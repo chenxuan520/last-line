@@ -18,6 +18,12 @@
       "fallback": "fallback.ui"
     },
     {
+      "id": "ui.menu.backdrop",
+      "type": "image",
+      "url": "./assets/ui/menu-backdrop.webp",
+      "fallback": "fallback.ui"
+    },
+    {
       "id": "ui.crosshair",
       "type": "svg",
       "url": "./assets/ui/crosshair.svg",
@@ -25,8 +31,74 @@
     },
     {
       "id": "ui.weapon.rifle",
-      "type": "svg",
-      "url": "./assets/ui/rifle.svg",
+      "type": "image",
+      "url": "./assets/ui/weapon-rifle.webp",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "ui.weapon.smg",
+      "type": "image",
+      "url": "./assets/ui/weapon-smg.webp",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "ui.weapon.shotgun",
+      "type": "image",
+      "url": "./assets/ui/weapon-shotgun.webp",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "ui.item.ammo.rifle",
+      "type": "image",
+      "url": "./assets/ui/item-ammo-rifle.webp",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "ui.item.ammo.light",
+      "type": "image",
+      "url": "./assets/ui/item-ammo-light.webp",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "ui.item.ammo.shell",
+      "type": "image",
+      "url": "./assets/ui/item-ammo-shell.webp",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "ui.item.armor.1",
+      "type": "image",
+      "url": "./assets/ui/item-armor-1.webp",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "ui.item.armor.2",
+      "type": "image",
+      "url": "./assets/ui/item-armor-2.webp",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "ui.item.helmet.1",
+      "type": "image",
+      "url": "./assets/ui/item-helmet-1.webp",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "ui.item.helmet.2",
+      "type": "image",
+      "url": "./assets/ui/item-helmet-2.webp",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "ui.item.bandage",
+      "type": "image",
+      "url": "./assets/ui/item-bandage.webp",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "ui.item.medkit",
+      "type": "image",
+      "url": "./assets/ui/item-medkit.webp",
       "fallback": "fallback.ui"
     },
     {

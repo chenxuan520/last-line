@@ -37,8 +37,12 @@ body {
   display: grid;
   place-items: center;
   background:
-    linear-gradient(90deg, rgb(8 11 8 / 88%), rgb(8 11 8 / 26%) 58%, rgb(8 11 8 / 72%)),
+    linear-gradient(90deg, rgb(8 11 8 / 90%) 0%, rgb(8 11 8 / 68%) 30%, rgb(8 11 8 / 18%) 62%, rgb(8 11 8 / 36%) 100%),
+    var(--menu-backdrop),
     radial-gradient(circle at 72% 42%, rgb(104 130 69 / 24%), transparent 34%);
+  background-position: center, center, center;
+  background-size: cover, cover, auto;
+  background-repeat: no-repeat;
   transition: opacity 180ms ease;
 }
 
@@ -360,8 +364,45 @@ h1 {
 
 .weapon-slots,
 .backpack {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
   padding: 7px 10px;
   background: rgb(9 13 9 / 68%);
+}
+
+.inventory-slot,
+.item-stack {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.inventory-slot img {
+  width: 48px;
+  height: 30px;
+  object-fit: contain;
+}
+
+.item-stack {
+  padding-left: 8px;
+  border-left: 1px solid rgb(181 218 127 / 22%);
+}
+
+.item-stack img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
+
+.inventory-slot.is-active {
+  color: #dce9d3;
+}
+
+.empty-slot-mark {
+  color: #71806d;
+  font-size: 20px;
 }
 
 .controls-card span {
@@ -418,8 +459,8 @@ h1 {
 }
 
 .weapon-status img {
-  width: 104px;
-  height: 38px;
+  width: 58px;
+  height: 48px;
   object-fit: contain;
 }
 

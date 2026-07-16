@@ -76,7 +76,10 @@ export class GameApp {
   private renderMenu(): void {
     if (!this.assets) return;
     const logo = this.assets.resolve("ui.logo", "svg");
+    const backdrop = this.assets.resolve("ui.menu.backdrop", "image");
     this.uiRoot.className = "";
+    const backdropUrl = backdrop.url ? new URL(backdrop.url, document.baseURI).href : null;
+    this.uiRoot.style.setProperty("--menu-backdrop", backdropUrl ? `url("${backdropUrl}")` : "none");
     this.uiRoot.innerHTML = `
       <section class="menu-panel" aria-labelledby="game-title">
         <p class="eyebrow">20 人 AI BATTLE ROYALE</p>

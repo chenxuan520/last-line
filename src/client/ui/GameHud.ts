@@ -16,15 +16,17 @@ export class GameHud {
   private readonly damageFlash: HTMLElement;
   private readonly killFeed: HTMLElement;
   private resultVisible = false;
+  private inventorySignature = "";
+  private weaponIconId = "";
 
   public constructor(
     root: HTMLDivElement,
-    assets: AssetCatalog,
+    private readonly assets: AssetCatalog,
     onResume: () => void,
     private readonly onRestart: () => void,
   ) {
     const crosshair = assets.resolve("ui.crosshair", "svg");
-    const weaponIcon = assets.resolve("ui.weapon.rifle", "svg");
+    const weaponIcon = assets.resolve("ui.weapon.rifle", "image");
     root.className = "is-playing";
     root.innerHTML = `
       <section class="hud" aria-label="游戏状态">
@@ -54,7 +56,7 @@ export class GameHud {
           </div>
           <div class="performance" data-hud="performance">-- FPS</div>
           <div class="weapon-status">
-            <img src="${weaponIcon.url}" alt="当前武器" />
+            <img data-hud="weapon-icon" src="${assetUrl(weaponIcon.url)}" alt="当前武器" />
             <div><small data-hud="weapon-name">未装备</small><strong data-hud="ammo">--</strong><span>/ <span data-hud="reserve">0</span></span></div>
           </div>
         </footer>
@@ -89,21 +91,26 @@ export class GameHud {
 
     const weapon = getActiveWeapon(player);
     const config = weapon ? WEAPONS[weapon.weaponId] : undefined;
+    const weaponIconId = weapon ? `ui.weapon.${weapon.weaponId}` : "ui.weapon.rifle";
+    if (weaponIconId !== this.weaponIconId) {
+      const weaponIcon = this.requireElement("weapon-icon") as HTMLImageElement;
+      weaponIcon.src = this.resolveIconUrl(weaponIconId);
+      weaponIcon.alt = config?.label ?? "当前武器";
+      this.weaponIconId = weaponIconId;
+    }
     this.setText("weapon-name", config?.label ?? "未装备");
     this.setText("ammo", weapon ? weapon.ammoInMagazine.toString().padStart(2, "0") : "--");
     this.setText("reserve", getReserveAmmo(player).toString());
-    this.setText(
-      "weapon-slots",
-      player.inventory.weaponSlots
-        .map((candidate, index) => `${index + 1}${index === player.inventory.activeWeaponSlot ? "●" : "○"} ${candidate ? WEAPONS[candidate.weaponId]?.label : "空"}`)
-        .join("  "),
-    );
-    this.setText(
-      "backpack",
-      player.inventory.backpack.length > 0
-        ? player.inventory.backpack.map((stack) => `${getItemLabel(stack.itemId)} ×${stack.quantity}`).join(" · ")
-        : "背包为空",
-    );
+    const inventorySignature = JSON.stringify({
+      activeWeaponSlot: player.inventory.activeWeaponSlot,
+      weaponIds: player.inventory.weaponSlots.map((slot) => slot?.weaponId ?? null),
+      backpack: player.inventory.backpack,
+    });
+    if (inventorySignature !== this.inventorySignature) {
+      this.renderWeaponSlots(player);
+      this.renderBackpack(player);
+      this.inventorySignature = inventorySignature;
+    }
     const nearestLoot = Object.values(state.groundLoot)
       .filter((loot) => loot.available)
       .map((loot) => ({ loot, distance: Math.hypot(loot.position.x - player.position.x, loot.position.z - player.position.z) }))
@@ -158,11 +165,44 @@ export class GameHud {
     this.requireElement(name).textContent = value;
   }
 
+  private renderWeaponSlots(player: ActorState): void {
+    this.requireElement("weapon-slots").innerHTML = player.inventory.weaponSlots
+      .map((candidate, index) => {
+        const active = index === player.inventory.activeWeaponSlot;
+        const label = candidate ? WEAPONS[candidate.weaponId]?.label ?? candidate.weaponId : "空";
+        const icon = candidate
+          ? `<img src="${this.resolveIconUrl(`ui.weapon.${candidate.weaponId}`)}" alt="" />`
+          : `<span class="empty-slot-mark">—</span>`;
+        return `<span class="inventory-slot${active ? " is-active" : ""}">${icon}<span>${index + 1} ${label}</span></span>`;
+      })
+      .join("");
+  }
+
+  private renderBackpack(player: ActorState): void {
+    const backpack = this.requireElement("backpack");
+    backpack.innerHTML = player.inventory.backpack.length > 0
+      ? player.inventory.backpack.map((stack) => `
+          <span class="item-stack">
+            <img src="${this.resolveIconUrl(`ui.item.${stack.itemId}`)}" alt="" />
+            <span>${getItemLabel(stack.itemId)} ×${stack.quantity}</span>
+          </span>
+        `).join("")
+      : "背包为空";
+  }
+
+  private resolveIconUrl(id: string): string {
+    return assetUrl(this.assets.resolve(id, "image").url);
+  }
+
   private requireElement(name: string): HTMLElement {
     const element = this.elements.get(name);
     if (!element) throw new Error(`HUD 元素缺失: ${name}`);
     return element;
   }
+}
+
+function assetUrl(url: string | undefined): string {
+  return url ? new URL(url, document.baseURI).href : "";
 }
 
 function phaseLabel(state: MatchState, player: ActorState): string {
