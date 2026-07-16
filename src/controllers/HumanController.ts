@@ -1,12 +1,16 @@
 import type { ActorCommand } from "../game/commands/ActorCommand";
 import { createIdleCommand } from "../game/commands/ActorCommand";
-import { getActiveWeapon, type ActorState, type WeaponSlot } from "../game/state/types";
+import { getActiveWeapon, getItemQuantity, type ActorState, type WeaponSlot } from "../game/state/types";
+
+const MOVEMENT_KEYS = new Set(["KeyW", "KeyA", "KeyS", "KeyD", "ShiftLeft", "ShiftRight"]);
 
 export class HumanController {
   private readonly pressedKeys = new Set<string>();
+  private readonly suppressedMovementKeys = new Set<string>();
   private yaw = 0;
   private pitch = 0;
   private fireHeld = false;
+  private fireSuppressedUntilRelease = false;
   private reloadRequested = false;
   private jumpRequested = false;
   private interactRequested = false;
@@ -92,6 +96,9 @@ export class HumanController {
     if (document.pointerLockElement !== this.canvas) {
       return;
     }
+    if (this.suppressedMovementKeys.has(event.code)) {
+      return;
+    }
     this.pressedKeys.add(event.code);
     if (event.repeat) {
       return;
@@ -101,8 +108,8 @@ export class HumanController {
     if (event.code === "KeyF") this.interactRequested = true;
     if (event.code === "Digit1" || event.code === "Numpad1") this.switchWeaponRequested = 0;
     if (event.code === "Digit2" || event.code === "Numpad2") this.switchWeaponRequested = 1;
-    if (event.code === "KeyQ") this.useItemRequested = "bandage";
-    if (event.code === "KeyH") this.useItemRequested = "medkit";
+    if (event.code === "KeyQ") this.requestMedicalItem("bandage");
+    if (event.code === "KeyH") this.requestMedicalItem("medkit");
     if (event.code === "KeyG") {
       const actor = this.lastActor;
       const weapon = actor ? getActiveWeapon(actor) : null;
@@ -117,6 +124,7 @@ export class HumanController {
   }
 
   private readonly handleKeyUp = (event: KeyboardEvent): void => {
+    this.suppressedMovementKeys.delete(event.code);
     this.pressedKeys.delete(event.code);
   };
 
@@ -130,11 +138,16 @@ export class HumanController {
   };
 
   private readonly handleMouseDown = (event: MouseEvent): void => {
-    if (event.button === 0 && document.pointerLockElement === this.canvas) this.fireHeld = true;
+    if (event.button === 0 && document.pointerLockElement === this.canvas && !this.fireSuppressedUntilRelease) {
+      this.fireHeld = true;
+    }
   };
 
   private readonly handleMouseUp = (event: MouseEvent): void => {
-    if (event.button === 0) this.fireHeld = false;
+    if (event.button === 0) {
+      this.fireHeld = false;
+      this.fireSuppressedUntilRelease = false;
+    }
   };
 
   private readonly handleWheel = (event: WheelEvent): void => {
@@ -157,7 +170,9 @@ export class HumanController {
       return;
     }
     this.pressedKeys.clear();
+    this.suppressedMovementKeys.clear();
     this.fireHeld = false;
+    this.fireSuppressedUntilRelease = false;
     this.reloadRequested = false;
     this.jumpRequested = false;
     this.interactRequested = false;
@@ -165,6 +180,28 @@ export class HumanController {
     this.useItemRequested = null;
     this.dropItemRequested = null;
   };
+
+  private requestMedicalItem(itemId: "bandage" | "medkit"): void {
+    const actor = this.lastActor;
+    if (
+      !actor?.alive ||
+      actor.deployment !== "grounded" ||
+      actor.health >= actor.maxHealth ||
+      actor.inventory.usingItem ||
+      getItemQuantity(actor, itemId) <= 0
+    ) {
+      return;
+    }
+    for (const key of this.pressedKeys) {
+      if (MOVEMENT_KEYS.has(key)) {
+        this.suppressedMovementKeys.add(key);
+        this.pressedKeys.delete(key);
+      }
+    }
+    this.fireSuppressedUntilRelease = this.fireHeld;
+    this.fireHeld = false;
+    this.useItemRequested = itemId;
+  }
 
   private readonly preventContextMenu = (event: MouseEvent): void => event.preventDefault();
 }

@@ -14,6 +14,9 @@ describe("IslandScene lifecycle", () => {
       const bundle = await createIslandScene(engine, assets, state.actors, state.groundLoot);
       expect(engine.scenes).toHaveLength(1);
       expect(bundle.lootMeshes.size).toBe(Object.keys(state.groundLoot).length);
+      expect(bundle.viewWeaponRoot.isEnabled()).toBe(false);
+      expect(bundle.viewWeaponRoot.getChildMeshes().every((mesh) => !mesh.isEnabled())).toBe(true);
+      expect([...bundle.actorRoots.values()].every((root) => !root.isEnabled())).toBe(true);
 
       bundle.scene.dispose();
 

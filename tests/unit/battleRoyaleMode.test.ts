@@ -4,9 +4,10 @@ import {
   FAST_BATTLE_ROYALE_CONFIG,
   type BattleRoyaleConfig,
 } from "../../src/config/battleRoyale";
+import { ITEMS } from "../../src/config/items";
 import { BattleRoyaleMode, createBattleRoyaleState } from "../../src/game/modes/BattleRoyaleMode";
 import { createIdleCommand } from "../../src/game/commands/ActorCommand";
-import type { GameEvent } from "../../src/game/state/types";
+import { createWeaponState, type GameEvent } from "../../src/game/state/types";
 import { MovementSystem } from "../../src/game/systems/MovementSystem";
 
 const damageConfig: BattleRoyaleConfig = {
@@ -55,6 +56,54 @@ describe("BattleRoyaleMode", () => {
       ]),
     );
     expect(() => JSON.parse(JSON.stringify(state)) as unknown).not.toThrow();
+  });
+
+  it("stratifies each POI loot slice without clustering adjacent categories", () => {
+    const state = createBattleRoyaleState("player", FAST_BATTLE_ROYALE_CONFIG, seededRandom(2026));
+    const loot = Object.values(state.groundLoot);
+
+    expect(loot).toHaveLength(72);
+    for (let start = 0; start < loot.length; start += 18) {
+      const poiLoot = loot.slice(start, start + 18);
+      const weapons = poiLoot.filter((entry) => lootCategory(entry.itemId) === "weapon");
+      const ammo = poiLoot.filter((entry) => lootCategory(entry.itemId) === "ammo");
+      const medical = poiLoot.filter((entry) => lootCategory(entry.itemId) === "medical");
+      const equipment = poiLoot.filter((entry) => lootCategory(entry.itemId) === "equipment");
+      const categories = poiLoot.map((entry) => lootCategory(entry.itemId));
+      const adjacentMatches = categories.filter(
+        (category, index) => category === categories[(index + 1) % categories.length],
+      ).length;
+
+      expect(new Set(weapons.map((entry) => entry.itemId))).toEqual(
+        new Set(["weapon.rifle", "weapon.smg", "weapon.shotgun"]),
+      );
+      expect(new Set(ammo.map((entry) => entry.itemId))).toEqual(
+        new Set(["ammo.rifle", "ammo.light", "ammo.shell"]),
+      );
+      expect(weapons.length).toBeGreaterThanOrEqual(3);
+      expect(medical.length).toBeGreaterThanOrEqual(2);
+      expect(equipment.length).toBeGreaterThanOrEqual(2);
+      expect(adjacentMatches / categories.length).toBeLessThanOrEqual(0.2);
+
+      for (const entry of weapons) {
+        const weaponId = ITEMS[entry.itemId]?.weaponId;
+        if (!weaponId) {
+          throw new Error(`weapon config missing: ${entry.itemId}`);
+        }
+        expect(entry.weapon).toEqual(createWeaponState(weaponId));
+      }
+    }
+  });
+
+  it("reproduces loot for the same seed and varies it for a different seed", () => {
+    const first = createBattleRoyaleState("player", FAST_BATTLE_ROYALE_CONFIG, seededRandom(7));
+    const second = createBattleRoyaleState("player", FAST_BATTLE_ROYALE_CONFIG, seededRandom(7));
+    const different = createBattleRoyaleState("player", FAST_BATTLE_ROYALE_CONFIG, seededRandom(8));
+
+    expect(first.groundLoot).toEqual(second.groundLoot);
+    expect(Object.values(first.groundLoot).map((entry) => entry.itemId)).not.toEqual(
+      Object.values(different.groundLoot).map((entry) => entry.itemId),
+    );
   });
 
   it("uses the injected random source for reproducible flight routes", () => {
@@ -157,3 +206,22 @@ describe("BattleRoyaleMode", () => {
     expect(winners).toEqual(new Set(["bot-1", "player"]));
   });
 });
+
+function lootCategory(itemId: string): "weapon" | "ammo" | "medical" | "equipment" {
+  const kind = ITEMS[itemId]?.kind;
+  if (!kind) {
+    throw new Error(`unknown item: ${itemId}`);
+  }
+  return kind === "armor" || kind === "helmet" ? "equipment" : kind;
+}
+
+function seededRandom(seed: number): () => number {
+  let value = seed >>> 0;
+  return () => {
+    value += 0x6d2b79f5;
+    let result = value;
+    result = Math.imul(result ^ (result >>> 15), result | 1);
+    result ^= result + Math.imul(result ^ (result >>> 7), result | 61);
+    return ((result ^ (result >>> 14)) >>> 0) / 4_294_967_296;
+  };
+}

@@ -1,4 +1,6 @@
 import type { AssetCatalog } from "../../assets/AssetCatalog";
+import { ITEMS } from "../../config/items";
+import { MAP_POINTS } from "../../config/map";
 import { WEAPONS } from "../../config/weapons";
 import {
   getActiveWeapon,
@@ -9,6 +11,7 @@ import {
   type MatchResult,
   type MatchState,
 } from "../../game/state/types";
+import { createMinimapView, projectToMinimap } from "./minimap";
 
 export class GameHud {
   private readonly elements = new Map<string, HTMLElement>();
@@ -26,7 +29,6 @@ export class GameHud {
     private readonly onRestart: () => void,
   ) {
     const crosshair = assets.resolve("ui.crosshair", "svg");
-    const weaponIcon = assets.resolve("ui.weapon.rifle", "image");
     root.className = "is-playing";
     root.innerHTML = `
       <section class="hud" aria-label="游戏状态">
@@ -39,7 +41,31 @@ export class GameHud {
         <div class="hit-marker" data-hud="hit-marker">×</div>
         <div class="damage-flash" data-hud="damage-flash"></div>
         <div class="kill-feed" data-hud="kill-feed" aria-live="polite"></div>
+        <aside class="minimap-card" aria-label="小地图">
+          <div class="minimap-heading"><strong>战术地图</strong><span data-hud="map-status">安全区内</span></div>
+          <svg class="minimap" viewBox="0 0 200 200" role="img" aria-label="苍岬岛小地图">
+            <rect class="minimap-sea" width="200" height="200" />
+            <path class="minimap-island" d="M18 50 L48 18 L103 10 L158 28 L190 72 L184 142 L151 186 L91 194 L37 171 L10 122 Z" />
+            <g class="minimap-grid">
+              <path d="M50 10V190 M100 10V190 M150 10V190 M10 50H190 M10 100H190 M10 150H190" />
+            </g>
+            <g class="minimap-pois">${MAP_POINTS.map((point) => {
+              const projected = projectToMinimap(point.position);
+              return `<g transform="translate(${projected.x} ${projected.y})"><circle r="2" /><text y="-5">${point.name}</text></g>`;
+            }).join("")}</g>
+            <line class="minimap-flight" data-hud="map-flight" />
+            <circle class="minimap-target-zone" data-hud="map-target-zone" />
+            <circle class="minimap-current-zone" data-hud="map-current-zone" />
+            <g class="minimap-player" data-hud="map-player"><path d="M0 -7 L5 6 L0 3 L-5 6 Z" /></g>
+          </svg>
+        </aside>
         <div class="interaction-prompt" data-hud="prompt"></div>
+        <div class="healing-progress" data-hud="healing" hidden>
+          <span data-hud="healing-label">治疗中</span>
+          <strong data-hud="healing-time">0.0s</strong>
+          <div><i data-hud="healing-bar"></i></div>
+          <small>移动或开火会中断</small>
+        </div>
         <aside class="controls-card">
           <span>WASD 移动</span><span>SHIFT 冲刺</span><span>空格 跳伞/跳跃</span><span>F 拾取</span>
           <span>1/2 或滚轮 切枪</span><span>Q 绷带</span><span>H 急救包</span><span>R 换弹</span>
@@ -56,7 +82,7 @@ export class GameHud {
           </div>
           <div class="performance" data-hud="performance">-- FPS</div>
           <div class="weapon-status">
-            <img data-hud="weapon-icon" src="${assetUrl(weaponIcon.url)}" alt="当前武器" />
+            <img data-hud="weapon-icon" src="" alt="" hidden />
             <div><small data-hud="weapon-name">未装备</small><strong data-hud="ammo">--</strong><span>/ <span data-hud="reserve">0</span></span></div>
           </div>
         </footer>
@@ -88,14 +114,17 @@ export class GameHud {
     this.setText("phase", phaseLabel(state, player));
     this.setText("zone-label", zoneLabel(state));
     this.setText("zone-time", formatSeconds(state.safeZone.secondsRemaining));
+    this.updateMinimap(state, player);
+    this.updateHealing(player);
 
     const weapon = getActiveWeapon(player);
     const config = weapon ? WEAPONS[weapon.weaponId] : undefined;
-    const weaponIconId = weapon ? `ui.weapon.${weapon.weaponId}` : "ui.weapon.rifle";
+    const weaponIconId = weapon ? `ui.weapon.${weapon.weaponId}` : "";
     if (weaponIconId !== this.weaponIconId) {
       const weaponIcon = this.requireElement("weapon-icon") as HTMLImageElement;
-      weaponIcon.src = this.resolveIconUrl(weaponIconId);
-      weaponIcon.alt = config?.label ?? "当前武器";
+      weaponIcon.hidden = !weaponIconId;
+      weaponIcon.src = weaponIconId ? this.resolveIconUrl(weaponIconId) : "";
+      weaponIcon.alt = config?.label ?? "";
       this.weaponIconId = weaponIconId;
     }
     this.setText("weapon-name", config?.label ?? "未装备");
@@ -132,6 +161,15 @@ export class GameHud {
       }
       if (event.type === "item-picked" && event.actorId === playerId) {
         this.appendFeed(`获得 ${getItemLabel(event.itemId)} ×${event.quantity}`);
+      }
+      if (event.type === "healing-started" && event.actorId === playerId) {
+        this.appendFeed(`开始使用 ${getItemLabel(event.itemId)}`);
+      }
+      if (event.type === "healing-completed" && event.actorId === playerId) {
+        this.appendFeed(`${getItemLabel(event.itemId)} 使用完成`);
+      }
+      if (event.type === "healing-interrupted" && event.actorId === playerId) {
+        this.appendFeed("治疗已中断");
       }
     }
   }
@@ -190,6 +228,43 @@ export class GameHud {
       : "背包为空";
   }
 
+  private updateMinimap(state: MatchState, player: ActorState): void {
+    const view = createMinimapView(state, player);
+    setCircle(this.requireElement("map-current-zone"), view.currentZone);
+    setCircle(this.requireElement("map-target-zone"), view.targetZone);
+    const flight = this.requireElement("map-flight");
+    flight.setAttribute("x1", view.flight.start.x.toString());
+    flight.setAttribute("y1", view.flight.start.y.toString());
+    flight.setAttribute("x2", view.flight.end.x.toString());
+    flight.setAttribute("y2", view.flight.end.y.toString());
+    flight.classList.toggle("is-hidden", state.phase !== "flight");
+    this.requireElement("map-player").setAttribute(
+      "transform",
+      `translate(${view.player.x} ${view.player.y}) rotate(${view.player.rotationDegrees})`,
+    );
+    const mapStatus = state.phase === "flight"
+      ? "航线飞行"
+      : player.deployment === "parachuting"
+        ? "空降中"
+        : view.outsideZoneMeters > 0
+          ? `圈外 ${Math.ceil(view.outsideZoneMeters)}m`
+          : "安全区内";
+    this.setText("map-status", mapStatus);
+  }
+
+  private updateHealing(player: ActorState): void {
+    const healing = this.requireElement("healing");
+    const usingItem = player.inventory.usingItem;
+    healing.hidden = !usingItem;
+    if (!usingItem) {
+      return;
+    }
+    const totalSeconds = ITEMS[usingItem.itemId]?.useSeconds ?? usingItem.remainingSeconds;
+    this.setText("healing-label", `使用 ${getItemLabel(usingItem.itemId)}`);
+    this.setText("healing-time", `${usingItem.remainingSeconds.toFixed(1)}s`);
+    this.requireElement("healing-bar").style.width = `${Math.max(0, Math.min(100, (1 - usingItem.remainingSeconds / totalSeconds) * 100))}%`;
+  }
+
   private resolveIconUrl(id: string): string {
     return assetUrl(this.assets.resolve(id, "image").url);
   }
@@ -203,6 +278,12 @@ export class GameHud {
 
 function assetUrl(url: string | undefined): string {
   return url ? new URL(url, document.baseURI).href : "";
+}
+
+function setCircle(element: HTMLElement, circle: { x: number; y: number; radius: number }): void {
+  element.setAttribute("cx", circle.x.toString());
+  element.setAttribute("cy", circle.y.toString());
+  element.setAttribute("r", circle.radius.toString());
 }
 
 function phaseLabel(state: MatchState, player: ActorState): string {

@@ -18,7 +18,7 @@ import { Scene } from "@babylonjs/core/scene";
 import type { AssetCatalog } from "../../../assets/AssetCatalog";
 import type { AssetEntry } from "../../../assets/types";
 import { MAP_OBSTACLES, MAP_POINTS, MAP_SIZE } from "../../../config/map";
-import type { ActorState, EntityId, GroundLootState } from "../../../game/state/types";
+import { getActiveWeapon, type ActorState, type EntityId, type GroundLootState } from "../../../game/state/types";
 import { syncLootMarkerViews, type LootMarkerViewAdapter } from "../LootMarkerViewAdapter";
 import { loadCatalogModel } from "../loadCatalogModel";
 
@@ -47,6 +47,7 @@ export interface IslandSceneBundle {
   actorRoots: Map<EntityId, TransformNode>;
   lootMeshes: Map<EntityId, Mesh>;
   syncLootMeshes: (groundLoot: Readonly<Record<EntityId, GroundLootState>>) => void;
+  viewWeaponRoot: TransformNode;
   safeZoneRing: Mesh;
 }
 
@@ -85,13 +86,14 @@ export async function createIslandScene(
 
   const actorRoots = createActors(scene, actors, materials);
   const camera = createCamera(scene, player);
-  createViewWeapon(scene, camera, materials);
-  await replaceCatalogModels(scene, assets, actors, actorRoots, camera);
+  const viewWeaponRoot = createViewWeapon(scene, camera, materials);
+  viewWeaponRoot.setEnabled(Boolean(getActiveWeapon(player)));
+  await replaceCatalogModels(scene, assets, actors, actorRoots, viewWeaponRoot);
 
   const { lootMeshes, syncLootMeshes } = createLootMeshes(scene, groundLoot, materials.loot);
   const safeZoneRing = createSafeZoneRing(scene, materials.safeZone);
 
-  return { scene, camera, actorRoots, lootMeshes, syncLootMeshes, safeZoneRing };
+  return { scene, camera, actorRoots, lootMeshes, syncLootMeshes, viewWeaponRoot, safeZoneRing };
 }
 
 async function replaceCatalogModels(
@@ -99,7 +101,7 @@ async function replaceCatalogModels(
   assets: AssetCatalog,
   actors: Readonly<Record<EntityId, ActorState>>,
   actorRoots: Map<EntityId, TransformNode>,
-  camera: UniversalCamera,
+  viewWeaponRoot: TransformNode,
 ): Promise<void> {
   const [character, weapon] = await Promise.all([
     loadCatalogModel(scene, assets, "model.character.enemy"),
@@ -121,7 +123,7 @@ async function replaceCatalogModels(
   if (weapon) {
     scene.meshes.filter((mesh) => mesh.name.startsWith("view-rifle-")).forEach((mesh) => mesh.setEnabled(false));
     const instance = weapon.container.instantiateModelsToScene((name) => `view-${name}`);
-    attachModel(instance.rootNodes, camera, weapon.descriptor);
+    attachModel(instance.rootNodes, viewWeaponRoot, weapon.descriptor, true);
     scene.onDisposeObservable.addOnce(() => weapon.container.dispose());
   }
 }
@@ -130,12 +132,12 @@ function attachModel(
   nodes: readonly Node[],
   parent: TransformNode | UniversalCamera,
   descriptor: AssetEntry,
+  viewModel = false,
 ): void {
   const scale = numberMetadata(descriptor, "scale", 1);
-  const characterModel = parent instanceof TransformNode;
-  const x = numberMetadata(descriptor, "offsetX", characterModel ? 0 : 0.38);
-  const y = numberMetadata(descriptor, "offsetY", characterModel ? -1.76 : -0.34);
-  const z = numberMetadata(descriptor, "offsetZ", characterModel ? 0 : 0.76);
+  const x = numberMetadata(descriptor, "offsetX", viewModel ? 0.38 : 0);
+  const y = numberMetadata(descriptor, "offsetY", viewModel ? -0.34 : -1.76);
+  const z = numberMetadata(descriptor, "offsetZ", viewModel ? 0.76 : 0);
   for (const node of nodes) {
     if (!(node instanceof TransformNode)) continue;
     node.parent = parent;
@@ -405,7 +407,7 @@ function createActors(
     root.position.set(actor.position.x, actor.position.y, actor.position.z);
     root.rotation.y = actor.yaw;
     root.metadata = { actorId: actor.id, actorKind: actor.kind };
-    root.setEnabled(actor.alive);
+    root.setEnabled(actor.alive && actor.deployment !== "aircraft");
 
     if (actor.kind === "player") {
       createPlayerHitbox(scene, root, actor.id, materials.playerHitbox);
@@ -481,16 +483,18 @@ function createCamera(scene: Scene, player: ActorState): UniversalCamera {
   return camera;
 }
 
-function createViewWeapon(scene: Scene, camera: UniversalCamera, materials: IslandMaterials): void {
+function createViewWeapon(scene: Scene, camera: UniversalCamera, materials: IslandMaterials): TransformNode {
+  const root = new TransformNode("view-weapon-root", scene);
+  root.parent = camera;
   const receiver = CreateBox("view-rifle-receiver", { width: 0.22, height: 0.2, depth: 0.82 }, scene);
-  receiver.parent = camera;
+  receiver.parent = root;
   receiver.position.set(0.38, -0.34, 0.76);
   receiver.rotation.y = -0.04;
   receiver.material = materials.weapon;
   receiver.isPickable = false;
 
   const stock = CreateBox("view-rifle-stock", { width: 0.2, height: 0.25, depth: 0.38 }, scene);
-  stock.parent = camera;
+  stock.parent = root;
   stock.position.set(0.39, -0.37, 0.23);
   stock.rotation.x = 0.15;
   stock.material = materials.gear;
@@ -501,11 +505,12 @@ function createViewWeapon(scene: Scene, camera: UniversalCamera, materials: Isla
     { diameter: 0.07, height: 0.72, tessellation: 8 },
     scene,
   );
-  barrel.parent = camera;
+  barrel.parent = root;
   barrel.position.set(0.38, -0.29, 1.46);
   barrel.rotation.x = Math.PI / 2;
   barrel.material = materials.gear;
   barrel.isPickable = false;
+  return root;
 }
 
 function createLootMeshes(

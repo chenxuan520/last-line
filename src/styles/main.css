@@ -306,10 +306,106 @@ h1 {
 .kill-feed {
   position: absolute;
   top: 92px;
-  right: 28px;
+  right: 252px;
   display: grid;
   justify-items: end;
   gap: 5px;
+}
+
+.minimap-card {
+  position: absolute;
+  top: 92px;
+  right: 28px;
+  width: 210px;
+  padding: 8px;
+  border: 1px solid rgb(181 218 127 / 25%);
+  background: rgb(7 12 10 / 82%);
+  box-shadow: 0 12px 36px rgb(0 0 0 / 24%);
+}
+
+.minimap-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2px 7px;
+  color: #dce9d3;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.minimap-heading span {
+  color: #b5da7f;
+}
+
+.minimap {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  overflow: hidden;
+  background: #172d32;
+}
+
+.minimap-sea {
+  fill: #173239;
+}
+
+.minimap-island {
+  fill: #52684d;
+  stroke: #91a77c;
+  stroke-width: 1.5;
+}
+
+.minimap-grid path {
+  fill: none;
+  stroke: rgb(220 233 211 / 10%);
+  stroke-width: 0.6;
+}
+
+.minimap-pois circle {
+  fill: #d6c47b;
+}
+
+.minimap-pois text {
+  fill: #eef4e8;
+  font-size: 7px;
+  font-weight: 800;
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: rgb(7 12 10 / 90%);
+  stroke-width: 2px;
+}
+
+.minimap-flight {
+  stroke: #e0cc83;
+  stroke-width: 1.5;
+  stroke-dasharray: 5 3;
+}
+
+.minimap-flight.is-hidden {
+  display: none;
+}
+
+.minimap-current-zone,
+.minimap-target-zone {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.minimap-current-zone {
+  stroke: #eef4e8;
+  stroke-width: 1.8;
+}
+
+.minimap-target-zone {
+  stroke: #b5da7f;
+  stroke-width: 1.4;
+  stroke-dasharray: 4 3;
+}
+
+.minimap-player path {
+  fill: #c8ec94;
+  stroke: #07100c;
+  stroke-width: 1.2;
 }
 
 .kill-feed div {
@@ -335,6 +431,46 @@ h1 {
 
 .interaction-prompt:empty {
   display: none;
+}
+
+.healing-progress {
+  position: absolute;
+  top: calc(50% + 76px);
+  left: 50%;
+  display: grid;
+  width: 240px;
+  grid-template-columns: 1fr auto;
+  gap: 5px 12px;
+  padding: 10px 12px;
+  background: rgb(7 12 10 / 86%);
+  translate: -50% 0;
+}
+
+.healing-progress[hidden] {
+  display: none;
+}
+
+.healing-progress span,
+.healing-progress strong {
+  font-size: 12px;
+}
+
+.healing-progress > div {
+  grid-column: 1 / -1;
+  height: 4px;
+  background: #29372a;
+}
+
+.healing-progress i {
+  display: block;
+  height: 100%;
+  background: #b5da7f;
+}
+
+.healing-progress small {
+  grid-column: 1 / -1;
+  color: #9eaa99;
+  font-size: 9px;
 }
 
 @keyframes hit-marker {

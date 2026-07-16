@@ -25,20 +25,25 @@ import { DamageSystem } from "../systems/DamageSystem";
 const FLIGHT_ALTITUDE = 180;
 const FLIGHT_HALF_LENGTH = MAP_HALF_SIZE * 1.3;
 const MAX_FLIGHT_OFFSET = MAP_HALF_SIZE * 0.55;
+const LOOT_POINTS_PER_POI = 18;
 
-const LOOT_TABLE: readonly { itemId: string; quantity: number }[] = [
-  { itemId: "weapon.rifle", quantity: 1 },
-  { itemId: "weapon.smg", quantity: 1 },
-  { itemId: "weapon.shotgun", quantity: 1 },
-  { itemId: "ammo.rifle", quantity: 60 },
-  { itemId: "ammo.light", quantity: 80 },
-  { itemId: "ammo.shell", quantity: 12 },
-  { itemId: "armor.1", quantity: 1 },
-  { itemId: "armor.2", quantity: 1 },
-  { itemId: "helmet.1", quantity: 1 },
-  { itemId: "helmet.2", quantity: 1 },
-  { itemId: "bandage", quantity: 2 },
-  { itemId: "medkit", quantity: 1 },
+type LootCategory = "weapon" | "ammo" | "medical" | "equipment";
+
+const LOOT_CATEGORIES: readonly LootCategory[] = ["weapon", "ammo", "medical", "equipment"];
+
+const LOOT_TABLE: readonly { category: LootCategory; itemId: string; quantity: number }[] = [
+  { category: "weapon", itemId: "weapon.rifle", quantity: 1 },
+  { category: "weapon", itemId: "weapon.smg", quantity: 1 },
+  { category: "weapon", itemId: "weapon.shotgun", quantity: 1 },
+  { category: "ammo", itemId: "ammo.rifle", quantity: 60 },
+  { category: "ammo", itemId: "ammo.light", quantity: 80 },
+  { category: "ammo", itemId: "ammo.shell", quantity: 12 },
+  { category: "equipment", itemId: "armor.1", quantity: 1 },
+  { category: "equipment", itemId: "armor.2", quantity: 1 },
+  { category: "equipment", itemId: "helmet.1", quantity: 1 },
+  { category: "equipment", itemId: "helmet.2", quantity: 1 },
+  { category: "medical", itemId: "bandage", quantity: 2 },
+  { category: "medical", itemId: "medkit", quantity: 1 },
 ];
 
 export class BattleRoyaleMode implements GameMode {
@@ -258,7 +263,7 @@ export function createBattleRoyaleState(
     phase: "ready",
     elapsedSeconds: 0,
     actors,
-    groundLoot: createGroundLoot(),
+    groundLoot: createGroundLoot(createLootRandom(flight)),
     safeZone: createInitialSafeZone(config, random),
     flight,
     result: null,
@@ -280,26 +285,130 @@ function createBattleRoyaleActor(
   return actor;
 }
 
-function createGroundLoot(): Record<EntityId, GroundLootState> {
+function createGroundLoot(random: () => number): Record<EntityId, GroundLootState> {
   const groundLoot: Record<EntityId, GroundLootState> = {};
-  LOOT_SPAWN_POINTS.forEach((position, index) => {
-    const entry = LOOT_TABLE[index % LOOT_TABLE.length];
-    if (!entry) {
-      return;
-    }
-    const id = `loot-${index}`;
-    const item = ITEMS[entry.itemId];
-    const weapon = item?.kind === "weapon" && item.weaponId ? createWeaponState(item.weaponId) : undefined;
-    groundLoot[id] = {
-      id,
-      itemId: entry.itemId,
-      quantity: entry.quantity,
-      ...(weapon ? { weapon } : {}),
-      position: { ...position },
-      available: true,
+  for (let poiStart = 0; poiStart < LOOT_SPAWN_POINTS.length; poiStart += LOOT_POINTS_PER_POI) {
+    const categoryCounts: Record<LootCategory, number> = {
+      weapon: 5,
+      ammo: 4,
+      medical: 3,
+      equipment: 6,
     };
-  });
+    const entriesByCategory = Object.fromEntries(
+      LOOT_CATEGORIES.map((category) => [
+        category,
+        createLootEntries(category, categoryCounts[category], random),
+      ]),
+    ) as Record<LootCategory, (typeof LOOT_TABLE)[number][]>;
+    const categoryOrder = createLootCategoryOrder(categoryCounts, random);
+
+    for (let poiOffset = 0; poiOffset < LOOT_POINTS_PER_POI; poiOffset += 1) {
+      const index = poiStart + poiOffset;
+      const position = LOOT_SPAWN_POINTS[index];
+      const category = categoryOrder[poiOffset];
+      const entry = category ? entriesByCategory[category].pop() : undefined;
+      if (!position || !entry) {
+        continue;
+      }
+      const id = `loot-${index}`;
+      const item = ITEMS[entry.itemId];
+      const weapon = item?.kind === "weapon" && item.weaponId ? createWeaponState(item.weaponId) : undefined;
+      groundLoot[id] = {
+        id,
+        itemId: entry.itemId,
+        quantity: entry.quantity,
+        ...(weapon ? { weapon } : {}),
+        position: { ...position },
+        available: true,
+      };
+    }
+  }
   return groundLoot;
+}
+
+function createLootRandom(flight: FlightState): () => number {
+  // Keep loot randomization from perturbing the shared stream used by later simulation systems.
+  const seed = Math.abs(Math.sin(flight.start.x * 12.9898 + flight.start.z * 78.233));
+  let value = Math.floor(seed * 4_294_967_296) >>> 0;
+  return () => {
+    value += 0x6d2b79f5;
+    let result = value;
+    result = Math.imul(result ^ (result >>> 15), result | 1);
+    result ^= result + Math.imul(result ^ (result >>> 7), result | 61);
+    return ((result ^ (result >>> 14)) >>> 0) / 4_294_967_296;
+  };
+}
+
+function createLootEntries(
+  category: LootCategory,
+  count: number,
+  random: () => number,
+): (typeof LOOT_TABLE)[number][] {
+  const available = LOOT_TABLE.filter((entry) => entry.category === category);
+  const entries = [...available];
+  while (entries.length < count) {
+    const entry = available[Math.floor(random() * available.length)];
+    if (entry) {
+      entries.push(entry);
+    }
+  }
+  return shuffle(entries, random);
+}
+
+function createLootCategoryOrder(
+  categoryCounts: Readonly<Record<LootCategory, number>>,
+  random: () => number,
+): LootCategory[] {
+  const remaining = { ...categoryCounts };
+  const order: LootCategory[] = [];
+  const deadEnds = new Set<string>();
+
+  const appendCategory = (previous?: LootCategory, first?: LootCategory): boolean => {
+    const remainingCount = LOOT_CATEGORIES.reduce((total, category) => total + remaining[category], 0);
+    if (remainingCount === 0) {
+      return previous !== first;
+    }
+
+    const stateKey = `${LOOT_CATEGORIES.map((category) => remaining[category]).join(",")}:${previous ?? ""}:${first ?? ""}`;
+    if (deadEnds.has(stateKey)) {
+      return false;
+    }
+
+    const candidates = shuffle(
+      LOOT_CATEGORIES.filter(
+        (category) =>
+          remaining[category] > 0 && category !== previous && (remainingCount > 1 || category !== first),
+      ),
+      random,
+    ).sort((left, right) => remaining[right] - remaining[left]);
+
+    for (const category of candidates) {
+      remaining[category] -= 1;
+      order.push(category);
+      if (appendCategory(category, first ?? category)) {
+        return true;
+      }
+      order.pop();
+      remaining[category] += 1;
+    }
+
+    deadEnds.add(stateKey);
+    return false;
+  };
+
+  if (!appendCategory()) {
+    throw new Error("无法生成分散的物资类别序列");
+  }
+  return order;
+}
+
+function shuffle<T>(values: readonly T[], random: () => number): T[] {
+  const result = [...values];
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(random() * (index + 1));
+    [result[index], result[swapIndex]] = [result[swapIndex] as T, result[index] as T];
+  }
+  return result;
 }
 
 function createFlight(durationSeconds: number, random: () => number): FlightState {

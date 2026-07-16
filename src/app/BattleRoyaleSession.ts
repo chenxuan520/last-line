@@ -24,6 +24,7 @@ export class BattleRoyaleSession {
   private readonly actorRoots: Map<EntityId, TransformNode>;
   private readonly lootMeshes;
   private readonly syncLootMeshes;
+  private readonly viewWeaponRoot;
   private readonly safeZoneRing;
   private readonly simulation: GameSimulation;
   private readonly clock = new FixedStepClock();
@@ -51,6 +52,7 @@ export class BattleRoyaleSession {
     this.actorRoots = bundle.actorRoots;
     this.lootMeshes = bundle.lootMeshes;
     this.syncLootMeshes = bundle.syncLootMeshes;
+    this.viewWeaponRoot = bundle.viewWeaponRoot;
     this.safeZoneRing = bundle.safeZoneRing;
     this.humanController = new HumanController(canvas, settings.sensitivity);
     this.audio = new AudioFeedback(settings.volume);
@@ -87,6 +89,7 @@ export class BattleRoyaleSession {
   public update(frameSeconds: number, fps: number): void {
     if (!this.active) return;
     const player = this.getActor(PLAYER_ID);
+    this.humanController.rememberActor(player);
     const pointerLocked = document.pointerLockElement === this.canvas;
     const shouldAdvance = this.simulation.state.phase !== "finished" && (pointerLocked || !player.alive);
     if (shouldAdvance) {
@@ -145,13 +148,14 @@ export class BattleRoyaleSession {
 
   private syncVisuals(): void {
     const player = this.getActor(PLAYER_ID);
+    this.viewWeaponRoot.setEnabled(Boolean(getActiveWeapon(player)));
     this.camera.position.set(player.position.x, player.position.y, player.position.z);
     this.camera.rotation.set(player.pitch, player.yaw, 0);
     for (const [actorId, root] of this.actorRoots) {
       const actor = this.getActor(actorId);
       root.position.set(actor.position.x, actor.position.y, actor.position.z);
       root.rotation.y = actor.yaw;
-      root.setEnabled(actor.alive);
+      root.setEnabled(actor.alive && actor.deployment !== "aircraft");
     }
     this.syncLootMeshes(this.simulation.state.groundLoot);
     for (const [lootId, mesh] of this.lootMeshes) {
