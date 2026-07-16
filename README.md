@@ -89,7 +89,8 @@ src/
 ## 在线部署
 
 - GitHub Pages：<https://chenxuan520.github.io/last-line/>
-- Cloudflare Pages：<https://last-line.pages.dev/>（控制台关联 GitHub 后启用）
+- Cloudflare Pages：<https://last-line.pages.dev/>
+- 正式域名：<https://lastline.011203.xyz/>
 
 GitHub Actions 在每次 PR 和 `main` 推送时执行类型检查、Vitest 和生产构建；`main` 通过后自动部署 GitHub Pages。Cloudflare Pages 使用 GitHub App 直接关联同一仓库并自动更新，配置见 [`docs/deployment.md`](docs/deployment.md)。
 

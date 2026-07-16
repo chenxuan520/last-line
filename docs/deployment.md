@@ -45,6 +45,18 @@ After the first build, the expected default domain is:
 https://last-line.pages.dev/
 ```
 
+The production custom domain is:
+
+```text
+https://lastline.011203.xyz/
+```
+
+It is attached through the Pages **Custom domains** section with a proxied CNAME:
+
+| Type | Name | Target |
+| --- | --- | --- |
+| `CNAME` | `lastline` | `last-line.pages.dev` |
+
 Every push to `main` then updates production automatically. Pull requests and non-production branches can receive Cloudflare preview deployments when preview branch deployments are enabled.
 
 Cloudflare Git integration does not require `CLOUDFLARE_API_TOKEN` or `CLOUDFLARE_ACCOUNT_ID` GitHub secrets. Repository access is managed by the Cloudflare Pages GitHub App.
