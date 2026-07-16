@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "id": "fallback.ui",
+      "type": "svg",
+      "url": "./assets/ui/fallback.svg"
+    },
+    {
+      "id": "fallback.model",
+      "type": "procedural-model",
+      "metadata": { "shape": "box", "color": "#cf4b3f" }
+    },
+    {
+      "id": "ui.logo",
+      "type": "svg",
+      "url": "./assets/ui/logo.svg",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "ui.crosshair",
+      "type": "svg",
+      "url": "./assets/ui/crosshair.svg",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "ui.weapon.rifle",
+      "type": "svg",
+      "url": "./assets/ui/rifle.svg",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "model.character.player",
+      "type": "procedural-model",
+      "fallback": "fallback.model",
+      "metadata": { "shape": "soldier", "color": "#809d5e" }
+    },
+    {
+      "id": "model.character.enemy",
+      "type": "procedural-model",
+      "fallback": "fallback.model",
+      "metadata": { "shape": "soldier", "color": "#bd6357" }
+    },
+    {
+      "id": "model.weapon.rifle",
+      "type": "procedural-model",
+      "fallback": "fallback.model",
+      "metadata": { "shape": "rifle", "color": "#283126" }
+    }
+  ]
+}
