@@ -23,6 +23,8 @@ export class HumanController {
     document.addEventListener("mousemove", this.handleMouseMove);
     document.addEventListener("mousedown", this.handleMouseDown);
     document.addEventListener("mouseup", this.handleMouseUp);
+    document.addEventListener("pointerlockchange", this.handlePointerLockChange);
+    canvas.addEventListener("wheel", this.handleWheel, { passive: false });
     canvas.addEventListener("contextmenu", this.preventContextMenu);
   }
 
@@ -81,10 +83,15 @@ export class HumanController {
     document.removeEventListener("mousemove", this.handleMouseMove);
     document.removeEventListener("mousedown", this.handleMouseDown);
     document.removeEventListener("mouseup", this.handleMouseUp);
+    document.removeEventListener("pointerlockchange", this.handlePointerLockChange);
+    this.canvas.removeEventListener("wheel", this.handleWheel);
     this.canvas.removeEventListener("contextmenu", this.preventContextMenu);
   }
 
   private readonly handleKeyDown = (event: KeyboardEvent): void => {
+    if (document.pointerLockElement !== this.canvas) {
+      return;
+    }
     this.pressedKeys.add(event.code);
     if (event.repeat) {
       return;
@@ -92,8 +99,8 @@ export class HumanController {
     if (event.code === "Space") this.jumpRequested = true;
     if (event.code === "KeyR") this.reloadRequested = true;
     if (event.code === "KeyF") this.interactRequested = true;
-    if (event.code === "Digit1") this.switchWeaponRequested = 0;
-    if (event.code === "Digit2") this.switchWeaponRequested = 1;
+    if (event.code === "Digit1" || event.code === "Numpad1") this.switchWeaponRequested = 0;
+    if (event.code === "Digit2" || event.code === "Numpad2") this.switchWeaponRequested = 1;
     if (event.code === "KeyQ") this.useItemRequested = "bandage";
     if (event.code === "KeyH") this.useItemRequested = "medkit";
     if (event.code === "KeyG") {
@@ -123,11 +130,40 @@ export class HumanController {
   };
 
   private readonly handleMouseDown = (event: MouseEvent): void => {
-    if (event.button === 0) this.fireHeld = true;
+    if (event.button === 0 && document.pointerLockElement === this.canvas) this.fireHeld = true;
   };
 
   private readonly handleMouseUp = (event: MouseEvent): void => {
     if (event.button === 0) this.fireHeld = false;
+  };
+
+  private readonly handleWheel = (event: WheelEvent): void => {
+    if (document.pointerLockElement !== this.canvas || event.deltaY === 0) {
+      return;
+    }
+    event.preventDefault();
+    const actor = this.lastActor;
+    if (!actor) {
+      return;
+    }
+    const nextSlot: WeaponSlot = actor.inventory.activeWeaponSlot === 0 ? 1 : 0;
+    if (actor.inventory.weaponSlots[nextSlot]) {
+      this.switchWeaponRequested = nextSlot;
+    }
+  };
+
+  private readonly handlePointerLockChange = (): void => {
+    if (document.pointerLockElement === this.canvas) {
+      return;
+    }
+    this.pressedKeys.clear();
+    this.fireHeld = false;
+    this.reloadRequested = false;
+    this.jumpRequested = false;
+    this.interactRequested = false;
+    this.switchWeaponRequested = null;
+    this.useItemRequested = null;
+    this.dropItemRequested = null;
   };
 
   private readonly preventContextMenu = (event: MouseEvent): void => event.preventDefault();

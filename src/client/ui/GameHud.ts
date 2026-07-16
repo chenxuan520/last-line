@@ -42,7 +42,7 @@ export class GameHud {
         <div class="interaction-prompt" data-hud="prompt"></div>
         <aside class="controls-card">
           <span>WASD 移动</span><span>SHIFT 冲刺</span><span>空格 跳伞/跳跃</span><span>F 拾取</span>
-          <span>1/2 切枪</span><span>Q 绷带</span><span>H 急救包</span><span>R 换弹</span>
+          <span>1/2 或滚轮 切枪</span><span>Q 绷带</span><span>H 急救包</span><span>R 换弹</span>
         </aside>
         <aside class="inventory-card">
           <div class="weapon-slots" data-hud="weapon-slots"></div>

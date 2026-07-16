@@ -117,6 +117,24 @@ describe("InventorySystem", () => {
     );
   });
 
+  it("automatically equips a picked weapon when the active weapon has no ammunition", () => {
+    const state = createState();
+    const actor = state.actors.player;
+    const events: GameEvent[] = [];
+    const inventory = new InventorySystem();
+    const activeWeapon = actor.inventory.weaponSlots[0];
+    if (!activeWeapon) throw new Error("test weapon missing");
+    activeWeapon.ammoInMagazine = 0;
+    actor.inventory.backpack = [];
+    state.groundLoot.smg = createLoot("smg", "weapon.smg", 1, 1, createWeaponState("smg"));
+
+    inventory.processCommand(state, actor.id, command({ interact: true }), events);
+
+    expect(actor.inventory.weaponSlots[1]?.weaponId).toBe("smg");
+    expect(actor.inventory.activeWeaponSlot).toBe(1);
+    expect(events).toContainEqual({ type: "weapon-switched", actorId: actor.id, slot: 1 });
+  });
+
   it("keeps an empty weapon empty when it is dropped and picked back up", () => {
     const state = createState();
     const actor = state.actors.player;

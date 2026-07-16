@@ -1,6 +1,8 @@
 import { ITEMS, type ItemConfig } from "../../config/items";
 import type { ActorCommand } from "../commands/ActorCommand";
 import {
+  getActiveWeapon,
+  getReserveAmmo,
   type ActorState,
   type EntityId,
   type GameEvent,
@@ -196,6 +198,9 @@ export class InventorySystem {
     const inventory = actor.inventory;
     const emptySlot: WeaponSlot | null = inventory.weaponSlots[0] === null ? 0 : inventory.weaponSlots[1] === null ? 1 : null;
     const targetSlot = emptySlot ?? inventory.activeWeaponSlot;
+    const activeWeapon = getActiveWeapon(actor);
+    const shouldAutoEquip = emptySlot !== null &&
+      (!activeWeapon || (activeWeapon.ammoInMagazine === 0 && getReserveAmmo(actor) === 0));
     const replacedWeapon = inventory.weaponSlots[targetSlot];
     const replacedItemId = replacedWeapon ? this.getWeaponItemId(replacedWeapon.weaponId) : null;
     if (replacedWeapon && !replacedItemId) {
@@ -203,6 +208,10 @@ export class InventorySystem {
     }
 
     inventory.weaponSlots[targetSlot] = pickedWeapon;
+    if (shouldAutoEquip && targetSlot !== inventory.activeWeaponSlot) {
+      inventory.activeWeaponSlot = targetSlot;
+      events.push({ type: "weapon-switched", actorId: actor.id, slot: targetSlot });
+    }
     delete loot.weapon;
     if (replacedWeapon && replacedItemId) {
       this.createGroundLoot(state, actor, replacedItemId, 1, events, replacedWeapon);

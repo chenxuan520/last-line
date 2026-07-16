@@ -530,3 +530,24 @@
 - Blocker 2 已闭环：Bot 缓存快路径已清空 `fire/reload/jump/interact/switchWeapon/useItem/dropItem` 等一次性动作；满背包空枪 Bot 首 tick 丢弃一栈并拾取兼容弹药后，下一缓存 tick 的 `dropItem` 为 `null`、`interact` 为 `false`，不会重复丢弃。
 - 验证：`npm run typecheck` 通过；相关 Vitest（`gameSimulation`、`battleRoyaleMode`、`botController`、`damageSystem`、`inventorySystem`）5 files / 44 tests 全部通过。
 - 残余验证缺口（非阻塞）：simultaneous combat 新增断言直接覆盖 survivor 的 1 HP，final-zone 用例从 1 HP 起测；护甲扣减、伤害事件和圈伤绕甲分别由现有规则测试与静态调用链覆盖，尚无单个组合用例同时断言全部状态。按用户约束未使用浏览器、声音或 Playwright。
+
+### 2026-07-16 23:34 +0800：未提交武器切换 bug 修复审查（不通过）
+
+- 审查范围：相对 `origin/main`（`3e8d5e3`）的当前未提交改动；重点检查空活动枪拾新枪自动装备、首把枪/双槽替换/AI/掉落重拾、主键盘/小键盘/滚轮和控制器到背包测试链。
+- 对照基线：本 plan 的双主武器槽、统一角色指令入口、AI 同规则及任务 6 验证要求。
+- 结论：**不通过**。规则层主路径未发现高风险回归，但存在一个可复现的一次性输入泄漏和一个关键整链验证缺口。
+- Findings：
+  1. **[中]** `HumanController` 在未获得 pointer lock 时仍缓存主键盘/小键盘切枪请求；会话此时暂停且不调用 `createCommand` 清理，恢复 pointer lock 后旧请求会被执行，导致暂停期间按键泄漏到后续游戏 tick。Builder 需限制非激活输入或在 pointer-lock 边界清理一次性请求，并补回归测试。
+  2. **[中][验证缺口]** 新控制器测试只覆盖“已有双枪时 Numpad2/单向滚轮 -> InventorySystem”，自动装备测试则直接构造 `ActorCommand`；未覆盖原问题的 `F keydown -> HumanController -> InventorySystem 拾枪/自动装备 -> 后续切枪` 整链，也未断言 Digit1/2、Numpad1/2、双向滚轮及请求只消费一次。Writer/builder 需补整链用例。
+- 已确认：空枪且无匹配备弹时拾入空槽会切到新枪；首把枪仍进入活动槽；满双槽仍替换活动槽；武器状态在掉落/重拾和替换时保持；完整 Vitest 中 AI 多 seed/完整局均通过。
+- 验证：`npm run typecheck` 通过；定向 Vitest 4 files / 36 tests 通过；完整 `npm run test` 15 files / 74 tests 通过。未启动浏览器、声音或 Playwright。
+
+### 2026-07-16 23:37 +0800：武器切换两项 blocker 定向复核（通过）
+
+- 审查范围：仅复核 23:34 记录中的 Pointer Lock 输入泄漏、控制器到背包整链测试，以及这些修复可能引入的高风险回归。
+- 对照基线：本 plan；当前 `HEAD/main/origin/main` 同为 `3e8d5e3`，目标改动仍为相对该基线的未提交差异。
+- 结论：**通过。本次审查未发现明确问题或高风险 finding。**
+- Blocker 1 已闭环：键盘和鼠标按下仅在当前 canvas 持有 Pointer Lock 时缓存；退出 Pointer Lock 会清空按键、持续开火及全部一次性动作；监听器在 dispose 时对称移除。
+- Blocker 2 已闭环：测试已通过真实 `KeyF` 事件生成控制器命令并进入 `InventorySystem` 完成空枪拾枪自动装备，随后覆盖主键盘、小键盘、双向滚轮、一次性请求消费及暂停输入不泄漏。
+- 高风险回归检查：未发现首把枪、双槽替换、AI 共用规则、掉落/重拾或输入生命周期回归。
+- 验证：`npm run typecheck` 通过；相关 Vitest（`humanController`、`inventorySystem`、`botController`、`gameSimulation`）4 files / 36 tests 全部通过。按用户约束未启动浏览器、声音或 Playwright。
