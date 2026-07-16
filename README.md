@@ -1,5 +1,7 @@
 # 最后防线
 
+[![CI and GitHub Pages](https://github.com/chenxuan520/last-line/actions/workflows/ci.yml/badge.svg)](https://github.com/chenxuan520/last-line/actions/workflows/ci.yml)
+
 桌面浏览器单人 AI 大逃杀 FPS。每局包含 1 名玩家和 19 名 AI，完整覆盖航线、跳伞、搜集、战斗、缩圈、淘汰和结算。
 
 ## 功能
@@ -81,7 +83,15 @@ src/
 
 - [`docs/architecture.md`](docs/architecture.md)
 - [`docs/asset-manifest.md`](docs/asset-manifest.md)
+- [`docs/deployment.md`](docs/deployment.md)
 - [`AGENTS.md`](AGENTS.md)
+
+## 在线部署
+
+- GitHub Pages：<https://chenxuan520.github.io/last-line/>
+- Cloudflare Pages：<https://last-line.pages.dev/>（控制台关联 GitHub 后启用）
+
+GitHub Actions 在每次 PR 和 `main` 推送时执行类型检查、Vitest 和生产构建；`main` 通过后自动部署 GitHub Pages。Cloudflare Pages 使用 GitHub App 直接关联同一仓库并自动更新，配置见 [`docs/deployment.md`](docs/deployment.md)。
 
 ## 素材替换
 

@@ -59,3 +59,11 @@ npm run preview
 3. Run `npm run build`.
 4. If presentation changed, open the production build in local Chrome/Edge with volume `0` and check the console.
 5. Update README or `docs/` when contracts, controls, commands, or architecture change.
+
+## Deployment Rules
+
+- Keep `.github/workflows/ci.yml` on Node.js 24 and lockfile installs.
+- Pull requests run checks only; `main` deploys the verified `dist/` artifact to GitHub Pages.
+- Cloudflare Pages uses dashboard Git integration with `main`, `npm run build`, and output directory `dist`.
+- Do not add Cloudflare long-lived credentials to the repository when Git integration is available.
+- Keep Vite asset URLs compatible with both the GitHub `/last-line/` subpath and the Cloudflare root domain.
