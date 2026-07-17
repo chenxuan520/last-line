@@ -1,9 +1,9 @@
 import type { Engine } from "@babylonjs/core/Engines/engine";
-import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { AssetCatalog } from "../assets/AssetCatalog";
 import { AudioFeedback } from "../client/audio/AudioFeedback";
-import { createIslandScene } from "../client/render/scenes/IslandScene";
+import { CombatEffects } from "../client/render/CombatEffects";
+import { createIslandScene, setActorWeaponVisual } from "../client/render/scenes/IslandScene";
 import { GameHud } from "../client/ui/GameHud";
 import type { GameSettings } from "../config/settings";
 import { WEAPONS } from "../config/weapons";
@@ -25,16 +25,20 @@ export class BattleRoyaleSession {
   private readonly lootMeshes;
   private readonly syncLootMeshes;
   private readonly viewWeaponRoot;
-  private readonly safeZoneRing;
+  private readonly aircraftVisualRoot;
+  private readonly syncSafeZoneRing;
   private readonly simulation: GameSimulation;
   private readonly clock = new FixedStepClock();
   private readonly humanController: HumanController;
   private readonly botControllers = new Map<EntityId, BotController>();
   private readonly combatWorld: SimulationCombatWorld;
   private readonly audio: AudioFeedback;
+  private readonly effects: CombatEffects;
+  private readonly actorVisualSignatures = new Map<EntityId, string>();
   private hud: GameHud | null = null;
   private active = false;
   private playerEliminated = false;
+  private lastVisualElapsedSeconds = -1;
 
   private constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -53,9 +57,11 @@ export class BattleRoyaleSession {
     this.lootMeshes = bundle.lootMeshes;
     this.syncLootMeshes = bundle.syncLootMeshes;
     this.viewWeaponRoot = bundle.viewWeaponRoot;
-    this.safeZoneRing = bundle.safeZoneRing;
+    this.aircraftVisualRoot = bundle.aircraftVisualRoot;
+    this.syncSafeZoneRing = bundle.syncSafeZoneRing;
     this.humanController = new HumanController(canvas, settings.sensitivity);
     this.audio = new AudioFeedback(settings.volume);
+    this.effects = new CombatEffects(this.scene);
     this.combatWorld = new SimulationCombatWorld(state);
     Object.values(state.actors).forEach((actor, index) => {
       if (actor.kind === "bot") this.botControllers.set(actor.id, new BotController(index));
@@ -71,7 +77,7 @@ export class BattleRoyaleSession {
     onRestart: () => void,
   ): Promise<BattleRoyaleSession> {
     const state = createBattleRoyaleState(PLAYER_ID);
-    const bundle = await createIslandScene(engine, assets, state.actors, state.groundLoot);
+    const bundle = await createIslandScene(engine, assets, state.actors, state.groundLoot, state.mapSeed);
     return new BattleRoyaleSession(canvas, uiRoot, assets, settings, onRestart, bundle, state);
   }
 
@@ -95,6 +101,7 @@ export class BattleRoyaleSession {
     if (shouldAdvance) {
       this.clock.advance(frameSeconds, (deltaSeconds) => this.fixedUpdate(deltaSeconds));
     }
+    this.effects.update(frameSeconds);
     this.syncVisuals();
     this.hud?.update(this.simulation.state, player, pointerLocked, fps);
   }
@@ -103,6 +110,7 @@ export class BattleRoyaleSession {
     this.active = false;
     this.humanController.dispose();
     this.audio.dispose();
+    this.effects.dispose();
     this.scene.dispose();
   }
 
@@ -124,6 +132,8 @@ export class BattleRoyaleSession {
     const events = this.simulation.drainEvents();
     this.hud?.handleEvents(events, PLAYER_ID);
     this.audio.handleEvents(events, PLAYER_ID);
+    this.effects.handleEvents(events, PLAYER_ID);
+    let lootSyncNeeded = false;
     for (const event of events) {
       if (event.type === "shot-fired" && event.actorId === PLAYER_ID) {
         const weapon = getActiveWeapon(this.getActor(PLAYER_ID));
@@ -138,35 +148,46 @@ export class BattleRoyaleSession {
           this.hud?.showEliminated(placement, this.getActor(PLAYER_ID).kills);
         }
       }
-      if (event.type === "item-picked") this.lootMeshes.get(event.lootId)?.setEnabled(false);
+      if (event.type === "item-picked") {
+        const loot = this.simulation.state.groundLoot[event.lootId];
+        this.lootMeshes.get(event.lootId)?.setEnabled(Boolean(loot?.available));
+      }
+      if (event.type === "item-dropped") lootSyncNeeded = true;
       if (event.type === "match-finished") {
         if (document.pointerLockElement === this.canvas) void document.exitPointerLock();
         this.hud?.showResult(event.result, PLAYER_ID, this.getActor(PLAYER_ID).kills);
       }
     }
+    if (lootSyncNeeded) this.syncLootMeshes(this.simulation.state.groundLoot);
   }
 
   private syncVisuals(): void {
     const player = this.getActor(PLAYER_ID);
-    this.viewWeaponRoot.setEnabled(Boolean(getActiveWeapon(player)));
-    this.camera.position.set(player.position.x, player.position.y, player.position.z);
-    this.camera.rotation.set(player.pitch, player.yaw, 0);
-    for (const [actorId, root] of this.actorRoots) {
-      const actor = this.getActor(actorId);
-      root.position.set(actor.position.x, actor.position.y, actor.position.z);
-      root.rotation.y = actor.yaw;
-      root.setEnabled(actor.alive && actor.deployment !== "aircraft");
+    if (this.lastVisualElapsedSeconds !== this.simulation.state.elapsedSeconds) {
+      this.lastVisualElapsedSeconds = this.simulation.state.elapsedSeconds;
+      this.viewWeaponRoot.setEnabled(Boolean(getActiveWeapon(player)));
+      this.aircraftVisualRoot.setEnabled(player.deployment === "aircraft");
+      this.camera.position.set(player.position.x, player.position.y, player.position.z);
+      this.camera.rotation.set(player.pitch, player.yaw, 0);
+      for (const [actorId, root] of this.actorRoots) {
+        const actor = this.getActor(actorId);
+        root.position.set(actor.position.x, actor.position.y, actor.position.z);
+        root.rotation.y = actor.yaw;
+        const signature = `${actor.alive}:${actor.deployment}:${getActiveWeapon(actor)?.weaponId ?? "none"}`;
+        if (this.actorVisualSignatures.get(actorId) !== signature) {
+          root.setEnabled(actor.alive && actor.deployment !== "aircraft");
+          if (actor.kind === "bot") setActorWeaponVisual(root, Boolean(getActiveWeapon(actor)));
+          this.actorVisualSignatures.set(actorId, signature);
+        }
+      }
+      for (const [lootId, mesh] of this.lootMeshes) {
+        const loot = this.simulation.state.groundLoot[lootId];
+        mesh.setEnabled(Boolean(loot?.available));
+        if (loot?.available) mesh.rotation.y += 0.06;
+      }
+      const zone = this.simulation.state.safeZone;
+      this.syncSafeZoneRing(zone.center.x, zone.center.z, zone.radius);
     }
-    this.syncLootMeshes(this.simulation.state.groundLoot);
-    for (const [lootId, mesh] of this.lootMeshes) {
-      const loot = this.simulation.state.groundLoot[lootId];
-      mesh.setEnabled(Boolean(loot?.available));
-      mesh.rotation.y += 0.015;
-    }
-    const zone = this.simulation.state.safeZone;
-    const baseRadius = Number(this.safeZoneRing.metadata?.baseRadius) || zone.radius;
-    this.safeZoneRing.position.set(zone.center.x, 0.18, zone.center.z);
-    this.safeZoneRing.scaling = new Vector3(zone.radius / baseRadius, 1, zone.radius / baseRadius);
   }
 
   private getActor(actorId: EntityId): ActorState {

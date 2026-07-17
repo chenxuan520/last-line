@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { GridNavigator } from "../../src/ai/navigation/GridNavigator";
-import { MAP_HALF_SIZE, MAP_OBSTACLES } from "../../src/config/map";
+import {
+  BUILDING_ROOF_CAP_HEIGHT,
+  createMapLayout,
+  getTerrainHeight,
+  MAP_HALF_SIZE,
+  MAP_OBSTACLES,
+} from "../../src/config/map";
 import { createIdleCommand, type ActorCommand } from "../../src/game/commands/ActorCommand";
 import { createActorState, type MatchState } from "../../src/game/state/types";
-import { MovementSystem } from "../../src/game/systems/MovementSystem";
+import { getSupportHeight, MovementSystem } from "../../src/game/systems/MovementSystem";
 
 const GROUND_HEIGHT = 1.76;
 const ACTOR_RADIUS = 0.42;
@@ -67,8 +73,45 @@ describe("MovementSystem", () => {
 
     advance(state, createIdleCommand(), 300, 1 / 60);
     expect(actor.deployment).toBe("grounded");
-    expect(actor.position.y).toBe(GROUND_HEIGHT);
+    expect(actor.position.y).toBeCloseTo(getSupportHeight(actor.position.x, actor.position.z) + GROUND_HEIGHT);
     expect(actor.velocity.y).toBe(0);
+  });
+
+  it("ignores manual ejection while the aircraft is outside the island", () => {
+    const state = createState(MAP_HALF_SIZE + 120, 0, 180);
+    const actor = state.actors.actor;
+    if (!actor) throw new Error("test actor missing");
+    actor.deployment = "aircraft";
+
+    new MovementSystem().processCommand(state, actor.id, { ...createIdleCommand(), jump: true }, 1 / 60);
+
+    expect(actor.deployment).toBe("aircraft");
+    expect(actor.position).toEqual({ x: MAP_HALF_SIZE + 120, y: 180, z: 0 });
+  });
+
+  it("walks up a roof ramp, jumps on the roof, and falls back to terrain", () => {
+    const layout = createMapLayout(0);
+    const ramp = layout.roofRamps[0];
+    const obstacle = layout.obstacles[0];
+    if (!ramp || !obstacle) throw new Error("test ramp missing");
+    const state = createState(ramp.centerX, ramp.startZ, ramp.bottomY + GROUND_HEIGHT);
+    const actor = state.actors.actor;
+    if (!actor) throw new Error("test actor missing");
+
+    advance(state, movingCommand(0, 1), 180, 1 / 60);
+
+    const roofY = obstacle.center.y + obstacle.height / 2 + BUILDING_ROOF_CAP_HEIGHT;
+    expect(actor.position.z).toBeGreaterThan(obstacle.center.z - obstacle.depth / 2);
+    expect(actor.position.y).toBeCloseTo(roofY + GROUND_HEIGHT, 1);
+
+    new MovementSystem().processCommand(state, actor.id, { ...createIdleCommand(), jump: true }, 1 / 60);
+    expect(actor.velocity.y).toBeGreaterThan(0);
+    advance(state, createIdleCommand(), 90, 1 / 60);
+    expect(actor.position.y).toBeCloseTo(roofY + GROUND_HEIGHT, 1);
+
+    advance(state, movingCommand(1, 0), 180, 1 / 60);
+    advance(state, createIdleCommand(), 90, 1 / 60);
+    expect(actor.position.y).toBeCloseTo(getTerrainHeight(actor.position.x, actor.position.z, layout) + GROUND_HEIGHT, 1);
   });
 });
 
@@ -87,12 +130,38 @@ describe("GridNavigator", () => {
     expect(path.at(-1)).toEqual(target);
     expect(path.length).toBeGreaterThan(2);
     expect(path.slice(1, -1).some((point) => Math.abs(point.z - obstacle.center.z) > obstacle.depth / 2)).toBe(true);
+    expect(path.slice(1, -1).every((point) =>
+      Math.abs(point.x - obstacle.center.x) >= obstacle.width / 2 + 0.54 ||
+      Math.abs(point.z - obstacle.center.z) >= obstacle.depth / 2 + 0.54
+    )).toBe(true);
+  });
+
+  it("routes rooftop actors down the matching ramp", () => {
+    const layout = createMapLayout(0);
+    const obstacle = layout.obstacles[0];
+    const ramp = layout.roofRamps[0];
+    if (!obstacle || !ramp) throw new Error("test rooftop missing");
+    const start = {
+      x: obstacle.center.x,
+      y: obstacle.center.y + obstacle.height / 2 + BUILDING_ROOF_CAP_HEIGHT + GROUND_HEIGHT,
+      z: obstacle.center.z,
+    };
+    const target = { x: ramp.centerX, y: getTerrainHeight(ramp.centerX, ramp.startZ, layout), z: ramp.startZ - 8 };
+
+    const path = new GridNavigator(layout.obstacles, layout.roofRamps).findPath(start, target);
+
+    expect(path.length).toBeGreaterThanOrEqual(4);
+    expect(path.some((point) => point.x === ramp.centerX && point.z === ramp.endZ)).toBe(true);
+    expect(path.some((point) => point.x === ramp.centerX && point.z === ramp.startZ)).toBe(true);
+    expect(path.at(-1)).toEqual(target);
   });
 });
 
 function createState(x: number, z: number, y = GROUND_HEIGHT): MatchState {
-  const actor = createActorState("actor", "player", { x, y, z });
+  const groundY = getTerrainHeight(x, z, 0) + GROUND_HEIGHT;
+  const actor = createActorState("actor", "player", { x, y: y === GROUND_HEIGHT ? groundY : y, z });
   return {
+    mapSeed: 0,
     phase: "combat",
     elapsedSeconds: 0,
     actors: { actor },

@@ -17,7 +17,7 @@
 
 - 单页 Web 游戏，无账号、后端、匹配和安装流程。
 - 首页提供开始游戏、画面/音量/鼠标灵敏度设置。
-- 一张固定小岛地图，随机飞机航线、物资分布和安全区。
+- 一张边界与 POI 固定的小岛地图，按可序列化 seed 受控随机丘陵、建筑、物资、飞机航线和安全区。
 - 玩家可自主跳伞；降落后搜集武器、弹药、头盔、护甲和药品。
 - 使用双主武器槽、独立装备槽和简化堆叠背包，不做格子整理与重量模拟。
 - 首版代表性武器为步枪、冲锋枪、霰弹枪；全部采用即时命中判定、中等后坐力和散布。
@@ -40,7 +40,7 @@
 - 5v5 的地图、经济、回合及爆破规则。
 - 手机与触屏适配。
 - 载具、投掷物、枪械配件、近战、可破坏场景和复杂弹道下坠。
-- 百人局、程序生成地图和写实级高精度资产。
+- 百人局、无限程序生成世界和写实级高精度资产。
 
 **只保留接口、不提前实现：**
 
@@ -204,11 +204,11 @@
 - 验证：单元测试覆盖背包已满、错误弹药、切枪、换甲、治疗中断和死亡掉落。
 - 完成标志：玩家可通过搜集完成装备成长。
 
-### 任务 7：搭建固定小岛和导航数据
+### 任务 7：搭建受控随机小岛和导航数据
 
-- 目标：提供支持 20 人分散落地、搜集和遭遇的固定地图。
+- 目标：提供支持 20 人分散落地、搜集和遭遇的有界地图；丘陵、建筑和物资布局由共享 seed 确定。
 - 涉及：`src/client/render/scenes/IslandScene.ts`、`src/config/map.ts`、`src/ai/navigation/`。
-- 动作：制作约 800m × 800m 的低多边形小岛，划分城镇、仓库、野外和高地；配置碰撞、出生区、物资点和 Recast 导航网格。
+- 动作：制作约 800m × 800m 的低多边形小岛，划分城镇、仓库、野外和高地；用共享 seed 生成受控变化，并让渲染、碰撞、出生区、物资点和导航使用同一布局。
 - 验证：从每类出生区域都能寻路到地图中心；玩家不能离开有效地形或卡入建筑。
 - 完成标志：地图支持随机航线、物资刷新和 AI 导航。
 
@@ -576,3 +576,92 @@
 - 治疗输入：`Q` 绷带和 `H` 急救包各用单次按键即可触发；若移动/开火正按住则先停止并抑制至松键，权威 `usingItem` 驱动倒计时、进度条和完成/中断提示。
 - 自动验证：`npm run typecheck`、16 个测试文件/82 项 Vitest、`npm run build` 全部通过；最终代码审查未发现中高风险问题。
 - 静音生产预览：音量 `0`，准备阶段无武器/角色遮挡，小地图与治疗进度卡视觉清晰，控制台无错误或警告。
+
+### 2026-07-18 01:15 +0800：当前未提交 terrain/floor 及全量 diff 审查（不通过）
+
+- 审查范围：当前 `main` 工作区相对 `HEAD/origin/main`（`a0a4267`）的全部未提交改动和 3 个未跟踪文件；重点检查 `IslandScene.ts`、`islandScene.test.ts`、地形权威碰撞、射击反馈、生命周期及其余行为改动。
+- 对照基线：本 plan 的固定小岛、禁止程序生成地图、权威规则/渲染边界、任务 7/11/12 与上一轮已验收的物资配额。
+- 结论：**不通过**。需 builder 处理下列阻塞问题后复审；不能记录为通过。
+- Findings 摘要：
+  1. **[高]** `createMapLayout` 按每局随机 seed 改变山体、建筑和物资坐标，偏离固定小岛及“不做程序生成地图”的明确范围。
+  2. **[高]** 75% 航线自动跳伞会把仍在飞机上的玩家直接横向传送到最近 POI 的物资点，而不是从当前航线位置离机，破坏航线语义并给予无成本精准落点。
+  3. **[高]** 渲染地形是 5m 网格三角面，移动/射击却查询连续解析高度；抽样的三角形质心误差最高约 0.063m，已超过弹痕仅 0.04m 的表面偏移。岛外规则还保留 y=0 的无限地面，而可见海面在 y=-1.5，岸边向海射击会生成悬空命中和弹痕，仍有闪烁/漂浮风险。
+  4. **[高]** 屋顶坡道已成为权威移动支撑面，但 `SimulationCombatWorld` 只检测 terrain 和 building AABB；子弹及 AI LOS 可穿过可站立的实体坡道，渲染/移动/战斗权威不一致。
+  5. **[中]** 每 POI 配额从已验收的 5 武器/4 弹药/3 医疗/6 装备改成 6/4/3/5，并同步改测试固化新语义；当前需求没有对应依据，属于无关玩法平衡回归。
+  6. **[中]** `mapLayoutCache` 对随机每局 seed 永久增量缓存且无清理/上限；生产重开会持续保留 layout。场景生命周期测试每轮固定使用同一 seed，无法发现该增长。
+  7. **[中][验证缺口]** floor flicker 断言筛选 `metadata.surfaceType`，但实现从未设置该 metadata，因此恒为空；测试没有验证 beach/wet/ocean band 的实际边界、非重叠关系、三角地形与规则表面一致性或连续帧视觉稳定性。
+- Builder 待处理：恢复固定地图和既有物资配额；自动离机保留当前航线坐标；统一渲染地形、移动支撑和射击表面（含海面与坡道）；限制或移除随机 layout cache；补真正能失败的表面重叠、边界射击、坡道遮挡、不同 seed/restart 内存及连续帧视觉回归测试。
+- 验证：`npm run typecheck` 通过；完整 Vitest 18 files / 97 tests 通过；`npm run build` 通过（主 chunk 812.59kB、GLTF chunk 625.30kB 警告）；生产 preview 以音量 `0` 打开航线场景，控制台无 error/warn。自动化 Pointer Lock 无法持续保持，因此未把单帧预览当作 floor flicker 动态验收证据。
+
+### 2026-07-18 01:52 +0800：更新随机地图需求后的全量终审（不通过）
+
+- 审查范围：当前 `main` 工作区相对 `HEAD/main/origin/main`（均为 `a0a4267`）的全部未提交改动及 3 个未跟踪文件；重点复核有界 seed 地图、floor/perimeter、地形渲染与权威规则、屋顶坡道、自动/手动离机、缓存、AI 公平性、性能和测试。
+- 对照基线：本 plan 已更新的“边界与 POI 固定、共享可序列化 seed 随机丘陵/建筑/物资/装备”要求。01:15 记录中关于“必须恢复固定地图”的 finding 已被最新用户要求明确取代，不再作为问题。
+- 结论：**不通过**。没有发现无界 layout/effect cache 或已复现的地表 band 面积重叠；自动离机也会保留当前航线坐标。但仍有 2 项高风险功能问题和 2 项中风险坡道/AI 问题需要 builder 处理。
+- Findings：
+  1. **[高] 手动过早离机仍可在岛外落地，移动时还会瞬移到边界。** 航线起点可位于 `±400m` 有效地形外；零水平输入时 `moveAxis` 不执行边界 clamp，岛外 `getTerrainHeight` 又返回 `0`，角色会在可见海面上方被判定落地。以 mode 随机源恒为 `0.5` 可得到 `x=520` 的航线起点；立即只按 Space 后可一直在 `x=520` 降至 `y=1.76`，随后首次产生对应轴移动时直接 clamp 到 `399.58`。需为手动离机定义岛外降落/回收规则，禁止站在无权威地形的海面或百米瞬移，并补航线起点早跳测试。
+  2. **[高] 可见屋顶比权威屋顶高 0.46m，坡道、站立面和射击反馈没有落在同一表面。** 渲染 roof cap 的底面才是 obstacle/ramp 的 `topY`，可见顶面在其上方 0.46m；Movement 与 Combat 仍使用 obstacle AABB 顶面。结果是坡道终点钻入 roof cap、角色脚底位于可见屋面内部，向屋顶开火产生的 impact/decal 也落在 cap 内而不可见。需让渲染 roof、移动支撑和 `SimulationCombatWorld` 共用同一顶面，并补可见 mesh 顶点/权威命中点/站立高度组合断言。
+  3. **[中] AI 导航完全不知道屋顶和坡道，玩家拥有 AI 无法使用的战术空间，Bot 若空降屋顶还会被判为起点 blocked。** `GridNavigator` 只做 obstacle 的二维阻挡，不含 ramp/高度层；Bot 的物资和进圈路径都依赖该 navigator。Movement 却允许降落到 roof support，因此屋顶 Bot 在无可见敌人时会拿到空路径并停住，地面 Bot 也永远不会规划上坡。需明确坡道是否属于 AI 可用导航；若是，应加入分层/坡道连接，若否则至少禁止 Bot 在屋顶落地并消除玩家单方面安全位。
+  4. **[中] seed 建筑抖动没有校验坡道与其他建筑，部分合法 seed 会生成被邻楼截断的坡道。** 对 seed `0..9999` 的布局枚举发现 2417 个 ramp/非所属 obstacle 顶视投影相交；例如 seed `8892` 的 `ramp-building-3-4` 与 `building-3-1` 沿 z 重叠约 `3.614m`，且该段坡道高度仍在邻楼 AABB 内，入口不可用。现有测试只检查单个 seed 的 building-building 不重叠。生成时需避让/换向坡道，并补多 seed 的 ramp-building clearance 测试。
+- 验证证据：`npm run typecheck` 通过；完整 `npm run test -- --reporter=verbose` 为 18 files / 100 tests 全部通过；`npm run build` 通过，主 chunk 813.56kB、GLTF chunk 625.30kB，保留既有大 chunk 警告；`git diff --check` 通过。静音生产 preview 可进入航线、自动离机、落地及 AI 战斗，页面显示约 120 FPS，玩家淘汰后规则仍继续推进。
+- 已确认非阻塞项：`mapLayoutCache` 强引用上限为 8，terrain grid 使用 WeakMap；CombatEffects 各池固定容量并可 dispose；ground/beach/wet/ocean band 静态边界无面积重叠；地形规则高度使用与 Babylon 网格一致的三角插值；物资配额保持 5/4/3/6；75% 自动离机保留当前航线位置。
+- Builder 待处理：先修 findings 1–2；同时收敛 findings 3–4 并补手动早跳、屋顶 mesh/rule、Bot 屋顶逃生/坡道导航及多 seed 坡道避让回归。Writer/验收需保留当前 bounded seeded-map 语言，不得恢复已被用户取代的固定地图结论。
+
+### 2026-07-18 02:05 +0800：四项 blocker 修复复审（不通过）
+
+- 审查范围：当前 `main` 工作区相对 `HEAD/main/origin/main`（均为 `a0a4267`）的完整未提交 diff；定向复核 01:52 记录的手动/自动离机、屋顶统一、AI 坡道导航、坡道避让，并额外检查反向（`startZ > endZ`）坡道。
+- 对照基线：本 plan 已更新的有界、共享可序列化 seed 控制丘陵/建筑/物资/装备需求；受控随机地图仍是明确预期，不恢复旧固定地图结论。
+- 结论：**不通过；无高风险 blocker，但仍有 2 项中风险 blocker。** 上轮四项的主体修复均已落地，但反向坡道暴露了物资排除回归，且屋顶只统一了高度、未统一可见 footprint。
+- Findings：
+  1. **[中] 反向坡道不会参与 loot 避让，可生成被坡道盖住且无法拾取的物资。** `src/config/map.ts:287-292` 的 `pointInsideRamp` 仍假设 `startZ <= endZ`；新生成的 row 1/2 外向坡道为 `startZ > endZ`，条件恒为 false。枚举 seed `0..9999` 得到 7752 个反向坡道/物资 clearance 重叠，1997 个 seed 至少有一件物资因坡道高度导致 3D 拾取距离超过 3m。seed `1` 的 `loot-33` 位于 `ramp-building-1-3` 下方：loot y=`0.45`、角色站在坡道后的 eye y≈`3.7246`，垂直距离≈`3.2746m`；HUD/Bot 以水平距离提示或反复 interact，但 `InventorySystem.ts:128-134` 拒绝拾取。Builder 需对 ramp z 范围统一使用 min/max，并补反向坡道 loot-clearance/实际拾取测试。
+  2. **[中] 屋顶高度已统一，但可见 roof cap 的 0.8m 四周挑檐仍不在 movement/combat AABB 中。** `IslandScene.ts:433-443` 把 roof 宽深设为 obstacle `+1.6m`，而 `MovementSystem.ts:214-220` 和 `SimulationCombatWorld.ts:210-218` 的 x/z 范围仍只使用 obstacle 本体。以 seed `0` 第一栋楼为例，在墙外 0.5m（仍位于可见挑檐内）向下射击，规则射线穿过屋顶并命中 y≈0 的 terrain，而非可见 roof y=`3.38`；同一区域也不是可站立支撑面。Builder 需让可见 cap footprint 与权威 obstacle footprint 一致，或把挑檐纳入 movement/combat 几何，并补 roof edge 射线/支撑测试。
+- 已确认修复：岛外手动 Space 不再离机；75% 航程处所有仍在 aircraft 的 actor 会在当前且位于岛内的航线坐标自动离机；`BUILDING_ROOF_CAP_HEIGHT` 已统一 ramp top、屋顶中心顶面、Movement 支撑和 Combat AABB 的 y 上界；`GridNavigator` 使用当前 seed 的 ramps，屋顶起点/目标路径顺序在正向和反向坡道上均正确；坡道按 building row 朝 POI 外侧生成，对 seed `0..9999` 额外枚举未发现 ramp 与非所属 building 相交，仓库已有 100-seed 回归。
+- 验证：`npm run typecheck` 通过；完整 `npm run test -- --reporter=verbose` 为 18 files / 104 tests 全部通过；`npm run build` 通过，保留主 chunk 814.31kB、GLTF chunk 625.30kB 警告；`git diff --check` 通过。未修改业务源码、未使用 Playwright或声音。
+- Builder 待处理：修复上述两个中风险 blocker；重点新增反向坡道的物资排除/拾取和 roof cap 边缘 render-rule 一致性测试后再复审。
+
+### 2026-07-18 02:14 +0800：剩余两项 medium 修复后的最终全量复查（不通过）
+
+- 审查范围：当前 `main` 工作区相对 `HEAD/main/origin/main`（均为 `a0a4267`）的完整未提交 diff；复查此前全部 findings、反向坡道 loot clearance、roof cap x/z/y 边界，并寻找受控随机丘陵引入的新渲染/规则回归。
+- 对照基线：本 plan 当前“有界地图、共享可序列化 seed 控制丘陵/建筑/物资/装备”要求；controlled random map 明确保留，不按旧固定地图语言审查。
+- 结论：**不通过；无高风险 blocker，仍有 1 项中风险 blocker。** 上轮反向坡道物资和 roof cap footprint 两项已闭环，但世界安全区边界仍未适配新增丘陵。
+- Finding：
+  1. **[中] 世界安全区环固定在 y=0.18，缩圈后会被权威随机丘陵埋住，导致部分边界完全不可见。** `src/client/render/scenes/IslandScene.ts:963-970` 创建厚度 1.2m 的水平 torus，`src/app/BattleRoyaleSession.ts:189-192` 每帧只更新 x/z 和半径，y 始终为 0.18；而本次 terrain 可高达十余米。torus 顶部约为 y=0.78，因此 terrain 高于该值的边界段会在深度测试中完全位于地表下。对 1000 个确定性对局采样第一阶段 target circle（最终会成为 current circle），1000/1000 均至少有边界点高于 0.78；最差样本约 25% 圆周被埋。影响：玩家在丘陵附近无法从世界场景辨认当前圈边界，虽仍有小地图，但任务 8/10 的场景安全区反馈相对原平地地图发生明确回归。Builder 需让边界按 terrain 高度分段贴地、改为足够高的垂直边界，或采用不被地形埋没且语义明确的表现，并补多 seed 圈边界可见性测试。
+- 已确认全部此前 findings 闭环：岛外手动离机被拒绝；75% 时所有剩余 aircraft actor 在当前且位于岛内的航线坐标自动离机；terrain mesh/规则三角插值一致且 perimeter band 无面积重叠；`BUILDING_ROOF_CAP_HEIGHT` 与 ramp top、Movement、Combat、可见 roof y 一致，roof x/z footprint 也与 obstacle 完全一致；正反向 ramp 的 Movement/Combat/导航顺序正确；BotController 使用当前 seed 的 obstacles/ramps；seed `0..9999` 未发现 ramp/loot 或 ramp/非所属 building 重叠；layout/effect/loot marker 缓存和池有界；物资配额保持 5/4/3/6。
+- 额外验证：1000 个随机航线在 75% 自动离机均位于 actor 边界内且所有剩余 actor 同点离机；1000 seed 的 rooftop→中心及中心→rooftop GridNavigator 路径均非空；roof 中心/边缘的 Combat y 命中与支撑面一致（仅精确浮点边界存在非实质性的闭区间舍入差异，不作为 blocker）。
+- 自动验证：`npm run typecheck` 通过；完整 `npm run test -- --reporter=verbose` 为 18 files / 104 tests 全部通过；`npm run build` 通过，保留主 chunk 814.34kB、GLTF chunk 625.30kB 警告；`git diff --check` 通过。未修改业务源码、未使用 Playwright 或声音。
+- Builder 待处理：仅剩上述世界安全区环的丘陵适配及对应多 seed 可见性回归；修复后再进行最终通过复审。
+
+### 2026-07-18 02:21 +0800：terrain-following safe-zone ribbon 最终复查（不通过）
+
+- 审查范围：当前 `main` 工作区相对 `HEAD/main/origin/main`（均为 `a0a4267`）的完整未提交 diff；定向复核最后一项世界安全区边界 finding，并回看此前离机、terrain/render/rule、perimeter、roof/ramp、AI、公平性、缓存、性能和测试结论。
+- 对照基线：本 plan 当前有界、共享可序列化 seed 控制随机丘陵/建筑/物资/装备要求；controlled random map 仍为明确需求。
+- 结论：**不通过；无高风险 blocker，仍有 1 项中风险 blocker。** ribbon 顶点会跟随权威 terrain，session 也会按 center/radius 更新，但只校验/采样顶点不足以保证三角形边内不被曲面穿透。
+- Finding：
+  1. **[中] 96 段 ribbon 的顶点虽离地，但 segment 内部仍会被丘陵穿透并局部完全埋没。** `src/client/render/scenes/IslandScene.ts:979-1008` 仅在每个圆周顶点采样 terrain，并用直线三角形连接相邻顶点；权威 terrain 在约 18–26m 长的外圈 segment 内可能高于两端线性插值。对 10,000 个确定性对局、第一阶段收缩的 21 个 center/radius 中间状态、每 segment 10 个内部点采样，9,971 个对局存在至少一个被 terrain 穿透的 ribbon 区段；最深约 0.403m，已接近并可超过 ribbon 的 0.43m 总高度，因此该处仍可完全不可见。最差圆周状态约 2.6% 采样点埋入 terrain。`tests/unit/islandScene.test.ts:79-92` 只断言顶点 lower/upper y 和一次移动后的首顶点，无法发现 segment interior 穿透。Builder 需提高/adaptively subdivide 到与 terrain 网格误差匹配、在 segment 内采样并抬升顶边，或使用不会被地形遮挡的边界表现；测试需断言所有三角形边内插值均高于共享 terrain，而不只是顶点。
+- 已确认修复有效：`BattleRoyaleSession.ts:164-190` 会随规则步同步 center/radius；ribbon mesh 与 vertex/material 数量固定，反复更新不分配新 Babylon mesh；顶点 lower/upper 分别为 terrain +0.12/+0.55；此前全部离机、屋顶、坡道、AI、loot、cache 和 render/rule findings 仍保持闭环。
+- 自动验证：`npm run typecheck` 通过；完整 `npm run test -- --reporter=verbose` 为 18 files / 104 tests 全部通过；`npm run build` 通过，主 chunk 813.57kB、GLTF chunk 625.30kB，保留既有大 chunk 警告；`git diff --check` 通过。未修改业务源码、未使用 Playwright 或声音。
+- Builder 待处理：仅剩 ribbon segment interior 的 terrain clearance 和对应多 seed/中间缩圈状态测试；处理后再发起最终通过复审。
+
+### 2026-07-18 02:32 +0800：当前未提交全量独立复审（不通过）
+
+- 审查范围：当前 `main` 工作区相对 `HEAD/main/origin/main`（均为 `a0a4267`）的完整未提交 diff；重点复核有界 seed 地图、单 terrain/perimeter、共享权威地形、roof/ramp movement/combat/navigation、离机边界、terrain-following safe-zone ribbon、缓存/特效池和测试。
+- 对照基线：本 plan 当前“有界地图、共享可序列化 seed 控制随机丘陵/建筑/物资”要求；不恢复已被用户取代的旧固定地图结论。
+- 结论：**不通过；未发现高风险 blocker，仍有 2 项中风险 blocker。**
+- Findings：
+  1. **[中] safe-zone ribbon 的 segment 内部仍会被地形完全穿透。** `IslandScene.ts:979-1002` 固定用 96 段，只在端点采样 terrain 后用直线三角形连接；seed `0`、初始 center `(0,0)`、radius `400` 的 segment 83 在 `t=0.6` 处，terrain 比下边线高约 `0.531m`，也比仅高 `0.43m` 的上边线高约 `0.101m`，该处整条 ribbon 埋入地形。`islandScene.test.ts:79-92` 仍只断言顶点和单个移动后顶点，无法覆盖 segment interior。Builder 需提高/自适应细分或在段内保证上下边 clearance，并补 segment 内插值回归。
+  2. **[中] Bot 的 rooftop target 路径没有接入战斗决策，新增屋顶仍是 AI 无法主动到达的战术层。** `GridNavigator.ts:22-43` 已能生成 ground→roof 路径，但 `BotController.ts:105-129` 对可见敌人始终直接使用水平向量追逐/横移/后退；navigator 只在 loot/安全区分支 `:138,157,159` 使用。seed `0` 第一栋楼上放玩家、地面放持枪 Bot 并使用真实 `SimulationCombatWorld` LOS，连续 60 秒 controller+movement 后 Bot 最大 y 仍为 `1.76`，没有走坡道。`movementSystem.test.ts:139-157` 只直接测试 navigator，未覆盖 BotController 追逐屋顶目标。Builder 需让需接近的屋顶敌人走 ramp path（或明确禁止该战术层），并补 controller+movement/combat 整链测试。
+- 验证：`npm run typecheck` 通过；完整 `npm run test -- --reporter=verbose` 为 18 files / 104 tests 全部通过；`git diff --check` 通过。额外抽样 5,000 个 seed 未发现 layout 生成失败、越界 loot、坡道被 terrain 穿透或建筑 roof 被 terrain 覆盖；未修改业务源码、未提交。
+
+### 2026-07-18 02:54 +0800：最终 release-gate 全量复审（不通过）
+
+- 审查范围：当前 `main` 工作区相对 `HEAD/origin/main`（`a0a4267`）的完整未提交 diff；对照本 plan，并复核此前 terrain/floor、权威地形、离机、roof/ramp、loot/cache、safe-zone ribbon 与 Bot combat pursuit findings。
+- 结论：**不通过；未发现高风险 blocker，仍有 1 项中风险 blocker。** controlled-random bounded island 为明确预期，不作为问题。
+- Finding：`BotController.navigate` 在接近当前 waypoint 2m 时重算整条路径，却始终只保存新的 `path[1]`（`src/controllers/BotController.ts:240-245`）。对 ground→roof 路径，`GridNavigator` 会依次返回 ramp start、ramp end、roof target（`src/ai/navigation/GridNavigator.ts:32-42`）；Bot 到达 ramp start 后每次都重新选择 ramp start，无法推进到 ramp end。以当前 seed `2147483648` 的 `building-0-1` 为例，持枪 Bot 追逐屋顶远端目标 60 秒后仍停在 `z=150.622/y=1.797`，而 ramp start/end 为 `150.522/161.722`、屋顶目标 eye y 为 `5.94`。现有 `botController.test.ts:42-68` 只检查首个 command 的方向，没有推进 controller + movement 穿越全部 waypoints。Builder 需保存/消费完整 waypoint 序列，或在到达当前 waypoint 后明确推进下一节点，并补真实多 tick ground→ramp→roof 回归。
+- 验证：`git diff --check`、`npm run typecheck`、完整 Vitest（18 files / 105 tests）及 `npm run build` 均通过；生产 preview 在本机 Chrome、音量 `0` 下可进入航线，控制台无 error/warn。构建保留既有 813.61kB 主 chunk 与 625.30kB GLTF chunk 警告。
+
+### 2026-07-18 03:02 +0800：Bot 屋顶追击 blocker 最终复核（通过）
+
+- 审查范围：复核 02:54 release-gate 唯一 blocker，并确认当前 `main` 相对 `origin/main`（`a0a4267`）完整未提交 diff 的既有结论未被该修复回归。
+- 结论：**通过。本次审查未发现明确高/中风险阻塞项。** `BotController` 会保存并顺序消费完整 navigation path；combat target 移动不会在路径中段重置 waypoint，地形高度差会保持导航，同时保留目标瞄准方向。
+- 验证：新增 controller + `MovementSystem` 30 秒回归可到达屋顶高度；额外以真实 `SimulationCombatWorld`、30 Hz 复现可见屋顶目标，Bot 到达目标屋顶。抽样 100 个布局、2,597 条有效可见 ground→roof 路径均到达屋顶，未复现 waypoint 卡死。
+- 自动检查：`git diff --check`、`npm run typecheck`、完整 Vitest（18 files / 105 tests）和 `npm run build` 全部通过；仅保留既有大 chunk 警告。

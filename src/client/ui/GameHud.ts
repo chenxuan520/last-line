@@ -21,6 +21,9 @@ export class GameHud {
   private resultVisible = false;
   private inventorySignature = "";
   private weaponIconId = "";
+  private minimapSignature = "";
+  private healingSignature = "";
+  private promptSignature = "";
 
   public constructor(
     root: HTMLDivElement,
@@ -33,22 +36,23 @@ export class GameHud {
     root.innerHTML = `
       <section class="hud" aria-label="游戏状态">
         <header class="hud-topbar">
-          <div class="location-block"><span class="hud-kicker">苍岬岛</span><strong data-hud="phase">航线部署</strong></div>
-          <div class="zone-block"><span data-hud="zone-label">安全区待命</span><strong data-hud="zone-time">--:--</strong></div>
-          <div class="alive-counter"><span data-hud="alive">20</span><small>存活</small><b data-hud="kills">0 击杀</b></div>
+          <div class="location-block"><span class="hud-kicker">LAST LINE // 01</span><strong>苍岬岛</strong><small data-hud="phase">航线部署</small></div>
+          <div class="zone-block"><span data-hud="zone-label">安全区待命</span><strong data-hud="zone-time">--:--</strong><i></i></div>
+          <div class="alive-counter"><small>存活</small><span data-hud="alive">20</span><b data-hud="kills">0 击杀</b></div>
         </header>
         <img class="crosshair" src="${crosshair.url}" alt="" />
         <div class="hit-marker" data-hud="hit-marker">×</div>
         <div class="damage-flash" data-hud="damage-flash"></div>
         <div class="kill-feed" data-hud="kill-feed" aria-live="polite"></div>
         <aside class="minimap-card" aria-label="小地图">
-          <div class="minimap-heading"><strong>战术地图</strong><span data-hud="map-status">安全区内</span></div>
+          <div class="minimap-heading"><strong>TACTICAL MAP</strong><span data-hud="map-status">安全区内</span></div>
           <svg class="minimap" viewBox="0 0 200 200" role="img" aria-label="苍岬岛小地图">
             <rect class="minimap-sea" width="200" height="200" />
             <path class="minimap-island" d="M18 50 L48 18 L103 10 L158 28 L190 72 L184 142 L151 186 L91 194 L37 171 L10 122 Z" />
             <g class="minimap-grid">
               <path d="M50 10V190 M100 10V190 M150 10V190 M10 50H190 M10 100H190 M10 150H190" />
             </g>
+            <g class="minimap-roads"><path d="M48 49 L130 61 L146 129 L61 129 Z M48 49 L61 129 M130 61 L61 129" /></g>
             <g class="minimap-pois">${MAP_POINTS.map((point) => {
               const projected = projectToMinimap(point.position);
               return `<g transform="translate(${projected.x} ${projected.y})"><circle r="2" /><text y="-5">${point.name}</text></g>`;
@@ -57,7 +61,9 @@ export class GameHud {
             <circle class="minimap-target-zone" data-hud="map-target-zone" />
             <circle class="minimap-current-zone" data-hud="map-current-zone" />
             <g class="minimap-player" data-hud="map-player"><path d="M0 -7 L5 6 L0 3 L-5 6 Z" /></g>
+            <text class="minimap-north" x="188" y="13">N</text>
           </svg>
+          <div class="minimap-scale"><span></span><small>200 M</small></div>
         </aside>
         <div class="interaction-prompt" data-hud="prompt"></div>
         <div class="healing-progress" data-hud="healing" hidden>
@@ -67,8 +73,8 @@ export class GameHud {
           <small>移动或开火会中断</small>
         </div>
         <aside class="controls-card">
-          <span>WASD 移动</span><span>SHIFT 冲刺</span><span>空格 跳伞/跳跃</span><span>F 拾取</span>
-          <span>1/2 或滚轮 切枪</span><span>Q 绷带</span><span>H 急救包</span><span>R 换弹</span>
+          <span><b>WASD</b>移动</span><span><b>SHIFT</b>冲刺</span><span><b>SPACE</b>跳伞 / 跳跃</span><span><b>F</b>拾取</span>
+          <span><b>1 / 2</b>切枪</span><span><b>Q</b>绷带</span><span><b>H</b>急救包</span><span><b>R</b>换弹</span>
         </aside>
         <aside class="inventory-card">
           <div class="weapon-slots" data-hud="weapon-slots"></div>
@@ -76,14 +82,14 @@ export class GameHud {
         </aside>
         <footer class="hud-footer">
           <div class="vitals">
-            <div><span>生命</span><strong data-hud="health">100</strong></div>
-            <div><span>护甲</span><strong data-hud="armor">0</strong></div>
-            <div><span>头盔</span><strong data-hud="helmet">0</strong></div>
+            <div class="vital-block health-vital"><span>生命值</span><strong data-hud="health">100</strong><i><b data-hud="health-bar"></b></i></div>
+            <div class="vital-block armor-vital"><span>护甲值</span><strong data-hud="armor">0</strong><i><b data-hud="armor-bar"></b></i></div>
+            <div class="helmet-vital"><span>头盔</span><strong>LV.<b data-hud="helmet">0</b></strong></div>
           </div>
           <div class="performance" data-hud="performance">-- FPS</div>
           <div class="weapon-status">
             <img data-hud="weapon-icon" src="" alt="" hidden />
-            <div><small data-hud="weapon-name">未装备</small><strong data-hud="ammo">--</strong><span>/ <span data-hud="reserve">0</span></span></div>
+            <div><small data-hud="weapon-name">未装备</small><strong data-hud="ammo">--</strong><span><i>RES</i> <span data-hud="reserve">0</span></span></div>
           </div>
         </footer>
         <div class="pause-card" data-hud="pause">
@@ -108,14 +114,38 @@ export class GameHud {
     this.setText("health", Math.ceil(player.health).toString());
     this.setText("armor", Math.ceil(player.armor).toString());
     this.setText("helmet", player.inventory.helmetLevel.toString());
+    setWidth(this.requireElement("health-bar"), player.health / player.maxHealth * 100);
+    setWidth(this.requireElement("armor-bar"), player.maxArmor > 0 ? player.armor / player.maxArmor * 100 : 0);
     this.setText("alive", Object.values(state.actors).filter((actor) => actor.alive).length.toString());
     this.setText("kills", `${player.kills} 击杀`);
     this.setText("performance", `${Math.round(fps)} FPS`);
     this.setText("phase", phaseLabel(state, player));
     this.setText("zone-label", zoneLabel(state));
     this.setText("zone-time", formatSeconds(state.safeZone.secondsRemaining));
-    this.updateMinimap(state, player);
-    this.updateHealing(player);
+    const minimapSignature = [
+      state.phase,
+      player.deployment,
+      player.position.x.toFixed(1),
+      player.position.z.toFixed(1),
+      player.yaw.toFixed(3),
+      state.safeZone.center.x.toFixed(1),
+      state.safeZone.center.z.toFixed(1),
+      state.safeZone.radius.toFixed(1),
+      state.safeZone.targetCenter.x.toFixed(1),
+      state.safeZone.targetCenter.z.toFixed(1),
+      state.safeZone.targetRadius.toFixed(1),
+    ].join(":");
+    if (minimapSignature !== this.minimapSignature) {
+      this.updateMinimap(state, player);
+      this.minimapSignature = minimapSignature;
+    }
+    const healingSignature = player.inventory.usingItem
+      ? `${player.inventory.usingItem.itemId}:${player.inventory.usingItem.remainingSeconds.toFixed(1)}`
+      : "none";
+    if (healingSignature !== this.healingSignature) {
+      this.updateHealing(player);
+      this.healingSignature = healingSignature;
+    }
 
     const weapon = getActiveWeapon(player);
     const config = weapon ? WEAPONS[weapon.weaponId] : undefined;
@@ -140,11 +170,21 @@ export class GameHud {
       this.renderBackpack(player);
       this.inventorySignature = inventorySignature;
     }
-    const nearestLoot = Object.values(state.groundLoot)
-      .filter((loot) => loot.available)
-      .map((loot) => ({ loot, distance: Math.hypot(loot.position.x - player.position.x, loot.position.z - player.position.z) }))
-      .sort((left, right) => left.distance - right.distance)[0];
-    this.setText("prompt", nearestLoot && nearestLoot.distance <= 3 ? `F 拾取 ${getItemLabel(nearestLoot.loot.itemId)}` : "");
+    const promptSignature = `${state.elapsedSeconds.toFixed(3)}:${player.position.x.toFixed(2)}:${player.position.z.toFixed(2)}`;
+    if (promptSignature !== this.promptSignature) {
+      let nearestLoot: MatchState["groundLoot"][string] | null = null;
+      let nearestDistance = 3;
+      for (const loot of Object.values(state.groundLoot)) {
+        if (!loot.available) continue;
+        const distance = Math.hypot(loot.position.x - player.position.x, loot.position.z - player.position.z);
+        if (distance <= nearestDistance) {
+          nearestLoot = loot;
+          nearestDistance = distance;
+        }
+      }
+      this.setText("prompt", nearestLoot ? `F 拾取 ${getItemLabel(nearestLoot.itemId)}` : "");
+      this.promptSignature = promptSignature;
+    }
     this.requireElement("pause").classList.toggle("is-visible", !pointerLocked && player.alive && !this.resultVisible);
   }
 
@@ -157,7 +197,11 @@ export class GameHud {
         replayAnimation(this.damageFlash);
       }
       if (event.type === "actor-died") {
-        this.appendFeed(event.sourceId ? `${event.sourceId} 淘汰 ${event.actorId}` : `${event.actorId} 倒在安全区外`);
+        this.appendFeed(
+          event.sourceId
+            ? `${actorLabel(event.sourceId, playerId)} 淘汰 ${actorLabel(event.actorId, playerId)}`
+            : `${actorLabel(event.actorId, playerId)} 倒在安全区外`,
+        );
       }
       if (event.type === "item-picked" && event.actorId === playerId) {
         this.appendFeed(`获得 ${getItemLabel(event.itemId)} ×${event.quantity}`);
@@ -200,7 +244,8 @@ export class GameHud {
   }
 
   private setText(name: string, value: string): void {
-    this.requireElement(name).textContent = value;
+    const element = this.requireElement(name);
+    if (element.textContent !== value) element.textContent = value;
   }
 
   private renderWeaponSlots(player: ActorState): void {
@@ -233,12 +278,13 @@ export class GameHud {
     setCircle(this.requireElement("map-current-zone"), view.currentZone);
     setCircle(this.requireElement("map-target-zone"), view.targetZone);
     const flight = this.requireElement("map-flight");
-    flight.setAttribute("x1", view.flight.start.x.toString());
-    flight.setAttribute("y1", view.flight.start.y.toString());
-    flight.setAttribute("x2", view.flight.end.x.toString());
-    flight.setAttribute("y2", view.flight.end.y.toString());
+    setAttribute(flight, "x1", view.flight.start.x.toString());
+    setAttribute(flight, "y1", view.flight.start.y.toString());
+    setAttribute(flight, "x2", view.flight.end.x.toString());
+    setAttribute(flight, "y2", view.flight.end.y.toString());
     flight.classList.toggle("is-hidden", state.phase !== "flight");
-    this.requireElement("map-player").setAttribute(
+    setAttribute(
+      this.requireElement("map-player"),
       "transform",
       `translate(${view.player.x} ${view.player.y}) rotate(${view.player.rotationDegrees})`,
     );
@@ -262,7 +308,7 @@ export class GameHud {
     const totalSeconds = ITEMS[usingItem.itemId]?.useSeconds ?? usingItem.remainingSeconds;
     this.setText("healing-label", `使用 ${getItemLabel(usingItem.itemId)}`);
     this.setText("healing-time", `${usingItem.remainingSeconds.toFixed(1)}s`);
-    this.requireElement("healing-bar").style.width = `${Math.max(0, Math.min(100, (1 - usingItem.remainingSeconds / totalSeconds) * 100))}%`;
+    setWidth(this.requireElement("healing-bar"), (1 - usingItem.remainingSeconds / totalSeconds) * 100);
   }
 
   private resolveIconUrl(id: string): string {
@@ -280,10 +326,25 @@ function assetUrl(url: string | undefined): string {
   return url ? new URL(url, document.baseURI).href : "";
 }
 
+function actorLabel(actorId: string, playerId: string): string {
+  if (actorId === playerId) return "你";
+  const number = /\d+$/.exec(actorId)?.[0];
+  return number ? `AI-${number.padStart(2, "0")}` : actorId;
+}
+
 function setCircle(element: HTMLElement, circle: { x: number; y: number; radius: number }): void {
-  element.setAttribute("cx", circle.x.toString());
-  element.setAttribute("cy", circle.y.toString());
-  element.setAttribute("r", circle.radius.toString());
+  setAttribute(element, "cx", circle.x.toString());
+  setAttribute(element, "cy", circle.y.toString());
+  setAttribute(element, "r", circle.radius.toString());
+}
+
+function setAttribute(element: HTMLElement, name: string, value: string): void {
+  if (element.getAttribute(name) !== value) element.setAttribute(name, value);
+}
+
+function setWidth(element: HTMLElement, value: number): void {
+  const width = `${Math.max(0, Math.min(100, value)).toFixed(1)}%`;
+  if (element.style.width !== width) element.style.width = width;
 }
 
 function phaseLabel(state: MatchState, player: ActorState): string {

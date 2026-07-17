@@ -20,8 +20,16 @@ export interface ShotTrace {
   range: number;
 }
 
+export interface ShotResult {
+  targetId: EntityId | null;
+  point: Vector3State;
+  normal: Vector3State;
+  hitType: "actor" | "environment" | "miss";
+}
+
 export interface CombatWorld {
   traceShot(trace: ShotTrace): EntityId | null;
+  traceShotDetailed?(trace: ShotTrace): ShotResult;
   hasLineOfSight?(observerId: EntityId, targetId: EntityId): boolean;
 }
 
@@ -161,12 +169,25 @@ export class CombatSystem {
     events.push({ type: "shot-fired", actorId: actor.id });
     for (let pellet = 0; pellet < config.pellets; pellet += 1) {
       const direction = addSpread(normalize(command.aimDirection), config.spreadRadians, this.random);
-      const targetId = world.traceShot({
+      const trace = {
         shooterId: actor.id,
         origin: { x: actor.position.x, y: actor.position.y, z: actor.position.z },
         direction,
         range: config.range,
-      });
+      };
+      const detailed = world.traceShotDetailed?.(trace);
+      const targetId = detailed ? detailed.targetId : world.traceShot(trace);
+      if (detailed) {
+        events.push({
+          type: "shot-traced",
+          actorId: actor.id,
+          origin: trace.origin,
+          end: detailed.point,
+          normal: detailed.normal,
+          hitType: detailed.hitType,
+          targetId: detailed.targetId,
+        });
+      }
       if (targetId && targetId !== actor.id) {
         pendingDamage.push({ targetId, sourceId: actor.id, amount: config.damage });
       }

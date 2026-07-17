@@ -5,6 +5,7 @@ import {
   type BattleRoyaleConfig,
 } from "../../src/config/battleRoyale";
 import { ITEMS } from "../../src/config/items";
+import { createMapLayout } from "../../src/config/map";
 import { BattleRoyaleMode, createBattleRoyaleState } from "../../src/game/modes/BattleRoyaleMode";
 import { createIdleCommand } from "../../src/game/commands/ActorCommand";
 import { createWeaponState, type GameEvent } from "../../src/game/state/types";
@@ -39,6 +40,10 @@ describe("BattleRoyaleMode", () => {
     expect(actors.filter((actor) => actor.kind === "player")).toHaveLength(1);
     expect(actors.filter((actor) => actor.kind === "bot")).toHaveLength(19);
     expect(actors.every((actor) => actor.deployment === "aircraft")).toBe(true);
+    expect(state.mapSeed).toBe(2_147_483_648);
+    expect(Object.values(state.groundLoot).map((loot) => loot.position)).toEqual(
+      createMapLayout(state.mapSeed).lootSpawnPoints,
+    );
     expect(itemIds).toEqual(
       new Set([
         "weapon.rifle",
@@ -80,9 +85,10 @@ describe("BattleRoyaleMode", () => {
       expect(new Set(ammo.map((entry) => entry.itemId))).toEqual(
         new Set(["ammo.rifle", "ammo.light", "ammo.shell"]),
       );
-      expect(weapons.length).toBeGreaterThanOrEqual(3);
-      expect(medical.length).toBeGreaterThanOrEqual(2);
-      expect(equipment.length).toBeGreaterThanOrEqual(2);
+      expect(weapons).toHaveLength(5);
+      expect(ammo).toHaveLength(4);
+      expect(medical).toHaveLength(3);
+      expect(equipment).toHaveLength(6);
       expect(adjacentMatches / categories.length).toBeLessThanOrEqual(0.2);
 
       for (const entry of weapons) {
@@ -116,9 +122,37 @@ describe("BattleRoyaleMode", () => {
     firstMode.start(firstState, []);
     secondMode.start(secondState, []);
 
+    expect(firstState.mapSeed).toBe(2_147_483_648);
     expect(firstState.flight).toEqual(secondState.flight);
     expect(firstState.flight).not.toEqual(differentState.flight);
     expect(Object.values(firstState.actors).every((actor) => actor.position.x === firstState.flight.start.x)).toBe(true);
+  });
+
+  it("does not change the state's map seed when the mode starts", () => {
+    const state = createBattleRoyaleState("player", damageConfig, () => 0.5);
+    const mapSeed = state.mapSeed;
+
+    new BattleRoyaleMode(damageConfig, () => 0.25).start(state, []);
+
+    expect(state.mapSeed).toBe(mapSeed);
+  });
+
+  it("auto-ejects the player at the current aircraft position", () => {
+    const state = createBattleRoyaleState("player", damageConfig, () => 0.5);
+    const mode = new BattleRoyaleMode(damageConfig, () => 0.5);
+    mode.start(state, []);
+
+    mode.update(state, damageConfig.flightSeconds * 0.76, []);
+
+    const player = state.actors.player;
+    if (!player) throw new Error("player missing");
+    expect(player.deployment).toBe("parachuting");
+    expect(player.position.x).toBeCloseTo(state.flight.start.x + (state.flight.end.x - state.flight.start.x) * 0.76);
+    expect(player.position.z).toBeCloseTo(state.flight.start.z + (state.flight.end.z - state.flight.start.z) * 0.76);
+    expect(createMapLayout(state.mapSeed).lootSpawnPoints).not.toContainEqual(player.position);
+    expect(Object.values(state.actors).every((actor) => actor.deployment === "parachuting")).toBe(true);
+    expect(Object.values(state.actors).every((actor) => actor.position.x === player.position.x)).toBe(true);
+    expect(Object.values(state.actors).every((actor) => actor.position.z === player.position.z)).toBe(true);
   });
 
   it("applies outside-zone damage directly to health", () => {

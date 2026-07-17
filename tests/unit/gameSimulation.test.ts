@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { WEAPONS } from "../../src/config/weapons";
+import { getTerrainHeight } from "../../src/config/map";
 import { createIdleCommand, type ActorCommand } from "../../src/game/commands/ActorCommand";
 import { GameSimulation } from "../../src/game/GameSimulation";
 import { TrainingMode } from "../../src/game/modes/TrainingMode";
@@ -8,9 +9,10 @@ import type { CombatWorld } from "../../src/game/systems/CombatSystem";
 import { SimulationCombatWorld } from "../../src/game/systems/SimulationCombatWorld";
 
 function createSimulation(weaponId = "rifle"): GameSimulation {
-  const player = createActorState("player", "player", { x: 0, y: 1.76, z: 0 }, weaponId);
-  const bot = createActorState("bot-1", "bot", { x: 0, y: 1.76, z: 10 });
+  const player = createActorState("player", "player", { x: 0, y: getTerrainHeight(0, 0, 0) + 1.76, z: 0 }, weaponId);
+  const bot = createActorState("bot-1", "bot", { x: 0, y: getTerrainHeight(0, 10, 0) + 1.76, z: 10 });
   const state: MatchState = {
+    mapSeed: 0,
     phase: "ready",
     elapsedSeconds: 0,
     actors: { player, "bot-1": bot },
@@ -55,6 +57,31 @@ describe("GameSimulation combat", () => {
     expect(getActiveWeapon(simulation.state.actors.player)?.ammoInMagazine).toBe(29);
     expect(simulation.state.actors["bot-1"]?.armor).toBeCloseTo(34.7);
     expect(simulation.state.actors["bot-1"]?.health).toBeCloseTo(81.3);
+  });
+
+  it("emits authoritative shot trace details for presentation", () => {
+    const simulation = createSimulation();
+    const world: CombatWorld = {
+      traceShot: () => null,
+      traceShotDetailed: () => ({
+        targetId: null,
+        point: { x: 0, y: 1.76, z: 12 },
+        normal: { x: 0, y: 0, z: -1 },
+        hitType: "environment",
+      }),
+    };
+
+    simulation.step(1 / 30, new Map([["player", fireCommand]]), world);
+
+    expect(simulation.drainEvents()).toContainEqual({
+      type: "shot-traced",
+      actorId: "player",
+      origin: { ...simulation.state.actors.player.position },
+      end: { x: 0, y: 1.76, z: 12 },
+      normal: { x: 0, y: 0, z: -1 },
+      hitType: "environment",
+      targetId: null,
+    });
   });
 
   it("finishes every actor's movement before tracing combat", () => {

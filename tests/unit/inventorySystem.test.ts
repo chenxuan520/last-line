@@ -13,6 +13,7 @@ import { InventorySystem } from "../../src/game/systems/InventorySystem";
 function createState(): MatchState {
   const actor = createActorState("player", "player", { x: 0, y: 0, z: 0 });
   return {
+    mapSeed: 0,
     phase: "combat",
     elapsedSeconds: 0,
     actors: { player: actor },

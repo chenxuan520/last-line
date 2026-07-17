@@ -91,6 +91,7 @@ export interface MatchResult {
 export interface MatchState {
   phase: "ready" | "flight" | "combat" | "finished";
   elapsedSeconds: number;
+  mapSeed: number;
   actors: Record<EntityId, ActorState>;
   groundLoot: Record<EntityId, GroundLootState>;
   safeZone: SafeZoneState;
@@ -102,6 +103,15 @@ export type GameEvent =
   | { type: "match-started" }
   | { type: "phase-changed"; phase: MatchState["phase"] }
   | { type: "shot-fired"; actorId: EntityId }
+  | {
+      type: "shot-traced";
+      actorId: EntityId;
+      origin: Vector3State;
+      end: Vector3State;
+      normal: Vector3State;
+      hitType: "actor" | "environment" | "miss";
+      targetId: EntityId | null;
+    }
   | { type: "actor-damaged"; actorId: EntityId; sourceId: EntityId | null; damage: number }
   | { type: "actor-died"; actorId: EntityId; sourceId: EntityId | null }
   | { type: "reload-started"; actorId: EntityId }

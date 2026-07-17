@@ -5,6 +5,7 @@ import { DamageSystem } from "../../src/game/systems/DamageSystem";
 function createState(): MatchState {
   const target = createActorState("target", "player", { x: 0, y: 0, z: 0 });
   return {
+    mapSeed: 0,
     phase: "combat",
     elapsedSeconds: 0,
     actors: { target },

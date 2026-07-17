@@ -124,6 +124,7 @@ describe("HumanController weapon switching", () => {
 
 function createState(actor: ReturnType<typeof createActorState>): MatchState {
   return {
+    mapSeed: 0,
     phase: "combat",
     elapsedSeconds: 0,
     actors: { [actor.id]: actor },

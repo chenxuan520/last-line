@@ -1,14 +1,31 @@
 import { describe, expect, it } from "vitest";
-import { MAP_OBSTACLES } from "../../src/config/map";
+import { BUILDING_ROOF_CAP_HEIGHT, createMapLayout, getTerrainHeight, MAP_OBSTACLES } from "../../src/config/map";
 import { BotController } from "../../src/controllers/BotController";
 import { createBattleRoyaleState } from "../../src/game/modes/BattleRoyaleMode";
 import { getActiveWeapon } from "../../src/game/state/types";
 import type { CombatWorld } from "../../src/game/systems/CombatSystem";
 import { InventorySystem } from "../../src/game/systems/InventorySystem";
+import { MovementSystem } from "../../src/game/systems/MovementSystem";
 
 const miss: CombatWorld = { traceShot: () => null, hasLineOfSight: () => true };
 
 describe("BotController", () => {
+  it("assigns parachuting bots to different weapon landing points", () => {
+    const state = createBattleRoyaleState("player", undefined, () => 0.5);
+    const first = state.actors["bot-1"];
+    const second = state.actors["bot-2"];
+    if (!first || !second) throw new Error("bots missing");
+    first.deployment = "parachuting";
+    second.deployment = "parachuting";
+    first.position = { x: 0, y: 100, z: 0 };
+    second.position = { x: 0, y: 100, z: 0 };
+
+    const firstCommand = new BotController(1, () => 0.5).update(first, state, miss, 1, "player");
+    const secondCommand = new BotController(2, () => 0.5).update(second, state, miss, 1, "player");
+
+    expect(firstCommand.move).not.toEqual(secondCommand.move);
+  });
+
   it("does not target an actor hidden by world geometry", () => {
     const state = groundedState();
     const bot = state.actors["bot-1"];
@@ -21,6 +38,45 @@ describe("BotController", () => {
     const command = new BotController(1, () => 0.5).update(bot, state, blocked, 1, "player");
 
     expect(command.fire).toBe(false);
+  });
+
+  it("uses the matching roof ramp while pursuing a visible rooftop target", () => {
+    const state = groundedState();
+    const layout = createMapLayout(state.mapSeed);
+    const obstacle = layout.obstacles[0];
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!obstacle || !bot || !player) throw new Error("test setup missing");
+    const botX = obstacle.center.x - obstacle.width / 2 - 35;
+    bot.position = {
+      x: botX,
+      y: getTerrainHeight(botX, obstacle.center.z, layout) + 1.76,
+      z: obstacle.center.z,
+    };
+    player.position = {
+      x: obstacle.center.x,
+      y: obstacle.center.y + obstacle.height / 2 + BUILDING_ROOF_CAP_HEIGHT + 1.76,
+      z: obstacle.center.z,
+    };
+    bot.yaw = Math.atan2(player.position.x - bot.position.x, player.position.z - bot.position.z);
+
+    const controller = new BotController(1, () => 0.5);
+    const command = controller.update(bot, state, miss, 1, "player");
+
+    expect(command.move.x).toBeGreaterThan(0);
+    expect(Math.abs(command.move.z)).toBeGreaterThan(0.1);
+    expect(command.aimDirection.x).toBeGreaterThan(0);
+    expect(Math.abs(command.aimDirection.z)).toBeLessThan(0.01);
+
+    const movement = new MovementSystem();
+    let maximumY = bot.position.y;
+    for (let step = 0; step < 300; step += 1) {
+      const nextCommand = controller.update(bot, state, miss, 0.1, "player");
+      movement.processCommand(state, bot.id, nextCommand, 0.1);
+      maximumY = Math.max(maximumY, bot.position.y);
+    }
+    const roofEyeY = obstacle.center.y + obstacle.height / 2 + BUILDING_ROOF_CAP_HEIGHT + 1.76;
+    expect(maximumY).toBeCloseTo(roofEyeY, 1);
   });
 
   it("reloads rather than firing with an empty magazine", () => {

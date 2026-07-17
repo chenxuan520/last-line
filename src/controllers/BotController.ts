@@ -1,6 +1,6 @@
 import { GridNavigator } from "../ai/navigation/GridNavigator";
 import { ITEMS } from "../config/items";
-import { LOOT_SPAWN_POINTS } from "../config/map";
+import { createMapLayout, getTerrainHeight, LOOT_SPAWN_POINTS } from "../config/map";
 import { WEAPONS } from "../config/weapons";
 import type { ActorCommand } from "../game/commands/ActorCommand";
 import { createIdleCommand } from "../game/commands/ActorCommand";
@@ -14,15 +14,24 @@ import {
 } from "../game/state/types";
 import type { CombatWorld } from "../game/systems/CombatSystem";
 
+const WAYPOINT_REACHED_DISTANCE = 0.5;
+
 export class BotController {
-  private readonly navigator = new GridNavigator();
+  private navigator = new GridNavigator();
+  private navigatorSeed = 0;
   private readonly dropProgress: number;
   private readonly landingTarget: Vector3State;
+  private weaponLandingTarget: Vector3State | null = null;
   private decisionSeconds = 0;
   private fireSeconds = 0;
   private cached = createIdleCommand();
   private waypoint: Vector3State | null = null;
+  private navigationPath: Vector3State[] = [];
+  private waypointIndex = 0;
+  private navigationPreservesAim = false;
   private navigationTarget: Vector3State | null = null;
+  private lastDecisionPosition: Vector3State | null = null;
+  private stalledDecisions = 0;
 
   public constructor(index = 0, private readonly random: () => number = Math.random) {
     this.dropProgress = 0.12 + (index / 19) * 0.72;
@@ -36,6 +45,14 @@ export class BotController {
     deltaSeconds: number,
     playerId: string,
   ): ActorCommand {
+    const layout = createMapLayout(state.mapSeed);
+    if (state.mapSeed !== this.navigatorSeed) {
+      this.navigator = new GridNavigator(layout.obstacles, layout.roofRamps);
+      this.navigatorSeed = state.mapSeed;
+      this.waypoint = null;
+      this.navigationPath = [];
+      this.navigationTarget = null;
+    }
     if (!actor.alive) {
       return createIdleCommand();
     }
@@ -43,7 +60,7 @@ export class BotController {
       return { ...createIdleCommand(), jump: state.flight.progress >= this.dropProgress };
     }
     if (actor.deployment === "parachuting") {
-      return this.moveToward(actor, this.landingTarget, false);
+      return this.moveToward(actor, this.findLandingTarget(actor, state), false);
     }
 
     const player = state.actors[playerId];
@@ -64,6 +81,19 @@ export class BotController {
       };
     }
     this.decisionSeconds = interval;
+    if (this.lastDecisionPosition) {
+      const moved = horizontalDistance(actor.position, this.lastDecisionPosition);
+      const wasMoving = Math.hypot(this.cached.move.x, this.cached.move.z) > 0.1;
+      this.stalledDecisions = wasMoving && moved < 0.18 ? this.stalledDecisions + 1 : 0;
+      if (this.stalledDecisions >= 3) {
+        this.waypoint = null;
+        this.navigationPath = [];
+        this.navigationTarget = null;
+        this.weaponLandingTarget = null;
+        this.stalledDecisions = 0;
+      }
+    }
+    this.lastDecisionPosition = { ...actor.position };
 
     const command = createIdleCommand();
     const activeWeapon = getActiveWeapon(actor);
@@ -94,8 +124,10 @@ export class BotController {
         this.fireSeconds = 0.18 + this.random() * 0.24;
       }
       command.reload = activeWeapon.ammoInMagazine === 0 && getItemQuantity(actor, weapon?.ammoItemId ?? "") > 0;
-      if (distance > 26) {
-        command.move = normalizeFlat(toTarget);
+      const actorElevated = actor.position.y - getTerrainHeight(actor.position.x, actor.position.z, layout) > 2;
+      const targetElevated = target.position.y - getTerrainHeight(target.position.x, target.position.z, layout) > 2;
+      if (distance > 26 || actorElevated || targetElevated) {
+        this.navigate(actor, target.position, command, undefined, true);
         command.sprint = distance > 55;
       } else if (distance < 11) {
         command.move = scale(normalizeFlat(toTarget), -1);
@@ -196,23 +228,46 @@ export class BotController {
     return null;
   }
 
+  private findLandingTarget(actor: ActorState, state: MatchState): Vector3State {
+    if (this.weaponLandingTarget) return this.weaponLandingTarget;
+    const weaponLoot = Object.values(state.groundLoot)
+      .filter((loot) => ITEMS[loot.itemId]?.kind === "weapon")
+      .sort((left, right) => left.id.localeCompare(right.id));
+    if (weaponLoot.length === 0) return this.landingTarget;
+    const target = weaponLoot[(Math.max(1, numericId(actor.id)) - 1) % weaponLoot.length]?.position;
+    this.weaponLandingTarget = target ? { ...target } : this.landingTarget;
+    return this.weaponLandingTarget;
+  }
+
   private navigate(
     actor: ActorState,
     target: Vector3State,
     command: ActorCommand,
     validatedPath?: readonly Vector3State[],
+    preserveAim = false,
   ): ActorCommand {
     const targetChanged = this.navigationTarget?.x !== target.x || this.navigationTarget.z !== target.z;
-    if (targetChanged || !this.waypoint || horizontalDistance(actor.position, this.waypoint) < 2) {
+    const navigationModeChanged = this.navigationPreservesAim !== preserveAim;
+    if (this.navigationPath.length === 0 || navigationModeChanged || (targetChanged && !preserveAim)) {
       const path = validatedPath ?? this.navigator.findPath(actor.position, target);
       this.navigationTarget = { ...target };
-      this.waypoint = path[1] ?? path[0] ?? null;
+      this.navigationPreservesAim = preserveAim;
+      this.navigationPath = path.map((point) => ({ ...point }));
+      this.waypointIndex = Math.min(1, Math.max(0, this.navigationPath.length - 1));
     }
+    while (
+      this.waypointIndex < this.navigationPath.length &&
+      horizontalDistance(actor.position, this.navigationPath[this.waypointIndex] as Vector3State) < WAYPOINT_REACHED_DISTANCE
+    ) {
+      this.waypointIndex += 1;
+    }
+    this.waypoint = this.navigationPath[this.waypointIndex] ?? null;
     if (!this.waypoint) {
+      this.navigationPath = [];
       return command;
     }
     command.move = normalizeFlat(subtract(this.waypoint, actor.position));
-    command.aimDirection = { ...command.move };
+    if (!preserveAim) command.aimDirection = { ...command.move };
     command.sprint = true;
     return command;
   }

@@ -82,6 +82,7 @@ export class GameApp {
     this.uiRoot.style.setProperty("--menu-backdrop", backdropUrl ? `url("${backdropUrl}")` : "none");
     this.uiRoot.innerHTML = `
       <section class="menu-panel" aria-labelledby="game-title">
+        <div class="menu-index"><span>OPERATION</span><b>LL-01</b></div>
         <p class="eyebrow">20 人 AI BATTLE ROYALE</p>
         <h1 id="game-title"><span class="sr-only">最后防线</span><img class="game-logo" src="${logo.url}" alt="" /></h1>
         <p class="menu-description">穿越随机航线空降苍岬岛，搜集武器和补给，在不断收缩的安全区内成为最后一名幸存者。</p>
@@ -90,8 +91,8 @@ export class GameApp {
           <label>主音量<input data-setting="volume" type="range" min="0" max="1" step="0.1" value="${this.settings.volume}" /></label>
           <label>鼠标灵敏度<input data-setting="sensitivity" type="range" min="0.4" max="2" step="0.1" value="${this.settings.sensitivity}" /></label>
         </div>
-        <button class="primary-button" data-action="start">开始游戏</button>
-        <p class="build-label">PRE-ALPHA 0.2 · SINGLE PLAYER / 19 AI</p>
+        <button class="primary-button" data-action="start"><span>开始游戏</span><b>DEPLOY</b></button>
+        <p class="build-label">PRE-ALPHA 0.2 <span></span> SINGLE PLAYER / 19 AI</p>
       </section>
     `;
     const quality = this.uiRoot.querySelector<HTMLSelectElement>("[data-setting='quality']");

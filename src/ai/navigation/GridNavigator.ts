@@ -1,16 +1,49 @@
-import { MAP_HALF_SIZE, MAP_OBSTACLES, type MapObstacle } from "../../config/map";
+import {
+  BUILDING_ROOF_CAP_HEIGHT,
+  MAP_HALF_SIZE,
+  MAP_OBSTACLES,
+  MAP_ROOF_RAMPS,
+  type MapObstacle,
+  type RoofRamp,
+} from "../../config/map";
 import type { Vector3State } from "../../game/state/types";
 
 const DEFAULT_CLEARANCE = 0.4;
-const WAYPOINT_PADDING = 0.05;
+const PATH_CLEARANCE = 0.42;
+const WAYPOINT_PADDING = 0.13;
 
 export class GridNavigator {
   public constructor(
     private readonly obstacles: readonly MapObstacle[] = MAP_OBSTACLES,
+    private readonly roofRamps: readonly RoofRamp[] = MAP_ROOF_RAMPS,
     private readonly clearance = DEFAULT_CLEARANCE,
   ) {}
 
   public findPath(start: Vector3State, target: Vector3State): Vector3State[] {
+    const startRoof = this.findRoof(start);
+    const targetRoof = this.findRoof(target);
+    if (startRoof?.id === targetRoof?.id && startRoof) {
+      return [{ ...start }, { ...target }];
+    }
+    const startRamp = startRoof ? this.findRamp(startRoof) : null;
+    const targetRamp = targetRoof ? this.findRamp(targetRoof) : null;
+    if ((startRoof && !startRamp) || (targetRoof && !targetRamp)) return [];
+
+    const groundStart = startRamp ? { x: startRamp.centerX, y: start.y, z: startRamp.startZ } : start;
+    const groundTarget = targetRamp ? { x: targetRamp.centerX, y: target.y, z: targetRamp.startZ } : target;
+    const groundPath = this.findGroundPath(groundStart, groundTarget);
+    if (groundPath.length === 0) return [];
+
+    const path: Vector3State[] = startRamp
+      ? [{ ...start }, { x: startRamp.centerX, y: start.y, z: startRamp.endZ }, ...groundPath]
+      : groundPath;
+    if (targetRamp) {
+      path.push({ x: targetRamp.centerX, y: target.y, z: targetRamp.endZ }, { ...target });
+    }
+    return path;
+  }
+
+  private findGroundPath(start: Vector3State, target: Vector3State): Vector3State[] {
     if (this.isBlocked(start) || this.isBlocked(target)) {
       return [];
     }
@@ -22,7 +55,7 @@ export class GridNavigator {
     }
 
     const points: Vector3State[] = [{ ...start }, { ...target }];
-    const cornerOffset = this.clearance + WAYPOINT_PADDING;
+    const cornerOffset = Math.max(this.clearance, PATH_CLEARANCE) + WAYPOINT_PADDING;
     for (const obstacle of this.obstacles) {
       const halfWidth = obstacle.width / 2 + cornerOffset;
       const halfDepth = obstacle.depth / 2 + cornerOffset;
@@ -81,6 +114,17 @@ export class GridNavigator {
     return path;
   }
 
+  private findRoof(point: Vector3State): MapObstacle | null {
+    return this.obstacles.find((obstacle) => {
+      const roofY = obstacle.center.y + obstacle.height / 2 + BUILDING_ROOF_CAP_HEIGHT;
+      return point.y >= roofY + 0.2 && pointInsideObstacle(point, obstacle, 0);
+    }) ?? null;
+  }
+
+  private findRamp(obstacle: MapObstacle): RoofRamp | null {
+    return this.roofRamps.find((ramp) => ramp.id === `ramp-${obstacle.id}`) ?? null;
+  }
+
   private isBlocked(point: Vector3State): boolean {
     const mapLimit = MAP_HALF_SIZE - this.clearance;
     if (point.x < -mapLimit || point.x > mapLimit || point.z < -mapLimit || point.z > mapLimit) {
@@ -90,7 +134,9 @@ export class GridNavigator {
   }
 
   private hasLineOfSight(start: Vector3State, target: Vector3State): boolean {
-    return !this.obstacles.some((obstacle) => segmentIntersectsObstacle(start, target, obstacle, this.clearance));
+    return !this.obstacles.some((obstacle) =>
+      segmentIntersectsObstacle(start, target, obstacle, Math.max(this.clearance, PATH_CLEARANCE)),
+    );
   }
 }
 

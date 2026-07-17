@@ -4,7 +4,7 @@ import {
   type SafeZoneStageConfig,
 } from "../../config/battleRoyale";
 import { ITEMS } from "../../config/items";
-import { LOOT_SPAWN_POINTS, MAP_HALF_SIZE } from "../../config/map";
+import { createMapLayout, MAP_HALF_SIZE } from "../../config/map";
 import type { GameMode } from "./GameMode";
 import { selectSimultaneousSurvivor } from "../rules/resolveSimultaneous";
 import {
@@ -25,6 +25,7 @@ import { DamageSystem } from "../systems/DamageSystem";
 const FLIGHT_ALTITUDE = 180;
 const FLIGHT_HALF_LENGTH = MAP_HALF_SIZE * 1.3;
 const MAX_FLIGHT_OFFSET = MAP_HALF_SIZE * 0.55;
+const AUTO_EJECT_PROGRESS = 0.75;
 const LOOT_POINTS_PER_POI = 18;
 
 type LootCategory = "weapon" | "ammo" | "medical" | "equipment";
@@ -61,11 +62,17 @@ export class BattleRoyaleMode implements GameMode {
     state.result = null;
     state.flight = createFlight(this.config.flightSeconds, this.random);
     state.safeZone = createInitialSafeZone(this.config, this.random);
+    const flightYaw = Math.atan2(
+      state.flight.end.x - state.flight.start.x,
+      state.flight.end.z - state.flight.start.z,
+    );
 
     for (const actor of Object.values(state.actors)) {
       actor.deployment = "aircraft";
       actor.position = { ...state.flight.start };
       actor.velocity = { x: 0, y: 0, z: 0 };
+      actor.yaw = flightYaw;
+      actor.pitch = 0.28;
     }
 
     events.push({ type: "match-started" });
@@ -103,7 +110,7 @@ export class BattleRoyaleMode implements GameMode {
       }
     }
 
-    if (state.flight.progress === 1) {
+    if (state.flight.progress >= AUTO_EJECT_PROGRESS) {
       for (const actor of Object.values(state.actors)) {
         if (actor.deployment === "aircraft") {
           actor.deployment = "parachuting";
@@ -247,6 +254,8 @@ export function createBattleRoyaleState(
     throw new Error("大逃杀至少需要一名参与者");
   }
 
+  const mapSeed = Math.floor(random() * 4_294_967_296) >>> 0;
+  const layout = createMapLayout(mapSeed);
   const flight = createFlight(config.flightSeconds, random);
   const actors: Record<EntityId, ActorState> = {};
   actors[playerId] = createBattleRoyaleActor(playerId, "player", flight.start);
@@ -262,8 +271,9 @@ export function createBattleRoyaleState(
   return {
     phase: "ready",
     elapsedSeconds: 0,
+    mapSeed,
     actors,
-    groundLoot: createGroundLoot(createLootRandom(flight)),
+    groundLoot: createGroundLoot(layout.lootSpawnPoints, createLootRandom(mapSeed)),
     safeZone: createInitialSafeZone(config, random),
     flight,
     result: null,
@@ -285,9 +295,12 @@ function createBattleRoyaleActor(
   return actor;
 }
 
-function createGroundLoot(random: () => number): Record<EntityId, GroundLootState> {
+function createGroundLoot(
+  lootSpawnPoints: readonly Vector3State[],
+  random: () => number,
+): Record<EntityId, GroundLootState> {
   const groundLoot: Record<EntityId, GroundLootState> = {};
-  for (let poiStart = 0; poiStart < LOOT_SPAWN_POINTS.length; poiStart += LOOT_POINTS_PER_POI) {
+  for (let poiStart = 0; poiStart < lootSpawnPoints.length; poiStart += LOOT_POINTS_PER_POI) {
     const categoryCounts: Record<LootCategory, number> = {
       weapon: 5,
       ammo: 4,
@@ -304,7 +317,7 @@ function createGroundLoot(random: () => number): Record<EntityId, GroundLootStat
 
     for (let poiOffset = 0; poiOffset < LOOT_POINTS_PER_POI; poiOffset += 1) {
       const index = poiStart + poiOffset;
-      const position = LOOT_SPAWN_POINTS[index];
+      const position = lootSpawnPoints[index];
       const category = categoryOrder[poiOffset];
       const entry = category ? entriesByCategory[category].pop() : undefined;
       if (!position || !entry) {
@@ -326,10 +339,9 @@ function createGroundLoot(random: () => number): Record<EntityId, GroundLootStat
   return groundLoot;
 }
 
-function createLootRandom(flight: FlightState): () => number {
+function createLootRandom(seed: number): () => number {
   // Keep loot randomization from perturbing the shared stream used by later simulation systems.
-  const seed = Math.abs(Math.sin(flight.start.x * 12.9898 + flight.start.z * 78.233));
-  let value = Math.floor(seed * 4_294_967_296) >>> 0;
+  let value = seed >>> 0;
   return () => {
     value += 0x6d2b79f5;
     let result = value;

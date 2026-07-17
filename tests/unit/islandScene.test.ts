@@ -1,8 +1,10 @@
 import { NullEngine } from "@babylonjs/core/Engines/nullEngine";
 import { describe, expect, it } from "vitest";
 import { AssetCatalog } from "../../src/assets/AssetCatalog";
-import { createIslandScene } from "../../src/client/render/scenes/IslandScene";
+import { createIslandScene, setActorWeaponVisual } from "../../src/client/render/scenes/IslandScene";
+import { BUILDING_ROOF_CAP_HEIGHT, createMapLayout, getTerrainHeight } from "../../src/config/map";
 import { createBattleRoyaleState } from "../../src/game/modes/BattleRoyaleMode";
+import { createWeaponState } from "../../src/game/state/types";
 
 describe("IslandScene lifecycle", () => {
   it("releases scenes and loot marker references across restarts", async () => {
@@ -11,15 +13,105 @@ describe("IslandScene lifecycle", () => {
 
     for (let restart = 0; restart < 4; restart += 1) {
       const state = createBattleRoyaleState("player", undefined, () => 0.5);
-      const bundle = await createIslandScene(engine, assets, state.actors, state.groundLoot);
+      const bundle = await createIslandScene(engine, assets, state.actors, state.groundLoot, state.mapSeed);
+      const layout = createMapLayout(state.mapSeed);
       expect(engine.scenes).toHaveLength(1);
       expect(bundle.lootMeshes.size).toBe(Object.keys(state.groundLoot).length);
       expect(bundle.viewWeaponRoot.isEnabled()).toBe(false);
+      expect(bundle.aircraftVisualRoot.isEnabled()).toBe(true);
       expect(bundle.viewWeaponRoot.getChildMeshes().every((mesh) => !mesh.isEnabled())).toBe(true);
       expect([...bundle.actorRoots.values()].every((root) => !root.isEnabled())).toBe(true);
 
+      const layeredSurfaces = bundle.scene.meshes.filter((mesh) => mesh.metadata?.surfaceType);
+      const decorations = bundle.scene.meshes.filter((mesh) => mesh.metadata?.decoration);
+      const collisionMeshes = bundle.scene.meshes.filter((mesh) => mesh.metadata?.collision);
+      const ground = bundle.scene.getMeshByName("island-ground");
+      const positions = ground?.getVerticesData("position") ?? [];
+      const indices = ground?.getIndices() ?? [];
+      const heights = positions.filter((_, index) => index % 3 === 1);
+      const colors = ground?.getVerticesData("color") ?? [];
+      const terrainColors = new Set(
+        Array.from({ length: colors.length / 4 }, (_, index) =>
+          Array.from(colors.slice(index * 4, index * 4 + 3), (channel) => channel.toFixed(3)).join(","),
+        ),
+      );
+      expect(Math.max(...heights) - Math.min(...heights)).toBeGreaterThan(5);
+      expect(terrainColors.size).toBeGreaterThanOrEqual(7);
+      expect(layeredSurfaces).toHaveLength(0);
+      expect(bundle.scene.meshes.filter((mesh) => mesh.name.startsWith("ocean-"))).toHaveLength(4);
+      const floorMeshes = bundle.scene.meshes.filter(
+        (mesh) =>
+          mesh.name === "island-ground" ||
+          mesh.name.startsWith("island-beach-") ||
+          mesh.name.startsWith("island-wet-shore-") ||
+          mesh.name.startsWith("ocean-"),
+      );
+      for (let leftIndex = 0; leftIndex < floorMeshes.length; leftIndex += 1) {
+        for (let rightIndex = leftIndex + 1; rightIndex < floorMeshes.length; rightIndex += 1) {
+          const left = floorMeshes[leftIndex]?.getBoundingInfo().boundingBox;
+          const right = floorMeshes[rightIndex]?.getBoundingInfo().boundingBox;
+          if (!left || !right) continue;
+          const overlapX = Math.min(left.maximumWorld.x, right.maximumWorld.x) - Math.max(left.minimumWorld.x, right.minimumWorld.x);
+          const overlapZ = Math.min(left.maximumWorld.z, right.maximumWorld.z) - Math.max(left.minimumWorld.z, right.minimumWorld.z);
+          expect(overlapX <= 0.001 || overlapZ <= 0.001).toBe(true);
+        }
+      }
+      for (let triangleIndex = 0; triangleIndex + 2 < indices.length; triangleIndex += 3 * 257) {
+        const first = (indices[triangleIndex] ?? 0) * 3;
+        const second = (indices[triangleIndex + 1] ?? 0) * 3;
+        const third = (indices[triangleIndex + 2] ?? 0) * 3;
+        const x = ((positions[first] ?? 0) + (positions[second] ?? 0) + (positions[third] ?? 0)) / 3;
+        const y = ((positions[first + 1] ?? 0) + (positions[second + 1] ?? 0) + (positions[third + 1] ?? 0)) / 3;
+        const z = ((positions[first + 2] ?? 0) + (positions[second + 2] ?? 0) + (positions[third + 2] ?? 0)) / 3;
+        expect(getTerrainHeight(x, z, layout)).toBeCloseTo(y, 5);
+      }
+      expect(decorations.every((mesh) => !mesh.isPickable && !mesh.checkCollisions)).toBe(true);
+      expect(collisionMeshes).toHaveLength(layout.obstacles.length + 1);
+      expect(bundle.scene.meshes.length).toBeLessThan(650);
+      layout.obstacles.forEach((obstacle, index) => {
+        const roof = bundle.scene.getMeshByName(`building-roof-${index}`);
+        expect(roof?.getBoundingInfo().boundingBox.maximumWorld.y).toBeCloseTo(
+          obstacle.center.y + obstacle.height / 2 + BUILDING_ROOF_CAP_HEIGHT,
+        );
+        expect(roof?.getBoundingInfo().boundingBox.extendSizeWorld.x).toBeCloseTo(obstacle.width / 2);
+        expect(roof?.getBoundingInfo().boundingBox.extendSizeWorld.z).toBeCloseTo(obstacle.depth / 2);
+      });
+      const ringPositions = bundle.safeZoneRing.getVerticesData("position") ?? [];
+      for (let ringIndex = 0; ringIndex < ringPositions.length; ringIndex += 6 * 12) {
+        const x = ringPositions[ringIndex] ?? 0;
+        const lowerY = ringPositions[ringIndex + 1] ?? 0;
+        const z = ringPositions[ringIndex + 2] ?? 0;
+        const upperY = ringPositions[ringIndex + 4] ?? 0;
+        expect(lowerY).toBeCloseTo(getTerrainHeight(x, z, layout) + 0.12, 5);
+        expect(upperY).toBeCloseTo(getTerrainHeight(x, z, layout) + 1.5, 5);
+      }
+      bundle.syncSafeZoneRing(40, -30, 100);
+      const movedRingPositions = bundle.safeZoneRing.getVerticesData("position") ?? [];
+      expect(movedRingPositions[0]).toBeCloseTo(140);
+      expect(movedRingPositions[2]).toBeCloseTo(-30);
+      expect(movedRingPositions[1]).toBeCloseTo(getTerrainHeight(140, -30, layout) + 0.12, 5);
+      bundle.syncSafeZoneRing(0, 0, 400);
+      const edgeRingPositions = bundle.safeZoneRing.getVerticesData("position") ?? [];
+      for (let ringIndex = 0; ringIndex + 10 < edgeRingPositions.length; ringIndex += 6) {
+        const midpointX = ((edgeRingPositions[ringIndex] ?? 0) + (edgeRingPositions[ringIndex + 6] ?? 0)) / 2;
+        const midpointZ = ((edgeRingPositions[ringIndex + 2] ?? 0) + (edgeRingPositions[ringIndex + 8] ?? 0)) / 2;
+        const upperMidpointY = ((edgeRingPositions[ringIndex + 4] ?? 0) + (edgeRingPositions[ringIndex + 10] ?? 0)) / 2;
+        expect(upperMidpointY - getTerrainHeight(midpointX, midpointZ, layout)).toBeGreaterThan(0.2);
+      }
+
+      const bot = state.actors["bot-1"];
+      const botRoot = bundle.actorRoots.get("bot-1");
+      if (!bot || !botRoot) throw new Error("test bot missing");
+      const rifleMeshes = botRoot.getChildMeshes(false).filter((mesh) => mesh.metadata?.actorVisual === "rifle");
+      expect(rifleMeshes.length).toBeGreaterThan(0);
+      expect(rifleMeshes.every((mesh) => !mesh.isEnabled(false))).toBe(true);
+      bot.inventory.weaponSlots[0] = createWeaponState("rifle");
+      setActorWeaponVisual(botRoot, true);
+      expect(rifleMeshes.every((mesh) => mesh.isEnabled(false))).toBe(true);
+
       bundle.scene.dispose();
 
+      expect(bundle.scene.isDisposed).toBe(true);
       expect(engine.scenes).toHaveLength(0);
       expect(bundle.lootMeshes.size).toBe(0);
     }
