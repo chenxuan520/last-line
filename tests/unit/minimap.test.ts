@@ -118,4 +118,29 @@ describe("minimap projection", () => {
     expect(pickupPromptSignature(player, state.groundLoot)).not.toBe(fullArmorSignature);
     expect(pickupPromptText(player, state.groundLoot)).toBe("F 拾取 二级护甲");
   });
+
+  it("refreshes the pickup prompt when backpack capacity increases", () => {
+    const state = createBattleRoyaleState("player", undefined, () => 0.5);
+    const player = state.actors.player;
+    if (!player) throw new Error("player missing");
+    player.deployment = "grounded";
+    player.inventory.maxBackpackStacks = 1;
+    player.inventory.backpack = [{ itemId: "bandage", quantity: 5 }];
+    state.groundLoot = {
+      ammo: {
+        id: "ammo",
+        itemId: "ammo.rifle",
+        quantity: 30,
+        position: { x: player.position.x, y: player.position.y - 1.31, z: player.position.z },
+        available: true,
+      },
+    };
+    const fullBackpackSignature = pickupPromptSignature(player, state.groundLoot);
+    expect(pickupPromptText(player, state.groundLoot)).toContain("当前无法拾取");
+
+    player.inventory.maxBackpackStacks = 2;
+
+    expect(pickupPromptSignature(player, state.groundLoot)).not.toBe(fullBackpackSignature);
+    expect(pickupPromptText(player, state.groundLoot)).toBe("F 拾取 步枪弹");
+  });
 });

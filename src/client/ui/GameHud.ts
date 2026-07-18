@@ -453,6 +453,7 @@ export function pickupPromptSignature(
     player.inventory.armorLevel,
     player.inventory.helmetLevel,
     player.inventory.activeWeaponSlot,
+    player.inventory.maxBackpackStacks,
     player.inventory.weaponSlots.map((weapon) => weapon?.weaponId ?? "none").join(","),
     player.inventory.backpack.map((stack) => `${stack.itemId}:${stack.quantity}`).join(","),
     nearbyLootSignature,

@@ -457,6 +457,13 @@
 - 测试稳定性：清理多轮浏览器验收遗留的额外 Vite 服务，只保留当前 `4173` 生产预览；空间格结构测试由 3000 个重复移动步缩为 300 步但保留候选墙段约束，重型 AI/NullEngine 测试仅增加并发超时余量，不减少 seed、完整对局或几何断言。
 - 验证：重型 `mapLayout` 17 tests 约 78 秒、`aiLootReachability` 7 tests 约 70 秒独立通过；标准 `npm run typecheck && npm run test && npm run build && git diff --check` 全通过，Vitest 为 18 files / 162 tests，完整约 98.34 秒。构建仅保留既有大 chunk warning。
 
+#### 2026-07-19 01:16 +0800：拾取提示背包容量依赖收敛
+
+- Reviewer 指出 `maxBackpackStacks` 同样影响 `canActorPickLoot`，但未进入 HUD prompt 缓存签名；已将该字段加入 `pickupPromptSignature`。
+- 新增回归：背包容量 1 且唯一 stack 已满时，附近新弹药显示“当前无法拾取”；容量提升到 2 后签名变化，提示立即刷新为 `F 拾取 步枪弹`。
+- 测试稳定：清理遗留 Vite 验收进程后重型 map/AI 独立通过；空间格测试保留结构约束并将重复运动步数从 3000 降到 300，重型场景/AI/模式测试仅增加并发超时余量，不减少业务断言。
+- 最终验证：`npm run typecheck && npm run test && npm run build && git diff --check` 全通过；Vitest 18 files / 163 tests，完整约 83.39 秒。构建仅保留既有大 chunk warning。
+
 ### 2026-07-16：任务 1–12 完成
 
 - [x] 任务 1：Vite、TypeScript、Babylon.js、Vitest、菜单、构建和静态预览。
@@ -1068,3 +1075,22 @@
 - 远端门禁：GitHub Actions `CI and GitHub Pages` run `29650955943` 成功，build、GitHub Pages deploy、Cloudflare Pages 三个 check 均成功。
 - Chrome 生产 smoke：使用本机 Chrome、volume `0` 重新打开生产 build，开始对局成功，canvas/HUD 正常、无 `LOAD FAILED`，页面 console/error/warning 采集为 0。marker 业务实现相对 `cc9c869` 没有任何源码改动；`IslandScene.ts:1019-1045` 仍为 `0.62` box、原 rotation、clone scale `(1,1,1)`、原位置同步及 `isPickable=true`，NullEngine 回归实际覆盖 240 个普通 marker。plan 中 23:32 的“缩小 marker”实现记录与最终 commit 不一致，应以本次实际 diff 和上述旧规格为准。
 - 重点规则回归已实际通过：提前进入 target zone、无枪短绕路边界、全阶段巡逻、新受击覆盖旧记忆、屋顶 LOS 记忆、墙体脱困/空间格；飞机无敌、跳伞可命中且免圈伤、死亡跳伞不阻塞、岛内自动离机、零半径唯一胜者；屋顶边缘 10 件均在真实 3m 内、4 同点尸体 40 个唯一坐标；死亡/空中无拾取提示、动态 loot ID/位置/数量签名；自动换弹和落地计数。
+
+### 2026-07-19 01:09 +0800：origin/main d651b7c 与当前 release gate 复审（不通过）
+
+- 审查范围：已推送 `origin/main` 的 `d651b7cf7b4014867fb43dbe4b9cb6470c588c53` 相对父提交 `c23a95bea6eaf237b04e0eea031f611ed24b4a54` 的 7 个文件完整 diff，并复核当前 main release gate；忽略未跟踪 `session-ses_096e.md`。对照本 plan、`AGENTS.md`、`README.md`、00:09 上轮 finding 及用户列出的 marker、动态掉落、HUD/Inventory、测试稳定性和既有规则回归要求。
+- 结论：**不通过。** 上轮同级护甲耐久变化不刷新提示的问题已闭环，标准门禁、重型测试和远端 CI 均通过；但 `pickupPromptSignature` 仍遗漏 `canActorPickLoot` 实际读取的一项 inventory 容量状态，尚不能认定“完整覆盖所有 actor/inventory 依赖”。
+
+#### Finding
+
+1. **[中] `pickupPromptSignature` 未包含 `maxBackpackStacks`，背包容量变化后仍可复现提示缓存与实际拾取资格不一致。** `src/client/ui/GameHud.ts:445-459` 已包含 alive/deployment/位置、护甲、头盔、武器槽和背包内容，但遗漏 `player.inventory.maxBackpackStacks`；共享规则 `src/game/systems/InventorySystem.ts:477-478` 明确用该字段判断新栈能否拾取。复现：玩家背包为 1 个满绷带栈、`maxBackpackStacks=1`，身边放步枪弹，提示为“当前无法拾取”；保存签名后只把容量改为 2，`pickupPromptText` 已变为 `F 拾取 步枪弹`，但签名保持不变，真实 `GameHud.update` 会继续保留旧提示。当前生产容量固定为 6，故现网触发面有限，但这违反本轮要求的完整依赖覆盖，并会让既有可序列化 inventory 容量一旦动态配置/扩展就直接回归。最小修法：把 `maxBackpackStacks` 纳入签名，并补“满背包容量 1 → 2”缓存回归；更稳妥的后续方向是让候选规则与缓存依赖键共址，避免新增资格字段时再次漏同步。Builder 需处理，writer 需补验证记录。
+
+#### 已确认项与验证
+
+- 上轮护甲 finding 已闭环：签名现包含 `armor/maxArmor/armorLevel/helmetLevel`；新增测试证明同级二级满甲从 100 变为 0 后签名变化，提示由不可拾切为 `F 拾取 二级护甲`；既有 Inventory 回归证明 F 会拾取并恢复到 100。
+- marker 业务源码在 `cc9c869`、`c23a95b`、`d651b7c` 三者的 SHA-256 完全一致；仍为 `0.62` box、clone 默认 scale `(1,1,1)`、原 rotation/position 及 `isPickable=true`。NullEngine 完整测试覆盖默认 240 件 loot 对应 marker 数量及全部 scale/pickability；用户提供的最新 volume 0 生产 smoke（240/240、console 无 error/warn）与源码和自动回归一致，本轮未另启浏览器进程。
+- 动态掉落业务源码未被本 commit 改动：仍使用 `1.2/1.55/1.9/2.2/2.45/2.65m` 环候选、真实 3m、权威支撑面、墙/边界过滤和 unavailable record 复用；屋顶边缘 10 件、4 个同点尸体 40 个唯一坐标及 30 次 drop/pick 仅保留 1 条 loot record 的回归均通过。
+- HUD 与 Inventory 继续共用 `findPickupCandidate`；不可拾物名称、死亡/空中无提示、loot ID/位置/数量、护甲耐久刷新主路径均通过。除本轮 finding 的容量字段外，未发现 `canActorPickLoot` 其他 actor/inventory 依赖遗漏。
+- 本 commit 的测试调整仅为 timeout 余量（AI 60→120 秒、完整圈 30 秒、NullEngine 30→60 秒）以及空间格重复移动 3000→300 步；未减少 seed、几何、完整局或候选墙段断言。300 步仍会持续撞墙，结构断言仍直接要求当前格候选少于全图墙段的 1/4，足以验证本门禁目的。
+- 本机实际执行 `npm run typecheck && npm run test && npm run build && git diff --check` 全通过；Vitest 18 files / 162 tests，wall time 90.52 秒。独立 `mapLayout` 17 tests / 76.03 秒、`aiLootReachability` 7 tests / 66.87 秒全通过。构建仅保留既有 >500kB chunk warning。
+- GitHub Actions `CI and GitHub Pages` run `29652937142` 对 d651b7c 成功，build 与 GitHub Pages deploy jobs 均成功。自动换弹、落地计数、AI target zone、空中规则和零半径唯一胜者的现有回归随完整套件通过；未发现 `context.Background()`。
