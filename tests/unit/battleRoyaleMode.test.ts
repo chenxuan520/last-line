@@ -261,7 +261,7 @@ describe("BattleRoyaleMode", () => {
     expect(events).toContainEqual({ type: "phase-changed", phase: "flight" });
     expect(events).toContainEqual({ type: "phase-changed", phase: "combat" });
     expect(events).toContainEqual({ type: "phase-changed", phase: "finished" });
-  });
+  }, 30_000);
 
   it("rotates simultaneous final-zone survivors instead of favoring an actor class", () => {
     const config: BattleRoyaleConfig = {

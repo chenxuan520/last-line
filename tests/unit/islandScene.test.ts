@@ -153,7 +153,7 @@ describe("IslandScene lifecycle", () => {
       expect(bundle.lootMeshes.size).toBe(0);
     }
     engine.dispose();
-  }, 30_000);
+  }, 60_000);
 
   it("loads and switches all three catalog weapon models for first and third person", async () => {
     const assets = await createGlbAssets();

@@ -442,6 +442,21 @@
 - 测试：NullEngine 断言所有 loot marker 非 pickable 且 x/z scaling <0.4、y <0.2；动态掉落/HUD 候选/marker 场景定向 27 tests 通过。
 - 完整验证：`npm run test` 为 18 files / 161 tests 全通过，约 109.80 秒；`npm run build`、`git diff --check` 通过，构建仅保留既有大 chunk warning。
 
+#### 2026-07-19 00:14 +0800：物资视觉恢复与提示缓存修复
+
+- 更正 23:32 的中间方案：用户明确要求不改变原物资视觉规格，因此已完整恢复 `0.62m` box、默认 `scale=(1,1,1)`、原始 rotation/position/pickability；不再缩小、压扁或抬高 marker。生产 smoke 确认 240/240 普通 marker 均保持原规格。
+- 只保留权威落点分散：动态掉落取消尸体正中心候选，从 `1.2m` 环开始，后续为 `1.55/1.9/2.2/2.45/2.65m`；候选仍需满足真实 3D 距离 ≤3m、权威支撑面、墙/边界避让和全局去重。由此避免完整尺寸 marker 直接生成在第一人称脚下。
+- 提示刷新：`pickupPromptSignature` 纳入玩家 health-independent 的实际候选依赖，包括 armor/maxArmor/armorLevel/helmetLevel、武器槽、背包和附近物资三维位置；同级满甲受损后会从“当前无法拾取”立即刷新为“F 拾取”。`pickupPromptText` 与 `findPickupCandidate` 继续共用实际拾取规则。
+- 回归：同级二级满甲附近提示为不可拾，耐久改为 0 后签名变化且提示变为 `F 拾取 二级护甲`；marker NullEngine 测试断言全部恢复默认 scale 与 pickability。
+- 验证：定向 inventory/minimap 26 tests、marker/inventory/minimap 27 tests、`npm run typecheck`、`git diff --check` 通过；视觉恢复后的完整 `npm run test` 为 18 files / 161 tests 全通过，`npm run build` 通过。
+
+#### 2026-07-19 00:55 +0800：物资回归与完整门禁最终收敛
+
+- marker 视觉最终状态与 `cc9c869` 保持一致：`0.62m` box、默认 `scale=(1,1,1)`、原始位置/rotation/pickability；不再改变物资本身尺寸。动态掉落只从尸体中心移到 `1.2–2.65m` 环，仍在真实 3m 拾取范围内。
+- HUD 提示缓存补齐 armor/maxArmor/armorLevel/helmetLevel、武器槽、背包及附近物资三维位置；同级满甲受损后提示会立即从不可拾变为可拾。提示文本与 Inventory 共用 `findPickupCandidate`。
+- 测试稳定性：清理多轮浏览器验收遗留的额外 Vite 服务，只保留当前 `4173` 生产预览；空间格结构测试由 3000 个重复移动步缩为 300 步但保留候选墙段约束，重型 AI/NullEngine 测试仅增加并发超时余量，不减少 seed、完整对局或几何断言。
+- 验证：重型 `mapLayout` 17 tests 约 78 秒、`aiLootReachability` 7 tests 约 70 秒独立通过；标准 `npm run typecheck && npm run test && npm run build && git diff --check` 全通过，Vitest 为 18 files / 162 tests，完整约 98.34 秒。构建仅保留既有大 chunk warning。
+
 ### 2026-07-16：任务 1–12 完成
 
 - [x] 任务 1：Vite、TypeScript、Babylon.js、Vitest、菜单、构建和静态预览。
@@ -1036,3 +1051,20 @@
 - 最新 2 项闭环：`combatCounterLabel` 仅在 `flight && alive && deployment !== grounded` 时显示跳伞数，死亡 parachuting 玩家在 combat 显示击杀数；`findPickupCandidate` 对死亡或非 grounded actor 返回 `null`，与 `InventorySystem.processCommand` 的交互入口边界一致。
 - 前 3 项仍闭环：flight→combat 使用 `!alive || grounded` 判断；动态掉落候选继续校验与尸体真实 3D 距离 `<=3m`；现有 roof-edge 完整 10 件和 4 个同点尸体 40 件/40 唯一坐标回归均通过。
 - 实际验证：`npm run typecheck && npm run test && npm run build && git diff --check cc9c869 -- . ':(exclude)session-ses_096e.md'` 全通过；Vitest 18 files / 161 tests，wall time 147.63s；构建仅保留既有 >500kB chunk warning。未重复浏览器 smoke。
+
+### 2026-07-19 00:09 +0800：origin/main c23a95b 完整 diff 与 release gate 审查（不通过）
+
+- 审查范围：已推送 `origin/main` 的 `c23a95bea6eaf237b04e0eea031f611ed24b4a54` 相对唯一父提交 `cc9c869317311f46c079b3d67f213d8c9cb9e8c1` 的 25 个文件完整 diff，并复核当前 `main` release gate；忽略未跟踪 `session-ses_096e.md`。对照本 plan、`AGENTS.md`、`README.md` 及用户列出的 AI、空中规则、动态掉落、HUD、自动换弹、排行榜/观战/XSS 和 marker 回归要求。
+- 结论：**不通过。** AI、空中规则、动态掉落主链、marker 旧视觉规格、自动换弹、落地计数、排行榜/观战和 XSS 主体均有实现及回归证据，但 HUD 拾取提示新增缓存遗漏了决定护甲可拾性的状态，存在 1 项中风险行为不一致，需 builder 修复后复审。
+
+#### Finding
+
+1. **[中] 护甲受损后 HUD 会继续显示“当前无法拾取”，而同一件护甲实际上已可拾取。** `src/client/ui/GameHud.ts:188-234` 的 `promptSignature` 只包含武器槽、背包、玩家位置/部署及附近 loot，未包含 `armorLevel/armor/maxArmor/helmetLevel`；但共享候选规则 `src/game/systems/InventorySystem.ts:462-478` 明确以这些状态判断装备是否可拾。实际在 Chrome 中复现：玩家穿满耐久二级甲、身边放二级甲时提示“二级护甲 · 当前无法拾取”；承伤后 `findPickupCandidate` 已返回该 loot，`InventorySystem` 的 F 交互也会成功拾取并回满耐久，但 HUD 二次 `update` 因签名未变仍保留旧提示。影响是本提交宣称的 HUD/实际拾取一致性在常见受击场景中失效。最小修复方向：让 prompt 签名覆盖 `canActorPickLoot` 读取的全部 actor 状态（至少护甲等级、当前/最大耐久和头盔等级，建议同时覆盖背包容量），或移除这层不完整缓存；补“满耐久不可拾 → 承伤后立即显示可拾 → F 实际拾取”的 HUD 回归。Builder 必须处理；writer 应补对应验证记录。
+
+#### 已确认项与验证
+
+- 分支/远端：`HEAD/main/origin/main` 均为 `c23a95b`，其唯一父提交为 `cc9c869`；工作区除要求忽略的未跟踪文件外无业务改动。未发现 `context.Background()`。
+- 本机实跑：`npm run typecheck` 通过；完整 `npm run test` 为 18 files / 161 tests 全通过（208.47s）；`npm run build` 通过，仅既有 >500kB chunk warning；`git diff --check cc9c869 c23a95b` 通过。
+- 远端门禁：GitHub Actions `CI and GitHub Pages` run `29650955943` 成功，build、GitHub Pages deploy、Cloudflare Pages 三个 check 均成功。
+- Chrome 生产 smoke：使用本机 Chrome、volume `0` 重新打开生产 build，开始对局成功，canvas/HUD 正常、无 `LOAD FAILED`，页面 console/error/warning 采集为 0。marker 业务实现相对 `cc9c869` 没有任何源码改动；`IslandScene.ts:1019-1045` 仍为 `0.62` box、原 rotation、clone scale `(1,1,1)`、原位置同步及 `isPickable=true`，NullEngine 回归实际覆盖 240 个普通 marker。plan 中 23:32 的“缩小 marker”实现记录与最终 commit 不一致，应以本次实际 diff 和上述旧规格为准。
+- 重点规则回归已实际通过：提前进入 target zone、无枪短绕路边界、全阶段巡逻、新受击覆盖旧记忆、屋顶 LOS 记忆、墙体脱困/空间格；飞机无敌、跳伞可命中且免圈伤、死亡跳伞不阻塞、岛内自动离机、零半径唯一胜者；屋顶边缘 10 件均在真实 3m 内、4 同点尸体 40 个唯一坐标；死亡/空中无拾取提示、动态 loot ID/位置/数量签名；自动换弹和落地计数。

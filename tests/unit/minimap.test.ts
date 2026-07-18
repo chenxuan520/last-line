@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { createMinimapView, projectToMinimap } from "../../src/client/ui/minimap";
-import { combatCounterLabel, sortLeaderboardActors } from "../../src/client/ui/GameHud";
+import {
+  combatCounterLabel,
+  pickupPromptSignature,
+  pickupPromptText,
+  sortLeaderboardActors,
+} from "../../src/client/ui/GameHud";
 import { MAP_HALF_SIZE } from "../../src/config/map";
 import { createBattleRoyaleState } from "../../src/game/modes/BattleRoyaleMode";
 
@@ -86,5 +91,31 @@ describe("minimap projection", () => {
     player.alive = false;
     state.phase = "combat";
     expect(combatCounterLabel(state, player)).toBe("3 击杀");
+  });
+
+  it("refreshes the pickup prompt when same-level armor becomes usable", () => {
+    const state = createBattleRoyaleState("player", undefined, () => 0.5);
+    const player = state.actors.player;
+    if (!player) throw new Error("player missing");
+    player.deployment = "grounded";
+    player.inventory.armorLevel = 2;
+    player.maxArmor = 100;
+    player.armor = 100;
+    state.groundLoot = {
+      armor: {
+        id: "armor",
+        itemId: "armor.2",
+        quantity: 1,
+        position: { x: player.position.x, y: player.position.y - 1.31, z: player.position.z },
+        available: true,
+      },
+    };
+    const fullArmorSignature = pickupPromptSignature(player, state.groundLoot);
+    expect(pickupPromptText(player, state.groundLoot)).toContain("当前无法拾取");
+
+    player.armor = 0;
+
+    expect(pickupPromptSignature(player, state.groundLoot)).not.toBe(fullArmorSignature);
+    expect(pickupPromptText(player, state.groundLoot)).toBe("F 拾取 二级护甲");
   });
 });

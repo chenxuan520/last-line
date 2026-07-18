@@ -195,42 +195,9 @@ export class GameHud {
       this.renderBackpack(player);
       this.inventorySignature = inventorySignature;
     }
-    const nearbyLootSignature = Object.values(state.groundLoot)
-      .filter((loot) => loot.available && Math.hypot(
-        loot.position.x - player.position.x,
-        loot.position.y - player.position.y,
-        loot.position.z - player.position.z,
-      ) <= 3.2)
-      .map((loot) => [
-        loot.id,
-        loot.itemId,
-        loot.quantity,
-        loot.position.x.toFixed(2),
-        loot.position.y.toFixed(2),
-        loot.position.z.toFixed(2),
-      ].join(":"))
-      .sort()
-      .join("|");
-    const promptSignature = [
-      player.alive,
-      player.deployment,
-      player.position.x.toFixed(2),
-      player.position.y.toFixed(2),
-      player.position.z.toFixed(2),
-      this.inventorySignature,
-      nearbyLootSignature,
-    ].join(":");
+    const promptSignature = pickupPromptSignature(player, state.groundLoot);
     if (promptSignature !== this.promptSignature) {
-      const pickup = findPickupCandidate(player, state.groundLoot);
-      const nearby = pickup ?? findNearbyLootCandidate(player, state.groundLoot);
-      this.setText(
-        "prompt",
-        pickup
-          ? `F 拾取 ${getItemLabel(pickup.itemId)}`
-          : nearby
-            ? `${getItemLabel(nearby.itemId)} · 当前无法拾取`
-            : "",
-      );
+      this.setText("prompt", pickupPromptText(player, state.groundLoot));
       this.promptSignature = promptSignature;
     }
     this.requireElement("pause").classList.toggle("is-visible", !pointerLocked && player.alive && !this.resultVisible);
@@ -440,6 +407,56 @@ export function combatCounterLabel(state: MatchState, player: ActorState): strin
   }
   const jumpedCount = Object.values(state.actors).filter((actor) => actor.deployment !== "aircraft").length;
   return `已跳伞 ${jumpedCount} / ${Object.keys(state.actors).length}`;
+}
+
+export function pickupPromptText(
+  player: ActorState,
+  groundLoot: MatchState["groundLoot"],
+): string {
+  const pickup = findPickupCandidate(player, groundLoot);
+  const nearby = pickup ?? findNearbyLootCandidate(player, groundLoot);
+  return pickup
+    ? `F 拾取 ${getItemLabel(pickup.itemId)}`
+    : nearby
+      ? `${getItemLabel(nearby.itemId)} · 当前无法拾取`
+      : "";
+}
+
+export function pickupPromptSignature(
+  player: ActorState,
+  groundLoot: MatchState["groundLoot"],
+): string {
+  const nearbyLootSignature = Object.values(groundLoot)
+    .filter((loot) => loot.available && Math.hypot(
+      loot.position.x - player.position.x,
+      loot.position.y - player.position.y,
+      loot.position.z - player.position.z,
+    ) <= 3.2)
+    .map((loot) => [
+      loot.id,
+      loot.itemId,
+      loot.quantity,
+      loot.position.x.toFixed(2),
+      loot.position.y.toFixed(2),
+      loot.position.z.toFixed(2),
+    ].join(":"))
+    .sort()
+    .join("|");
+  return [
+    player.alive,
+    player.deployment,
+    player.position.x.toFixed(2),
+    player.position.y.toFixed(2),
+    player.position.z.toFixed(2),
+    player.armor.toFixed(2),
+    player.maxArmor.toFixed(2),
+    player.inventory.armorLevel,
+    player.inventory.helmetLevel,
+    player.inventory.activeWeaponSlot,
+    player.inventory.weaponSlots.map((weapon) => weapon?.weaponId ?? "none").join(","),
+    player.inventory.backpack.map((stack) => `${stack.itemId}:${stack.quantity}`).join(","),
+    nearbyLootSignature,
+  ].join(":");
 }
 
 function assetUrl(url: string | undefined): string {

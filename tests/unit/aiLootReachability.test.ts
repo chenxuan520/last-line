@@ -120,7 +120,7 @@ describe("AI loot reachability", () => {
       armedBots.length,
       `${armedBots.length} bots armed, ${heldWeapons} weapons held, ${availableWeapons.length} available for seed ${seed}: ${JSON.stringify(unarmedPositions)}`,
     ).toBeGreaterThanOrEqual(42);
-  }, 60_000);
+  }, 120_000);
 
   it("lets 49 real bot controllers loot, fight, and produce one winner", () => {
     const config: BattleRoyaleConfig = {

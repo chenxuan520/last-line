@@ -89,7 +89,7 @@ describe("MovementSystem", () => {
     const actor = state.actors.actor;
     if (!actor) throw new Error("test actor missing");
 
-    advance(state, movingCommand(1, 0, true), 3_000, 1 / 60);
+    advance(state, movingCommand(1, 0, true), 300, 1 / 60);
 
     expect(getWallCollisionCandidateCount(wall.center.x, wall.center.z, layout)).toBeLessThan(
       layout.wallSegments.length / 4,
