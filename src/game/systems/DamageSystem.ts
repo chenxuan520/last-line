@@ -9,6 +9,7 @@ export class DamageSystem {
     events: GameEvent[],
     bypassArmor = false,
     minimumHealth = 0,
+    weaponId: string | null = null,
   ): number {
     const target = state.actors[targetId];
     if (!target?.alive || amount <= 0) {
@@ -16,6 +17,17 @@ export class DamageSystem {
     }
 
     const healthBefore = target.health;
+    const source = sourceId ? state.actors[sourceId] : undefined;
+    if (source && source.id !== target.id) {
+      const x = source.position.x - target.position.x;
+      const y = source.position.y - target.position.y;
+      const z = source.position.z - target.position.z;
+      const length = Math.hypot(x, y, z);
+      if (length > 0) {
+        target.lastDamageDirection = { x: x / length, y: y / length, z: z / length };
+        target.lastDamageElapsedSeconds = state.elapsedSeconds;
+      }
+    }
     if (!bypassArmor) {
       const helmetReduction = target.inventory.helmetLevel === 2 ? 0.2 : target.inventory.helmetLevel === 1 ? 0.1 : 0;
       amount *= 1 - helmetReduction;
@@ -33,11 +45,10 @@ export class DamageSystem {
     if (target.health === 0) {
       target.alive = false;
       target.inventory.usingItem = null;
-      const source = sourceId ? state.actors[sourceId] : undefined;
       if (source && source.id !== target.id) {
         source.kills += 1;
       }
-      events.push({ type: "actor-died", actorId: target.id, sourceId });
+      events.push({ type: "actor-died", actorId: target.id, sourceId, weaponId });
     }
     return healthDamage;
   }

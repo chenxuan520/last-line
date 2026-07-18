@@ -1,5 +1,5 @@
 import { NullEngine } from "@babylonjs/core/Engines/nullEngine";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AssetCatalog } from "../../src/assets/AssetCatalog";
 import { createIslandScene, setActorWeaponVisual } from "../../src/client/render/scenes/IslandScene";
 import { BUILDING_ROOF_CAP_HEIGHT, createMapLayout, getTerrainHeight } from "../../src/config/map";
@@ -7,6 +7,11 @@ import { createBattleRoyaleState } from "../../src/game/modes/BattleRoyaleMode";
 import { createWeaponState } from "../../src/game/state/types";
 
 describe("IslandScene lifecycle", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
   it("releases scenes and loot marker references across restarts", async () => {
     const engine = new NullEngine();
     const assets = createAssets();
@@ -17,7 +22,22 @@ describe("IslandScene lifecycle", () => {
       const layout = createMapLayout(state.mapSeed);
       expect(engine.scenes).toHaveLength(1);
       expect(bundle.lootMeshes.size).toBe(Object.keys(state.groundLoot).length);
+      const spawnMarker = bundle.lootMeshes.values().next().value;
+      const spawnMaterial = spawnMarker?.material;
+      state.groundLoot.death = {
+        id: "death",
+        itemId: "weapon.rifle",
+        quantity: 1,
+        weapon: createWeaponState("rifle"),
+        position: { x: 0, y: 0.45, z: 0 },
+        available: true,
+        source: "death",
+      };
+      bundle.syncLootMeshes(state.groundLoot);
+      expect(bundle.lootMeshes.get("death")?.material).not.toBe(spawnMaterial);
+      expect(bundle.lootMeshes.get("death")?.metadata?.lootSource).toBe("death");
       expect(bundle.viewWeaponRoot.isEnabled()).toBe(false);
+      expect(bundle.camera.minZ).toBeGreaterThanOrEqual(0.1);
       expect(bundle.aircraftVisualRoot.isEnabled()).toBe(true);
       expect(bundle.viewWeaponRoot.getChildMeshes().every((mesh) => !mesh.isEnabled())).toBe(true);
       expect([...bundle.actorRoots.values()].every((root) => !root.isEnabled())).toBe(true);
@@ -66,8 +86,8 @@ describe("IslandScene lifecycle", () => {
         expect(getTerrainHeight(x, z, layout)).toBeCloseTo(y, 5);
       }
       expect(decorations.every((mesh) => !mesh.isPickable && !mesh.checkCollisions)).toBe(true);
-      expect(collisionMeshes).toHaveLength(layout.obstacles.length + 1);
-      expect(bundle.scene.meshes.length).toBeLessThan(650);
+      expect(collisionMeshes).toHaveLength(layout.wallSegments.length + 1);
+      expect(bundle.scene.meshes.length).toBeLessThan(5_400);
       layout.obstacles.forEach((obstacle, index) => {
         const roof = bundle.scene.getMeshByName(`building-roof-${index}`);
         expect(roof?.getBoundingInfo().boundingBox.maximumWorld.y).toBeCloseTo(
@@ -102,12 +122,26 @@ describe("IslandScene lifecycle", () => {
       const bot = state.actors["bot-1"];
       const botRoot = bundle.actorRoots.get("bot-1");
       if (!bot || !botRoot) throw new Error("test bot missing");
-      const rifleMeshes = botRoot.getChildMeshes(false).filter((mesh) => mesh.metadata?.actorVisual === "rifle");
-      expect(rifleMeshes.length).toBeGreaterThan(0);
-      expect(rifleMeshes.every((mesh) => !mesh.isEnabled(false))).toBe(true);
+      const weaponMeshes = botRoot.getChildMeshes(false).filter((mesh) => mesh.metadata?.actorVisual === "weapon");
+      const parachuteMeshes = botRoot.getChildMeshes(false).filter((mesh) => mesh.metadata?.actorVisual === "parachute");
+      expect(parachuteMeshes).toHaveLength(1);
+      expect(parachuteMeshes.every((mesh) => !mesh.isEnabled(false))).toBe(true);
+      const weaponIds = new Set(weaponMeshes.map((mesh) => mesh.metadata?.weaponId));
+      expect(weaponIds).toEqual(new Set(["rifle", "smg", "shotgun", "sniper"]));
+      expect(weaponMeshes.every((mesh) => !mesh.isEnabled(false))).toBe(true);
       bot.inventory.weaponSlots[0] = createWeaponState("rifle");
-      setActorWeaponVisual(botRoot, true);
-      expect(rifleMeshes.every((mesh) => mesh.isEnabled(false))).toBe(true);
+      setActorWeaponVisual(botRoot, "rifle");
+      expect(weaponMeshes.filter((mesh) => mesh.metadata?.weaponId === "rifle").every((mesh) => mesh.isEnabled(false))).toBe(true);
+      expect(weaponMeshes.filter((mesh) => mesh.metadata?.weaponId !== "rifle").every((mesh) => !mesh.isEnabled(false))).toBe(true);
+      setActorWeaponVisual(botRoot, "shotgun");
+      expect(weaponMeshes.filter((mesh) => mesh.metadata?.weaponId === "shotgun").every((mesh) => mesh.isEnabled(false))).toBe(true);
+      expect(weaponMeshes.filter((mesh) => mesh.metadata?.weaponId !== "shotgun").every((mesh) => !mesh.isEnabled(false))).toBe(true);
+      const viewWeaponMeshes = bundle.viewWeaponRoot.getChildMeshes(false)
+        .filter((mesh) => mesh.metadata?.actorVisual === "weapon");
+      expect(new Set(viewWeaponMeshes.map((mesh) => mesh.metadata?.weaponId))).toEqual(new Set(["rifle", "smg", "shotgun", "sniper"]));
+      setActorWeaponVisual(bundle.viewWeaponRoot, "smg");
+      expect(viewWeaponMeshes.filter((mesh) => mesh.metadata?.weaponId === "smg").every((mesh) => mesh.isEnabled(false))).toBe(true);
+      expect(viewWeaponMeshes.filter((mesh) => mesh.metadata?.weaponId !== "smg").every((mesh) => !mesh.isEnabled(false))).toBe(true);
 
       bundle.scene.dispose();
 
@@ -116,7 +150,52 @@ describe("IslandScene lifecycle", () => {
       expect(bundle.lootMeshes.size).toBe(0);
     }
     engine.dispose();
-  });
+  }, 30_000);
+
+  it("loads and switches all three catalog weapon models for first and third person", async () => {
+    const assets = await createGlbAssets();
+    const state = createBattleRoyaleState("player", {
+      participantCount: 2,
+      flightSeconds: 1,
+      safeZoneStages: [{ waitSeconds: 1, shrinkSeconds: 1, radius: 100, damagePerSecond: 1 }],
+    }, () => 0.5);
+    const player = state.actors.player;
+    const bot = state.actors["bot-1"];
+    if (!player || !bot) throw new Error("test actors missing");
+    player.inventory.weaponSlots[0] = createWeaponState("rifle");
+    bot.inventory.weaponSlots[0] = createWeaponState("smg");
+    bot.deployment = "parachuting";
+    const engine = new NullEngine();
+
+    const bundle = await createIslandScene(engine, assets, state.actors, state.groundLoot, state.mapSeed);
+    const botRoot = bundle.actorRoots.get(bot.id);
+    if (!botRoot) throw new Error("test bot root missing");
+    const viewMeshes = bundle.viewWeaponRoot.getChildMeshes(false)
+      .filter((mesh) => mesh.metadata?.actorVisual === "weapon");
+    const botMeshes = botRoot.getChildMeshes(false)
+      .filter((mesh) => mesh.metadata?.actorVisual === "weapon");
+
+    for (const weaponId of ["rifle", "smg", "shotgun", "sniper"] as const) {
+      expect(viewMeshes.some((mesh) => mesh.metadata?.visualModel === `model.weapon.${weaponId}`)).toBe(true);
+      expect(botMeshes.some((mesh) => mesh.metadata?.visualModel === `model.weapon.${weaponId}`)).toBe(true);
+    }
+    expect(botMeshes.some((mesh) => mesh.metadata?.visualModel === "model.character.enemy")).toBe(false);
+    expect(botRoot.getChildMeshes(false).filter((mesh) => mesh.metadata?.actorVisual === "parachute")
+      .every((mesh) => mesh.isEnabled(false))).toBe(true);
+    expect(botMeshes.filter((mesh) => mesh.metadata?.weaponId === "smg" && mesh.metadata?.visualModel)
+      .every((mesh) => mesh.isEnabled(false))).toBe(true);
+    setActorWeaponVisual(bundle.viewWeaponRoot, "shotgun");
+    expect(viewMeshes.filter((mesh) => mesh.metadata?.visualModel === "model.weapon.shotgun")
+      .every((mesh) => mesh.isEnabled(false))).toBe(true);
+    expect(viewMeshes.filter((mesh) => mesh.metadata?.visualModel && mesh.metadata?.weaponId !== "shotgun")
+      .every((mesh) => !mesh.isEnabled(false))).toBe(true);
+    expect(viewMeshes.filter((mesh) => mesh.metadata?.weaponFallbackSuppressed === true)
+      .every((mesh) => !mesh.isEnabled(false))).toBe(true);
+
+    bundle.scene.dispose();
+    expect(engine.scenes).toHaveLength(0);
+    engine.dispose();
+  }, 30_000);
 });
 
 function createAssets(): AssetCatalog {
@@ -130,6 +209,81 @@ function createAssets(): AssetCatalog {
       { id: "model.character.player", type: "procedural-model", fallback: "fallback.model", metadata: { color: "#809d5e" } },
       { id: "model.character.enemy", type: "procedural-model", fallback: "fallback.model", metadata: { color: "#bd6357" } },
       { id: "model.weapon.rifle", type: "procedural-model", fallback: "fallback.model", metadata: { color: "#283126" } },
+      { id: "model.weapon.smg", type: "procedural-model", fallback: "fallback.model", metadata: { color: "#263838" } },
+      { id: "model.weapon.shotgun", type: "procedural-model", fallback: "fallback.model", metadata: { color: "#3b3028" } },
+      { id: "model.weapon.sniper", type: "procedural-model", fallback: "fallback.model", metadata: { color: "#354238" } },
     ],
   });
+}
+
+async function createGlbAssets(): Promise<AssetCatalog> {
+  const glb = createMinimalGlb();
+  vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+    const url = input.toString();
+    if (url === "/manifest.json") {
+      return Response.json({
+        version: 1,
+        assets: [
+          { id: "fallback.ui", type: "svg", url: "/fallback.svg" },
+          { id: "fallback.model", type: "procedural-model", metadata: { color: "#cf4b3f" } },
+          { id: "ui.crosshair", type: "svg", url: "/crosshair.svg", fallback: "fallback.ui" },
+          { id: "ui.weapon.rifle", type: "svg", url: "/rifle.svg", fallback: "fallback.ui" },
+          { id: "model.character.player", type: "procedural-model", fallback: "fallback.model" },
+          { id: "model.character.enemy", type: "model", url: "/enemy.glb", fallback: "fallback.model" },
+          ...["rifle", "smg", "shotgun", "sniper"].map((weaponId) => ({
+            id: `model.weapon.${weaponId}`,
+            type: "model",
+            url: `/${weaponId}.glb`,
+            fallback: "fallback.model",
+          })),
+        ],
+      });
+    }
+    if (url.endsWith(".glb")) {
+      return new Response(glb, { headers: { "content-type": "model/gltf-binary" } });
+    }
+    if (url.endsWith(".svg")) {
+      return new Response("<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>");
+    }
+    return new Response(null, { status: 404 });
+  }));
+  return AssetCatalog.load("/manifest.json");
+}
+
+function createMinimalGlb(): Uint8Array<ArrayBuffer> {
+  const document = {
+    asset: { version: "2.0" },
+    scene: 0,
+    scenes: [{ nodes: [0] }],
+    nodes: [{ name: "root", mesh: 0 }],
+    buffers: [{ byteLength: 36 }],
+    bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: 36, target: 34962 }],
+    accessors: [{
+      bufferView: 0,
+      componentType: 5126,
+      count: 3,
+      type: "VEC3",
+      min: [0, 0, 0],
+      max: [1, 1, 0],
+    }],
+    meshes: [{ primitives: [{ attributes: { POSITION: 0 } }] }],
+  };
+  const source = new TextEncoder().encode(JSON.stringify(document));
+  const jsonLength = Math.ceil(source.length / 4) * 4;
+  const binaryLength = 36;
+  const buffer = new ArrayBuffer(12 + 8 + jsonLength + 8 + binaryLength);
+  const view = new DataView(buffer);
+  view.setUint32(0, 0x46546c67, true);
+  view.setUint32(4, 2, true);
+  view.setUint32(8, buffer.byteLength, true);
+  view.setUint32(12, jsonLength, true);
+  view.setUint32(16, 0x4e4f534a, true);
+  const output = new Uint8Array(buffer);
+  output.fill(0x20, 20);
+  output.set(source, 20);
+  const chunkOffset = 20 + jsonLength;
+  view.setUint32(chunkOffset, binaryLength, true);
+  view.setUint32(chunkOffset + 4, 0x004e4942, true);
+  new Float32Array(buffer, chunkOffset + 8, 9).set([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+  return output;
 }

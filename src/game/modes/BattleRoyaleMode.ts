@@ -25,8 +25,8 @@ import { DamageSystem } from "../systems/DamageSystem";
 const FLIGHT_ALTITUDE = 180;
 const FLIGHT_HALF_LENGTH = MAP_HALF_SIZE * 1.3;
 const MAX_FLIGHT_OFFSET = MAP_HALF_SIZE * 0.55;
-const AUTO_EJECT_PROGRESS = 0.75;
-const LOOT_POINTS_PER_POI = 18;
+const AUTO_EJECT_PROGRESS = 0.92;
+const INDOOR_LOOT_POINTS_PER_ZONE = 1;
 
 type LootCategory = "weapon" | "ammo" | "medical" | "equipment";
 
@@ -36,9 +36,11 @@ const LOOT_TABLE: readonly { category: LootCategory; itemId: string; quantity: n
   { category: "weapon", itemId: "weapon.rifle", quantity: 1 },
   { category: "weapon", itemId: "weapon.smg", quantity: 1 },
   { category: "weapon", itemId: "weapon.shotgun", quantity: 1 },
+  { category: "weapon", itemId: "weapon.sniper", quantity: 1 },
   { category: "ammo", itemId: "ammo.rifle", quantity: 60 },
   { category: "ammo", itemId: "ammo.light", quantity: 80 },
   { category: "ammo", itemId: "ammo.shell", quantity: 12 },
+  { category: "ammo", itemId: "ammo.sniper", quantity: 10 },
   { category: "equipment", itemId: "armor.1", quantity: 1 },
   { category: "equipment", itemId: "armor.2", quantity: 1 },
   { category: "equipment", itemId: "helmet.1", quantity: 1 },
@@ -273,7 +275,7 @@ export function createBattleRoyaleState(
     elapsedSeconds: 0,
     mapSeed,
     actors,
-    groundLoot: createGroundLoot(layout.lootSpawnPoints, createLootRandom(mapSeed)),
+    groundLoot: createGroundLoot(layout.lootSpawnPoints, layout.lootZoneCounts, createLootRandom(mapSeed)),
     safeZone: createInitialSafeZone(config, random),
     flight,
     result: null,
@@ -297,15 +299,20 @@ function createBattleRoyaleActor(
 
 function createGroundLoot(
   lootSpawnPoints: readonly Vector3State[],
+  lootZoneCounts: readonly number[],
   random: () => number,
 ): Record<EntityId, GroundLootState> {
   const groundLoot: Record<EntityId, GroundLootState> = {};
-  for (let poiStart = 0; poiStart < lootSpawnPoints.length; poiStart += LOOT_POINTS_PER_POI) {
+  let zoneStart = 0;
+  for (const zoneCount of lootZoneCounts) {
+    const weaponCount = Math.max(4, Math.round(zoneCount * 0.4));
+    const ammoCount = Math.max(4, Math.round(zoneCount * 0.2));
+    const medicalCount = Math.max(1, Math.floor(zoneCount * 0.15));
     const categoryCounts: Record<LootCategory, number> = {
-      weapon: 5,
-      ammo: 4,
-      medical: 3,
-      equipment: 6,
+      weapon: weaponCount,
+      ammo: ammoCount,
+      medical: medicalCount,
+      equipment: zoneCount - weaponCount - ammoCount - medicalCount,
     };
     const entriesByCategory = Object.fromEntries(
       LOOT_CATEGORIES.map((category) => [
@@ -313,12 +320,12 @@ function createGroundLoot(
         createLootEntries(category, categoryCounts[category], random),
       ]),
     ) as Record<LootCategory, (typeof LOOT_TABLE)[number][]>;
-    const categoryOrder = createLootCategoryOrder(categoryCounts, random);
+    const categoryOrder = reserveIndoorLootForSupplies(createLootCategoryOrder(categoryCounts, random));
 
-    for (let poiOffset = 0; poiOffset < LOOT_POINTS_PER_POI; poiOffset += 1) {
-      const index = poiStart + poiOffset;
+    for (let zoneOffset = 0; zoneOffset < zoneCount; zoneOffset += 1) {
+      const index = zoneStart + zoneOffset;
       const position = lootSpawnPoints[index];
-      const category = categoryOrder[poiOffset];
+      const category = categoryOrder[zoneOffset];
       const entry = category ? entriesByCategory[category].pop() : undefined;
       if (!position || !entry) {
         continue;
@@ -333,10 +340,25 @@ function createGroundLoot(
         ...(weapon ? { weapon } : {}),
         position: { ...position },
         available: true,
+        source: "spawn",
       };
     }
+    zoneStart += zoneCount;
   }
   return groundLoot;
+}
+
+function reserveIndoorLootForSupplies(categories: LootCategory[]): LootCategory[] {
+  const result = [...categories];
+  const indoorStart = Math.max(0, result.length - INDOOR_LOOT_POINTS_PER_ZONE);
+  for (let index = indoorStart; index < result.length; index += 1) {
+    if (result[index] !== "weapon") continue;
+    const swapIndex = result.findIndex((category, candidateIndex) => candidateIndex < indoorStart && category !== "weapon");
+    if (swapIndex !== -1) {
+      [result[index], result[swapIndex]] = [result[swapIndex] as LootCategory, result[index] as LootCategory];
+    }
+  }
+  return result;
 }
 
 function createLootRandom(seed: number): () => number {

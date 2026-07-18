@@ -37,6 +37,7 @@ interface PendingDamage {
   targetId: EntityId;
   sourceId: EntityId;
   amount: number;
+  weaponId: string;
 }
 
 const TIMER_EPSILON_SECONDS = 1e-9;
@@ -189,7 +190,7 @@ export class CombatSystem {
         });
       }
       if (targetId && targetId !== actor.id) {
-        pendingDamage.push({ targetId, sourceId: actor.id, amount: config.damage });
+        pendingDamage.push({ targetId, sourceId: actor.id, amount: config.damage, weaponId: config.id });
       }
     }
   }
@@ -219,6 +220,7 @@ export class CombatSystem {
         events,
         false,
         damage.targetId === survivorId ? 1 : 0,
+        damage.weaponId,
       );
     }
   }

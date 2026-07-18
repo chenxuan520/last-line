@@ -10,6 +10,7 @@ export interface WeaponConfig {
   spreadRadians: number;
   pellets: number;
   recoil: number;
+  scopeFov?: number;
 }
 
 export const WEAPONS: Readonly<Record<string, WeaponConfig>> = {
@@ -51,5 +52,19 @@ export const WEAPONS: Readonly<Record<string, WeaponConfig>> = {
     spreadRadians: 0.075,
     pellets: 8,
     recoil: 0.035,
+  },
+  sniper: {
+    id: "sniper",
+    label: "M-24 狙击枪",
+    ammoItemId: "ammo.sniper",
+    damage: 105,
+    roundsPerMinute: 42,
+    magazineSize: 5,
+    reloadSeconds: 2.85,
+    range: 520,
+    spreadRadians: 0.0015,
+    pellets: 1,
+    recoil: 0.055,
+    scopeFov: 0.32,
   },
 };

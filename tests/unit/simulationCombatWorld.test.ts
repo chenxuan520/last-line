@@ -6,6 +6,7 @@ import {
   getTerrainHeight,
   MAP_HALF_SIZE,
   MAP_OBSTACLES,
+  MAP_WALL_SEGMENTS,
 } from "../../src/config/map";
 import { createActorState, type MatchState, type Vector3State } from "../../src/game/state/types";
 import type { ShotTrace } from "../../src/game/systems/CombatSystem";
@@ -32,8 +33,8 @@ describe("SimulationCombatWorld", () => {
   });
 
   it("blocks shots and line of sight with static map buildings", () => {
-    const obstacle = MAP_OBSTACLES[0];
-    if (!obstacle) throw new Error("test obstacle missing");
+    const obstacle = MAP_WALL_SEGMENTS[0];
+    if (!obstacle) throw new Error("test wall missing");
     const shooter = createActorState("shooter", "player", {
       x: obstacle.center.x - obstacle.width / 2 - 5,
       y: 1.76,
@@ -133,7 +134,11 @@ describe("SimulationCombatWorld", () => {
     const target = createActorState("target", "bot", { x: 0, y: 1.76, z: 10 });
     const state = createState(shooter, target);
     const reusedWorld = new SimulationCombatWorld(state);
-    const shot = trace(shooter.position, { x: 0, y: 0, z: 1 });
+    const shot = trace(shooter.position, {
+      x: target.position.x - shooter.position.x,
+      y: target.position.y - shooter.position.y,
+      z: target.position.z - shooter.position.z,
+    });
 
     expect(reusedWorld.traceShot(shot)).toBe("target");
     target.position.x = 2;

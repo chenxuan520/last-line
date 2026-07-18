@@ -71,4 +71,20 @@ describe("DamageSystem", () => {
     expect(damage).toBe(30);
     expect(events).toEqual([{ type: "actor-damaged", actorId: target.id, sourceId: null, damage: 30 }]);
   });
+
+  it("records the authoritative direction of the latest attacker", () => {
+    const state = createState();
+    const target = state.actors.target;
+    const source = createActorState("source", "bot", { x: 10, y: 5, z: 0 });
+    state.actors.source = source;
+    state.elapsedSeconds = 12;
+
+    new DamageSystem().applyDamage(state, target.id, 10, source.id, []);
+
+    expect(target.lastDamageElapsedSeconds).toBe(12);
+    expect(target.lastDamageDirection?.x).toBeCloseTo(10 / Math.hypot(10, 5));
+    expect(target.lastDamageDirection?.y).toBeGreaterThan(0.3);
+    expect(target.lastDamageDirection?.z).toBe(0);
+    expect(() => JSON.stringify(state)).not.toThrow();
+  });
 });

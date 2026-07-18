@@ -3,10 +3,10 @@ import { WEAPONS } from "../../src/config/weapons";
 import { getTerrainHeight } from "../../src/config/map";
 import { createIdleCommand, type ActorCommand } from "../../src/game/commands/ActorCommand";
 import { GameSimulation } from "../../src/game/GameSimulation";
+import { getReloadVisualTransform, resolveSpectatorActorId } from "../../src/app/BattleRoyaleSession";
 import { TrainingMode } from "../../src/game/modes/TrainingMode";
 import { createActorState, createWeaponState, getActiveWeapon, type MatchState } from "../../src/game/state/types";
 import type { CombatWorld } from "../../src/game/systems/CombatSystem";
-import { SimulationCombatWorld } from "../../src/game/systems/SimulationCombatWorld";
 
 function createSimulation(weaponId = "rifle"): GameSimulation {
   const player = createActorState("player", "player", { x: 0, y: getTerrainHeight(0, 0, 0) + 1.76, z: 0 }, weaponId);
@@ -86,6 +86,13 @@ describe("GameSimulation combat", () => {
 
   it("finishes every actor's movement before tracing combat", () => {
     const simulation = createSimulation();
+    const world: CombatWorld = {
+      traceShot: () => {
+        expect(simulation.state.actors.player?.position.x).toBeCloseTo(8.7);
+        expect(simulation.state.actors["bot-1"]?.position.x).toBeCloseTo(8.7);
+        return "bot-1";
+      },
+    };
     const moveAndFire = {
       ...fireCommand,
       move: { x: 1, y: 0, z: 0 },
@@ -99,11 +106,11 @@ describe("GameSimulation combat", () => {
         ["player", moveAndFire],
         ["bot-1", move],
       ]),
-      new SimulationCombatWorld(simulation.state),
+      world,
     );
 
-    expect(simulation.state.actors.player?.position.x).toBeCloseTo(5.8);
-    expect(simulation.state.actors["bot-1"]?.position.x).toBeCloseTo(5.8);
+    expect(simulation.state.actors.player?.position.x).toBeCloseTo(8.7);
+    expect(simulation.state.actors["bot-1"]?.position.x).toBeCloseTo(8.7);
     expect(simulation.state.actors["bot-1"]?.health).toBeLessThan(100);
   });
 
@@ -164,9 +171,15 @@ describe("GameSimulation combat", () => {
     bot.armor = 0;
 
     simulation.step(1 / 30, new Map([["player", fireCommand]]), hit("bot-1"));
-    const eventTypes = simulation.drainEvents().map((event) => event.type);
+    const events = simulation.drainEvents();
+    const eventTypes = events.map((event) => event.type);
 
     expect(eventTypes).toEqual(["shot-fired", "actor-damaged", "actor-died", "match-finished", "item-dropped", "item-dropped", "item-dropped"]);
+    expect(events.find((event) => event.type === "actor-died")).toMatchObject({
+      actorId: "bot-1",
+      sourceId: "player",
+      weaponId: "rifle",
+    });
     expect(simulation.state.result?.winnerId).toBe("player");
   });
 
@@ -181,6 +194,42 @@ describe("GameSimulation combat", () => {
 
     expect(weapon.ammoInMagazine).toBe(30);
     expect(simulation.drainEvents().some((event) => event.type === "shot-fired")).toBe(false);
+  });
+
+  it("derives reload animation from authoritative weapon progress", () => {
+    const weapon = createWeaponState("rifle");
+    weapon.reloadSeconds = (WEAPONS.rifle?.reloadSeconds ?? 1.8) / 2;
+
+    expect(getReloadVisualTransform(weapon)).toMatchObject({
+      y: -0.18,
+      rotationX: -0.5,
+      rotationZ: 0.22,
+    });
+    weapon.reloadSeconds = 0;
+    expect(getReloadVisualTransform(weapon)).toBeNull();
+  });
+
+  it("switches spectating to the killer and chains when that killer dies", () => {
+    const simulation = createSimulation();
+    const bot2 = createActorState("bot-2", "bot", { x: 20, y: 1.76, z: 0 });
+    simulation.state.actors[bot2.id] = bot2;
+    const playerDeath = {
+      type: "actor-died" as const,
+      actorId: "player",
+      sourceId: "bot-1",
+      weaponId: "sniper",
+    };
+    simulation.state.actors.player!.alive = false;
+    expect(resolveSpectatorActorId("player", null, playerDeath, simulation.state.actors)).toBe("bot-1");
+
+    simulation.state.actors["bot-1"]!.alive = false;
+    const killerDeath = {
+      type: "actor-died" as const,
+      actorId: "bot-1",
+      sourceId: "bot-2",
+      weaponId: "rifle",
+    };
+    expect(resolveSpectatorActorId("player", "bot-1", killerDeath, simulation.state.actors)).toBe("bot-2");
   });
 
   it("settles same-tick mutual fire independently of command insertion order", () => {
@@ -214,7 +263,7 @@ describe("GameSimulation combat", () => {
     expect(winners).toEqual(new Set(["bot-1", "player"]));
   });
 
-  it.each(["rifle", "smg", "shotgun"])("keeps %s near its configured RPM at 30 Hz", (weaponId) => {
+  it.each(["rifle", "smg", "shotgun", "sniper"])("keeps %s near its configured RPM at 30 Hz", (weaponId) => {
     const durationSeconds = 30;
     const simulation = createSimulation(weaponId);
     const weapon = getActiveWeapon(simulation.state.actors.player);

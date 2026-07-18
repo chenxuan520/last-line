@@ -18,7 +18,7 @@ const damageConfig: BattleRoyaleConfig = {
 };
 
 describe("BattleRoyaleMode", () => {
-  it("budgets 18 minutes from the flight route through the final circle", () => {
+  it("budgets 15 minutes while accelerating the late circles", () => {
     const budgetSeconds =
       BATTLE_ROYALE_CONFIG.flightSeconds +
       BATTLE_ROYALE_CONFIG.safeZoneStages.reduce(
@@ -26,19 +26,22 @@ describe("BattleRoyaleMode", () => {
         0,
       );
 
-    expect(budgetSeconds).toBe(18 * 60);
+    expect(budgetSeconds).toBe(15 * 60);
     expect(budgetSeconds).toBeGreaterThanOrEqual(15 * 60);
     expect(budgetSeconds).toBeLessThanOrEqual(20 * 60);
+    const stages = BATTLE_ROYALE_CONFIG.safeZoneStages;
+    expect(stages.slice(2).map((stage) => stage.waitSeconds)).toEqual([90, 55, 30, 10]);
+    expect(stages.slice(2).map((stage) => stage.shrinkSeconds)).toEqual([55, 40, 25, 15]);
   });
 
-  it("creates a serializable 20-person match with complete ground loot", () => {
+  it("creates a serializable 50-person match with complete ground loot", () => {
     const state = createBattleRoyaleState("player", FAST_BATTLE_ROYALE_CONFIG, () => 0.5);
     const actors = Object.values(state.actors);
     const itemIds = new Set(Object.values(state.groundLoot).map((loot) => loot.itemId));
 
-    expect(actors).toHaveLength(20);
+    expect(actors).toHaveLength(50);
     expect(actors.filter((actor) => actor.kind === "player")).toHaveLength(1);
-    expect(actors.filter((actor) => actor.kind === "bot")).toHaveLength(19);
+    expect(actors.filter((actor) => actor.kind === "bot")).toHaveLength(49);
     expect(actors.every((actor) => actor.deployment === "aircraft")).toBe(true);
     expect(state.mapSeed).toBe(2_147_483_648);
     expect(Object.values(state.groundLoot).map((loot) => loot.position)).toEqual(
@@ -49,9 +52,11 @@ describe("BattleRoyaleMode", () => {
         "weapon.rifle",
         "weapon.smg",
         "weapon.shotgun",
+        "weapon.sniper",
         "ammo.rifle",
         "ammo.light",
         "ammo.shell",
+        "ammo.sniper",
         "armor.1",
         "armor.2",
         "helmet.1",
@@ -66,10 +71,12 @@ describe("BattleRoyaleMode", () => {
   it("stratifies each POI loot slice without clustering adjacent categories", () => {
     const state = createBattleRoyaleState("player", FAST_BATTLE_ROYALE_CONFIG, seededRandom(2026));
     const loot = Object.values(state.groundLoot);
+    const layout = createMapLayout(state.mapSeed);
 
-    expect(loot).toHaveLength(72);
-    for (let start = 0; start < loot.length; start += 18) {
-      const poiLoot = loot.slice(start, start + 18);
+    expect(loot).toHaveLength(240);
+    let start = 0;
+    for (const zoneCount of layout.lootZoneCounts) {
+      const poiLoot = loot.slice(start, start + zoneCount);
       const weapons = poiLoot.filter((entry) => lootCategory(entry.itemId) === "weapon");
       const ammo = poiLoot.filter((entry) => lootCategory(entry.itemId) === "ammo");
       const medical = poiLoot.filter((entry) => lootCategory(entry.itemId) === "medical");
@@ -80,15 +87,18 @@ describe("BattleRoyaleMode", () => {
       ).length;
 
       expect(new Set(weapons.map((entry) => entry.itemId))).toEqual(
-        new Set(["weapon.rifle", "weapon.smg", "weapon.shotgun"]),
+        new Set(["weapon.rifle", "weapon.smg", "weapon.shotgun", "weapon.sniper"]),
       );
       expect(new Set(ammo.map((entry) => entry.itemId))).toEqual(
-        new Set(["ammo.rifle", "ammo.light", "ammo.shell"]),
+        new Set(["ammo.rifle", "ammo.light", "ammo.shell", "ammo.sniper"]),
       );
-      expect(weapons).toHaveLength(5);
-      expect(ammo).toHaveLength(4);
-      expect(medical).toHaveLength(3);
-      expect(equipment).toHaveLength(6);
+      const weaponCount = Math.max(4, Math.round(zoneCount * 0.4));
+      const ammoCount = Math.max(4, Math.round(zoneCount * 0.2));
+      const medicalCount = Math.max(1, Math.floor(zoneCount * 0.15));
+      expect(weapons).toHaveLength(weaponCount);
+      expect(ammo).toHaveLength(ammoCount);
+      expect(medical).toHaveLength(medicalCount);
+      expect(equipment).toHaveLength(zoneCount - weaponCount - ammoCount - medicalCount);
       expect(adjacentMatches / categories.length).toBeLessThanOrEqual(0.2);
 
       for (const entry of weapons) {
@@ -98,6 +108,7 @@ describe("BattleRoyaleMode", () => {
         }
         expect(entry.weapon).toEqual(createWeaponState(weaponId));
       }
+      start += zoneCount;
     }
   });
 
@@ -142,13 +153,13 @@ describe("BattleRoyaleMode", () => {
     const mode = new BattleRoyaleMode(damageConfig, () => 0.5);
     mode.start(state, []);
 
-    mode.update(state, damageConfig.flightSeconds * 0.76, []);
+    mode.update(state, damageConfig.flightSeconds * 0.93, []);
 
     const player = state.actors.player;
     if (!player) throw new Error("player missing");
     expect(player.deployment).toBe("parachuting");
-    expect(player.position.x).toBeCloseTo(state.flight.start.x + (state.flight.end.x - state.flight.start.x) * 0.76);
-    expect(player.position.z).toBeCloseTo(state.flight.start.z + (state.flight.end.z - state.flight.start.z) * 0.76);
+    expect(player.position.x).toBeCloseTo(state.flight.start.x + (state.flight.end.x - state.flight.start.x) * 0.93);
+    expect(player.position.z).toBeCloseTo(state.flight.start.z + (state.flight.end.z - state.flight.start.z) * 0.93);
     expect(createMapLayout(state.mapSeed).lootSpawnPoints).not.toContainEqual(player.position);
     expect(Object.values(state.actors).every((actor) => actor.deployment === "parachuting")).toBe(true);
     expect(Object.values(state.actors).every((actor) => actor.position.x === player.position.x)).toBe(true);

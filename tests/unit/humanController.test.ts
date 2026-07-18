@@ -47,10 +47,10 @@ describe("HumanController weapon switching", () => {
     inventory.processCommand(state, actor.id, controller.createCommand(actor), []);
     expect(actor.inventory.activeWeaponSlot).toBe(1);
 
-    canvas.dispatchEvent(wheelEvent(-1));
+    documentTarget.dispatchEvent(wheelEvent(-1));
     inventory.processCommand(state, actor.id, controller.createCommand(actor), []);
     expect(actor.inventory.activeWeaponSlot).toBe(0);
-    canvas.dispatchEvent(wheelEvent(1));
+    documentTarget.dispatchEvent(wheelEvent(1));
     inventory.processCommand(state, actor.id, controller.createCommand(actor), []);
     expect(actor.inventory.activeWeaponSlot).toBe(1);
 
@@ -118,6 +118,102 @@ describe("HumanController weapon switching", () => {
     expect(controller.createCommand(actor).useItem).toBe("bandage");
     documentTarget.dispatchEvent(mouseEvent("mousedown", 0));
     expect(controller.createCommand(actor).fire).toBe(true);
+    controller.dispose();
+  });
+
+  it("scopes only the sniper and exits on release, reload, switch, and pointer unlock", () => {
+    const canvas = new EventTarget() as HTMLCanvasElement;
+    const documentTarget = new EventTarget() as Document;
+    let pointerLockElement: Element | null = canvas;
+    Object.defineProperty(documentTarget, "pointerLockElement", {
+      configurable: true,
+      get: () => pointerLockElement,
+    });
+    vi.stubGlobal("document", documentTarget);
+    const actor = createActorState("player", "player", { x: 0, y: 1.76, z: 0 });
+    const controller = new HumanController(canvas);
+    controller.rememberActor(actor);
+
+    documentTarget.dispatchEvent(mouseEvent("mousedown", 2));
+    expect(controller.isScoped(actor)).toBe(false);
+
+    actor.inventory.weaponSlots[0] = createWeaponState("sniper");
+    controller.rememberActor(actor);
+    documentTarget.dispatchEvent(mouseEvent("mousedown", 2));
+    expect(controller.isScoped(actor)).toBe(true);
+    documentTarget.dispatchEvent(mouseEvent("mouseup", 2));
+    expect(controller.isScoped(actor)).toBe(false);
+
+    documentTarget.dispatchEvent(mouseEvent("mousedown", 2));
+    documentTarget.dispatchEvent(keyEvent("KeyR"));
+    expect(controller.isScoped(actor)).toBe(false);
+    documentTarget.dispatchEvent(mouseEvent("mousedown", 2));
+    documentTarget.dispatchEvent(keyEvent("Digit2"));
+    expect(controller.isScoped(actor)).toBe(false);
+
+    documentTarget.dispatchEvent(mouseEvent("mousedown", 2));
+    pointerLockElement = null;
+    documentTarget.dispatchEvent(new Event("pointerlockchange"));
+    expect(controller.isScoped(actor)).toBe(false);
+    controller.dispose();
+  });
+
+  it("keeps a reload request alive until the weapon enters reload", () => {
+    const canvas = new EventTarget() as HTMLCanvasElement;
+    const documentTarget = new EventTarget() as Document;
+    Object.defineProperty(documentTarget, "pointerLockElement", { configurable: true, value: canvas });
+    vi.stubGlobal("document", documentTarget);
+    const actor = createActorState("player", "player", { x: 0, y: 1.76, z: 0 });
+    const weapon = actor.inventory.weaponSlots[0];
+    if (!weapon) throw new Error("weapon missing");
+    weapon.ammoInMagazine = 5;
+    actor.inventory.backpack = [{ itemId: "ammo.rifle", quantity: 30 }];
+    const controller = new HumanController(canvas);
+    controller.rememberActor(actor);
+
+    documentTarget.dispatchEvent(keyEvent("KeyR"));
+    expect(controller.createCommand(actor).reload).toBe(true);
+    expect(controller.createCommand(actor).reload).toBe(true);
+    weapon.reloadSeconds = 1.8;
+    controller.acknowledgeActorState(actor);
+    expect(controller.createCommand(actor).reload).toBe(false);
+    controller.dispose();
+  });
+
+  it("clears a buffered reload when switching by keyboard", () => {
+    const canvas = new EventTarget() as HTMLCanvasElement;
+    const documentTarget = new EventTarget() as Document;
+    Object.defineProperty(documentTarget, "pointerLockElement", { configurable: true, value: canvas });
+    vi.stubGlobal("document", documentTarget);
+    const actor = createActorState("player", "player", { x: 0, y: 1.76, z: 0 });
+    actor.inventory.weaponSlots[1] = createWeaponState("smg");
+    const controller = new HumanController(canvas);
+    controller.rememberActor(actor);
+
+    documentTarget.dispatchEvent(keyEvent("KeyR"));
+    documentTarget.dispatchEvent(keyEvent("Digit2"));
+    const command = controller.createCommand(actor);
+
+    expect(command.switchWeapon).toBe(1);
+    expect(command.reload).toBe(false);
+    expect(controller.createCommand(actor).reload).toBe(false);
+    controller.dispose();
+  });
+
+  it("shows the leaderboard only while Tab is held", () => {
+    const canvas = new EventTarget() as HTMLCanvasElement;
+    const documentTarget = new EventTarget() as Document;
+    Object.defineProperty(documentTarget, "pointerLockElement", { configurable: true, value: canvas });
+    vi.stubGlobal("document", documentTarget);
+    const controller = new HumanController(canvas);
+
+    documentTarget.dispatchEvent(keyEvent("Tab"));
+    expect(controller.isLeaderboardVisible()).toBe(true);
+    documentTarget.dispatchEvent(Object.assign(new Event("keyup"), { code: "Tab" }));
+    expect(controller.isLeaderboardVisible()).toBe(false);
+    Object.defineProperty(documentTarget, "pointerLockElement", { configurable: true, value: null });
+    documentTarget.dispatchEvent(keyEvent("Tab"));
+    expect(controller.isLeaderboardVisible()).toBe(true);
     controller.dispose();
   });
 });

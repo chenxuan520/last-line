@@ -97,6 +97,19 @@ describe("InventorySystem", () => {
     });
   });
 
+  it("does not pick loot through a floor even when the horizontal position matches", () => {
+    const state = createState();
+    const actor = state.actors.player;
+    actor.position.y = 5;
+    actor.inventory.backpack = [];
+    state.groundLoot.ammo = createLoot("ammo", "ammo.rifle", 30, 0);
+
+    new InventorySystem().processCommand(state, actor.id, command({ interact: true }), []);
+
+    expect(state.groundLoot.ammo?.available).toBe(true);
+    expect(actor.inventory.backpack).toEqual([]);
+  });
+
   it("fills two weapon slots, switches weapons, and drops the replaced active weapon", () => {
     const state = createState();
     const actor = state.actors.player;
@@ -228,6 +241,41 @@ describe("InventorySystem", () => {
     expect(events).toHaveLength(eventCount);
   });
 
+  it("replaces broken armor with fresh armor of the same level", () => {
+    const state = createState();
+    const actor = state.actors.player;
+    actor.inventory.armorLevel = 2;
+    actor.maxArmor = 100;
+    actor.armor = 0;
+    state.groundLoot.armor = createLoot("armor", "armor.2", 1);
+
+    new InventorySystem().processCommand(state, actor.id, command({ interact: true }), []);
+
+    expect(actor.inventory.armorLevel).toBe(2);
+    expect(actor.armor).toBe(100);
+    expect(state.groundLoot.armor?.available).toBe(false);
+    expect(Object.values(state.groundLoot).filter((loot) => loot.available && loot.itemId === "armor.2")).toHaveLength(0);
+  });
+
+  it("skips unusable death loot and picks a helmet from the same pile", () => {
+    const state = createState();
+    const actor = state.actors.player;
+    actor.inventory.armorLevel = 2;
+    actor.maxArmor = 100;
+    actor.armor = 100;
+    actor.inventory.helmetLevel = 0;
+    state.groundLoot = {
+      armor: { ...createLoot("armor", "armor.2", 1), source: "death" },
+      helmet: { ...createLoot("helmet", "helmet.2", 1), source: "death" },
+    };
+
+    new InventorySystem().processCommand(state, actor.id, command({ interact: true }), []);
+
+    expect(state.groundLoot.armor?.available).toBe(true);
+    expect(state.groundLoot.helmet?.available).toBe(false);
+    expect(actor.inventory.helmetLevel).toBe(2);
+  });
+
   it("interrupts healing on movement or fire without consuming the item", () => {
     const state = createState();
     const actor = state.actors.player;
@@ -314,6 +362,7 @@ describe("InventorySystem", () => {
     expect(actor.inventory.armorLevel).toBe(0);
     expect(actor.inventory.helmetLevel).toBe(0);
     expect(Object.values(state.groundLoot)).toHaveLength(firstDropCount);
+    expect(Object.values(state.groundLoot).every((loot) => loot.source === "death")).toBe(true);
     expect(Object.values(state.groundLoot).find((loot) => loot.itemId === "weapon.rifle")?.weapon).toBe(weapon);
     expect(weapon).toMatchObject({ ammoInMagazine: 4, cooldownSeconds: 0.3, reloadSeconds: 1.1 });
   });

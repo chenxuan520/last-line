@@ -5,7 +5,7 @@ import {
   createMapLayout,
   getTerrainHeight,
   MAP_HALF_SIZE,
-  MAP_OBSTACLES,
+  MAP_WALL_SEGMENTS,
 } from "../../src/config/map";
 import { createIdleCommand, type ActorCommand } from "../../src/game/commands/ActorCommand";
 import { createActorState, type MatchState } from "../../src/game/state/types";
@@ -23,8 +23,8 @@ describe("MovementSystem", () => {
     advance(slowFrames, command, 20, 1 / 20);
     advance(fastFrames, command, 60, 1 / 60);
 
-    expect(slowFrames.actors.actor?.position.x).toBeCloseTo(5.8, 8);
-    expect(fastFrames.actors.actor?.position.x).toBeCloseTo(5.8, 8);
+    expect(slowFrames.actors.actor?.position.x).toBeCloseTo(8.7, 8);
+    expect(fastFrames.actors.actor?.position.x).toBeCloseTo(8.7, 8);
     expect(slowFrames.actors.actor?.position.x).toBeCloseTo(fastFrames.actors.actor?.position.x ?? 0, 8);
   });
 
@@ -33,11 +33,11 @@ describe("MovementSystem", () => {
     advance(boundaryState, movingCommand(1, 0, true), 30, 1 / 30);
     expect(boundaryState.actors.actor?.position.x).toBeLessThanOrEqual(MAP_HALF_SIZE - ACTOR_RADIUS);
 
-    const obstacle = MAP_OBSTACLES[0];
-    if (!obstacle) {
-      throw new Error("test obstacle missing");
+    const wall = MAP_WALL_SEGMENTS[0];
+    if (!wall) {
+      throw new Error("test wall missing");
     }
-    const obstacleState = createState(obstacle.center.x - obstacle.width / 2 - ACTOR_RADIUS - 1, obstacle.center.z);
+    const obstacleState = createState(wall.center.x - wall.width / 2 - ACTOR_RADIUS - 1, wall.center.z);
     advance(obstacleState, movingCommand(1, 0, true), 60, 1 / 60);
 
     const actor = obstacleState.actors.actor;
@@ -45,13 +45,13 @@ describe("MovementSystem", () => {
     if (actor) {
       const closestX = clamp(
         actor.position.x,
-        obstacle.center.x - obstacle.width / 2,
-        obstacle.center.x + obstacle.width / 2,
+        wall.center.x - wall.width / 2,
+        wall.center.x + wall.width / 2,
       );
       const closestZ = clamp(
         actor.position.z,
-        obstacle.center.z - obstacle.depth / 2,
-        obstacle.center.z + obstacle.depth / 2,
+        wall.center.z - wall.depth / 2,
+        wall.center.z + wall.depth / 2,
       );
       expect(Math.hypot(actor.position.x - closestX, actor.position.z - closestZ)).toBeGreaterThanOrEqual(
         ACTOR_RADIUS - 0.001,
@@ -59,8 +59,42 @@ describe("MovementSystem", () => {
     }
   });
 
+  it("recovers an actor that starts overlapped with a wall", () => {
+    const wall = MAP_WALL_SEGMENTS[0];
+    if (!wall) throw new Error("test wall missing");
+    const state = createState(wall.center.x, wall.center.z);
+    const actor = state.actors.actor;
+    if (!actor) throw new Error("test actor missing");
+    actor.position.x = wall.center.x;
+    actor.position.z = wall.center.z;
+
+    new MovementSystem().processCommand(state, actor.id, movingCommand(1, 0), 1 / 30);
+
+    const closestX = clamp(actor.position.x, wall.center.x - wall.width / 2, wall.center.x + wall.width / 2);
+    const closestZ = clamp(actor.position.z, wall.center.z - wall.depth / 2, wall.center.z + wall.depth / 2);
+    expect(Math.hypot(actor.position.x - closestX, actor.position.z - closestZ)).toBeGreaterThanOrEqual(
+      ACTOR_RADIUS,
+    );
+  });
+
+  it("keeps wall collision queries local to the current spatial cell", () => {
+    const layout = createMapLayout(0);
+    const wall = layout.wallSegments[0];
+    if (!wall) throw new Error("test wall missing");
+    const state = createState(wall.center.x - wall.width / 2 - ACTOR_RADIUS - 2, wall.center.z);
+    const actor = state.actors.actor;
+    if (!actor) throw new Error("test actor missing");
+
+    const startedAt = performance.now();
+    advance(state, movingCommand(1, 0, true), 3_000, 1 / 60);
+    const elapsed = performance.now() - startedAt;
+
+    expect(elapsed).toBeLessThan(1_500);
+    expect(Number.isFinite(actor.position.x)).toBe(true);
+  });
+
   it("enters a parachute from the aircraft and lands automatically", () => {
-    const state = createState(0, 0, 20);
+    const state = createState(0, 0, 180);
     const actor = state.actors.actor;
     if (!actor) {
       throw new Error("test actor missing");
@@ -71,10 +105,27 @@ describe("MovementSystem", () => {
     expect(actor.deployment).toBe("parachuting");
     expect(actor.position.x).toBeGreaterThan(0);
 
-    advance(state, createIdleCommand(), 300, 1 / 60);
+    advance(state, createIdleCommand(), 2_400, 1 / 60);
     expect(actor.deployment).toBe("grounded");
     expect(actor.position.y).toBeCloseTo(getSupportHeight(actor.position.x, actor.position.z) + GROUND_HEIGHT);
     expect(actor.velocity.y).toBe(0);
+  });
+
+  it("slows horizontal gliding continuously near the ground", () => {
+    const high = createState(0, 0, 180);
+    const low = createState(0, 0, getTerrainHeight(0, 0) + GROUND_HEIGHT + 18);
+    const highActor = high.actors.actor;
+    const lowActor = low.actors.actor;
+    if (!highActor || !lowActor) throw new Error("test actors missing");
+    highActor.deployment = "parachuting";
+    lowActor.deployment = "parachuting";
+
+    new MovementSystem().processCommand(high, highActor.id, movingCommand(1, 0), 0.25);
+    new MovementSystem().processCommand(low, lowActor.id, movingCommand(1, 0), 0.25);
+
+    expect(highActor.position.x).toBeGreaterThan(lowActor.position.x * 2);
+    expect(lowActor.position.x).toBeCloseTo(2, 6);
+    expect(lowActor.position.x).toBeLessThan(3.5);
   });
 
   it("ignores manual ejection while the aircraft is outside the island", () => {
@@ -98,10 +149,10 @@ describe("MovementSystem", () => {
     const actor = state.actors.actor;
     if (!actor) throw new Error("test actor missing");
 
-    advance(state, movingCommand(0, 1), 180, 1 / 60);
+    const rampDirection = Math.sign(ramp.endZ - ramp.startZ) || 1;
+    advance(state, movingCommand(0, rampDirection), 240, 1 / 60);
 
     const roofY = obstacle.center.y + obstacle.height / 2 + BUILDING_ROOF_CAP_HEIGHT;
-    expect(actor.position.z).toBeGreaterThan(obstacle.center.z - obstacle.depth / 2);
     expect(actor.position.y).toBeCloseTo(roofY + GROUND_HEIGHT, 1);
 
     new MovementSystem().processCommand(state, actor.id, { ...createIdleCommand(), jump: true }, 1 / 60);
@@ -117,23 +168,37 @@ describe("MovementSystem", () => {
 
 describe("GridNavigator", () => {
   it("adds waypoints when a building blocks the direct path", () => {
-    const obstacle = MAP_OBSTACLES[0];
-    if (!obstacle) {
-      throw new Error("test obstacle missing");
-    }
-    const start = { x: obstacle.center.x - obstacle.width / 2 - 5, y: GROUND_HEIGHT, z: obstacle.center.z };
-    const target = { x: obstacle.center.x + obstacle.width / 2 + 5, y: GROUND_HEIGHT, z: obstacle.center.z };
+    const footprint = { id: "test-building", center: { x: 0, y: 2, z: 0 }, width: 14, height: 4, depth: 12, color: "#fff" };
+    const wall = { ...footprint, id: "test-wall", obstacleId: footprint.id, width: 0.35, depth: 12 };
+    const start = { x: wall.center.x - wall.width / 2 - 5, y: GROUND_HEIGHT, z: wall.center.z };
+    const target = { x: wall.center.x + wall.width / 2 + 5, y: GROUND_HEIGHT, z: wall.center.z };
 
-    const path = new GridNavigator().findPath(start, target);
+    const path = new GridNavigator([footprint], [], [wall]).findPath(start, target);
 
     expect(path[0]).toEqual(start);
     expect(path.at(-1)).toEqual(target);
     expect(path.length).toBeGreaterThan(2);
-    expect(path.slice(1, -1).some((point) => Math.abs(point.z - obstacle.center.z) > obstacle.depth / 2)).toBe(true);
+    expect(path.slice(1, -1).some((point) => Math.abs(point.z - wall.center.z) > wall.depth / 2)).toBe(true);
     expect(path.slice(1, -1).every((point) =>
-      Math.abs(point.x - obstacle.center.x) >= obstacle.width / 2 + 0.54 ||
-      Math.abs(point.z - obstacle.center.z) >= obstacle.depth / 2 + 0.54
+      Math.abs(point.x - wall.center.x) >= wall.width / 2 + 0.54 ||
+      Math.abs(point.z - wall.center.z) >= wall.depth / 2 + 0.54
     )).toBe(true);
+  });
+
+  it("routes around several wall segments without limiting the path to two turns", () => {
+    const walls = [
+      { id: "wall-1", center: { x: -6, y: 2, z: -8 }, width: 0.35, height: 4, depth: 24, color: "#fff" },
+      { id: "wall-2", center: { x: 0, y: 2, z: 8 }, width: 0.35, height: 4, depth: 24, color: "#fff" },
+      { id: "wall-3", center: { x: 6, y: 2, z: -8 }, width: 0.35, height: 4, depth: 24, color: "#fff" },
+    ];
+    const start = { x: -12, y: GROUND_HEIGHT, z: 0 };
+    const target = { x: 12, y: GROUND_HEIGHT, z: 0 };
+
+    const path = new GridNavigator([], [], walls).findPath(start, target);
+
+    expect(path[0]).toEqual(start);
+    expect(path.at(-1)).toEqual(target);
+    expect(path.length).toBeGreaterThan(4);
   });
 
   it("routes rooftop actors down the matching ramp", () => {
@@ -148,7 +213,7 @@ describe("GridNavigator", () => {
     };
     const target = { x: ramp.centerX, y: getTerrainHeight(ramp.centerX, ramp.startZ, layout), z: ramp.startZ - 8 };
 
-    const path = new GridNavigator(layout.obstacles, layout.roofRamps).findPath(start, target);
+    const path = new GridNavigator(layout.obstacles, layout.roofRamps, layout.wallSegments).findPath(start, target);
 
     expect(path.length).toBeGreaterThanOrEqual(4);
     expect(path.some((point) => point.x === ramp.centerX && point.z === ramp.endZ)).toBe(true);

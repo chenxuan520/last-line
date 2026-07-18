@@ -607,6 +607,135 @@ h1 {
   opacity: 0.92;
 }
 
+.crosshair.is-hidden {
+  display: none;
+}
+
+.scope-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: none;
+  overflow: hidden;
+  background: radial-gradient(circle at center, transparent 0 32vh, rgb(0 0 0 / 96%) 32.4vh);
+  pointer-events: none;
+}
+
+.scope-overlay.is-visible {
+  display: block;
+}
+
+.scope-overlay::before,
+.scope-overlay::after,
+.scope-overlay i,
+.scope-overlay b {
+  position: absolute;
+  background: rgb(16 22 19 / 85%);
+  content: "";
+}
+
+.scope-overlay::before,
+.scope-overlay::after {
+  top: 50%;
+  left: 50%;
+  width: 32vh;
+  height: 1px;
+}
+
+.scope-overlay::before {
+  transform: translateX(-100%);
+}
+
+.scope-overlay::after {
+  transform: translateX(0);
+}
+
+.scope-overlay i,
+.scope-overlay b {
+  top: 50%;
+  left: 50%;
+  width: 1px;
+  height: 32vh;
+}
+
+.scope-overlay i {
+  transform: translateY(-100%);
+}
+
+.leaderboard {
+  position: absolute;
+  top: 9vh;
+  left: 50%;
+  z-index: 20;
+  width: min(720px, 78vw);
+  max-height: 78vh;
+  overflow: hidden;
+  transform: translateX(-50%);
+  border: 1px solid rgb(183 197 139 / 35%);
+  background: rgb(10 16 14 / 94%);
+  color: var(--ink);
+  box-shadow: 0 18px 60px rgb(0 0 0 / 45%);
+}
+
+.leaderboard[hidden] {
+  display: none;
+}
+
+.leaderboard header,
+.leaderboard [data-hud="leaderboard-rows"] > div {
+  display: grid;
+  grid-template-columns: 54px 1fr 100px 90px;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+}
+
+.leaderboard header {
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px solid rgb(183 197 139 / 25%);
+  color: var(--signal-bright);
+}
+
+.leaderboard [data-hud="leaderboard-rows"] {
+  max-height: 68vh;
+  overflow: auto;
+}
+
+.leaderboard [data-hud="leaderboard-rows"] > div {
+  border-bottom: 1px solid rgb(255 255 255 / 5%);
+  font: 700 11px/1.2 var(--tactical-font);
+}
+
+.leaderboard [data-hud="leaderboard-rows"] > div.is-alive em {
+  color: #a9d98d;
+}
+
+.leaderboard [data-hud="leaderboard-rows"] > div.is-eliminated {
+  color: rgb(214 218 207 / 42%);
+  background: rgb(70 22 19 / 12%);
+}
+
+.leaderboard [data-hud="leaderboard-rows"] > div.is-eliminated span {
+  text-decoration: line-through;
+  text-decoration-color: rgb(221 93 73 / 70%);
+}
+
+.leaderboard [data-hud="leaderboard-rows"] > div.is-eliminated em {
+  color: #dd6855;
+}
+
+.leaderboard [data-hud="leaderboard-rows"] > div.is-player {
+  box-shadow: inset 3px 0 0 var(--signal-bright);
+  background: rgb(188 204 140 / 18%);
+  color: var(--signal-bright);
+}
+
+.leaderboard em {
+  color: var(--ink-dim);
+  font-style: normal;
+}
+
 .hit-marker {
   position: absolute;
   top: 50%;

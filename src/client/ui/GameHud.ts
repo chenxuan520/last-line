@@ -1,6 +1,7 @@
 import type { AssetCatalog } from "../../assets/AssetCatalog";
+import { BATTLE_ROYALE_CONFIG } from "../../config/battleRoyale";
 import { ITEMS } from "../../config/items";
-import { MAP_POINTS } from "../../config/map";
+import { createMapLayout, createMapRoadSegments, MAP_SIZE } from "../../config/map";
 import { WEAPONS } from "../../config/weapons";
 import {
   getActiveWeapon,
@@ -28,19 +29,28 @@ export class GameHud {
   public constructor(
     root: HTMLDivElement,
     private readonly assets: AssetCatalog,
+    mapSeed: number,
     onResume: () => void,
     private readonly onRestart: () => void,
   ) {
     const crosshair = assets.resolve("ui.crosshair", "svg");
+    const mapLayout = createMapLayout(mapSeed);
+    const mapPoints = mapLayout.mapPoints;
+    const mapRoadPath = createMapRoadSegments(mapLayout.landingZones).map(([startX, startZ, endX, endZ]) => {
+      const start = projectToMinimap({ x: startX, y: 0, z: startZ });
+      const end = projectToMinimap({ x: endX, y: 0, z: endZ });
+      return `M${start.x} ${start.y}L${end.x} ${end.y}`;
+    }).join(" ");
     root.className = "is-playing";
     root.innerHTML = `
       <section class="hud" aria-label="游戏状态">
         <header class="hud-topbar">
           <div class="location-block"><span class="hud-kicker">LAST LINE // 01</span><strong>苍岬岛</strong><small data-hud="phase">航线部署</small></div>
           <div class="zone-block"><span data-hud="zone-label">安全区待命</span><strong data-hud="zone-time">--:--</strong><i></i></div>
-          <div class="alive-counter"><small>存活</small><span data-hud="alive">20</span><b data-hud="kills">0 击杀</b></div>
+          <div class="alive-counter"><small>存活</small><span data-hud="alive">${BATTLE_ROYALE_CONFIG.participantCount}</span><b data-hud="kills">0 击杀</b></div>
         </header>
-        <img class="crosshair" src="${crosshair.url}" alt="" />
+        <img class="crosshair" data-hud="crosshair" src="${crosshair.url}" alt="" />
+        <div class="scope-overlay" data-hud="scope" aria-hidden="true"><i></i><b></b></div>
         <div class="hit-marker" data-hud="hit-marker">×</div>
         <div class="damage-flash" data-hud="damage-flash"></div>
         <div class="kill-feed" data-hud="kill-feed" aria-live="polite"></div>
@@ -48,12 +58,12 @@ export class GameHud {
           <div class="minimap-heading"><strong>TACTICAL MAP</strong><span data-hud="map-status">安全区内</span></div>
           <svg class="minimap" viewBox="0 0 200 200" role="img" aria-label="苍岬岛小地图">
             <rect class="minimap-sea" width="200" height="200" />
-            <path class="minimap-island" d="M18 50 L48 18 L103 10 L158 28 L190 72 L184 142 L151 186 L91 194 L37 171 L10 122 Z" />
+            <rect class="minimap-island" x="10" y="10" width="180" height="180" rx="5" />
             <g class="minimap-grid">
               <path d="M50 10V190 M100 10V190 M150 10V190 M10 50H190 M10 100H190 M10 150H190" />
             </g>
-            <g class="minimap-roads"><path d="M48 49 L130 61 L146 129 L61 129 Z M48 49 L61 129 M130 61 L61 129" /></g>
-            <g class="minimap-pois">${MAP_POINTS.map((point) => {
+            <g class="minimap-roads"><path d="${mapRoadPath}" /></g>
+            <g class="minimap-pois">${mapPoints.map((point) => {
               const projected = projectToMinimap(point.position);
               return `<g transform="translate(${projected.x} ${projected.y})"><circle r="2" /><text y="-5">${point.name}</text></g>`;
             }).join("")}</g>
@@ -63,7 +73,7 @@ export class GameHud {
             <g class="minimap-player" data-hud="map-player"><path d="M0 -7 L5 6 L0 3 L-5 6 Z" /></g>
             <text class="minimap-north" x="188" y="13">N</text>
           </svg>
-          <div class="minimap-scale"><span></span><small>200 M</small></div>
+          <div class="minimap-scale"><span></span><small>${Math.round(MAP_SIZE * 0.17 / 100) * 100} M</small></div>
         </aside>
         <div class="interaction-prompt" data-hud="prompt"></div>
         <div class="healing-progress" data-hud="healing" hidden>
@@ -98,6 +108,10 @@ export class GameHud {
           <button type="button" data-action="resume">继续游戏</button>
         </div>
         <div class="result-card" data-hud="result" hidden></div>
+        <aside class="leaderboard" data-hud="leaderboard" hidden aria-label="本局排行榜">
+          <header><strong>本局排行榜</strong><span>存活优先 · 击杀排序</span></header>
+          <div data-hud="leaderboard-rows"></div>
+        </aside>
       </section>
     `;
     for (const element of root.querySelectorAll<HTMLElement>("[data-hud]")) {
@@ -110,14 +124,25 @@ export class GameHud {
     root.querySelector<HTMLButtonElement>("[data-action='resume']")?.addEventListener("click", onResume);
   }
 
-  public update(state: MatchState, player: ActorState, pointerLocked: boolean, fps: number): void {
+  public update(
+    state: MatchState,
+    player: ActorState,
+    pointerLocked: boolean,
+    fps: number,
+    scoped = false,
+    leaderboardVisible = false,
+  ): void {
     this.setText("health", Math.ceil(player.health).toString());
     this.setText("armor", Math.ceil(player.armor).toString());
     this.setText("helmet", player.inventory.helmetLevel.toString());
     setWidth(this.requireElement("health-bar"), player.health / player.maxHealth * 100);
     setWidth(this.requireElement("armor-bar"), player.maxArmor > 0 ? player.armor / player.maxArmor * 100 : 0);
     this.setText("alive", Object.values(state.actors).filter((actor) => actor.alive).length.toString());
-    this.setText("kills", `${player.kills} 击杀`);
+    const jumpedCount = Object.values(state.actors).filter((actor) => actor.deployment !== "aircraft").length;
+    this.setText(
+      "kills",
+      state.phase === "flight" ? `已跳伞 ${jumpedCount} / ${Object.keys(state.actors).length}` : `${player.kills} 击杀`,
+    );
     this.setText("performance", `${Math.round(fps)} FPS`);
     this.setText("phase", phaseLabel(state, player));
     this.setText("zone-label", zoneLabel(state));
@@ -149,6 +174,9 @@ export class GameHud {
 
     const weapon = getActiveWeapon(player);
     const config = weapon ? WEAPONS[weapon.weaponId] : undefined;
+    const scopedWeapon = config?.scopeFov !== undefined;
+    this.requireElement("scope").classList.toggle("is-visible", scoped);
+    this.requireElement("crosshair").classList.toggle("is-hidden", scopedWeapon);
     const weaponIconId = weapon ? `ui.weapon.${weapon.weaponId}` : "";
     if (weaponIconId !== this.weaponIconId) {
       const weaponIcon = this.requireElement("weapon-icon") as HTMLImageElement;
@@ -186,6 +214,20 @@ export class GameHud {
       this.promptSignature = promptSignature;
     }
     this.requireElement("pause").classList.toggle("is-visible", !pointerLocked && player.alive && !this.resultVisible);
+    this.updateLeaderboard(state, player.id, leaderboardVisible);
+  }
+
+  private updateLeaderboard(state: MatchState, playerId: string, visible: boolean): void {
+    const leaderboard = this.requireElement("leaderboard");
+    leaderboard.hidden = !visible;
+    if (!visible) return;
+    const actors = sortLeaderboardActors(Object.values(state.actors));
+    this.requireElement("leaderboard-rows").innerHTML = actors.map((actor, index) => `
+      <div class="${actor.alive ? "is-alive" : "is-eliminated"}${actor.id === playerId ? " is-player" : ""}">
+        <b>${index + 1}</b><span>${actorLabel(actor.id, playerId)}</span>
+        <em>${actor.alive ? "存活" : "淘汰"}</em><strong>${actor.kills} 击杀</strong>
+      </div>
+    `).join("");
   }
 
   public handleEvents(events: readonly GameEvent[], playerId: string): void {
@@ -197,9 +239,10 @@ export class GameHud {
         replayAnimation(this.damageFlash);
       }
       if (event.type === "actor-died") {
+        const weaponLabel = event.weaponId ? WEAPONS[event.weaponId]?.label ?? event.weaponId : null;
         this.appendFeed(
           event.sourceId
-            ? `${actorLabel(event.sourceId, playerId)} 淘汰 ${actorLabel(event.actorId, playerId)}`
+            ? `${actorLabel(event.sourceId, playerId)} 使用 ${weaponLabel ?? "武器"} 淘汰 ${actorLabel(event.actorId, playerId)}`
             : `${actorLabel(event.actorId, playerId)} 倒在安全区外`,
         );
       }
@@ -218,8 +261,8 @@ export class GameHud {
     }
   }
 
-  public showEliminated(placement: number, kills: number): void {
-    this.showResultCard("任务失败", `第 ${placement} 名 · ${kills} 次淘汰`, "重新部署");
+  public showEliminated(placement: number, kills: number, eliminatedBy: string): void {
+    this.showResultCard("任务失败", `${eliminatedBy} · 第 ${placement} 名 · ${kills} 次淘汰`, "重新部署");
   }
 
   public showResult(result: MatchResult, playerId: string, kills: number): void {
@@ -320,6 +363,14 @@ export class GameHud {
     if (!element) throw new Error(`HUD 元素缺失: ${name}`);
     return element;
   }
+}
+
+export function sortLeaderboardActors(actors: readonly ActorState[]): ActorState[] {
+  return [...actors].sort((left, right) =>
+    Number(right.alive) - Number(left.alive) ||
+    right.kills - left.kills ||
+    left.id.localeCompare(right.id),
+  );
 }
 
 function assetUrl(url: string | undefined): string {

@@ -18,7 +18,7 @@ Each fixed step follows this order:
 
 `src/game/` has no DOM or Babylon dependency. `MatchState` contains serializable actors, inventories, ground loot, flight, safe zone, phase, and result data.
 
-`SimulationCombatWorld` performs hitscan and line-of-sight tests against fixed actor capsules and static map obstacles. Babylon meshes only present the state and never decide a hit.
+`SimulationCombatWorld` performs hitscan and line-of-sight tests against fixed actor capsules, generated wall segments, roof caps, ramps, and shared terrain data. Babylon meshes only present the state and never decide a hit.
 
 Simultaneous lethal damage uses a deterministic tick-based selector. The selected survivor still receives normal damage, armor reduction, and events, with health clamped to 1 only when every remaining actor would otherwise die in the same tick.
 
@@ -30,7 +30,7 @@ Each `BotController` has independent decision timers and memory. Bots use the sa
 
 ## Rendering
 
-`IslandScene` builds the 800m island, POIs, static collision geometry, procedural actors, loot markers, safe-zone ring, and first-person view weapon.
+`IslandScene` builds the 2400m island from per-match seeded map points: eight irregular named POIs, eight wilderness compounds, nearest-neighbor roads, randomly scattered enterable buildings, variable-density loot, dense natural details, procedural actors, a terrain-following safe-zone ribbon, and weapon-specific first-person/third-person models. The player camera applies scope FOV only while a sniper is active and the right mouse button is held.
 
 Optional GLB models are loaded asynchronously and instantiated as non-pickable visual children. Procedural models remain the fallback. Repeated loot drops reuse inactive state IDs and marker meshes, and scene disposal clears marker references and imported containers.
 
@@ -38,6 +38,7 @@ Optional GLB models are loaded asynchronously and instantiated as non-pickable v
 
 - Fixed 30 Hz rules with decoupled rendering
 - Staggered AI decisions based on distance
+- Bounded multi-wall path search with per-Bot path reuse
 - Shared procedural materials and cloned loot/tree meshes
 - Quality-dependent hardware scaling
 - No dynamic shadows or full rigid-body simulation

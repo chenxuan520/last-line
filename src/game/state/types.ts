@@ -52,6 +52,8 @@ export interface ActorState {
   deployment: "aircraft" | "parachuting" | "grounded";
   inventory: InventoryState;
   kills: number;
+  lastDamageDirection: Vector3State | null;
+  lastDamageElapsedSeconds: number;
 }
 
 export interface GroundLootState {
@@ -61,6 +63,7 @@ export interface GroundLootState {
   weapon?: WeaponState;
   position: Vector3State;
   available: boolean;
+  source?: "spawn" | "drop" | "death";
 }
 
 export interface SafeZoneState {
@@ -113,7 +116,7 @@ export type GameEvent =
       targetId: EntityId | null;
     }
   | { type: "actor-damaged"; actorId: EntityId; sourceId: EntityId | null; damage: number }
-  | { type: "actor-died"; actorId: EntityId; sourceId: EntityId | null }
+  | { type: "actor-died"; actorId: EntityId; sourceId: EntityId | null; weaponId: string | null }
   | { type: "reload-started"; actorId: EntityId }
   | { type: "reload-completed"; actorId: EntityId }
   | { type: "item-picked"; actorId: EntityId; lootId: EntityId; itemId: string; quantity: number }
@@ -169,6 +172,8 @@ export function createActorState(
       usingItem: null,
     },
     kills: 0,
+    lastDamageDirection: null,
+    lastDamageElapsedSeconds: -1,
   };
 }
 

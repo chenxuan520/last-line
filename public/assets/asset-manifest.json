@@ -48,6 +48,12 @@
       "fallback": "fallback.ui"
     },
     {
+      "id": "ui.weapon.sniper",
+      "type": "svg",
+      "url": "./assets/ui/weapon-sniper.svg",
+      "fallback": "fallback.ui"
+    },
+    {
       "id": "ui.item.ammo.rifle",
       "type": "image",
       "url": "./assets/ui/item-ammo-rifle.webp",
@@ -63,6 +69,12 @@
       "id": "ui.item.ammo.shell",
       "type": "image",
       "url": "./assets/ui/item-ammo-shell.webp",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "ui.item.ammo.sniper",
+      "type": "svg",
+      "url": "./assets/ui/item-ammo-sniper.svg",
       "fallback": "fallback.ui"
     },
     {
@@ -118,6 +130,24 @@
       "type": "procedural-model",
       "fallback": "fallback.model",
       "metadata": { "shape": "rifle", "color": "#283126" }
+    },
+    {
+      "id": "model.weapon.smg",
+      "type": "procedural-model",
+      "fallback": "fallback.model",
+      "metadata": { "shape": "smg", "color": "#263838" }
+    },
+    {
+      "id": "model.weapon.shotgun",
+      "type": "procedural-model",
+      "fallback": "fallback.model",
+      "metadata": { "shape": "shotgun", "color": "#3b3028" }
+    },
+    {
+      "id": "model.weapon.sniper",
+      "type": "procedural-model",
+      "fallback": "fallback.model",
+      "metadata": { "shape": "sniper", "color": "#354238" }
     }
   ]
 }

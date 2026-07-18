@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { GridNavigator } from "../../src/ai/navigation/GridNavigator";
 import type { BattleRoyaleConfig } from "../../src/config/battleRoyale";
-import { LOOT_SPAWN_POINTS, MAP_OBSTACLES } from "../../src/config/map";
+import { createMapLayout, LOOT_SPAWN_POINTS, MAP_WALL_SEGMENTS } from "../../src/config/map";
 import { WEAPONS } from "../../src/config/weapons";
 import { BotController } from "../../src/controllers/BotController";
 import { createIdleCommand, type ActorCommand } from "../../src/game/commands/ActorCommand";
@@ -13,9 +13,9 @@ import { InventorySystem } from "../../src/game/systems/InventorySystem";
 import { SimulationCombatWorld } from "../../src/game/systems/SimulationCombatWorld";
 
 const TEST_CONFIG: BattleRoyaleConfig = {
-  participantCount: 20,
+  participantCount: 50,
   flightSeconds: 1,
-  safeZoneStages: [{ waitSeconds: 300, shrinkSeconds: 1, radius: 400, damagePerSecond: 0 }],
+  safeZoneStages: [{ waitSeconds: 300, shrinkSeconds: 1, radius: 1_200, damagePerSecond: 0 }],
 };
 const NO_COMBAT_WORLD: CombatWorld = { traceShot: () => null, hasLineOfSight: () => false };
 const SEEDS = [1, 7, 19, 42, 99] as const;
@@ -29,19 +29,19 @@ describe("AI loot reachability", () => {
     player.deployment = "grounded";
     const inventory = new InventorySystem();
 
-    expect(LOOT_SPAWN_POINTS).toHaveLength(72);
+    expect(LOOT_SPAWN_POINTS).toHaveLength(240);
     LOOT_SPAWN_POINTS.forEach((point, index) => {
-      const insideExpandedObstacle = MAP_OBSTACLES.some(
-        (obstacle) =>
-          point.x >= obstacle.center.x - obstacle.width / 2 - 0.5 &&
-          point.x <= obstacle.center.x + obstacle.width / 2 + 0.5 &&
-          point.z >= obstacle.center.z - obstacle.depth / 2 - 0.5 &&
-          point.z <= obstacle.center.z + obstacle.depth / 2 + 0.5,
+      const insideExpandedWall = MAP_WALL_SEGMENTS.some(
+        (wall) =>
+          point.x >= wall.center.x - wall.width / 2 - 0.5 &&
+          point.x <= wall.center.x + wall.width / 2 + 0.5 &&
+          point.z >= wall.center.z - wall.depth / 2 - 0.5 &&
+          point.z <= wall.center.z + wall.depth / 2 + 0.5,
       );
-      expect(insideExpandedObstacle, `loot point ${index} overlaps an expanded obstacle`).toBe(false);
+      expect(insideExpandedWall, `loot point ${index} overlaps an expanded wall`).toBe(false);
       expect(navigator.findPath(point, point), `loot point ${index} is not standable`).not.toHaveLength(0);
 
-      player.position = { x: point.x, y: 1.76, z: point.z };
+      player.position = { x: point.x, y: point.y + 1.31, z: point.z };
       player.inventory.backpack = [];
       state.groundLoot = {
         loot: {
@@ -57,7 +57,7 @@ describe("AI loot reachability", () => {
     });
   });
 
-  it.each(SEEDS)("arms at least 15 of 19 bots after landing with seed %i", (seed) => {
+  it.each(SEEDS)("arms at least 42 of 49 bots after landing with seed %i", (seed) => {
     const random = seededRandom(seed);
     const state = createBattleRoyaleState("player", TEST_CONFIG, random);
     const simulation = new GameSimulation(state, new BattleRoyaleMode(TEST_CONFIG, random), WEAPONS);
@@ -65,10 +65,12 @@ describe("AI loot reachability", () => {
     const controllers = new Map(
       bots.map((bot, index) => [bot.id, new BotController(index + 1, seededRandom(seed * 100 + index))]),
     );
+    const landingZones = createMapLayout(state.mapSeed).landingZones;
     simulation.start();
 
     let groundedAt: number | null = null;
-    for (let tick = 0; tick < 800; tick += 1) {
+    const landingPoiByBot = new Map<EntityId, number>();
+    for (let tick = 0; tick < 1_000; tick += 1) {
       const commands = new Map<EntityId, ActorCommand>([["player", createIdleCommand()]]);
       for (const bot of bots) {
         const controller = controllers.get(bot.id);
@@ -76,6 +78,10 @@ describe("AI loot reachability", () => {
         commands.set(bot.id, controller.update(bot, state, NO_COMBAT_WORLD, 0.25, "player"));
       }
       simulation.step(0.25, commands, NO_COMBAT_WORLD);
+      for (const bot of bots) {
+        if (bot.deployment !== "grounded" || landingPoiByBot.has(bot.id)) continue;
+        landingPoiByBot.set(bot.id, nearestPoiIndex(bot.position.x, bot.position.z, landingZones));
+      }
 
       if (bots.every((bot) => bot.deployment === "grounded")) {
         groundedAt ??= state.elapsedSeconds;
@@ -103,19 +109,26 @@ describe("AI loot reachability", () => {
         ),
       }));
     expect(bots.every((bot) => bot.deployment === "grounded")).toBe(true);
+    const landingCounts = new Map<number, number>();
+    for (const poiIndex of landingPoiByBot.values()) {
+      landingCounts.set(poiIndex, (landingCounts.get(poiIndex) ?? 0) + 1);
+    }
+    expect(landingCounts.size, `only ${landingCounts.size} landing zones for seed ${seed}`).toBeGreaterThanOrEqual(13);
+    expect(Math.max(...landingCounts.values()), `landing counts for seed ${seed}: ${JSON.stringify([...landingCounts])}`)
+      .toBeLessThanOrEqual(10);
     expect(
       armedBots.length,
       `${armedBots.length} bots armed, ${heldWeapons} weapons held, ${availableWeapons.length} available for seed ${seed}: ${JSON.stringify(unarmedPositions)}`,
-    ).toBeGreaterThanOrEqual(15);
-  });
+    ).toBeGreaterThanOrEqual(42);
+  }, 60_000);
 
-  it("lets 19 real bot controllers loot, fight, and produce one winner", () => {
+  it("lets 49 real bot controllers loot, fight, and produce one winner", () => {
     const config: BattleRoyaleConfig = {
-      participantCount: 20,
+      participantCount: 50,
       flightSeconds: 1,
       safeZoneStages: [
-        { waitSeconds: 130, shrinkSeconds: 20, radius: 220, damagePerSecond: 5 },
-        { waitSeconds: 35, shrinkSeconds: 20, radius: 75, damagePerSecond: 12 },
+        { waitSeconds: 130, shrinkSeconds: 20, radius: 660, damagePerSecond: 5 },
+        { waitSeconds: 35, shrinkSeconds: 20, radius: 210, damagePerSecond: 12 },
         { waitSeconds: 8, shrinkSeconds: 18, radius: 0, damagePerSecond: 80 },
       ],
     };
@@ -147,7 +160,7 @@ describe("AI loot reachability", () => {
     expect(allEvents.some((event) => event.type === "item-picked" && event.actorId.startsWith("bot-"))).toBe(true);
     expect(allEvents.some((event) => event.type === "shot-fired" && event.actorId.startsWith("bot-"))).toBe(true);
     expect(allEvents.some((event) => event.type === "actor-died" && event.sourceId?.startsWith("bot-"))).toBe(true);
-  });
+  }, 60_000);
 });
 
 function seededRandom(seed: number): () => number {
@@ -159,4 +172,17 @@ function seededRandom(seed: number): () => number {
     result ^= result + Math.imul(result ^ (result >>> 7), result | 61);
     return ((result ^ (result >>> 14)) >>> 0) / 4_294_967_296;
   };
+}
+
+function nearestPoiIndex(x: number, z: number, landingZones: ReturnType<typeof createMapLayout>["landingZones"]): number {
+  let nearestIndex = 0;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+  landingZones.forEach((poi, index) => {
+    const distance = Math.hypot(x - poi.position.x, z - poi.position.z);
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearestIndex = index;
+    }
+  });
+  return nearestIndex;
 }

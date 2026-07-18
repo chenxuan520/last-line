@@ -3,7 +3,7 @@ import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { AssetCatalog } from "../assets/AssetCatalog";
 import { AudioFeedback } from "../client/audio/AudioFeedback";
 import { CombatEffects } from "../client/render/CombatEffects";
-import { createIslandScene, setActorWeaponVisual } from "../client/render/scenes/IslandScene";
+import { createIslandScene, setActorParachuteVisual, setActorWeaponVisual } from "../client/render/scenes/IslandScene";
 import { GameHud } from "../client/ui/GameHud";
 import type { GameSettings } from "../config/settings";
 import { WEAPONS } from "../config/weapons";
@@ -13,7 +13,13 @@ import type { ActorCommand } from "../game/commands/ActorCommand";
 import { FixedStepClock } from "../game/FixedStepClock";
 import { GameSimulation } from "../game/GameSimulation";
 import { BattleRoyaleMode, createBattleRoyaleState } from "../game/modes/BattleRoyaleMode";
-import { getActiveWeapon, type ActorState, type EntityId, type MatchState } from "../game/state/types";
+import {
+  getActiveWeapon,
+  type ActorState,
+  type EntityId,
+  type GameEvent,
+  type MatchState,
+} from "../game/state/types";
 import { SimulationCombatWorld } from "../game/systems/SimulationCombatWorld";
 
 const PLAYER_ID = "player";
@@ -35,9 +41,11 @@ export class BattleRoyaleSession {
   private readonly audio: AudioFeedback;
   private readonly effects: CombatEffects;
   private readonly actorVisualSignatures = new Map<EntityId, string>();
+  private reloadVisualActive = false;
   private hud: GameHud | null = null;
   private active = false;
   private playerEliminated = false;
+  private spectatorActorId: EntityId | null = null;
   private lastVisualElapsedSeconds = -1;
 
   private constructor(
@@ -84,7 +92,13 @@ export class BattleRoyaleSession {
   public start(): void {
     if (this.active) return;
     this.active = true;
-    this.hud = new GameHud(this.uiRoot, this.assets, () => this.requestPointerLock(), this.onRestart);
+    this.hud = new GameHud(
+      this.uiRoot,
+      this.assets,
+      this.simulation.state.mapSeed,
+      () => this.requestPointerLock(),
+      this.onRestart,
+    );
     this.audio.start();
     this.simulation.start();
     this.processEvents();
@@ -103,7 +117,14 @@ export class BattleRoyaleSession {
     }
     this.effects.update(frameSeconds);
     this.syncVisuals();
-    this.hud?.update(this.simulation.state, player, pointerLocked, fps);
+    this.hud?.update(
+      this.simulation.state,
+      player,
+      pointerLocked,
+      fps,
+      this.humanController.isScoped(player),
+      this.humanController.isLeaderboardVisible(),
+    );
   }
 
   public dispose(): void {
@@ -145,8 +166,21 @@ export class BattleRoyaleSession {
           this.playerEliminated = true;
           if (document.pointerLockElement === this.canvas) void document.exitPointerLock();
           const placement = Object.values(this.simulation.state.actors).filter((actor) => actor.alive).length + 1;
-          this.hud?.showEliminated(placement, this.getActor(PLAYER_ID).kills);
+          const killer = event.sourceId ? this.simulation.state.actors[event.sourceId] : undefined;
+          const killerLabel = killer?.kind === "bot" ? `AI-${/\d+$/.exec(killer.id)?.[0] ?? killer.id}` : killer ? "玩家" : "安全区";
+          const weaponLabel = event.weaponId ? WEAPONS[event.weaponId]?.label ?? event.weaponId : null;
+          this.hud?.showEliminated(
+            placement,
+            this.getActor(PLAYER_ID).kills,
+            event.sourceId ? `被 ${killerLabel} 使用 ${weaponLabel ?? "武器"} 淘汰` : "被安全区淘汰",
+          );
         }
+        this.spectatorActorId = resolveSpectatorActorId(
+          PLAYER_ID,
+          this.spectatorActorId,
+          event,
+          this.simulation.state.actors,
+        );
       }
       if (event.type === "item-picked") {
         const loot = this.simulation.state.groundLoot[event.lootId];
@@ -163,20 +197,30 @@ export class BattleRoyaleSession {
 
   private syncVisuals(): void {
     const player = this.getActor(PLAYER_ID);
+    const spectator = this.spectatorActorId ? this.simulation.state.actors[this.spectatorActorId] : undefined;
+    const cameraActor = spectator?.alive ? spectator : player;
+    const activeViewWeapon = getActiveWeapon(cameraActor);
+    const scoped = cameraActor.id === PLAYER_ID && this.humanController.isScoped(player);
+    this.camera.fov = scoped ? WEAPONS[activeViewWeapon?.weaponId ?? ""]?.scopeFov ?? 1.18 : 1.18;
+    this.viewWeaponRoot.setEnabled(Boolean(activeViewWeapon) && !scoped && cameraActor.deployment === "grounded");
+    setActorWeaponVisual(this.viewWeaponRoot, activeViewWeapon?.weaponId ?? null);
+    this.syncReloadVisual(activeViewWeapon);
     if (this.lastVisualElapsedSeconds !== this.simulation.state.elapsedSeconds) {
       this.lastVisualElapsedSeconds = this.simulation.state.elapsedSeconds;
-      this.viewWeaponRoot.setEnabled(Boolean(getActiveWeapon(player)));
-      this.aircraftVisualRoot.setEnabled(player.deployment === "aircraft");
-      this.camera.position.set(player.position.x, player.position.y, player.position.z);
-      this.camera.rotation.set(player.pitch, player.yaw, 0);
+      this.aircraftVisualRoot.setEnabled(cameraActor.id === PLAYER_ID && player.deployment === "aircraft");
+      this.camera.position.set(cameraActor.position.x, cameraActor.position.y, cameraActor.position.z);
+      this.camera.rotation.set(cameraActor.pitch, cameraActor.yaw, 0);
       for (const [actorId, root] of this.actorRoots) {
         const actor = this.getActor(actorId);
         root.position.set(actor.position.x, actor.position.y, actor.position.z);
         root.rotation.y = actor.yaw;
-        const signature = `${actor.alive}:${actor.deployment}:${getActiveWeapon(actor)?.weaponId ?? "none"}`;
+        const signature = `${actor.alive}:${actor.deployment}:${getActiveWeapon(actor)?.weaponId ?? "none"}:${actorId === cameraActor.id}`;
         if (this.actorVisualSignatures.get(actorId) !== signature) {
-          root.setEnabled(actor.alive && actor.deployment !== "aircraft");
-          if (actor.kind === "bot") setActorWeaponVisual(root, Boolean(getActiveWeapon(actor)));
+          root.setEnabled(actor.alive && actor.deployment !== "aircraft" && actorId !== cameraActor.id);
+          if (actor.kind === "bot") {
+            setActorWeaponVisual(root, getActiveWeapon(actor)?.weaponId ?? null);
+            setActorParachuteVisual(root, actor.deployment === "parachuting");
+          }
           this.actorVisualSignatures.set(actorId, signature);
         }
       }
@@ -187,6 +231,19 @@ export class BattleRoyaleSession {
       }
       const zone = this.simulation.state.safeZone;
       this.syncSafeZoneRing(zone.center.x, zone.center.z, zone.radius);
+    }
+  }
+
+  private syncReloadVisual(weapon: ReturnType<typeof getActiveWeapon>): void {
+    const transform = getReloadVisualTransform(weapon);
+    if (transform) {
+      this.viewWeaponRoot.position.set(0, transform.y, 0);
+      this.viewWeaponRoot.rotation.set(transform.rotationX, 0, transform.rotationZ);
+      this.reloadVisualActive = true;
+    } else if (this.reloadVisualActive) {
+      this.viewWeaponRoot.position.setAll(0);
+      this.viewWeaponRoot.rotation.setAll(0);
+      this.reloadVisualActive = false;
     }
   }
 
@@ -202,4 +259,28 @@ export class BattleRoyaleSession {
       // Embedded and headless browsers may reject pointer lock; the resume card remains available.
     });
   }
+}
+
+export function resolveSpectatorActorId(
+  playerId: EntityId,
+  currentSpectatorId: EntityId | null,
+  event: Extract<GameEvent, { type: "actor-died" }>,
+  actors: Readonly<Record<EntityId, ActorState>>,
+): EntityId | null {
+  if (event.actorId !== playerId && event.actorId !== currentSpectatorId) return currentSpectatorId;
+  const killer = event.sourceId ? actors[event.sourceId] : undefined;
+  if (killer?.alive && killer.id !== playerId) return killer.id;
+  return Object.values(actors)
+    .filter((actor) => actor.alive && actor.id !== playerId)
+    .sort((left, right) => left.id.localeCompare(right.id))[0]?.id ?? null;
+}
+
+export function getReloadVisualTransform(
+  weapon: ReturnType<typeof getActiveWeapon>,
+): { y: number; rotationX: number; rotationZ: number } | null {
+  if (!weapon || weapon.reloadSeconds <= 0) return null;
+  const totalSeconds = WEAPONS[weapon.weaponId]?.reloadSeconds ?? 1;
+  const progress = 1 - weapon.reloadSeconds / totalSeconds;
+  const dip = Math.sin(Math.max(0, Math.min(1, progress)) * Math.PI);
+  return { y: -0.18 * dip, rotationX: -0.5 * dip, rotationZ: 0.22 * dip };
 }

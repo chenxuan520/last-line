@@ -20,9 +20,9 @@ import type { AssetCatalog } from "../../../assets/AssetCatalog";
 import type { AssetEntry } from "../../../assets/types";
 import {
   BUILDING_ROOF_CAP_HEIGHT,
+  createMapRoadSegments,
   createMapLayout,
   getTerrainHeight,
-  MAP_POINTS,
   MAP_SIZE,
   TERRAIN_GRID_SUBDIVISIONS,
   type MapLayout,
@@ -33,35 +33,24 @@ import { loadCatalogModel } from "../loadCatalogModel";
 
 const INITIAL_SAFE_ZONE_RADIUS = MAP_SIZE * 0.36;
 const TERRAIN_PATCHES: ReadonlyArray<readonly [number, number, number, number, number, "mud" | "grass"]> = [
-  [-310, -190, 92, 58, 0.2, "grass"],
-  [-260, 84, 72, 42, -0.45, "mud"],
-  [-118, 278, 104, 54, 0.14, "grass"],
-  [42, 284, 82, 44, -0.28, "mud"],
-  [248, 224, 110, 62, 0.32, "grass"],
-  [310, 92, 74, 48, -0.52, "mud"],
-  [292, -104, 92, 52, 0.22, "grass"],
-  [248, -286, 112, 56, -0.16, "mud"],
-  [72, -306, 88, 50, 0.42, "grass"],
-  [-82, -258, 108, 64, -0.22, "mud"],
-  [-286, -306, 78, 46, 0.31, "grass"],
-  [-332, 18, 76, 52, -0.12, "mud"],
-  [-48, 42, 94, 58, 0.38, "grass"],
-  [82, -54, 70, 42, -0.35, "mud"],
-  [322, 330, 64, 38, 0.18, "grass"],
-  [-330, 322, 86, 48, -0.28, "mud"],
+  [-620, -380, 184, 116, 0.2, "grass"],
+  [-520, 168, 144, 84, -0.45, "mud"],
+  [-236, 556, 208, 108, 0.14, "grass"],
+  [84, 568, 164, 88, -0.28, "mud"],
+  [496, 448, 220, 124, 0.32, "grass"],
+  [620, 184, 148, 96, -0.52, "mud"],
+  [584, -208, 184, 104, 0.22, "grass"],
+  [496, -572, 224, 112, -0.16, "mud"],
+  [144, -612, 176, 100, 0.42, "grass"],
+  [-164, -516, 216, 128, -0.22, "mud"],
+  [-572, -612, 156, 92, 0.31, "grass"],
+  [-664, 36, 152, 104, -0.12, "mud"],
+  [-96, 84, 188, 116, 0.38, "grass"],
+  [164, -108, 140, 84, -0.35, "mud"],
+  [644, 660, 128, 76, 0.18, "grass"],
+  [-660, 644, 172, 96, -0.28, "mud"],
 ];
-const ROAD_SEGMENTS: ReadonlyArray<readonly [number, number, number, number]> = [
-  [-210, 205, -30, 180],
-  [-30, 180, 120, 155],
-  [120, 155, 145, 0],
-  [145, 0, 190, -185],
-  [190, -185, 15, -150],
-  [15, -150, -155, -115],
-  [-155, -115, -190, 35],
-  [-190, 35, -210, 205],
-  [-190, 35, 145, 0],
-];
-const POI_TYPES = ["harbor", "town", "warehouse", "station"] as const;
+const POI_TYPES = ["harbor", "town", "warehouse", "station", "town", "station", "warehouse", "town"] as const;
 const TERRAIN_COLORS = {
   ground: Color3.FromHexString("#5f704f"),
   highland: Color3.FromHexString("#4c5943"),
@@ -73,6 +62,8 @@ const TERRAIN_COLORS = {
   poiAccent: Color3.FromHexString("#a37848"),
   poiDark: Color3.FromHexString("#434b4f"),
 } as const;
+type WeaponPiece = readonly [string, "body" | "gear" | "barrel", number, number, number, number, number, number, number?];
+type WeaponVisualId = "rifle" | "smg" | "shotgun" | "sniper";
 
 interface IslandMaterials {
   ground: StandardMaterial;
@@ -93,8 +84,12 @@ interface IslandMaterials {
   botBody: StandardMaterial;
   playerHitbox: StandardMaterial;
   gear: StandardMaterial;
-  weapon: StandardMaterial;
+  weaponRifle: StandardMaterial;
+  weaponSmg: StandardMaterial;
+  weaponShotgun: StandardMaterial;
+  weaponSniper: StandardMaterial;
   loot: StandardMaterial;
+  deathLoot: StandardMaterial;
   safeZone: StandardMaterial;
 }
 
@@ -127,8 +122,8 @@ export async function createIslandScene(
   scene.clearColor = new Color4(0.36, 0.44, 0.46, 1);
   scene.collisionsEnabled = true;
   scene.fogMode = Scene.FOGMODE_LINEAR;
-  scene.fogStart = 390;
-  scene.fogEnd = 940;
+  scene.fogStart = MAP_SIZE * 0.65;
+  scene.fogEnd = MAP_SIZE * 1.1;
   scene.fogColor = new Color3(0.46, 0.53, 0.53);
   scene.skipPointerMovePicking = true;
 
@@ -152,10 +147,11 @@ export async function createIslandScene(
   const aircraftVisualRoot = createAircraftVisual(scene, camera, materials);
   aircraftVisualRoot.setEnabled(player.deployment === "aircraft");
   const viewWeaponRoot = createViewWeapon(scene, camera, materials);
+  setActorWeaponVisual(viewWeaponRoot, getActiveWeapon(player)?.weaponId ?? null);
   viewWeaponRoot.setEnabled(Boolean(getActiveWeapon(player)));
   await replaceCatalogModels(scene, assets, actors, actorRoots, viewWeaponRoot);
 
-  const { lootMeshes, syncLootMeshes } = createLootMeshes(scene, groundLoot, materials.loot);
+  const { lootMeshes, syncLootMeshes } = createLootMeshes(scene, groundLoot, materials.loot, materials.deathLoot);
   const { mesh: safeZoneRing, sync: syncSafeZoneRing } = createSafeZoneRing(scene, materials.safeZone, layout);
 
   return {
@@ -178,9 +174,10 @@ async function replaceCatalogModels(
   actorRoots: Map<EntityId, TransformNode>,
   viewWeaponRoot: TransformNode,
 ): Promise<void> {
-  const [character, weapon] = await Promise.all([
+  const weaponIds = ["rifle", "smg", "shotgun", "sniper"] as const;
+  const [character, ...weapons] = await Promise.all([
     loadCatalogModel(scene, assets, "model.character.enemy"),
-    loadCatalogModel(scene, assets, "model.weapon.rifle"),
+    ...weaponIds.map((weaponId) => loadCatalogModel(scene, assets, `model.weapon.${weaponId}`)),
   ]);
 
   if (character) {
@@ -188,17 +185,32 @@ async function replaceCatalogModels(
       if (actor.kind !== "bot") continue;
       const root = actorRoots.get(actor.id);
       if (!root) continue;
-      root.getChildMeshes().forEach((mesh) => mesh.setEnabled(false));
+      root.getChildMeshes()
+        .filter((mesh) => mesh.metadata?.actorVisual !== "weapon" && mesh.metadata?.actorVisual !== "parachute")
+        .forEach((mesh) => mesh.setEnabled(false));
       const instance = character.container.instantiateModelsToScene((name) => `${actor.id}-${name}`);
       attachModel(instance.rootNodes, root, character.descriptor);
     }
     scene.onDisposeObservable.addOnce(() => character.container.dispose());
   }
 
-  if (weapon) {
-    scene.meshes.filter((mesh) => mesh.name.startsWith("view-rifle-")).forEach((mesh) => mesh.setEnabled(false));
-    const instance = weapon.container.instantiateModelsToScene((name) => `view-${name}`);
-    attachModel(instance.rootNodes, viewWeaponRoot, weapon.descriptor, true);
+  for (const [index, weapon] of weapons.entries()) {
+    const weaponId = weaponIds[index];
+    if (!weapon || !weaponId) continue;
+    suppressProceduralWeapon(viewWeaponRoot, weaponId);
+    const viewInstance = weapon.container.instantiateModelsToScene((name) => `view-${weaponId}-${name}`);
+    attachModel(viewInstance.rootNodes, viewWeaponRoot, weapon.descriptor, true, weaponId);
+    for (const actor of Object.values(actors)) {
+      if (actor.kind !== "bot") continue;
+      const root = actorRoots.get(actor.id);
+      if (!root) continue;
+      suppressProceduralWeapon(root, weaponId);
+      const instance = weapon.container.instantiateModelsToScene((name) => `${actor.id}-${weaponId}-${name}`);
+      attachModel(instance.rootNodes, root, weapon.descriptor, false, weaponId);
+      setActorWeaponVisual(root, getActiveWeapon(actor)?.weaponId ?? null);
+    }
+    const player = Object.values(actors).find((actor) => actor.kind === "player");
+    setActorWeaponVisual(viewWeaponRoot, player ? getActiveWeapon(player)?.weaponId ?? null : null);
     scene.onDisposeObservable.addOnce(() => weapon.container.dispose());
   }
 }
@@ -208,6 +220,7 @@ function attachModel(
   parent: TransformNode | UniversalCamera,
   descriptor: AssetEntry,
   viewModel = false,
+  weaponId?: WeaponVisualId,
 ): void {
   const scale = numberMetadata(descriptor, "scale", 1);
   const x = numberMetadata(descriptor, "offsetX", viewModel ? 0.38 : 0);
@@ -218,9 +231,13 @@ function attachModel(
     node.parent = parent;
     node.position.set(x, y, z);
     node.scaling.setAll(scale);
-    for (const mesh of node.getChildMeshes()) {
+    const meshes = node instanceof Mesh ? [node, ...node.getChildMeshes()] : node.getChildMeshes();
+    for (const mesh of meshes) {
       mesh.isPickable = false;
-      mesh.metadata = { visualModel: descriptor.id };
+      mesh.metadata = weaponId
+        ? { visualModel: descriptor.id, actorVisual: "weapon", weaponId }
+        : { visualModel: descriptor.id };
+      if (weaponId) mesh.setEnabled(false);
     }
   }
 }
@@ -233,7 +250,10 @@ function numberMetadata(descriptor: AssetEntry, name: string, fallback: number):
 function createMaterials(scene: Scene, assets: AssetCatalog): IslandMaterials {
   const playerColor = assetColor(assets, "model.character.player", "model", "#809d5e");
   const botColor = assetColor(assets, "model.character.enemy", "model", "#bd6357");
-  const weaponColor = assetColor(assets, "model.weapon.rifle", "model", "#283126");
+  const rifleColor = assetColor(assets, "model.weapon.rifle", "model", "#283126");
+  const smgColor = assetColor(assets, "model.weapon.smg", "model", "#263838");
+  const shotgunColor = assetColor(assets, "model.weapon.shotgun", "model", "#3b3028");
+  const sniperColor = assetColor(assets, "model.weapon.sniper", "model", "#354238");
   const hudColor = assetColor(assets, "ui.crosshair", "svg", "#74d9cb");
   const lootColor = assetColor(assets, "ui.weapon.rifle", "svg", "#e2c66d");
 
@@ -250,6 +270,8 @@ function createMaterials(scene: Scene, assets: AssetCatalog): IslandMaterials {
 
   const loot = material(scene, "loot-marker-material", lootColor);
   loot.emissiveColor = Color3.FromHexString(lootColor).scale(0.48);
+  const deathLoot = material(scene, "death-loot-marker-material", "#f06445");
+  deathLoot.emissiveColor = Color3.FromHexString("#f06445").scale(0.62);
 
   const safeZone = material(scene, "safe-zone-material", hudColor);
   safeZone.emissiveColor = Color3.FromHexString(hudColor);
@@ -279,8 +301,12 @@ function createMaterials(scene: Scene, assets: AssetCatalog): IslandMaterials {
     botBody: material(scene, "bot-body-material", botColor),
     playerHitbox,
     gear: material(scene, "actor-gear-material", "#252d2b"),
-    weapon: material(scene, "weapon-material", weaponColor),
+    weaponRifle: material(scene, "weapon-rifle-material", rifleColor),
+    weaponSmg: material(scene, "weapon-smg-material", smgColor),
+    weaponShotgun: material(scene, "weapon-shotgun-material", shotgunColor),
+    weaponSniper: material(scene, "weapon-sniper-material", sniperColor),
     loot,
+    deathLoot,
     safeZone,
   };
 }
@@ -298,21 +324,21 @@ function createIslandEnvironment(scene: Scene, materials: IslandMaterials, layou
   markEnvironment(ground, "island-ground");
 
   const buildingMaterials = new Map<string, StandardMaterial>();
-  for (const obstacle of layout.obstacles) {
-    let buildingMaterial = buildingMaterials.get(obstacle.color);
+  for (const wall of layout.wallSegments) {
+    let buildingMaterial = buildingMaterials.get(wall.color);
     if (!buildingMaterial) {
-      buildingMaterial = material(scene, `building-material-${buildingMaterials.size}`, obstacle.color);
-      buildingMaterials.set(obstacle.color, buildingMaterial);
+      buildingMaterial = material(scene, `building-material-${buildingMaterials.size}`, wall.color);
+      buildingMaterials.set(wall.color, buildingMaterial);
     }
 
-    const building = CreateBox(
-      obstacle.id,
-      { width: obstacle.width, height: obstacle.height, depth: obstacle.depth },
+    const wallMesh = CreateBox(
+      wall.id,
+      { width: wall.width, height: wall.height, depth: wall.depth },
       scene,
     );
-    building.position.set(obstacle.center.x, obstacle.center.y, obstacle.center.z);
-    building.material = buildingMaterial;
-    markEnvironment(building, obstacle.id);
+    wallMesh.position.set(wall.center.x, wall.center.y, wall.center.z);
+    wallMesh.material = buildingMaterial;
+    markEnvironment(wallMesh, wall.id);
   }
 
   createBuildingDetails(scene, materials, layout);
@@ -325,11 +351,12 @@ function applyTerrainSurface(ground: Mesh, layout: MapLayout): void {
   const positions = ground.getVerticesData(VertexBuffer.PositionKind);
   if (!positions) return;
   const colors: number[] = [];
+  const roadSegments = createMapRoadSegments(layout.landingZones);
   for (let index = 0; index < positions.length; index += 3) {
     const x = positions[index] ?? 0;
     const z = positions[index + 2] ?? 0;
     const height = getTerrainHeight(x, z, layout);
-    const color = getTerrainColor(x, z, height);
+    const color = getTerrainColor(x, z, height, layout.mapPoints, roadSegments);
     positions[index + 1] = height;
     colors.push(color.r, color.g, color.b, 1);
   }
@@ -375,7 +402,13 @@ function createSquareBand(
   });
 }
 
-function getTerrainColor(x: number, z: number, height: number): Color3 {
+function getTerrainColor(
+  x: number,
+  z: number,
+  height: number,
+  mapPoints: MapLayout["mapPoints"],
+  roadSegments: ReadonlyArray<readonly [number, number, number, number]>,
+): Color3 {
   let color = height > 4 ? TERRAIN_COLORS.highland : TERRAIN_COLORS.ground;
   for (const [patchX, patchZ, width, depth, rotation, type] of TERRAIN_PATCHES) {
     const cosine = Math.cos(rotation);
@@ -389,10 +422,10 @@ function getTerrainColor(x: number, z: number, height: number): Color3 {
       break;
     }
   }
-  if (ROAD_SEGMENTS.some(([startX, startZ, endX, endZ]) => pointToSegmentDistance(x, z, startX, startZ, endX, endZ) <= 6)) {
+  if (roadSegments.some(([startX, startZ, endX, endZ]) => pointToSegmentDistance(x, z, startX, startZ, endX, endZ) <= 6)) {
     color = TERRAIN_COLORS.roadShoulder;
   }
-  MAP_POINTS.forEach((point, index) => {
+  mapPoints.forEach((point, index) => {
     const poiType = POI_TYPES[index];
     if (!poiType) return;
     const width = poiType === "harbor" ? 138 : 126;
@@ -401,10 +434,10 @@ function getTerrainColor(x: number, z: number, height: number): Color3 {
       color = index % 2 === 0 ? TERRAIN_COLORS.paving : TERRAIN_COLORS.roadShoulder;
     }
   });
-  if (ROAD_SEGMENTS.some(([startX, startZ, endX, endZ]) => pointToSegmentDistance(x, z, startX, startZ, endX, endZ) <= 3.75)) {
+  if (roadSegments.some(([startX, startZ, endX, endZ]) => pointToSegmentDistance(x, z, startX, startZ, endX, endZ) <= 3.75)) {
     color = TERRAIN_COLORS.road;
   }
-  MAP_POINTS.forEach((point, index) => {
+  mapPoints.forEach((point, index) => {
     if (Math.hypot(x - point.position.x, z - point.position.z) <= 15) {
       color = index % 2 === 0 ? TERRAIN_COLORS.poiDark : TERRAIN_COLORS.poiAccent;
     }
@@ -432,14 +465,10 @@ function createBuildingDetails(scene: Scene, materials: IslandMaterials, layout:
   roofTemplate.material = materials.roof;
   roofTemplate.isVisible = false;
   roofTemplate.isPickable = false;
-  const windowTemplate = CreateBox("building-window-template", { size: 1 }, scene);
-  windowTemplate.material = materials.window;
-  windowTemplate.isVisible = false;
-  windowTemplate.isPickable = false;
-  const doorTemplate = CreateBox("building-door-template", { size: 1 }, scene);
-  doorTemplate.material = materials.door;
-  doorTemplate.isVisible = false;
-  doorTemplate.isPickable = false;
+  const trimTemplate = CreateBox("building-opening-trim-template", { size: 1 }, scene);
+  trimTemplate.material = materials.wallTrim;
+  trimTemplate.isVisible = false;
+  trimTemplate.isPickable = false;
 
   layout.obstacles.forEach((obstacle, index) => {
     const roof = roofTemplate.clone(`building-roof-${index}`);
@@ -454,27 +483,37 @@ function createBuildingDetails(scene: Scene, materials: IslandMaterials, layout:
       markBuildingDetail(roof, obstacle.id, "roof");
     }
 
-    const door = doorTemplate.clone(`building-door-${index}`);
-    if (door) {
-      const baseY = obstacle.center.y - obstacle.height / 2;
-      door.position.set(obstacle.center.x, baseY + 1.55, obstacle.center.z - obstacle.depth / 2 - 0.045);
-      door.scaling.set(1.9, 3.1, 0.09);
-      door.isVisible = true;
-      markBuildingDetail(door, obstacle.id, "door");
-    }
-
-    const window = windowTemplate.clone(`building-window-${index}`);
-    if (window) {
-      window.position.set(
-        obstacle.center.x + obstacle.width * 0.25,
-        obstacle.center.y + obstacle.height * 0.15,
-        obstacle.center.z - obstacle.depth / 2 - 0.055,
-      );
-      window.scaling.set(2.5, 1.65, 0.08);
-      window.isVisible = true;
-      markBuildingDetail(window, obstacle.id, "window");
-    }
+    createOpeningFrame(trimTemplate, obstacle, index, "door", -1);
+    createOpeningFrame(trimTemplate, obstacle, index, "window", 1);
   });
+}
+
+function createOpeningFrame(
+  template: Mesh,
+  obstacle: { id: string; center: { x: number; y: number; z: number }; width: number; height: number; depth: number },
+  index: number,
+  detailType: "door" | "window",
+  side: -1 | 1,
+): void {
+  const baseY = obstacle.center.y - obstacle.height / 2;
+  const openingWidth = detailType === "door" ? Math.min(4.2, obstacle.width * 0.34) : Math.min(3.6, obstacle.width * 0.3);
+  const openingHeight = detailType === "door" ? 3.0 : 2.2;
+  const z = obstacle.center.z + side * (obstacle.depth / 2 + 0.02);
+  const y = baseY + openingHeight / 2;
+  const thickness = 0.12;
+  const pieces: ReadonlyArray<readonly [string, number, number, number, number]> = [
+    ["left", obstacle.center.x - openingWidth / 2, y, thickness, openingHeight],
+    ["right", obstacle.center.x + openingWidth / 2, y, thickness, openingHeight],
+    ["top", obstacle.center.x, baseY + openingHeight, openingWidth + thickness, thickness],
+  ];
+  for (const [pieceName, x, pieceY, width, height] of pieces) {
+    const piece = template.clone(`building-${detailType}-frame-${index}-${pieceName}`);
+    if (!piece) continue;
+    piece.position.set(x, pieceY, z);
+    piece.scaling.set(width, height, thickness);
+    piece.isVisible = true;
+    markBuildingDetail(piece, obstacle.id, detailType);
+  }
 }
 
 function createRoofRamps(scene: Scene, materials: IslandMaterials, layout: MapLayout): void {
@@ -509,7 +548,7 @@ function createVegetation(
   foliageMaterial: StandardMaterial,
   layout: MapLayout,
 ): void {
-  const treeCount = 24;
+  const treeCount = 128;
   const trunkTemplate = CreateCylinder(
     "tree-trunk-template",
     { height: 2.8, diameterTop: 0.5, diameterBottom: 0.8, tessellation: 5 },
@@ -528,11 +567,11 @@ function createVegetation(
   foliageTemplate.isVisible = false;
   foliageTemplate.isPickable = false;
 
+  const random = createVisualRandom(layout.seed ^ 0x68bc21eb);
   for (let index = 0; index < treeCount; index += 1) {
-    const angle = index * 2.39996;
-    const radius = 118 + ((index * 47) % 238);
-    const x = Math.cos(angle) * radius;
-    const z = Math.sin(angle) * radius;
+    const position = randomNaturalPosition(random, layout, 5);
+    if (!position) continue;
+    const { x, z } = position;
     const terrainY = getTerrainHeight(x, z, layout);
 
     const trunk = trunkTemplate.clone(`tree-trunk-${index}`);
@@ -546,7 +585,7 @@ function createVegetation(
     if (foliage) {
       foliage.position.set(x, terrainY + 5.7, z);
       foliage.isVisible = true;
-      foliage.rotation.y = angle;
+      foliage.rotation.y = random() * Math.PI * 2;
       foliage.scaling.y = 0.82 + (index % 3) * 0.12;
       markDecoration(foliage, "vegetation");
     }
@@ -559,23 +598,23 @@ function createNaturalDetails(
   shrubMaterial: StandardMaterial,
   layout: MapLayout,
 ): void {
-  const rockCount = 10;
-  const shrubCount = 12;
+  const rockCount = 56;
+  const shrubCount = 80;
+  const random = createVisualRandom(layout.seed ^ 0x02e5be93);
   const rockTemplate = CreateSphere("rock-template", { diameter: 1, segments: 5 }, scene);
   rockTemplate.material = rockMaterial;
   rockTemplate.isVisible = false;
   rockTemplate.isPickable = false;
 
   for (let index = 0; index < rockCount; index += 1) {
-    const angle = index * 2.17 + 0.4;
-    const radius = 92 + ((index * 73) % 278);
     const rock = rockTemplate.clone(`rock-${index}`);
     if (!rock) continue;
-    const x = Math.cos(angle) * radius;
-    const z = Math.sin(angle) * radius;
+    const position = randomNaturalPosition(random, layout, 3);
+    if (!position) continue;
+    const { x, z } = position;
     rock.position.set(x, getTerrainHeight(x, z, layout) + 0.42 + (index % 3) * 0.12, z);
     rock.scaling.set(1.2 + (index % 4) * 0.38, 0.72 + (index % 3) * 0.18, 1 + ((index + 2) % 4) * 0.31);
-    rock.rotation.y = angle * 1.7;
+    rock.rotation.y = random() * Math.PI * 2;
     rock.isVisible = true;
     markNaturalDetail(rock, "rock");
   }
@@ -585,22 +624,21 @@ function createNaturalDetails(
   shrubTemplate.isVisible = false;
   shrubTemplate.isPickable = false;
   for (let index = 0; index < shrubCount; index += 1) {
-    const angle = index * 2.53 - 0.6;
-    const radius = 76 + ((index * 59) % 302);
     const shrub = shrubTemplate.clone(`shrub-${index}`);
     if (!shrub) continue;
-    const x = Math.cos(angle) * radius;
-    const z = Math.sin(angle) * radius;
+    const position = randomNaturalPosition(random, layout, 2);
+    if (!position) continue;
+    const { x, z } = position;
     shrub.position.set(x, getTerrainHeight(x, z, layout) + 0.68, z);
     shrub.scaling.set(2.1 + (index % 3) * 0.42, 1.05 + (index % 2) * 0.24, 1.8 + ((index + 1) % 3) * 0.36);
-    shrub.rotation.y = angle;
+    shrub.rotation.y = random() * Math.PI * 2;
     shrub.isVisible = true;
     markNaturalDetail(shrub, "shrub");
   }
 }
 
 function createPois(scene: Scene, materials: IslandMaterials, layout: MapLayout): void {
-  MAP_POINTS.forEach((point, index) => {
+  layout.mapPoints.forEach((point, index) => {
     const poiType = POI_TYPES[index];
     if (!poiType) {
       return;
@@ -693,7 +731,8 @@ function createActors(
       createPlayerHitbox(scene, root, actor.id, materials.playerHitbox);
     } else {
       createBot(scene, root, actor.id, materials);
-      setActorWeaponVisual(root, Boolean(getActiveWeapon(actor)));
+      setActorWeaponVisual(root, getActiveWeapon(actor)?.weaponId ?? null);
+      setActorParachuteVisual(root, actor.deployment === "parachuting");
     }
 
     actorRoots.set(actor.id, root);
@@ -772,42 +811,39 @@ function createBot(scene: Scene, root: TransformNode, actorId: EntityId, materia
     markActorVisual(arm, actorId, "arm");
   }
 
-  const rifle = CreateBox(`rifle-${actorId}`, { width: 0.15, height: 0.17, depth: 0.72 }, scene);
-  rifle.parent = root;
-  rifle.position.set(0.28, -0.43, 0.31);
-  rifle.rotation.x = -0.12;
-  rifle.material = materials.weapon;
-  markActorVisual(rifle, actorId, "rifle");
+  const parachute = CreateSphere(`parachute-${actorId}`, { diameter: 2.8, segments: 8 }, scene);
+  parachute.parent = root;
+  parachute.position.y = 2.25;
+  parachute.scaling.y = 0.2;
+  parachute.material = materials.gear;
+  markActorVisual(parachute, actorId, "parachute");
+  parachute.setEnabled(false);
 
-  const rifleStock = CreateBox(`rifle-stock-${actorId}`, { width: 0.17, height: 0.2, depth: 0.34 }, scene);
-  rifleStock.parent = root;
-  rifleStock.position.set(0.28, -0.44, -0.22);
-  rifleStock.rotation.x = -0.12;
-  rifleStock.material = materials.gear;
-  markActorVisual(rifleStock, actorId, "rifle");
-
-  const rifleBarrel = CreateCylinder(
-    `rifle-barrel-${actorId}`,
-    { diameter: 0.055, height: 0.62, tessellation: 7 },
-    scene,
-  );
-  rifleBarrel.parent = root;
-  rifleBarrel.position.set(0.28, -0.37, 0.94);
-  rifleBarrel.rotation.x = Math.PI / 2 - 0.12;
-  rifleBarrel.material = materials.gear;
-  markActorVisual(rifleBarrel, actorId, "rifle");
-
-  const magazine = CreateBox(`rifle-magazine-${actorId}`, { width: 0.12, height: 0.3, depth: 0.2 }, scene);
-  magazine.parent = root;
-  magazine.position.set(0.28, -0.62, 0.29);
-  magazine.rotation.x = 0.18;
-  magazine.material = materials.gear;
-  markActorVisual(magazine, actorId, "rifle");
+  createWeaponModel(scene, root, `bot-${actorId}`, "rifle", materials, false);
+  createWeaponModel(scene, root, `bot-${actorId}`, "smg", materials, false);
+  createWeaponModel(scene, root, `bot-${actorId}`, "shotgun", materials, false);
+  createWeaponModel(scene, root, `bot-${actorId}`, "sniper", materials, false);
 }
 
-export function setActorWeaponVisual(root: TransformNode, armed: boolean): void {
+export function setActorWeaponVisual(root: TransformNode, weaponId: string | null): void {
   for (const mesh of root.getChildMeshes(false)) {
-    if (mesh.metadata?.actorVisual === "rifle") mesh.setEnabled(armed);
+    if (mesh.metadata?.actorVisual === "weapon") {
+      mesh.setEnabled(mesh.metadata.weaponId === weaponId && mesh.metadata.weaponFallbackSuppressed !== true);
+    }
+  }
+}
+
+export function setActorParachuteVisual(root: TransformNode, parachuting: boolean): void {
+  for (const mesh of root.getChildMeshes(false)) {
+    if (mesh.metadata?.actorVisual === "parachute") mesh.setEnabled(parachuting);
+  }
+}
+
+function suppressProceduralWeapon(root: TransformNode, weaponId: string): void {
+  for (const mesh of root.getChildMeshes(false)) {
+    if (mesh.metadata?.actorVisual !== "weapon" || mesh.metadata.weaponId !== weaponId) continue;
+    mesh.metadata = { ...mesh.metadata, weaponFallbackSuppressed: true };
+    mesh.setEnabled(false);
   }
 }
 
@@ -818,8 +854,8 @@ function createCamera(scene: Scene, player: ActorState): UniversalCamera {
     scene,
   );
   camera.rotation.set(player.pitch, player.yaw, 0);
-  camera.minZ = 0.05;
-  camera.maxZ = 1_050;
+  camera.minZ = 0.12;
+  camera.maxZ = MAP_SIZE * 1.2;
   camera.fov = 1.18;
   camera.inertia = 0;
   camera.speed = 0.78;
@@ -855,81 +891,127 @@ function createAircraftVisual(scene: Scene, camera: UniversalCamera, materials: 
 function createViewWeapon(scene: Scene, camera: UniversalCamera, materials: IslandMaterials): TransformNode {
   const root = new TransformNode("view-weapon-root", scene);
   root.parent = camera;
-  const receiver = CreateBox("view-rifle-receiver", { width: 0.22, height: 0.2, depth: 0.68 }, scene);
-  receiver.parent = root;
-  receiver.position.set(0.38, -0.34, 0.7);
-  receiver.rotation.y = -0.04;
-  receiver.material = materials.weapon;
-  receiver.isPickable = false;
-
-  const stock = CreateBox("view-rifle-stock", { width: 0.2, height: 0.25, depth: 0.38 }, scene);
-  stock.parent = root;
-  stock.position.set(0.39, -0.37, 0.23);
-  stock.rotation.x = 0.15;
-  stock.material = materials.gear;
-  stock.isPickable = false;
-
-  const handguard = CreateBox("view-rifle-handguard", { width: 0.18, height: 0.16, depth: 0.52 }, scene);
-  handguard.parent = root;
-  handguard.position.set(0.38, -0.32, 1.27);
-  handguard.material = materials.weapon;
-  handguard.isPickable = false;
-
-  const barrel = CreateCylinder(
-    "view-rifle-barrel",
-    { diameter: 0.065, height: 0.58, tessellation: 8 },
-    scene,
-  );
-  barrel.parent = root;
-  barrel.position.set(0.38, -0.29, 1.78);
-  barrel.rotation.x = Math.PI / 2;
-  barrel.material = materials.gear;
-  barrel.isPickable = false;
-
-  const muzzle = CreateCylinder("view-rifle-muzzle", { diameter: 0.095, height: 0.18, tessellation: 8 }, scene);
-  muzzle.parent = root;
-  muzzle.position.set(0.38, -0.29, 2.08);
-  muzzle.rotation.x = Math.PI / 2;
-  muzzle.material = materials.gear;
-  muzzle.isPickable = false;
-
-  const magazine = CreateBox("view-rifle-magazine", { width: 0.15, height: 0.38, depth: 0.24 }, scene);
-  magazine.parent = root;
-  magazine.position.set(0.38, -0.57, 0.72);
-  magazine.rotation.x = 0.17;
-  magazine.material = materials.gear;
-  magazine.isPickable = false;
-
-  const grip = CreateBox("view-rifle-grip", { width: 0.12, height: 0.32, depth: 0.16 }, scene);
-  grip.parent = root;
-  grip.position.set(0.38, -0.53, 1.14);
-  grip.rotation.x = -0.12;
-  grip.material = materials.gear;
-  grip.isPickable = false;
-
-  const rail = CreateBox("view-rifle-rail", { width: 0.14, height: 0.035, depth: 0.72 }, scene);
-  rail.parent = root;
-  rail.position.set(0.38, -0.22, 0.95);
-  rail.material = materials.gear;
-  rail.isPickable = false;
-
-  for (const [name, z] of [
-    ["rear", 0.67],
-    ["front", 1.42],
-  ] as const) {
-    const sight = CreateBox(`view-rifle-${name}-sight`, { width: 0.09, height: 0.11, depth: 0.045 }, scene);
-    sight.parent = root;
-    sight.position.set(0.38, -0.15, z);
-    sight.material = materials.gear;
-    sight.isPickable = false;
-  }
+  createWeaponModel(scene, root, "view", "rifle", materials, true);
+  createWeaponModel(scene, root, "view", "smg", materials, true);
+  createWeaponModel(scene, root, "view", "shotgun", materials, true);
+  createWeaponModel(scene, root, "view", "sniper", materials, true);
   return root;
+}
+
+function createWeaponModel(
+  scene: Scene,
+  root: TransformNode,
+  prefix: string,
+  weaponId: WeaponVisualId,
+  materials: IslandMaterials,
+  viewModel: boolean,
+): void {
+  const scale = viewModel ? 1 : 0.62;
+  const offset = viewModel ? { x: 0.38, y: -0.34, z: 0.72 } : { x: 0.28, y: -0.43, z: 0.32 };
+  const pieces = weaponPieces(weaponId, viewModel);
+  pieces.forEach(([name, kind, x, y, z, width, height, depth, rotationX = 0]) => {
+    const mesh = kind === "barrel"
+      ? CreateCylinder(`${prefix}-${weaponId}-${name}`, { diameter: width * scale, height: depth * scale, tessellation: 8 }, scene)
+      : CreateBox(`${prefix}-${weaponId}-${name}`, { width: width * scale, height: height * scale, depth: depth * scale }, scene);
+    mesh.parent = root;
+    mesh.position.set(offset.x + x * scale, offset.y + y * scale, offset.z + z * scale);
+    mesh.rotation.x = kind === "barrel" ? Math.PI / 2 + rotationX : rotationX;
+    mesh.material = kind === "body" ? weaponMaterial(materials, weaponId) : materials.gear;
+    mesh.isPickable = false;
+    mesh.metadata = { actorVisual: "weapon", weaponId, weaponFallback: true };
+    mesh.setEnabled(false);
+  });
+}
+
+function weaponPieces(
+  weaponId: WeaponVisualId,
+  viewModel: boolean,
+): ReadonlyArray<WeaponPiece> {
+  if (weaponId === "sniper") {
+    if (!viewModel) {
+      return [
+        ["receiver", "body", 0, 0, 0, 0.2, 0.2, 0.74],
+        ["long-barrel", "barrel", 0, 0.04, 1.08, 0.05, 0.05, 0.82],
+        ["scope", "gear", 0, 0.2, 0.05, 0.18, 0.18, 0.42],
+        ["stock", "gear", 0, -0.02, -0.52, 0.2, 0.22, 0.5, 0.1],
+      ];
+    }
+    return [
+      ["receiver", "body", 0, 0, 0, 0.22, 0.2, 0.78],
+      ["long-barrel", "barrel", 0, 0.04, 1.18, 0.055, 0.055, 0.94],
+      ["scope", "gear", 0, 0.22, 0.05, 0.2, 0.2, 0.46],
+      ["scope-front", "barrel", 0, 0.22, 0.29, 0.2, 0.2, 0.08],
+      ["scope-rear", "barrel", 0, 0.22, -0.19, 0.15, 0.15, 0.08],
+      ["stock", "gear", 0, -0.02, -0.55, 0.22, 0.25, 0.52, 0.1],
+      ["bolt", "gear", 0.15, 0.07, 0.2, 0.05, 0.05, 0.2],
+    ];
+  }
+  if (weaponId === "smg") {
+    if (!viewModel) {
+      return [
+        ["receiver", "body", 0, 0, 0, 0.24, 0.22, 0.46],
+        ["short-barrel", "barrel", 0, 0.03, 0.43, 0.08, 0.08, 0.34],
+        ["box-mag", "gear", -0.02, -0.27, 0.02, 0.16, 0.38, 0.16, 0.08],
+      ];
+    }
+    const pieces: readonly WeaponPiece[] = [
+      ["receiver", "body", 0, 0, 0, 0.26, 0.24, 0.48],
+      ["short-barrel", "barrel", 0, 0.03, 0.46, 0.08, 0.08, 0.36],
+      ["box-mag", "gear", -0.02, -0.27, 0.03, 0.17, 0.42, 0.18, 0.08],
+      ["fold-stock", "gear", 0, 0.02, -0.36, 0.12, 0.12, 0.36, 0.18],
+      ["foregrip", "gear", 0, -0.23, 0.38, 0.11, 0.31, 0.12],
+    ];
+    return pieces;
+  }
+  if (weaponId === "shotgun") {
+    if (!viewModel) {
+      return [
+        ["receiver", "body", 0, 0, 0.05, 0.22, 0.2, 0.52],
+        ["long-barrel", "barrel", 0, 0.04, 0.78, 0.065, 0.065, 0.82],
+        ["pump", "gear", 0, -0.12, 0.52, 0.24, 0.13, 0.32],
+      ];
+    }
+    const pieces: readonly WeaponPiece[] = [
+      ["receiver", "body", 0, 0, 0.05, 0.24, 0.22, 0.56],
+      ["long-barrel", "barrel", 0, 0.04, 0.78, 0.07, 0.07, 0.86],
+      ["tube", "barrel", 0, -0.07, 0.72, 0.06, 0.06, 0.76],
+      ["pump", "gear", 0, -0.12, 0.52, 0.26, 0.14, 0.34],
+      ["stock", "gear", 0, -0.02, -0.39, 0.23, 0.24, 0.45, 0.12],
+    ];
+    return pieces;
+  }
+  if (!viewModel) {
+    return [
+      ["receiver", "body", 0, 0, 0, 0.2, 0.18, 0.62],
+      ["barrel", "barrel", 0, 0.05, 0.9, 0.06, 0.06, 0.56],
+      ["curved-mag", "gear", 0, -0.27, 0.02, 0.14, 0.34, 0.22, 0.17],
+    ];
+  }
+  const pieces: readonly WeaponPiece[] = [
+    ["receiver", "body", 0, 0, 0, 0.22, 0.2, 0.68],
+    ["stock", "gear", 0.01, -0.03, -0.47, 0.2, 0.25, 0.38, 0.15],
+    ["handguard", "body", 0, 0.02, 0.62, 0.18, 0.16, 0.52],
+    ["barrel", "barrel", 0, 0.05, 1.12, 0.065, 0.065, 0.58],
+    ["curved-mag", "gear", 0, -0.28, 0.02, 0.15, 0.38, 0.24, 0.17],
+    ["rail", "gear", 0, 0.13, 0.2, 0.14, 0.035, 0.72],
+    ["rear-sight", "gear", 0, 0.22, -0.05, 0.09, 0.11, 0.045],
+    ["front-sight", "gear", 0, 0.22, 0.7, 0.09, 0.11, 0.045],
+  ];
+  return pieces;
+}
+
+function weaponMaterial(materials: IslandMaterials, weaponId: WeaponVisualId): StandardMaterial {
+  if (weaponId === "smg") return materials.weaponSmg;
+  if (weaponId === "shotgun") return materials.weaponShotgun;
+  if (weaponId === "sniper") return materials.weaponSniper;
+  return materials.weaponRifle;
 }
 
 function createLootMeshes(
   scene: Scene,
   groundLoot: Readonly<Record<EntityId, GroundLootState>>,
   lootMaterial: StandardMaterial,
+  deathLootMaterial: StandardMaterial,
 ): {
   lootMeshes: Map<EntityId, Mesh>;
   syncLootMeshes: (groundLoot: Readonly<Record<EntityId, GroundLootState>>) => void;
@@ -952,11 +1034,13 @@ function createLootMeshes(
       return marker;
     },
     update(marker, loot) {
+      marker.material = loot.source === "death" ? deathLootMaterial : lootMaterial;
       marker.position.set(loot.position.x, loot.position.y, loot.position.z);
       marker.metadata = {
         lootId: loot.id,
         itemId: loot.itemId,
         assetId: "ui.weapon.rifle",
+        lootSource: loot.source ?? "spawn",
       };
       marker.setEnabled(loot.available);
     },
@@ -1077,4 +1161,33 @@ function material(scene: Scene, name: string, hex: string): StandardMaterial {
 
 function lerp(start: number, end: number, progress: number): number {
   return start + (end - start) * progress;
+}
+
+function createVisualRandom(seed: number): () => number {
+  let value = seed >>> 0;
+  return () => {
+    value = (value + 0x6d2b79f5) >>> 0;
+    let result = value;
+    result = Math.imul(result ^ (result >>> 15), result | 1);
+    result ^= result + Math.imul(result ^ (result >>> 7), result | 61);
+    return ((result ^ (result >>> 14)) >>> 0) / 4_294_967_296;
+  };
+}
+
+function randomNaturalPosition(
+  random: () => number,
+  layout: MapLayout,
+  clearance: number,
+): { x: number; z: number } | null {
+  const limit = MAP_SIZE / 2 - 35;
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const x = lerp(-limit, limit, random());
+    const z = lerp(-limit, limit, random());
+    const blocked = layout.obstacles.some((obstacle) =>
+      Math.abs(x - obstacle.center.x) <= obstacle.width / 2 + clearance &&
+      Math.abs(z - obstacle.center.z) <= obstacle.depth / 2 + clearance
+    );
+    if (!blocked) return { x, z };
+  }
+  return null;
 }

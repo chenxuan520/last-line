@@ -31,8 +31,14 @@ export class SimulationCombatWorld implements CombatWorld {
 
     const layout = createMapLayout(this.state.mapSeed);
     let nearestEnvironment: SurfaceHit | null = intersectTerrain(trace.origin, direction, trace.range, layout);
+    for (const wall of layout.wallSegments) {
+      const hit = intersectObstacle(trace.origin, direction, trace.range, wall);
+      if (hit && (!nearestEnvironment || hit.distance < nearestEnvironment.distance)) {
+        nearestEnvironment = hit;
+      }
+    }
     for (const obstacle of layout.obstacles) {
-      const hit = intersectObstacle(trace.origin, direction, trace.range, obstacle);
+      const hit = intersectRoofCap(trace.origin, direction, trace.range, obstacle);
       if (hit && (!nearestEnvironment || hit.distance < nearestEnvironment.distance)) {
         nearestEnvironment = hit;
       }
@@ -204,18 +210,27 @@ function intersectObstacle(
   range: number,
   obstacle: MapObstacle,
 ): SurfaceHit | null {
+  return intersectBox(
+    origin,
+    direction,
+    range,
+    [
+      ["x", obstacle.center.x - obstacle.width / 2, obstacle.center.x + obstacle.width / 2],
+      ["y", obstacle.center.y - obstacle.height / 2, obstacle.center.y + obstacle.height / 2],
+      ["z", obstacle.center.z - obstacle.depth / 2, obstacle.center.z + obstacle.depth / 2],
+    ],
+  );
+}
+
+function intersectBox(
+  origin: Vector3State,
+  direction: Vector3State,
+  range: number,
+  bounds: readonly (readonly [keyof Vector3State, number, number])[],
+): SurfaceHit | null {
   let near = 0;
   let far = range;
   let hitNormal: Vector3State = { x: 0, y: 0, z: 0 };
-  const bounds: readonly [keyof Vector3State, number, number][] = [
-    ["x", obstacle.center.x - obstacle.width / 2, obstacle.center.x + obstacle.width / 2],
-    [
-      "y",
-      obstacle.center.y - obstacle.height / 2,
-      obstacle.center.y + obstacle.height / 2 + BUILDING_ROOF_CAP_HEIGHT,
-    ],
-    ["z", obstacle.center.z - obstacle.depth / 2, obstacle.center.z + obstacle.depth / 2],
-  ];
   for (const [axis, minimum, maximum] of bounds) {
     if (Math.abs(direction[axis]) <= GEOMETRY_EPSILON) {
       if (origin[axis] < minimum || origin[axis] > maximum) {
@@ -237,6 +252,26 @@ function intersectObstacle(
     }
   }
   return near <= range ? { distance: near, normal: hitNormal } : null;
+}
+
+function intersectRoofCap(
+  origin: Vector3State,
+  direction: Vector3State,
+  range: number,
+  obstacle: MapObstacle,
+): SurfaceHit | null {
+  const roofMinimumY = obstacle.center.y + obstacle.height / 2;
+  const roofMaximumY = roofMinimumY + BUILDING_ROOF_CAP_HEIGHT;
+  return intersectBox(
+    origin,
+    direction,
+    range,
+    [
+      ["x", obstacle.center.x - obstacle.width / 2, obstacle.center.x + obstacle.width / 2],
+      ["y", roofMinimumY, roofMaximumY],
+      ["z", obstacle.center.z - obstacle.depth / 2, obstacle.center.z + obstacle.depth / 2],
+    ],
+  );
 }
 
 function intersectTerrain(

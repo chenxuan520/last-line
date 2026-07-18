@@ -64,5 +64,5 @@ Cloudflare Git integration does not require `CLOUDFLARE_API_TOKEN` or `CLOUDFLAR
 ## Deployment Verification
 
 - Keep the game volume at `0` during browser checks.
-- Verify the menu, 20-player HUD, and browser console in locally installed Chrome or Edge.
+- Verify the menu, 50-player HUD, and browser console in locally installed Chrome or Edge.
 - Do not install Playwright or download a CI browser for this project.

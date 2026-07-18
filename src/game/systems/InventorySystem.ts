@@ -88,26 +88,26 @@ export class InventorySystem {
         }
         const itemId = this.getWeaponItemId(weapon.weaponId);
         if (itemId) {
-          this.createGroundLoot(state, actor, itemId, 1, events, weapon);
+          this.createGroundLoot(state, actor, itemId, 1, events, weapon, "death");
         }
         actor.inventory.weaponSlots[slot] = null;
       }
 
       for (const stack of actor.inventory.backpack) {
         if (stack.quantity > 0) {
-          this.createGroundLoot(state, actor, stack.itemId, stack.quantity, events);
+          this.createGroundLoot(state, actor, stack.itemId, stack.quantity, events, undefined, "death");
         }
       }
       actor.inventory.backpack = [];
 
       if (actor.inventory.armorLevel > 0) {
-        this.createGroundLoot(state, actor, `armor.${actor.inventory.armorLevel}`, 1, events);
+        this.createGroundLoot(state, actor, `armor.${actor.inventory.armorLevel}`, 1, events, undefined, "death");
         actor.inventory.armorLevel = 0;
         actor.armor = 0;
         actor.maxArmor = 0;
       }
       if (actor.inventory.helmetLevel > 0) {
-        this.createGroundLoot(state, actor, `helmet.${actor.inventory.helmetLevel}`, 1, events);
+        this.createGroundLoot(state, actor, `helmet.${actor.inventory.helmetLevel}`, 1, events, undefined, "death");
         actor.inventory.helmetLevel = 0;
       }
     }
@@ -119,50 +119,34 @@ export class InventorySystem {
     events: GameEvent[],
     ignoredLootId: EntityId | null = null,
   ): void {
-    let nearest: GroundLootState | null = null;
-    let nearestDistanceSquared = Number.POSITIVE_INFINITY;
-    for (const loot of Object.values(state.groundLoot)) {
-      if (!loot.available || loot.quantity <= 0 || loot.id === ignoredLootId) {
-        continue;
-      }
-      const distanceSquared =
-        (loot.position.x - actor.position.x) ** 2 +
-        (loot.position.y - actor.position.y) ** 2 +
-        (loot.position.z - actor.position.z) ** 2;
-      if (
-        distanceSquared > INTERACTION_DISTANCE_SQUARED ||
-        distanceSquared > nearestDistanceSquared ||
-        (distanceSquared === nearestDistanceSquared && nearest && loot.id >= nearest.id)
-      ) {
-        continue;
-      }
-      nearest = loot;
-      nearestDistanceSquared = distanceSquared;
-    }
+    const candidates = Object.values(state.groundLoot)
+      .filter((loot) => loot.available && loot.quantity > 0 && loot.id !== ignoredLootId)
+      .map((loot) => ({
+        loot,
+        distanceSquared:
+          (loot.position.x - actor.position.x) ** 2 +
+          (loot.position.y - actor.position.y) ** 2 +
+          (loot.position.z - actor.position.z) ** 2,
+      }))
+      .filter((candidate) => candidate.distanceSquared <= INTERACTION_DISTANCE_SQUARED)
+      .sort((left, right) => left.distanceSquared - right.distanceSquared || left.loot.id.localeCompare(right.loot.id));
 
-    if (!nearest) {
+    for (const { loot } of candidates) {
+      const item = ITEMS[loot.itemId];
+      if (!item) continue;
+      const pickedQuantity = this.pickLoot(state, actor, item, loot, events);
+      if (pickedQuantity <= 0) continue;
+      loot.quantity -= pickedQuantity;
+      if (loot.quantity === 0) loot.available = false;
+      events.push({
+        type: "item-picked",
+        actorId: actor.id,
+        lootId: loot.id,
+        itemId: loot.itemId,
+        quantity: pickedQuantity,
+      });
       return;
     }
-    const item = ITEMS[nearest.itemId];
-    if (!item) {
-      return;
-    }
-
-    const pickedQuantity = this.pickLoot(state, actor, item, nearest, events);
-    if (pickedQuantity <= 0) {
-      return;
-    }
-    nearest.quantity -= pickedQuantity;
-    if (nearest.quantity === 0) {
-      nearest.available = false;
-    }
-    events.push({
-      type: "item-picked",
-      actorId: actor.id,
-      lootId: nearest.id,
-      itemId: nearest.itemId,
-      quantity: pickedQuantity,
-    });
   }
 
   private pickLoot(
@@ -221,14 +205,18 @@ export class InventorySystem {
 
   private pickArmor(state: MatchState, actor: ActorState, item: ItemConfig, events: GameEvent[]): number {
     const level = item.level;
-    if (!level || level <= actor.inventory.armorLevel) {
+    if (
+      !level ||
+      level < actor.inventory.armorLevel ||
+      (level === actor.inventory.armorLevel && actor.armor >= actor.maxArmor)
+    ) {
       return 0;
     }
     const replacedLevel = actor.inventory.armorLevel;
     actor.inventory.armorLevel = level;
     actor.maxArmor = level * 50;
     actor.armor = actor.maxArmor;
-    if (replacedLevel > 0) {
+    if (replacedLevel > 0 && replacedLevel !== level) {
       this.createGroundLoot(state, actor, `armor.${replacedLevel}`, 1, events);
     }
     return 1;
@@ -367,6 +355,7 @@ export class InventorySystem {
     quantity: number,
     events: GameEvent[],
     weapon?: WeaponState,
+    source: GroundLootState["source"] = "drop",
   ): EntityId {
     const reusable = Object.values(state.groundLoot)
       .filter((loot) => !loot.available)
@@ -386,6 +375,7 @@ export class InventorySystem {
       ...(weapon ? { weapon } : {}),
       position: { ...actor.position },
       available: true,
+      source,
     };
     events.push({ type: "item-dropped", actorId: actor.id, lootId, itemId, quantity });
     return lootId;

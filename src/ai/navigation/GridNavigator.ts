@@ -3,19 +3,22 @@ import {
   MAP_HALF_SIZE,
   MAP_OBSTACLES,
   MAP_ROOF_RAMPS,
+  MAP_WALL_SEGMENTS,
   type MapObstacle,
   type RoofRamp,
 } from "../../config/map";
 import type { Vector3State } from "../../game/state/types";
 
 const DEFAULT_CLEARANCE = 0.4;
-const PATH_CLEARANCE = 0.42;
+const PATH_CLEARANCE = 0.64;
 const WAYPOINT_PADDING = 0.13;
+const MAX_PATH_SEARCH_NODES = 256;
 
 export class GridNavigator {
   public constructor(
     private readonly obstacles: readonly MapObstacle[] = MAP_OBSTACLES,
     private readonly roofRamps: readonly RoofRamp[] = MAP_ROOF_RAMPS,
+    private readonly blockingObstacles: readonly MapObstacle[] = MAP_WALL_SEGMENTS,
     private readonly clearance = DEFAULT_CLEARANCE,
   ) {}
 
@@ -54,64 +57,59 @@ export class GridNavigator {
       return [{ ...start }, { ...target }];
     }
 
-    const points: Vector3State[] = [{ ...start }, { ...target }];
     const cornerOffset = Math.max(this.clearance, PATH_CLEARANCE) + WAYPOINT_PADDING;
-    for (const obstacle of this.obstacles) {
-      const halfWidth = obstacle.width / 2 + cornerOffset;
-      const halfDepth = obstacle.depth / 2 + cornerOffset;
-      for (const xDirection of [-1, 1]) {
-        for (const zDirection of [-1, 1]) {
-          const point = {
-            x: obstacle.center.x + xDirection * halfWidth,
-            y: start.y,
-            z: obstacle.center.z + zDirection * halfDepth,
-          };
-          if (!this.isBlocked(point)) {
-            points.push(point);
-          }
+    const open: PathSearchNode[] = [{
+      point: { ...start },
+      path: [{ ...start }],
+      distance: 0,
+      score: horizontalDistance(start, target),
+    }];
+    const bestDistances = new Map<string, number>([[pointKey(start), 0]]);
+
+    for (let searched = 0; searched < MAX_PATH_SEARCH_NODES && open.length > 0; searched += 1) {
+      let currentIndex = 0;
+      for (let index = 1; index < open.length; index += 1) {
+        if ((open[index]?.score ?? Number.POSITIVE_INFINITY) < (open[currentIndex]?.score ?? Number.POSITIVE_INFINITY)) {
+          currentIndex = index;
+        }
+      }
+      const current = open.splice(currentIndex, 1)[0];
+      if (!current) break;
+      if (this.hasLineOfSight(current.point, target)) {
+        return [...current.path, { ...target }];
+      }
+
+      const blockers = this.blockingObstacles
+        .map((obstacle) => ({
+          obstacle,
+          progress: segmentObstacleEntryProgress(
+            current.point,
+            target,
+            obstacle,
+            Math.max(this.clearance, PATH_CLEARANCE),
+          ),
+        }))
+        .filter((entry): entry is { obstacle: MapObstacle; progress: number } => entry.progress !== null)
+        .sort((left, right) => left.progress - right.progress)
+        .slice(0, 3);
+
+      for (const { obstacle } of blockers) {
+        for (const waypoint of obstacleCorners(obstacle, start.y, cornerOffset)) {
+          if (this.isBlocked(waypoint) || !this.hasLineOfSight(current.point, waypoint)) continue;
+          const distance = current.distance + horizontalDistance(current.point, waypoint);
+          const key = pointKey(waypoint);
+          if (distance >= (bestDistances.get(key) ?? Number.POSITIVE_INFINITY)) continue;
+          bestDistances.set(key, distance);
+          open.push({
+            point: waypoint,
+            path: [...current.path, waypoint],
+            distance,
+            score: distance + horizontalDistance(waypoint, target),
+          });
         }
       }
     }
-
-    const distances = Array<number>(points.length).fill(Number.POSITIVE_INFINITY);
-    const previous = Array<number>(points.length).fill(-1);
-    const visited = Array<boolean>(points.length).fill(false);
-    distances[0] = 0;
-
-    for (let iteration = 0; iteration < points.length; iteration += 1) {
-      let current = -1;
-      for (let index = 0; index < points.length; index += 1) {
-        if (!visited[index] && (current === -1 || distances[index] < distances[current])) {
-          current = index;
-        }
-      }
-      if (current === -1 || !Number.isFinite(distances[current]) || current === 1) {
-        break;
-      }
-
-      visited[current] = true;
-      for (let next = 0; next < points.length; next += 1) {
-        if (visited[next] || next === current || !this.hasLineOfSight(points[current], points[next])) {
-          continue;
-        }
-        const distance = distances[current] + horizontalDistance(points[current], points[next]);
-        if (distance < distances[next]) {
-          distances[next] = distance;
-          previous[next] = current;
-        }
-      }
-    }
-
-    if (!Number.isFinite(distances[1])) {
-      return [];
-    }
-
-    const path: Vector3State[] = [];
-    for (let current = 1; current !== -1; current = previous[current]) {
-      path.push({ ...points[current] });
-    }
-    path.reverse();
-    return path;
+    return [];
   }
 
   private findRoof(point: Vector3State): MapObstacle | null {
@@ -130,14 +128,37 @@ export class GridNavigator {
     if (point.x < -mapLimit || point.x > mapLimit || point.z < -mapLimit || point.z > mapLimit) {
       return true;
     }
-    return this.obstacles.some((obstacle) => pointInsideObstacle(point, obstacle, this.clearance));
+    return this.blockingObstacles.some((obstacle) => pointInsideObstacle(point, obstacle, this.clearance));
   }
 
   private hasLineOfSight(start: Vector3State, target: Vector3State): boolean {
-    return !this.obstacles.some((obstacle) =>
+    return !this.blockingObstacles.some((obstacle) =>
       segmentIntersectsObstacle(start, target, obstacle, Math.max(this.clearance, PATH_CLEARANCE)),
     );
   }
+}
+
+interface PathSearchNode {
+  point: Vector3State;
+  path: Vector3State[];
+  distance: number;
+  score: number;
+}
+
+function obstacleCorners(obstacle: MapObstacle, y: number, cornerOffset: number): Vector3State[] {
+  const halfWidth = obstacle.width / 2 + cornerOffset;
+  const halfDepth = obstacle.depth / 2 + cornerOffset;
+  return [-1, 1].flatMap((xDirection) =>
+    [-1, 1].map((zDirection) => ({
+      x: obstacle.center.x + xDirection * halfWidth,
+      y,
+      z: obstacle.center.z + zDirection * halfDepth,
+    })),
+  );
+}
+
+function pointKey(point: Vector3State): string {
+  return `${point.x.toFixed(3)}:${point.z.toFixed(3)}`;
 }
 
 function pointInsideObstacle(point: Vector3State, obstacle: MapObstacle, clearance: number): boolean {
@@ -155,6 +176,15 @@ function segmentIntersectsObstacle(
   obstacle: MapObstacle,
   clearance: number,
 ): boolean {
+  return segmentObstacleEntryProgress(start, target, obstacle, clearance) !== null;
+}
+
+function segmentObstacleEntryProgress(
+  start: Vector3State,
+  target: Vector3State,
+  obstacle: MapObstacle,
+  clearance: number,
+): number | null {
   const minimumX = obstacle.center.x - obstacle.width / 2 - clearance;
   const maximumX = obstacle.center.x + obstacle.width / 2 + clearance;
   const minimumZ = obstacle.center.z - obstacle.depth / 2 - clearance;
@@ -168,7 +198,7 @@ function segmentIntersectsObstacle(
   ] as const) {
     if (delta === 0) {
       if (origin < minimum || origin > maximum) {
-        return false;
+        return null;
       }
       continue;
     }
@@ -177,10 +207,10 @@ function segmentIntersectsObstacle(
     minimumTime = Math.max(minimumTime, Math.min(firstTime, secondTime));
     maximumTime = Math.min(maximumTime, Math.max(firstTime, secondTime));
     if (minimumTime > maximumTime) {
-      return false;
+      return null;
     }
   }
-  return true;
+  return maximumTime > 1e-6 ? minimumTime : null;
 }
 
 function horizontalDistance(start: Vector3State, target: Vector3State): number {

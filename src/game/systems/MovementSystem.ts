@@ -5,13 +5,17 @@ import {
   getTerrainHeight,
   MAP_HALF_SIZE,
   type MapLayout,
+  type MapWallSegment,
 } from "../../config/map";
 import type { ActorCommand } from "../commands/ActorCommand";
 import type { ActorState, EntityId, MatchState, Vector3State } from "../state/types";
 
-const WALK_SPEED = 5.8;
-const SPRINT_SPEED = 8.5;
-const GLIDE_SPEED = 10;
+const WALK_SPEED = 8.7;
+export const SPRINT_SPEED = 11.5;
+const MIN_GLIDE_SPEED = 8;
+const MAX_GLIDE_SPEED = 64;
+const GLIDE_ACCELERATION_ALTITUDE = 20;
+const GLIDE_SPEED_PER_METER = 0.4;
 const PARACHUTE_DESCENT_SPEED = 5;
 const JUMP_SPEED = 6.5;
 const GRAVITY = 18;
@@ -20,6 +24,8 @@ const ACTOR_RADIUS = 0.42;
 const MAX_COLLISION_STEP = ACTOR_RADIUS / 2;
 const MAX_STEP_UP = 0.35;
 const SURFACE_EPSILON = 0.08;
+const WALL_COLLISION_CELL_SIZE = 64;
+const wallCollisionIndexes = new WeakMap<MapLayout, Map<string, MapWallSegment[]>>();
 
 export class MovementSystem {
   public processCommand(
@@ -54,7 +60,14 @@ export class MovementSystem {
     }
 
     if (actor.deployment === "parachuting") {
-      this.moveHorizontally(actor, command.move, GLIDE_SPEED, deltaSeconds, layout);
+      const terrainEyeY = getTerrainHeight(actor.position.x, actor.position.z, layout) + EYE_HEIGHT;
+      const altitude = Math.max(0, actor.position.y - terrainEyeY);
+      const glideSpeed = clamp(
+        MIN_GLIDE_SPEED + Math.max(0, altitude - GLIDE_ACCELERATION_ALTITUDE) * GLIDE_SPEED_PER_METER,
+        MIN_GLIDE_SPEED,
+        MAX_GLIDE_SPEED,
+      );
+      this.moveHorizontally(actor, command.move, glideSpeed, deltaSeconds, layout);
       actor.velocity.y = -PARACHUTE_DESCENT_SPEED;
       actor.position.y += actor.velocity.y * deltaSeconds;
       const supportEyeY = getSupportHeight(actor.position.x, actor.position.z, Number.POSITIVE_INFINITY, layout) + EYE_HEIGHT;
@@ -159,8 +172,20 @@ function moveAxis(
 
   const limit = MAP_HALF_SIZE - ACTOR_RADIUS;
   const target = clamp(current + delta, -limit, limit);
-  if (!collides(axis === "x" ? target : otherAxis, axis === "z" ? target : otherAxis, actor.position.y, layout)) {
+  const targetX = axis === "x" ? target : otherAxis;
+  const targetZ = axis === "z" ? target : otherAxis;
+  if (!collides(targetX, targetZ, actor.position.y, layout)) {
     return target;
+  }
+
+  const currentX = axis === "x" ? current : otherAxis;
+  const currentZ = axis === "z" ? current : otherAxis;
+  if (collides(currentX, currentZ, actor.position.y, layout)) {
+    resolveWallOverlap(actor, layout);
+    const recoveredCurrent = axis === "x" ? actor.position.x : actor.position.z;
+    const recoveredOther = axis === "x" ? actor.position.z : actor.position.x;
+    if (collides(actor.position.x, actor.position.z, actor.position.y, layout)) return recoveredCurrent;
+    return moveAxis(actor, recoveredCurrent, recoveredOther, delta, axis, layout);
   }
 
   let safe = current;
@@ -182,20 +207,90 @@ function collides(x: number, z: number, eyeY: number, layout: MapLayout): boolea
   const feetY = eyeY - EYE_HEIGHT;
   const candidateSupport = getSupportHeight(x, z, feetY + MAX_STEP_UP, layout);
   const effectiveFeetY = Math.max(feetY, candidateSupport);
-  for (const obstacle of layout.obstacles) {
-    const roofY = obstacle.center.y + obstacle.height / 2 + BUILDING_ROOF_CAP_HEIGHT;
-    if (effectiveFeetY >= roofY - SURFACE_EPSILON) continue;
-    const halfWidth = obstacle.width / 2;
-    const halfDepth = obstacle.depth / 2;
-    const closestX = clamp(x, obstacle.center.x - halfWidth, obstacle.center.x + halfWidth);
-    const closestZ = clamp(z, obstacle.center.z - halfDepth, obstacle.center.z + halfDepth);
-    const deltaX = x - closestX;
-    const deltaZ = z - closestZ;
-    if (deltaX * deltaX + deltaZ * deltaZ < ACTOR_RADIUS * ACTOR_RADIUS) {
-      return true;
-    }
+  for (const wall of getNearbyWalls(x, z, layout)) {
+    if (collidesWithWall(x, z, effectiveFeetY, wall)) return true;
   }
   return false;
+}
+
+function collidesWithWall(
+  x: number,
+  z: number,
+  feetY: number,
+  wall: MapLayout["wallSegments"][number],
+): boolean {
+  const roofY = wall.center.y + wall.height / 2 + BUILDING_ROOF_CAP_HEIGHT;
+  if (feetY >= roofY - SURFACE_EPSILON) return false;
+  const halfWidth = wall.width / 2;
+  const halfDepth = wall.depth / 2;
+  const closestX = clamp(x, wall.center.x - halfWidth, wall.center.x + halfWidth);
+  const closestZ = clamp(z, wall.center.z - halfDepth, wall.center.z + halfDepth);
+  const deltaX = x - closestX;
+  const deltaZ = z - closestZ;
+  return deltaX * deltaX + deltaZ * deltaZ < ACTOR_RADIUS * ACTOR_RADIUS;
+}
+
+function resolveWallOverlap(actor: ActorState, layout: MapLayout): void {
+  const feetY = actor.position.y - EYE_HEIGHT;
+  const limit = MAP_HALF_SIZE - ACTOR_RADIUS;
+  const padding = ACTOR_RADIUS + 0.001;
+  for (let iteration = 0; iteration < 8 && collides(actor.position.x, actor.position.z, actor.position.y, layout); iteration += 1) {
+    const candidates = getNearbyWalls(actor.position.x, actor.position.z, layout)
+      .filter((wall) => collidesWithWall(actor.position.x, actor.position.z, feetY, wall))
+      .flatMap((wall) => {
+        const minimumX = wall.center.x - wall.width / 2 - padding;
+        const maximumX = wall.center.x + wall.width / 2 + padding;
+        const minimumZ = wall.center.z - wall.depth / 2 - padding;
+        const maximumZ = wall.center.z + wall.depth / 2 + padding;
+        return [
+          { x: minimumX, z: actor.position.z },
+          { x: maximumX, z: actor.position.z },
+          { x: actor.position.x, z: minimumZ },
+          { x: actor.position.x, z: maximumZ },
+          { x: minimumX, z: minimumZ },
+          { x: minimumX, z: maximumZ },
+          { x: maximumX, z: minimumZ },
+          { x: maximumX, z: maximumZ },
+        ];
+      })
+      .filter((candidate) => Math.abs(candidate.x) <= limit && Math.abs(candidate.z) <= limit)
+      .sort((left, right) =>
+        Math.hypot(left.x - actor.position.x, left.z - actor.position.z) -
+        Math.hypot(right.x - actor.position.x, right.z - actor.position.z)
+      );
+    const safe = candidates.find((candidate) => !collides(candidate.x, candidate.z, actor.position.y, layout));
+    const recovery = safe ?? candidates[0];
+    if (!recovery) return;
+    actor.position.x = recovery.x;
+    actor.position.z = recovery.z;
+  }
+}
+
+function getNearbyWalls(x: number, z: number, layout: MapLayout): readonly MapWallSegment[] {
+  let index = wallCollisionIndexes.get(layout);
+  if (!index) {
+    index = new Map<string, MapWallSegment[]>();
+    for (const wall of layout.wallSegments) {
+      const minimumCellX = wallCell(wall.center.x - wall.width / 2 - ACTOR_RADIUS);
+      const maximumCellX = wallCell(wall.center.x + wall.width / 2 + ACTOR_RADIUS);
+      const minimumCellZ = wallCell(wall.center.z - wall.depth / 2 - ACTOR_RADIUS);
+      const maximumCellZ = wallCell(wall.center.z + wall.depth / 2 + ACTOR_RADIUS);
+      for (let cellX = minimumCellX; cellX <= maximumCellX; cellX += 1) {
+        for (let cellZ = minimumCellZ; cellZ <= maximumCellZ; cellZ += 1) {
+          const key = `${cellX}:${cellZ}`;
+          const walls = index.get(key);
+          if (walls) walls.push(wall);
+          else index.set(key, [wall]);
+        }
+      }
+    }
+    wallCollisionIndexes.set(layout, index);
+  }
+  return index.get(`${wallCell(x)}:${wallCell(z)}`) ?? [];
+}
+
+function wallCell(value: number): number {
+  return Math.floor((value + MAP_HALF_SIZE) / WALL_COLLISION_CELL_SIZE);
 }
 
 export function getSupportHeight(

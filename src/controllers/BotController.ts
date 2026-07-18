@@ -1,6 +1,11 @@
 import { GridNavigator } from "../ai/navigation/GridNavigator";
 import { ITEMS } from "../config/items";
-import { createMapLayout, getTerrainHeight, LOOT_SPAWN_POINTS } from "../config/map";
+import {
+  createMapLayout,
+  getTerrainHeight,
+  LANDING_ZONE_COUNT,
+  LOOT_SPAWN_POINTS,
+} from "../config/map";
 import { WEAPONS } from "../config/weapons";
 import type { ActorCommand } from "../game/commands/ActorCommand";
 import { createIdleCommand } from "../game/commands/ActorCommand";
@@ -13,13 +18,22 @@ import {
   type Vector3State,
 } from "../game/state/types";
 import type { CombatWorld } from "../game/systems/CombatSystem";
+import { SPRINT_SPEED } from "../game/systems/MovementSystem";
 
 const WAYPOINT_REACHED_DISTANCE = 0.5;
+const LOOT_INTERACTION_DISTANCE = 3;
+const LATE_GAME_PATROL_RADIUS = 350;
+const LATE_GAME_PATROL_ACTORS = 12;
+const DAMAGE_INVESTIGATION_SECONDS = 2.5;
+const DAMAGE_INVESTIGATION_DISTANCE = 30;
 
 export class BotController {
   private navigator = new GridNavigator();
   private navigatorSeed = 0;
-  private readonly dropProgress: number;
+  private dropProgress: number | null = null;
+  private readonly dropProgressJitter: number;
+  private readonly landingPoiSlot: number;
+  private readonly landingPoiWave: number;
   private readonly landingTarget: Vector3State;
   private weaponLandingTarget: Vector3State | null = null;
   private decisionSeconds = 0;
@@ -30,11 +44,24 @@ export class BotController {
   private waypointIndex = 0;
   private navigationPreservesAim = false;
   private navigationTarget: Vector3State | null = null;
+  private lootTargetId: string | null = null;
+  private patrolTarget: Vector3State | null = null;
+  private patrolSequence = 0;
+  private lastObservedDamageElapsedSeconds = -1;
+  private damageInvestigationTarget: Vector3State | null = null;
+  private damageInvestigationDirection: Vector3State | null = null;
+  private damageInvestigationUntilSeconds = -1;
+  private navigationProgressKey: string | null = null;
+  private navigationProgressDistance = Number.POSITIVE_INFINITY;
+  private navigationNoProgressDecisions = 0;
+  private updateDeltaSeconds = 0;
   private lastDecisionPosition: Vector3State | null = null;
   private stalledDecisions = 0;
 
   public constructor(index = 0, private readonly random: () => number = Math.random) {
-    this.dropProgress = 0.12 + (index / 19) * 0.72;
+    this.dropProgressJitter = randomBetween(this.random, -0.045, 0.045);
+    this.landingPoiSlot = Math.max(0, index - 1) % LANDING_ZONE_COUNT;
+    this.landingPoiWave = Math.floor(Math.max(0, index - 1) / LANDING_ZONE_COUNT);
     this.landingTarget = { ...(LOOT_SPAWN_POINTS[(index * 4) % LOOT_SPAWN_POINTS.length] ?? { x: 0, y: 1.76, z: 0 }) };
   }
 
@@ -45,22 +72,48 @@ export class BotController {
     deltaSeconds: number,
     playerId: string,
   ): ActorCommand {
+    this.updateDeltaSeconds = deltaSeconds;
     const layout = createMapLayout(state.mapSeed);
     if (state.mapSeed !== this.navigatorSeed) {
-      this.navigator = new GridNavigator(layout.obstacles, layout.roofRamps);
+      this.navigator = new GridNavigator(layout.obstacles, layout.roofRamps, layout.wallSegments);
       this.navigatorSeed = state.mapSeed;
       this.waypoint = null;
       this.navigationPath = [];
       this.navigationTarget = null;
+      this.lootTargetId = null;
+      this.patrolTarget = null;
+      this.damageInvestigationTarget = null;
+      this.damageInvestigationDirection = null;
+      this.damageInvestigationUntilSeconds = -1;
+      this.resetNavigationProgress();
     }
     if (!actor.alive) {
       return createIdleCommand();
     }
     if (actor.deployment === "aircraft") {
+      const landingTarget = this.findLandingTarget(state);
+      this.dropProgress ??= this.getDropProgress(state, landingTarget);
       return { ...createIdleCommand(), jump: state.flight.progress >= this.dropProgress };
     }
     if (actor.deployment === "parachuting") {
-      return this.moveToward(actor, this.findLandingTarget(actor, state), false);
+      return this.moveToward(actor, this.findLandingTarget(state), false);
+    }
+
+    if (
+      actor.lastDamageDirection &&
+      actor.lastDamageElapsedSeconds > this.lastObservedDamageElapsedSeconds
+    ) {
+      this.lastObservedDamageElapsedSeconds = actor.lastDamageElapsedSeconds;
+      this.damageInvestigationDirection = { ...actor.lastDamageDirection };
+      const horizontalDirection = normalizeFlat(actor.lastDamageDirection);
+      const x = actor.position.x + horizontalDirection.x * DAMAGE_INVESTIGATION_DISTANCE;
+      const z = actor.position.z + horizontalDirection.z * DAMAGE_INVESTIGATION_DISTANCE;
+      this.damageInvestigationTarget = { x, y: getTerrainHeight(x, z, layout) + 1.76, z };
+      this.damageInvestigationUntilSeconds = state.elapsedSeconds + DAMAGE_INVESTIGATION_SECONDS;
+      this.decisionSeconds = 0;
+      this.lootTargetId = null;
+      this.patrolTarget = null;
+      this.clearNavigation();
     }
 
     const player = state.actors[playerId];
@@ -69,7 +122,7 @@ export class BotController {
     this.fireSeconds -= deltaSeconds;
     const interval = playerDistance < 80 ? 0.08 : 0.22 + (numericId(actor.id) % 4) * 0.04;
     if (this.decisionSeconds > 0) {
-      return {
+      const command = {
         ...this.cached,
         fire: false,
         reload: false,
@@ -79,6 +132,10 @@ export class BotController {
         useItem: null,
         dropItem: null,
       };
+      if (this.navigationPath.length > 0) {
+        this.updateNavigationMovement(actor, command);
+      }
+      return command;
     }
     this.decisionSeconds = interval;
     if (this.lastDecisionPosition) {
@@ -89,6 +146,9 @@ export class BotController {
         this.waypoint = null;
         this.navigationPath = [];
         this.navigationTarget = null;
+        this.lootTargetId = null;
+        this.patrolTarget = null;
+        this.resetNavigationProgress();
         this.weaponLandingTarget = null;
         this.stalledDecisions = 0;
       }
@@ -100,17 +160,19 @@ export class BotController {
     const activeWeaponConfig = activeWeapon ? WEAPONS[activeWeapon.weaponId] : undefined;
     const reserveAmmo = activeWeaponConfig ? getItemQuantity(actor, activeWeaponConfig.ammoItemId) : 0;
     const canFight = Boolean(activeWeapon && (activeWeapon.ammoInMagazine > 0 || reserveAmmo > 0));
-    if (actor.health < 38 && getItemQuantity(actor, "medkit") > 0) {
-      command.useItem = "medkit";
-      return this.cache(command);
-    }
-    if (actor.health < 72 && getItemQuantity(actor, "bandage") > 0) {
-      command.useItem = "bandage";
-      return this.cache(command);
+    const outsideZone = horizontalDistance(actor.position, state.safeZone.center) > state.safeZone.radius;
+    if (outsideZone) {
+      this.lootTargetId = null;
+      this.patrolTarget = null;
+      return this.cache(this.navigate(actor, state.safeZone.center, command));
     }
 
     const target = this.findVisibleTarget(actor, state, world);
     if (target && activeWeapon && canFight) {
+      this.damageInvestigationTarget = null;
+      this.damageInvestigationDirection = null;
+      this.damageInvestigationUntilSeconds = -1;
+      this.lootTargetId = null;
       const toTarget = subtract(target.position, actor.position);
       const distance = horizontalDistance(actor.position, target.position);
       const weapon = WEAPONS[activeWeapon.weaponId];
@@ -130,11 +192,51 @@ export class BotController {
         this.navigate(actor, target.position, command, undefined, true);
         command.sprint = distance > 55;
       } else if (distance < 11) {
+        this.clearNavigation();
         command.move = scale(normalizeFlat(toTarget), -1);
       } else {
+        this.clearNavigation();
         const forward = normalizeFlat(toTarget);
         command.move = { x: forward.z, y: 0, z: -forward.x };
       }
+      return this.cache(command);
+    }
+
+    if (
+      !target &&
+      this.damageInvestigationTarget &&
+      this.damageInvestigationDirection &&
+      state.elapsedSeconds <= this.damageInvestigationUntilSeconds
+    ) {
+      command.aimDirection = { ...this.damageInvestigationDirection };
+      const path = this.navigator.findPath(actor.position, this.damageInvestigationTarget);
+      if (path.length > 0) {
+        return this.cache(this.navigate(actor, this.damageInvestigationTarget, command, path, true));
+      }
+      command.move = normalizeFlat(this.damageInvestigationDirection);
+      command.sprint = true;
+      return this.cache(command);
+    }
+    if (state.elapsedSeconds > this.damageInvestigationUntilSeconds) {
+      this.damageInvestigationTarget = null;
+      this.damageInvestigationDirection = null;
+    }
+    if (actor.health < 38 && getItemQuantity(actor, "medkit") > 0) {
+      this.clearNavigation();
+      command.useItem = "medkit";
+      return this.cache(command);
+    }
+    if (actor.health < 72 && getItemQuantity(actor, "bandage") > 0) {
+      this.clearNavigation();
+      command.useItem = "bandage";
+      return this.cache(command);
+    }
+
+    if (!getActiveWeapon(actor) && Object.values(state.groundLoot).some((loot) =>
+      loot.available && ITEMS[loot.itemId]?.kind === "weapon" && distanceSquared(actor.position, loot.position) <= LOOT_INTERACTION_DISTANCE ** 2
+    )) {
+      this.clearNavigation();
+      command.interact = true;
       return this.cache(command);
     }
 
@@ -142,15 +244,11 @@ export class BotController {
       const config = WEAPONS[activeWeapon.weaponId];
       command.reload = Boolean(config && getItemQuantity(actor, config.ammoItemId) > 0);
     }
-    const outsideZone = horizontalDistance(actor.position, state.safeZone.center) > state.safeZone.radius * 0.88;
-    if (outsideZone) {
-      return this.cache(this.navigate(actor, state.safeZone.center, command));
-    }
-
     const lootSelection = this.findUsefulLoot(actor, state);
     if (lootSelection) {
       const { loot, path } = lootSelection;
-      if (horizontalDistance(actor.position, loot.position) <= 2.6) {
+      if (distanceSquared(actor.position, loot.position) <= LOOT_INTERACTION_DISTANCE ** 2) {
+        this.clearNavigation();
         const item = ITEMS[loot.itemId];
         const existingStack = actor.inventory.backpack.find((stack) => stack.itemId === loot.itemId);
         if (
@@ -165,7 +263,49 @@ export class BotController {
       }
       return this.cache(this.navigate(actor, loot.position, command, path));
     }
+    this.lootTargetId = null;
+    const patrol = this.findPatrolTarget(actor, state, layout);
+    if (patrol) return this.cache(this.navigate(actor, patrol.target, command, patrol.path));
+    this.patrolTarget = null;
     return this.cache(this.navigate(actor, state.safeZone.center, command));
+  }
+
+  private findPatrolTarget(
+    actor: ActorState,
+    state: MatchState,
+    layout: ReturnType<typeof createMapLayout>,
+  ): { target: Vector3State; path: Vector3State[] } | null {
+    const livingActors = Object.values(state.actors).filter((candidate) => candidate.alive).length;
+    const lateGame = livingActors <= LATE_GAME_PATROL_ACTORS || state.safeZone.radius <= LATE_GAME_PATROL_RADIUS;
+    if (
+      this.patrolTarget &&
+      horizontalDistance(actor.position, this.patrolTarget) >= 2 &&
+      horizontalDistance(this.patrolTarget, state.safeZone.center) <= state.safeZone.radius * 0.82
+    ) {
+      const path = this.navigationTarget?.x === this.patrolTarget.x &&
+        this.navigationTarget.z === this.patrolTarget.z &&
+        this.navigationPath.length > 0
+        ? this.navigationPath
+        : this.navigator.findPath(actor.position, this.patrolTarget);
+      if (path.length > 0) return { target: this.patrolTarget, path };
+    }
+
+    this.patrolTarget = null;
+    this.patrolSequence += 1;
+    const usableRadius = Math.max(0, Math.min(state.safeZone.radius * 0.68 - 1, lateGame ? 260 : 180));
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const angle = numericId(actor.id) * 2.399963 + (this.patrolSequence + attempt) * 1.618034;
+      const radiusScale = 0.35 + ((numericId(actor.id) + this.patrolSequence + attempt * 3) % 6) * 0.1;
+      const radius = usableRadius * radiusScale;
+      const x = state.safeZone.center.x + Math.cos(angle) * radius;
+      const z = state.safeZone.center.z + Math.sin(angle) * radius;
+      const candidate = { x, y: getTerrainHeight(x, z, layout) + 1.76, z };
+      const path = this.navigator.findPath(actor.position, candidate);
+      if (path.length === 0 || horizontalDistance(actor.position, candidate) < 2) continue;
+      this.patrolTarget = candidate;
+      return { target: candidate, path };
+    }
+    return null;
   }
 
   private findVisibleTarget(actor: ActorState, state: MatchState, world: CombatWorld): ActorState | null {
@@ -199,44 +339,107 @@ export class BotController {
       activeWeapon.ammoInMagazine === 0 &&
       getItemQuantity(actor, weaponConfig.ammoItemId) === 0
     );
-    const candidates: { loot: GroundLootState; distance: number }[] = [];
-    for (const loot of Object.values(state.groundLoot)) {
-      if (!loot.available) continue;
+    const isUseful = (loot: GroundLootState): boolean => {
+      if (!loot.available) return false;
       const item = ITEMS[loot.itemId];
-      if (!item) continue;
+      if (!item) return false;
       const existingStack = actor.inventory.backpack.find((stack) => stack.itemId === item.id);
       const canCarry = Boolean(existingStack && existingStack.quantity < item.maxStack) ||
         actor.inventory.backpack.length < actor.inventory.maxBackpackStacks;
-      const useful = hasWeapon
+      return hasWeapon
         ? (item.kind === "ammo" && (!needsAmmo || item.id === weaponConfig?.ammoItemId) && (needsAmmo || canCarry)) ||
           (item.kind === "medical" && actor.health < 90) ||
-          (item.kind === "armor" && (item.level ?? 0) > actor.inventory.armorLevel) ||
+          (item.kind === "armor" && (
+            (item.level ?? 0) > actor.inventory.armorLevel ||
+            ((item.level ?? 0) === actor.inventory.armorLevel && actor.armor < actor.maxArmor)
+          )) ||
           (item.kind === "helmet" && (item.level ?? 0) > actor.inventory.helmetLevel)
         : item.kind === "weapon";
-      if (!useful) continue;
+    };
+    const currentTarget = this.lootTargetId ? state.groundLoot[this.lootTargetId] : undefined;
+    if (currentTarget && isUseful(currentTarget)) {
+      const currentDistance = horizontalDistance(actor.position, currentTarget.position);
+      const nearestUsefulDistance = hasWeapon
+        ? currentDistance
+        : Object.values(state.groundLoot).reduce((nearest, loot) =>
+            isUseful(loot) ? Math.min(nearest, horizontalDistance(actor.position, loot.position)) : nearest,
+          Number.POSITIVE_INFINITY);
+      const significantlyBetterTargetExists = nearestUsefulDistance + 30 < currentDistance * 0.9;
+      if (!significantlyBetterTargetExists) {
+        if (this.navigationPath.length > 0 || distanceSquared(actor.position, currentTarget.position) <= LOOT_INTERACTION_DISTANCE ** 2) {
+          return { loot: currentTarget, path: this.navigationPath };
+        }
+        const path = this.navigator.findPath(actor.position, currentTarget.position);
+        if (path.length > 0) return { loot: currentTarget, path };
+      }
+      this.clearNavigation();
+    }
+    this.lootTargetId = null;
+    const candidates: { loot: GroundLootState; distance: number }[] = [];
+    for (const loot of Object.values(state.groundLoot)) {
+      if (!isUseful(loot)) continue;
       const distance = horizontalDistance(actor.position, loot.position);
       if (hasWeapon && !needsAmmo && distance >= 85) continue;
       candidates.push({ loot, distance });
     }
     candidates.sort((left, right) => left.distance - right.distance || left.loot.id.localeCompare(right.loot.id));
-    for (const candidate of candidates) {
+    const nearbyCandidateCount = Math.min(3, candidates.length);
+    const candidateOffset = hasWeapon || nearbyCandidateCount === 0
+      ? 0
+      : (numericId(actor.id) * 7 + this.landingPoiWave) % nearbyCandidateCount;
+    const orderedCandidates = candidateOffset === 0
+      ? candidates
+      : [
+          ...candidates.slice(candidateOffset, nearbyCandidateCount),
+          ...candidates.slice(0, candidateOffset),
+          ...candidates.slice(nearbyCandidateCount),
+        ];
+    for (const candidate of orderedCandidates) {
       const path = this.navigator.findPath(actor.position, candidate.loot.position);
       if (path.length > 0) {
+        this.lootTargetId = candidate.loot.id;
         return { loot: candidate.loot, path };
       }
     }
     return null;
   }
 
-  private findLandingTarget(actor: ActorState, state: MatchState): Vector3State {
+  private findLandingTarget(state: MatchState): Vector3State {
     if (this.weaponLandingTarget) return this.weaponLandingTarget;
+    const layout = createMapLayout(state.mapSeed);
     const weaponLoot = Object.values(state.groundLoot)
       .filter((loot) => ITEMS[loot.itemId]?.kind === "weapon")
       .sort((left, right) => left.id.localeCompare(right.id));
-    if (weaponLoot.length === 0) return this.landingTarget;
-    const target = weaponLoot[(Math.max(1, numericId(actor.id)) - 1) % weaponLoot.length]?.position;
+    const outdoorWeaponLoot = weaponLoot.filter((loot) => !pointInsideBuilding(loot.position, layout));
+    const availableWeaponLoot = outdoorWeaponLoot.length > 0 ? outdoorWeaponLoot : weaponLoot;
+    if (availableWeaponLoot.length === 0) return this.landingTarget;
+    const poiIndex = (this.landingPoiSlot + state.mapSeed) % layout.landingZones.length;
+    const assignedPoi = layout.landingZones[poiIndex] ?? layout.landingZones[0];
+    const localWeaponLoot = assignedPoi
+      ? availableWeaponLoot.filter((loot) => lootZoneIndex(numericId(loot.id), layout.lootZoneCounts) === poiIndex)
+      : [];
+    const targetPool = (localWeaponLoot.length > 0 ? localWeaponLoot : availableWeaponLoot)
+      .sort((left, right) =>
+        horizontalDistance(left.position, assignedPoi?.position ?? left.position) -
+        horizontalDistance(right.position, assignedPoi?.position ?? right.position) ||
+        left.id.localeCompare(right.id),
+      )
+      .slice(0, 6);
+    const poiRotation = ((state.mapSeed ^ Math.imul(poiIndex + 1, 0x9e3779b1)) >>> 0) % targetPool.length;
+    const targetIndex = (this.landingPoiWave + poiRotation) % targetPool.length;
+    const target = targetPool[targetIndex]?.position;
     this.weaponLandingTarget = target ? { ...target } : this.landingTarget;
     return this.weaponLandingTarget;
+  }
+
+  private getDropProgress(state: MatchState, target: Vector3State): number {
+    const deltaX = state.flight.end.x - state.flight.start.x;
+    const deltaZ = state.flight.end.z - state.flight.start.z;
+    const lengthSquared = deltaX * deltaX + deltaZ * deltaZ;
+    const projected = lengthSquared === 0
+      ? 0.5
+      : ((target.x - state.flight.start.x) * deltaX + (target.z - state.flight.start.z) * deltaZ) / lengthSquared;
+    return clamp(projected + this.dropProgressJitter, 0.12, 0.88);
   }
 
   private navigate(
@@ -254,7 +457,13 @@ export class BotController {
       this.navigationPreservesAim = preserveAim;
       this.navigationPath = path.map((point) => ({ ...point }));
       this.waypointIndex = Math.min(1, Math.max(0, this.navigationPath.length - 1));
+      this.resetNavigationProgress();
     }
+    this.updateNavigationMovement(actor, command);
+    return command;
+  }
+
+  private updateNavigationMovement(actor: ActorState, command: ActorCommand): void {
     while (
       this.waypointIndex < this.navigationPath.length &&
       horizontalDistance(actor.position, this.navigationPath[this.waypointIndex] as Vector3State) < WAYPOINT_REACHED_DISTANCE
@@ -264,12 +473,36 @@ export class BotController {
     this.waypoint = this.navigationPath[this.waypointIndex] ?? null;
     if (!this.waypoint) {
       this.navigationPath = [];
-      return command;
+      this.resetNavigationProgress();
+      command.move = { x: 0, y: 0, z: 0 };
+      return;
     }
-    command.move = normalizeFlat(subtract(this.waypoint, actor.position));
-    if (!preserveAim) command.aimDirection = { ...command.move };
+    const waypointKey = `${this.waypointIndex}:${this.waypoint.x}:${this.waypoint.z}`;
+    const waypointDistance = horizontalDistance(actor.position, this.waypoint);
+    if (waypointKey !== this.navigationProgressKey) {
+      this.navigationProgressKey = waypointKey;
+      this.navigationProgressDistance = waypointDistance;
+      this.navigationNoProgressDecisions = 0;
+    } else {
+      this.navigationNoProgressDecisions = waypointDistance < this.navigationProgressDistance - 0.08
+        ? 0
+        : this.navigationNoProgressDecisions + 1;
+      this.navigationProgressDistance = waypointDistance;
+      if (this.navigationNoProgressDecisions >= 4) {
+        this.navigationPath = [];
+        this.navigationTarget = null;
+        this.resetNavigationProgress();
+        command.move = { x: 0, y: 0, z: 0 };
+        return;
+      }
+    }
+    const direction = normalizeFlat(subtract(this.waypoint, actor.position));
+    const maximumStepDistance = SPRINT_SPEED * this.updateDeltaSeconds;
+    command.move = maximumStepDistance > 0 && waypointDistance < maximumStepDistance
+      ? scale(direction, waypointDistance / maximumStepDistance)
+      : direction;
+    if (!this.navigationPreservesAim) command.aimDirection = { ...command.move };
     command.sprint = true;
-    return command;
   }
 
   private moveToward(actor: ActorState, target: Vector3State, sprint: boolean): ActorCommand {
@@ -283,6 +516,19 @@ export class BotController {
   private cache(command: ActorCommand): ActorCommand {
     this.cached = command;
     return command;
+  }
+
+  private resetNavigationProgress(): void {
+    this.navigationProgressKey = null;
+    this.navigationProgressDistance = Number.POSITIVE_INFINITY;
+    this.navigationNoProgressDecisions = 0;
+  }
+
+  private clearNavigation(): void {
+    this.waypoint = null;
+    this.navigationPath = [];
+    this.navigationTarget = null;
+    this.resetNavigationProgress();
   }
 }
 
@@ -308,11 +554,36 @@ function horizontalDistance(a: Vector3State, b: Vector3State): number {
   return Math.hypot(a.x - b.x, a.z - b.z);
 }
 
+function distanceSquared(a: Vector3State, b: Vector3State): number {
+  return (a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2;
+}
+
+function pointInsideBuilding(point: Vector3State, layout: ReturnType<typeof createMapLayout>): boolean {
+  return layout.obstacles.some(
+    (obstacle) =>
+      Math.abs(point.x - obstacle.center.x) < obstacle.width / 2 - 0.6 &&
+      Math.abs(point.z - obstacle.center.z) < obstacle.depth / 2 - 0.6,
+  );
+}
+
 function randomBetween(random: () => number, minimum: number, maximum: number): number {
   return minimum + random() * (maximum - minimum);
+}
+
+function lootZoneIndex(lootIndex: number, counts: readonly number[]): number {
+  let start = 0;
+  for (let zoneIndex = 0; zoneIndex < counts.length; zoneIndex += 1) {
+    start += counts[zoneIndex] ?? 0;
+    if (lootIndex < start) return zoneIndex;
+  }
+  return Math.max(0, counts.length - 1);
 }
 
 function numericId(id: string): number {
   const match = /\d+$/.exec(id);
   return match ? Number(match[0]) : 0;
+}
+
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.max(minimum, Math.min(maximum, value));
 }
