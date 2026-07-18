@@ -22,6 +22,9 @@ describe("IslandScene lifecycle", () => {
       const layout = createMapLayout(state.mapSeed);
       expect(engine.scenes).toHaveLength(1);
       expect(bundle.lootMeshes.size).toBe(Object.keys(state.groundLoot).length);
+      expect([...bundle.lootMeshes.values()].every((mesh) =>
+        mesh.isPickable && mesh.scaling.x === 1 && mesh.scaling.y === 1 && mesh.scaling.z === 1
+      )).toBe(true);
       const spawnMarker = bundle.lootMeshes.values().next().value;
       const spawnMaterial = spawnMarker?.material;
       state.groundLoot.death = {

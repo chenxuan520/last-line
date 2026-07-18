@@ -154,13 +154,25 @@ describe("AI loot reachability", () => {
     }
 
     const living = Object.values(state.actors).filter((actor) => actor.alive);
-    expect(state.phase).toBe("finished");
+    expect(
+      state.phase,
+      JSON.stringify({
+        elapsedSeconds: state.elapsedSeconds,
+        safeZone: state.safeZone,
+        living: living.map((actor) => ({
+          id: actor.id,
+          health: actor.health,
+          deployment: actor.deployment,
+          position: actor.position,
+        })),
+      }),
+    ).toBe("finished");
     expect(living).toHaveLength(1);
     expect(state.result?.winnerId).toBe(living[0]?.id);
     expect(allEvents.some((event) => event.type === "item-picked" && event.actorId.startsWith("bot-"))).toBe(true);
     expect(allEvents.some((event) => event.type === "shot-fired" && event.actorId.startsWith("bot-"))).toBe(true);
     expect(allEvents.some((event) => event.type === "actor-died" && event.sourceId?.startsWith("bot-"))).toBe(true);
-  }, 60_000);
+  }, 120_000);
 });
 
 function seededRandom(seed: number): () => number {

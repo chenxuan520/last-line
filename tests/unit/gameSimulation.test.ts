@@ -6,7 +6,7 @@ import { GameSimulation } from "../../src/game/GameSimulation";
 import { getReloadVisualTransform, resolveSpectatorActorId } from "../../src/app/BattleRoyaleSession";
 import { TrainingMode } from "../../src/game/modes/TrainingMode";
 import { createActorState, createWeaponState, getActiveWeapon, type MatchState } from "../../src/game/state/types";
-import type { CombatWorld } from "../../src/game/systems/CombatSystem";
+import { CombatSystem, type CombatWorld } from "../../src/game/systems/CombatSystem";
 
 function createSimulation(weaponId = "rifle"): GameSimulation {
   const player = createActorState("player", "player", { x: 0, y: getTerrainHeight(0, 0, 0) + 1.76, z: 0 }, weaponId);
@@ -127,6 +127,24 @@ describe("GameSimulation combat", () => {
     weapon.ammoInMagazine = 0;
     simulation.step(1, new Map([["player", fireCommand]]), hit("bot-1"));
     expect(weapon.ammoInMagazine).toBe(0);
+  });
+
+  it("automatically starts reloading after firing the final round when reserve ammo remains", () => {
+    const simulation = createSimulation();
+    const player = simulation.state.actors.player;
+    const weapon = getActiveWeapon(player);
+    if (!weapon) throw new Error("test weapon missing");
+    weapon.ammoInMagazine = 1;
+    player.inventory.backpack = [{ itemId: "ammo.rifle", quantity: 30 }];
+
+    simulation.step(1 / 30, new Map([["player", fireCommand]]), miss);
+
+    expect(weapon.ammoInMagazine).toBe(0);
+    expect(weapon.reloadSeconds).toBe(WEAPONS.rifle?.reloadSeconds);
+    expect(simulation.drainEvents().map((event) => event.type)).toEqual([
+      "shot-fired",
+      "reload-started",
+    ]);
   });
 
   it("reloads only the available reserve ammunition", () => {
@@ -252,6 +270,26 @@ describe("GameSimulation combat", () => {
     expect(winners).toEqual(new Set(["bot-1", "player"]));
   });
 
+  it("aggregates same-tick attacker directions independently of command ID order", () => {
+    const forward = runCrossfire(["bot-1", "bot-2"]);
+    const reversed = runCrossfire(["bot-2", "bot-1"]);
+
+    expect(reversed).toEqual(forward);
+    expect(forward.x).toBeCloseTo(Math.SQRT1_2);
+    expect(forward.z).toBeCloseTo(Math.SQRT1_2);
+  });
+
+  it("rotates the investigation direction for equal opposing same-tick hits", () => {
+    const directions = new Set<number>();
+    for (let tick = 0; tick < 24; tick += 1) {
+      const forward = runOpposingCrossfire(["bot-1", "bot-2"], tick / 30);
+      const reversed = runOpposingCrossfire(["bot-2", "bot-1"], tick / 30);
+      expect(reversed).toEqual(forward);
+      directions.add(Math.sign(forward.x ?? 0));
+    }
+    expect(directions).toEqual(new Set([-1, 1]));
+  });
+
   it("resolves contested pickups independently of command insertion order without class bias", () => {
     const winners = new Set<string>();
     for (let tick = 0; tick < 24; tick += 1) {
@@ -309,6 +347,57 @@ function runMutualFire(commandOrder: readonly string[], elapsedSeconds = 0) {
     survivorHealth: Object.values(simulation.state.actors).find((actor) => actor.alive)?.health,
     events,
   };
+}
+
+function runCrossfire(commandOrder: readonly string[]) {
+  const simulation = createSimulation();
+  const target = simulation.state.actors.player;
+  const first = simulation.state.actors["bot-1"];
+  if (!target || !first) throw new Error("actors missing");
+  target.position = { x: 0, y: 1.76, z: 0 };
+  target.armor = 0;
+  target.inventory.armorLevel = 0;
+  first.position = { x: 10, y: 1.76, z: 0 };
+  const second = createActorState("bot-2", "bot", { x: 0, y: 1.76, z: 10 });
+  simulation.state.actors[second.id] = second;
+  const targetHit: CombatWorld = { traceShot: ({ shooterId }) => shooterId === "player" ? null : "player" };
+
+  new CombatSystem(WEAPONS).processCommands(
+    simulation.state,
+    new Map(commandOrder.map((actorId) => [actorId, fireCommand] as const)),
+    targetHit,
+    [],
+  );
+
+  return {
+    x: target.lastDamageDirection?.x,
+    y: target.lastDamageDirection?.y,
+    z: target.lastDamageDirection?.z,
+  };
+}
+
+function runOpposingCrossfire(commandOrder: readonly string[], elapsedSeconds: number) {
+  const simulation = createSimulation();
+  simulation.state.elapsedSeconds = elapsedSeconds;
+  const target = simulation.state.actors.player;
+  const first = simulation.state.actors["bot-1"];
+  if (!target || !first) throw new Error("actors missing");
+  target.position = { x: 0, y: 1.76, z: 0 };
+  target.armor = 0;
+  target.inventory.armorLevel = 0;
+  first.position = { x: 10, y: 1.76, z: 0 };
+  const second = createActorState("bot-2", "bot", { x: -10, y: 1.76, z: 0 });
+  simulation.state.actors[second.id] = second;
+  const targetHit: CombatWorld = { traceShot: ({ shooterId }) => shooterId === "player" ? null : "player" };
+
+  new CombatSystem(WEAPONS).processCommands(
+    simulation.state,
+    new Map(commandOrder.map((actorId) => [actorId, fireCommand] as const)),
+    targetHit,
+    [],
+  );
+
+  return { x: target.lastDamageDirection?.x, y: target.lastDamageDirection?.y, z: target.lastDamageDirection?.z };
 }
 
 function runContestedPickup(commandOrder: readonly string[], elapsedSeconds: number): string {

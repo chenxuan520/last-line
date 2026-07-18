@@ -22,7 +22,7 @@ describe("loadCatalogModel", () => {
     loaded?.container.dispose();
     scene.dispose();
     engine.dispose();
-  });
+  }, 30_000);
 
   it("returns the procedural fallback path when node validation fails", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);

@@ -87,4 +87,19 @@ describe("DamageSystem", () => {
     expect(target.lastDamageDirection?.z).toBe(0);
     expect(() => JSON.stringify(state)).not.toThrow();
   });
+
+  it("keeps aircraft occupants invulnerable but allows parachuting actors to take damage", () => {
+    const state = createState();
+    const target = state.actors.target;
+    const source = createActorState("source", "bot", { x: 10, y: 0, z: 0 });
+    state.actors.source = source;
+    target.deployment = "aircraft";
+
+    expect(new DamageSystem().applyDamage(state, target.id, 20, source.id, [])).toBe(0);
+    expect(target.health).toBe(100);
+
+    target.deployment = "parachuting";
+    expect(new DamageSystem().applyDamage(state, target.id, 20, source.id, [])).toBeGreaterThan(0);
+    expect(target.health).toBeLessThan(100);
+  });
 });

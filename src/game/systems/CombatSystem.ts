@@ -193,6 +193,9 @@ export class CombatSystem {
         pendingDamage.push({ targetId, sourceId: actor.id, amount: config.damage, weaponId: config.id });
       }
     }
+    if (weapon.ammoInMagazine === 0 && getItemQuantity(actor, config.ammoItemId) > 0) {
+      this.startReload(actor, events);
+    }
   }
 
   private applyPendingDamage(state: MatchState, pendingDamage: readonly PendingDamage[], events: GameEvent[]): void {
@@ -210,6 +213,27 @@ export class CombatSystem {
     const survivorId = allWouldDie
       ? selectSimultaneousSurvivor(living.map((actor) => actor.id), state.elapsedSeconds)
       : undefined;
+    const damageDirections = new Map<EntityId, Vector3State>();
+    const damageSources = new Map<EntityId, Set<EntityId>>();
+    for (const damage of pendingDamage) {
+      const target = state.actors[damage.targetId];
+      const source = state.actors[damage.sourceId];
+      if (!target || !source || target.deployment === "aircraft") continue;
+      const direction = normalize({
+        x: source.position.x - target.position.x,
+        y: source.position.y - target.position.y,
+        z: source.position.z - target.position.z,
+      });
+      const previous = damageDirections.get(damage.targetId) ?? { x: 0, y: 0, z: 0 };
+      damageDirections.set(damage.targetId, {
+        x: previous.x + direction.x * damage.amount,
+        y: previous.y + direction.y * damage.amount,
+        z: previous.z + direction.z * damage.amount,
+      });
+      const sources = damageSources.get(damage.targetId) ?? new Set<EntityId>();
+      sources.add(damage.sourceId);
+      damageSources.set(damage.targetId, sources);
+    }
 
     for (const damage of pendingDamage) {
       this.damage.applyDamage(
@@ -222,6 +246,33 @@ export class CombatSystem {
         damage.targetId === survivorId ? 1 : 0,
         damage.weaponId,
       );
+    }
+    for (const [targetId, aggregate] of damageDirections) {
+      const target = state.actors[targetId];
+      if (!target) continue;
+      let direction = aggregate;
+      let length = Math.hypot(direction.x, direction.y, direction.z);
+      if (length <= 1e-9) {
+        const selectedSourceId = selectSimultaneousSurvivor(
+          [...(damageSources.get(targetId) ?? [])],
+          state.elapsedSeconds,
+        );
+        const selectedSource = selectedSourceId ? state.actors[selectedSourceId] : undefined;
+        if (!selectedSource) continue;
+        direction = {
+          x: selectedSource.position.x - target.position.x,
+          y: selectedSource.position.y - target.position.y,
+          z: selectedSource.position.z - target.position.z,
+        };
+        length = Math.hypot(direction.x, direction.y, direction.z);
+        if (length <= 1e-9) continue;
+      }
+      target.lastDamageDirection = {
+        x: direction.x / length,
+        y: direction.y / length,
+        z: direction.z / length,
+      };
+      target.lastDamageElapsedSeconds = state.elapsedSeconds;
     }
   }
 }

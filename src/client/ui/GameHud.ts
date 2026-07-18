@@ -13,6 +13,7 @@ import {
   type MatchState,
 } from "../../game/state/types";
 import { createMinimapView, projectToMinimap } from "./minimap";
+import { findNearbyLootCandidate, findPickupCandidate } from "../../game/systems/InventorySystem";
 
 export class GameHud {
   private readonly elements = new Map<string, HTMLElement>();
@@ -138,11 +139,7 @@ export class GameHud {
     setWidth(this.requireElement("health-bar"), player.health / player.maxHealth * 100);
     setWidth(this.requireElement("armor-bar"), player.maxArmor > 0 ? player.armor / player.maxArmor * 100 : 0);
     this.setText("alive", Object.values(state.actors).filter((actor) => actor.alive).length.toString());
-    const jumpedCount = Object.values(state.actors).filter((actor) => actor.deployment !== "aircraft").length;
-    this.setText(
-      "kills",
-      state.phase === "flight" ? `已跳伞 ${jumpedCount} / ${Object.keys(state.actors).length}` : `${player.kills} 击杀`,
-    );
+    this.setText("kills", combatCounterLabel(state, player));
     this.setText("performance", `${Math.round(fps)} FPS`);
     this.setText("phase", phaseLabel(state, player));
     this.setText("zone-label", zoneLabel(state));
@@ -198,19 +195,42 @@ export class GameHud {
       this.renderBackpack(player);
       this.inventorySignature = inventorySignature;
     }
-    const promptSignature = `${state.elapsedSeconds.toFixed(3)}:${player.position.x.toFixed(2)}:${player.position.z.toFixed(2)}`;
+    const nearbyLootSignature = Object.values(state.groundLoot)
+      .filter((loot) => loot.available && Math.hypot(
+        loot.position.x - player.position.x,
+        loot.position.y - player.position.y,
+        loot.position.z - player.position.z,
+      ) <= 3.2)
+      .map((loot) => [
+        loot.id,
+        loot.itemId,
+        loot.quantity,
+        loot.position.x.toFixed(2),
+        loot.position.y.toFixed(2),
+        loot.position.z.toFixed(2),
+      ].join(":"))
+      .sort()
+      .join("|");
+    const promptSignature = [
+      player.alive,
+      player.deployment,
+      player.position.x.toFixed(2),
+      player.position.y.toFixed(2),
+      player.position.z.toFixed(2),
+      this.inventorySignature,
+      nearbyLootSignature,
+    ].join(":");
     if (promptSignature !== this.promptSignature) {
-      let nearestLoot: MatchState["groundLoot"][string] | null = null;
-      let nearestDistance = 3;
-      for (const loot of Object.values(state.groundLoot)) {
-        if (!loot.available) continue;
-        const distance = Math.hypot(loot.position.x - player.position.x, loot.position.z - player.position.z);
-        if (distance <= nearestDistance) {
-          nearestLoot = loot;
-          nearestDistance = distance;
-        }
-      }
-      this.setText("prompt", nearestLoot ? `F 拾取 ${getItemLabel(nearestLoot.itemId)}` : "");
+      const pickup = findPickupCandidate(player, state.groundLoot);
+      const nearby = pickup ?? findNearbyLootCandidate(player, state.groundLoot);
+      this.setText(
+        "prompt",
+        pickup
+          ? `F 拾取 ${getItemLabel(pickup.itemId)}`
+          : nearby
+            ? `${getItemLabel(nearby.itemId)} · 当前无法拾取`
+            : "",
+      );
       this.promptSignature = promptSignature;
     }
     this.requireElement("pause").classList.toggle("is-visible", !pointerLocked && player.alive && !this.resultVisible);
@@ -222,12 +242,24 @@ export class GameHud {
     leaderboard.hidden = !visible;
     if (!visible) return;
     const actors = sortLeaderboardActors(Object.values(state.actors));
-    this.requireElement("leaderboard-rows").innerHTML = actors.map((actor, index) => `
-      <div class="${actor.alive ? "is-alive" : "is-eliminated"}${actor.id === playerId ? " is-player" : ""}">
-        <b>${index + 1}</b><span>${actorLabel(actor.id, playerId)}</span>
-        <em>${actor.alive ? "存活" : "淘汰"}</em><strong>${actor.kills} 击杀</strong>
-      </div>
-    `).join("");
+    const fragment = document.createDocumentFragment();
+    actors.forEach((actor, index) => {
+      const row = document.createElement("div");
+      row.classList.add(actor.alive ? "is-alive" : "is-eliminated");
+      if (actor.id === playerId) row.classList.add("is-player");
+      for (const [tagName, text] of [
+        ["b", `${index + 1}`],
+        ["span", actorLabel(actor.id, playerId)],
+        ["em", actor.alive ? "存活" : "淘汰"],
+        ["strong", `${actor.kills} 击杀`],
+      ] as const) {
+        const element = document.createElement(tagName);
+        element.textContent = text;
+        row.append(element);
+      }
+      fragment.append(row);
+    });
+    this.requireElement("leaderboard-rows").replaceChildren(fragment);
   }
 
   public handleEvents(events: readonly GameEvent[], playerId: string): void {
@@ -275,8 +307,16 @@ export class GameHud {
     this.resultVisible = true;
     const result = this.requireElement("result");
     result.hidden = false;
-    result.innerHTML = `<p>${title}</p><strong>${detail}</strong><button type="button" data-action="restart">${buttonLabel}</button>`;
-    result.querySelector<HTMLButtonElement>("[data-action='restart']")?.addEventListener("click", this.onRestart);
+    const heading = document.createElement("p");
+    heading.textContent = title;
+    const body = document.createElement("strong");
+    body.textContent = detail;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.action = "restart";
+    button.textContent = buttonLabel;
+    button.addEventListener("click", this.onRestart);
+    result.replaceChildren(heading, body, button);
   }
 
   private appendFeed(text: string): void {
@@ -292,28 +332,49 @@ export class GameHud {
   }
 
   private renderWeaponSlots(player: ActorState): void {
-    this.requireElement("weapon-slots").innerHTML = player.inventory.weaponSlots
-      .map((candidate, index) => {
-        const active = index === player.inventory.activeWeaponSlot;
-        const label = candidate ? WEAPONS[candidate.weaponId]?.label ?? candidate.weaponId : "空";
-        const icon = candidate
-          ? `<img src="${this.resolveIconUrl(`ui.weapon.${candidate.weaponId}`)}" alt="" />`
-          : `<span class="empty-slot-mark">—</span>`;
-        return `<span class="inventory-slot${active ? " is-active" : ""}">${icon}<span>${index + 1} ${label}</span></span>`;
-      })
-      .join("");
+    const fragment = document.createDocumentFragment();
+    player.inventory.weaponSlots.forEach((candidate, index) => {
+      const slot = document.createElement("span");
+      slot.classList.add("inventory-slot");
+      if (index === player.inventory.activeWeaponSlot) slot.classList.add("is-active");
+      if (candidate) {
+        const icon = document.createElement("img");
+        icon.src = this.resolveIconUrl(`ui.weapon.${candidate.weaponId}`);
+        icon.alt = "";
+        slot.append(icon);
+      } else {
+        const empty = document.createElement("span");
+        empty.className = "empty-slot-mark";
+        empty.textContent = "—";
+        slot.append(empty);
+      }
+      const label = document.createElement("span");
+      label.textContent = `${index + 1} ${candidate ? WEAPONS[candidate.weaponId]?.label ?? candidate.weaponId : "空"}`;
+      slot.append(label);
+      fragment.append(slot);
+    });
+    this.requireElement("weapon-slots").replaceChildren(fragment);
   }
 
   private renderBackpack(player: ActorState): void {
     const backpack = this.requireElement("backpack");
-    backpack.innerHTML = player.inventory.backpack.length > 0
-      ? player.inventory.backpack.map((stack) => `
-          <span class="item-stack">
-            <img src="${this.resolveIconUrl(`ui.item.${stack.itemId}`)}" alt="" />
-            <span>${getItemLabel(stack.itemId)} ×${stack.quantity}</span>
-          </span>
-        `).join("")
-      : "背包为空";
+    if (player.inventory.backpack.length === 0) {
+      backpack.textContent = "背包为空";
+      return;
+    }
+    const fragment = document.createDocumentFragment();
+    for (const stack of player.inventory.backpack) {
+      const item = document.createElement("span");
+      item.className = "item-stack";
+      const icon = document.createElement("img");
+      icon.src = this.resolveIconUrl(`ui.item.${stack.itemId}`);
+      icon.alt = "";
+      const label = document.createElement("span");
+      label.textContent = `${getItemLabel(stack.itemId)} ×${stack.quantity}`;
+      item.append(icon, label);
+      fragment.append(item);
+    }
+    backpack.replaceChildren(fragment);
   }
 
   private updateMinimap(state: MatchState, player: ActorState): void {
@@ -371,6 +432,14 @@ export function sortLeaderboardActors(actors: readonly ActorState[]): ActorState
     right.kills - left.kills ||
     left.id.localeCompare(right.id),
   );
+}
+
+export function combatCounterLabel(state: MatchState, player: ActorState): string {
+  if (state.phase !== "flight" || !player.alive || player.deployment === "grounded") {
+    return `${player.kills} 击杀`;
+  }
+  const jumpedCount = Object.values(state.actors).filter((actor) => actor.deployment !== "aircraft").length;
+  return `已跳伞 ${jumpedCount} / ${Object.keys(state.actors).length}`;
 }
 
 function assetUrl(url: string | undefined): string {

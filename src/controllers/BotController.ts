@@ -26,6 +26,9 @@ const LATE_GAME_PATROL_RADIUS = 350;
 const LATE_GAME_PATROL_ACTORS = 12;
 const DAMAGE_INVESTIGATION_SECONDS = 2.5;
 const DAMAGE_INVESTIGATION_DISTANCE = 30;
+const COMBAT_MEMORY_SECONDS = 12;
+const ZONE_SAFETY_MARGIN = 30;
+const UNARMED_WEAPON_DETOUR_DISTANCE = 120;
 
 export class BotController {
   private navigator = new GridNavigator();
@@ -51,6 +54,9 @@ export class BotController {
   private damageInvestigationTarget: Vector3State | null = null;
   private damageInvestigationDirection: Vector3State | null = null;
   private damageInvestigationUntilSeconds = -1;
+  private combatTargetId: string | null = null;
+  private combatLastKnownPosition: Vector3State | null = null;
+  private combatMemoryUntilSeconds = -1;
   private navigationProgressKey: string | null = null;
   private navigationProgressDistance = Number.POSITIVE_INFINITY;
   private navigationNoProgressDecisions = 0;
@@ -85,6 +91,7 @@ export class BotController {
       this.damageInvestigationTarget = null;
       this.damageInvestigationDirection = null;
       this.damageInvestigationUntilSeconds = -1;
+      this.clearCombatMemory();
       this.resetNavigationProgress();
     }
     if (!actor.alive) {
@@ -113,6 +120,7 @@ export class BotController {
       this.decisionSeconds = 0;
       this.lootTargetId = null;
       this.patrolTarget = null;
+      this.clearCombatMemory();
       this.clearNavigation();
     }
 
@@ -160,21 +168,67 @@ export class BotController {
     const activeWeaponConfig = activeWeapon ? WEAPONS[activeWeapon.weaponId] : undefined;
     const reserveAmmo = activeWeaponConfig ? getItemQuantity(actor, activeWeaponConfig.ammoItemId) : 0;
     const canFight = Boolean(activeWeapon && (activeWeapon.ammoInMagazine > 0 || reserveAmmo > 0));
-    const outsideZone = horizontalDistance(actor.position, state.safeZone.center) > state.safeZone.radius;
-    if (outsideZone) {
+    if (!activeWeapon && Object.values(state.groundLoot).some((loot) =>
+      loot.available &&
+      ITEMS[loot.itemId]?.kind === "weapon" &&
+      distanceSquared(actor.position, loot.position) <= LOOT_INTERACTION_DISTANCE ** 2
+    )) {
+      this.clearNavigation();
+      command.interact = true;
+      return this.cache(command);
+    }
+    const targetZoneRadius = Math.max(
+      0,
+      state.safeZone.targetRadius - Math.min(ZONE_SAFETY_MARGIN, state.safeZone.targetRadius * 0.12),
+    );
+    const outsideTargetZone = horizontalDistance(actor.position, state.safeZone.targetCenter) > targetZoneRadius;
+    const outsideCurrentZone = horizontalDistance(actor.position, state.safeZone.center) > state.safeZone.radius;
+    const nearbyWeapon = !activeWeapon && !outsideCurrentZone
+      ? this.findUsefulLoot(actor, state, true)
+      : null;
+    const nearbyWeaponInsideCurrentZone = Boolean(
+      nearbyWeapon &&
+      horizontalDistance(nearbyWeapon.loot.position, state.safeZone.center) <= state.safeZone.radius,
+    );
+    const nearbyWeaponPreservesTargetZone = Boolean(
+      nearbyWeapon &&
+      (outsideTargetZone ||
+        horizontalDistance(nearbyWeapon.loot.position, state.safeZone.targetCenter) <= targetZoneRadius),
+    );
+    if (
+      nearbyWeapon &&
+      nearbyWeaponInsideCurrentZone &&
+      nearbyWeaponPreservesTargetZone &&
+      horizontalDistance(actor.position, nearbyWeapon.loot.position) <= UNARMED_WEAPON_DETOUR_DISTANCE
+    ) {
+      if (distanceSquared(actor.position, nearbyWeapon.loot.position) <= LOOT_INTERACTION_DISTANCE ** 2) {
+        this.clearNavigation();
+        command.interact = true;
+        return this.cache(command);
+      }
+      return this.cache(this.navigate(actor, nearbyWeapon.loot.position, command, nearbyWeapon.path));
+    }
+    if (outsideTargetZone || outsideCurrentZone) {
       this.lootTargetId = null;
       this.patrolTarget = null;
-      return this.cache(this.navigate(actor, state.safeZone.center, command));
+      const center = outsideTargetZone ? state.safeZone.targetCenter : state.safeZone.center;
+      const radius = outsideTargetZone
+        ? targetZoneRadius
+        : Math.max(0, state.safeZone.radius - ZONE_SAFETY_MARGIN);
+      return this.cache(this.navigateIntoZone(actor, center, radius, command));
     }
 
     const target = this.findVisibleTarget(actor, state, world);
     if (target && activeWeapon && canFight) {
+      this.combatTargetId = target.id;
+      this.combatLastKnownPosition = { ...target.position };
+      this.combatMemoryUntilSeconds = state.elapsedSeconds + COMBAT_MEMORY_SECONDS;
       this.damageInvestigationTarget = null;
       this.damageInvestigationDirection = null;
       this.damageInvestigationUntilSeconds = -1;
       this.lootTargetId = null;
       const toTarget = subtract(target.position, actor.position);
-      const distance = horizontalDistance(actor.position, target.position);
+      const distance = vectorDistance(actor.position, target.position);
       const weapon = WEAPONS[activeWeapon.weaponId];
       command.aimDirection = normalize({
         x: toTarget.x + randomBetween(this.random, -0.45, 0.45),
@@ -200,6 +254,26 @@ export class BotController {
         command.move = { x: forward.z, y: 0, z: -forward.x };
       }
       return this.cache(command);
+    }
+
+    const rememberedTarget = this.combatTargetId ? state.actors[this.combatTargetId] : undefined;
+    if (
+      !target &&
+      rememberedTarget?.alive &&
+      this.combatLastKnownPosition &&
+      state.elapsedSeconds <= this.combatMemoryUntilSeconds &&
+      horizontalDistance(actor.position, this.combatLastKnownPosition) > 2
+    ) {
+      command.aimDirection = normalize(subtract(this.combatLastKnownPosition, actor.position));
+      return this.cache(this.navigate(actor, this.combatLastKnownPosition, command, undefined, true));
+    }
+    if (
+      !target &&
+      (!rememberedTarget?.alive ||
+        state.elapsedSeconds > this.combatMemoryUntilSeconds ||
+        (this.combatLastKnownPosition && horizontalDistance(actor.position, this.combatLastKnownPosition) <= 2))
+    ) {
+      this.clearCombatMemory();
     }
 
     if (
@@ -232,14 +306,6 @@ export class BotController {
       return this.cache(command);
     }
 
-    if (!getActiveWeapon(actor) && Object.values(state.groundLoot).some((loot) =>
-      loot.available && ITEMS[loot.itemId]?.kind === "weapon" && distanceSquared(actor.position, loot.position) <= LOOT_INTERACTION_DISTANCE ** 2
-    )) {
-      this.clearNavigation();
-      command.interact = true;
-      return this.cache(command);
-    }
-
     if (activeWeapon?.ammoInMagazine === 0) {
       const config = WEAPONS[activeWeapon.weaponId];
       command.reload = Boolean(config && getItemQuantity(actor, config.ammoItemId) > 0);
@@ -267,7 +333,7 @@ export class BotController {
     const patrol = this.findPatrolTarget(actor, state, layout);
     if (patrol) return this.cache(this.navigate(actor, patrol.target, command, patrol.path));
     this.patrolTarget = null;
-    return this.cache(this.navigate(actor, state.safeZone.center, command));
+    return this.cache(this.navigateIntoZone(actor, state.safeZone.targetCenter, state.safeZone.targetRadius, command));
   }
 
   private findPatrolTarget(
@@ -276,11 +342,16 @@ export class BotController {
     layout: ReturnType<typeof createMapLayout>,
   ): { target: Vector3State; path: Vector3State[] } | null {
     const livingActors = Object.values(state.actors).filter((candidate) => candidate.alive).length;
-    const lateGame = livingActors <= LATE_GAME_PATROL_ACTORS || state.safeZone.radius <= LATE_GAME_PATROL_RADIUS;
+    const patrolCenter = state.safeZone.targetCenter;
+    const patrolRadius = Math.max(
+      0,
+      state.safeZone.targetRadius - Math.min(ZONE_SAFETY_MARGIN, state.safeZone.targetRadius * 0.12),
+    );
+    const lateGame = livingActors <= LATE_GAME_PATROL_ACTORS || patrolRadius <= LATE_GAME_PATROL_RADIUS;
     if (
       this.patrolTarget &&
       horizontalDistance(actor.position, this.patrolTarget) >= 2 &&
-      horizontalDistance(this.patrolTarget, state.safeZone.center) <= state.safeZone.radius * 0.82
+      horizontalDistance(this.patrolTarget, patrolCenter) <= patrolRadius
     ) {
       const path = this.navigationTarget?.x === this.patrolTarget.x &&
         this.navigationTarget.z === this.patrolTarget.z &&
@@ -292,13 +363,13 @@ export class BotController {
 
     this.patrolTarget = null;
     this.patrolSequence += 1;
-    const usableRadius = Math.max(0, Math.min(state.safeZone.radius * 0.68 - 1, lateGame ? 260 : 180));
+    const usableRadius = Math.max(0, Math.min(patrolRadius * 0.68 - 1, lateGame ? 260 : 180));
     for (let attempt = 0; attempt < 12; attempt += 1) {
       const angle = numericId(actor.id) * 2.399963 + (this.patrolSequence + attempt) * 1.618034;
       const radiusScale = 0.35 + ((numericId(actor.id) + this.patrolSequence + attempt * 3) % 6) * 0.1;
       const radius = usableRadius * radiusScale;
-      const x = state.safeZone.center.x + Math.cos(angle) * radius;
-      const z = state.safeZone.center.z + Math.sin(angle) * radius;
+      const x = patrolCenter.x + Math.cos(angle) * radius;
+      const z = patrolCenter.z + Math.sin(angle) * radius;
       const candidate = { x, y: getTerrainHeight(x, z, layout) + 1.76, z };
       const path = this.navigator.findPath(actor.position, candidate);
       if (path.length === 0 || horizontalDistance(actor.position, candidate) < 2) continue;
@@ -313,9 +384,9 @@ export class BotController {
     let nearestDistance = Number.POSITIVE_INFINITY;
     const facing = { x: Math.sin(actor.yaw), y: 0, z: Math.cos(actor.yaw) };
     for (const candidate of Object.values(state.actors)) {
-      if (!candidate.alive || candidate.id === actor.id || candidate.deployment !== "grounded") continue;
+      if (!candidate.alive || candidate.id === actor.id || candidate.deployment === "aircraft") continue;
       const offset = subtract(candidate.position, actor.position);
-      const distance = Math.hypot(offset.x, offset.z);
+      const distance = Math.hypot(offset.x, offset.y, offset.z);
       if (distance > 150 || distance >= nearestDistance) continue;
       const direction = normalizeFlat(offset);
       const inView = distance < 12 || direction.x * facing.x + direction.z * facing.z > -0.2;
@@ -329,6 +400,7 @@ export class BotController {
   private findUsefulLoot(
     actor: ActorState,
     state: MatchState,
+    allowOutsideTargetZone = false,
   ): { loot: GroundLootState; path: Vector3State[] } | null {
     const hasWeapon = actor.inventory.weaponSlots.some((weapon) => weapon !== null);
     const activeWeapon = getActiveWeapon(actor);
@@ -339,8 +411,15 @@ export class BotController {
       activeWeapon.ammoInMagazine === 0 &&
       getItemQuantity(actor, weaponConfig.ammoItemId) === 0
     );
+    const lootZoneRadius = Math.max(
+      0,
+      state.safeZone.targetRadius - Math.min(ZONE_SAFETY_MARGIN, state.safeZone.targetRadius * 0.12),
+    );
     const isUseful = (loot: GroundLootState): boolean => {
-      if (!loot.available) return false;
+      if (
+        !loot.available ||
+        (!allowOutsideTargetZone && horizontalDistance(loot.position, state.safeZone.targetCenter) > lootZoneRadius)
+      ) return false;
       const item = ITEMS[loot.itemId];
       if (!item) return false;
       const existingStack = actor.inventory.backpack.find((stack) => stack.itemId === item.id);
@@ -513,6 +592,37 @@ export class BotController {
     return command;
   }
 
+  private navigateIntoZone(
+    actor: ActorState,
+    center: Vector3State,
+    radius: number,
+    command: ActorCommand,
+  ): ActorCommand {
+    const fromCenter = normalizeFlat(subtract(actor.position, center));
+    const entryRadius = Math.max(0, radius * 0.72);
+    const candidates: Vector3State[] = [{
+      x: center.x + fromCenter.x * entryRadius,
+      y: center.y,
+      z: center.z + fromCenter.z * entryRadius,
+    }, { ...center }];
+    for (let offset = 0; offset < 8 && radius > 0; offset += 1) {
+      const angle = numericId(actor.id) * 2.399963 + offset * Math.PI / 4;
+      candidates.push({
+        x: center.x + Math.cos(angle) * radius * 0.55,
+        y: center.y,
+        z: center.z + Math.sin(angle) * radius * 0.55,
+      });
+    }
+    for (const candidate of candidates) {
+      const path = this.navigator.findPath(actor.position, candidate);
+      if (path.length > 0) return this.navigate(actor, candidate, command, path);
+    }
+    command.move = normalizeFlat(subtract(center, actor.position));
+    command.aimDirection = { ...command.move };
+    command.sprint = true;
+    return command;
+  }
+
   private cache(command: ActorCommand): ActorCommand {
     this.cached = command;
     return command;
@@ -529,6 +639,12 @@ export class BotController {
     this.navigationPath = [];
     this.navigationTarget = null;
     this.resetNavigationProgress();
+  }
+
+  private clearCombatMemory(): void {
+    this.combatTargetId = null;
+    this.combatLastKnownPosition = null;
+    this.combatMemoryUntilSeconds = -1;
   }
 }
 
@@ -552,6 +668,10 @@ function normalizeFlat(value: Vector3State): Vector3State {
 
 function horizontalDistance(a: Vector3State, b: Vector3State): number {
   return Math.hypot(a.x - b.x, a.z - b.z);
+}
+
+function vectorDistance(a: Vector3State, b: Vector3State): number {
+  return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 }
 
 function distanceSquared(a: Vector3State, b: Vector3State): number {

@@ -94,7 +94,7 @@ const MAJOR_POINT_MINIMUM_DISTANCE = 420;
 const LANDING_ZONE_MINIMUM_DISTANCE = 300;
 const POINT_MAP_MARGIN = 210;
 const MOUNTAIN_COUNT = 16;
-const COVERAGE_COMPOUND_COUNT = 28;
+const COVERAGE_COMPOUND_COUNT = 20;
 const MAP_LAYOUT_CACHE_LIMIT = 8;
 const mapLayoutCache = new Map<number, MapLayout>();
 const terrainGridCache = new WeakMap<readonly TerrainHill[], Float32Array>();
@@ -303,7 +303,7 @@ function createSeededMapPoints(
     while (selected.length < names.length) {
       let bestPosition: Vector3State | null = null;
       let bestScore = Number.NEGATIVE_INFINITY;
-      for (let sample = 0; sample < 2_000; sample += 1) {
+      for (let sample = 0; sample < 480; sample += 1) {
         const candidate = {
           x: round(randomBetween(random, -limit, limit)),
           y: 0,
@@ -325,7 +325,7 @@ function createSeededMapPoints(
         }
       }
       if (!bestPosition) {
-        for (let sample = 0; sample < 2_000; sample += 1) {
+        for (let sample = 0; sample < 1_000; sample += 1) {
           const candidate = {
             x: round(randomBetween(random, -limit, limit)),
             y: 0,

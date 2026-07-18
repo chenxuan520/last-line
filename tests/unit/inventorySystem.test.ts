@@ -8,10 +8,12 @@ import {
   type MatchState,
   type WeaponState,
 } from "../../src/game/state/types";
-import { InventorySystem } from "../../src/game/systems/InventorySystem";
+import { findPickupCandidate, InventorySystem } from "../../src/game/systems/InventorySystem";
+import { BUILDING_ROOF_CAP_HEIGHT, createMapLayout, getTerrainHeight } from "../../src/config/map";
+import { getSupportHeight } from "../../src/game/systems/MovementSystem";
 
 function createState(): MatchState {
-  const actor = createActorState("player", "player", { x: 0, y: 0, z: 0 });
+  const actor = createActorState("player", "player", { x: 0, y: getTerrainHeight(0, 0, 0) + 1.76, z: 0 });
   return {
     mapSeed: 0,
     phase: "combat",
@@ -46,7 +48,7 @@ function createLoot(id: string, itemId: string, quantity: number, x = 1, weapon?
     itemId,
     quantity,
     ...(weapon ? { weapon } : {}),
-    position: { x, y: 0, z: 0 },
+    position: { x, y: getTerrainHeight(x, 0, 0) + 0.45, z: 0 },
     available: true,
   };
 }
@@ -108,6 +110,19 @@ describe("InventorySystem", () => {
 
     expect(state.groundLoot.ammo?.available).toBe(true);
     expect(actor.inventory.backpack).toEqual([]);
+  });
+
+  it("does not expose a pickup candidate to dead or airborne actors", () => {
+    const state = createState();
+    const actor = state.actors.player;
+    state.groundLoot.ammo = createLoot("ammo", "ammo.rifle", 30, 1);
+    actor.deployment = "parachuting";
+
+    expect(findPickupCandidate(actor, state.groundLoot)).toBeNull();
+
+    actor.deployment = "grounded";
+    actor.alive = false;
+    expect(findPickupCandidate(actor, state.groundLoot)).toBeNull();
   });
 
   it("fills two weapon slots, switches weapons, and drops the replaced active weapon", () => {
@@ -269,11 +284,14 @@ describe("InventorySystem", () => {
       helmet: { ...createLoot("helmet", "helmet.2", 1), source: "death" },
     };
 
-    new InventorySystem().processCommand(state, actor.id, command({ interact: true }), []);
+    expect(findPickupCandidate(actor, state.groundLoot)?.id).toBe("helmet");
+    const events: GameEvent[] = [];
+    new InventorySystem().processCommand(state, actor.id, command({ interact: true }), events);
 
     expect(state.groundLoot.armor?.available).toBe(true);
     expect(state.groundLoot.helmet?.available).toBe(false);
     expect(actor.inventory.helmetLevel).toBe(2);
+    expect(events).toContainEqual(expect.objectContaining({ type: "item-picked", lootId: "helmet" }));
   });
 
   it("interrupts healing on movement or fire without consuming the item", () => {
@@ -367,6 +385,96 @@ describe("InventorySystem", () => {
     expect(weapon).toMatchObject({ ammoInMagazine: 4, cooldownSeconds: 0.3, reloadSeconds: 1.1 });
   });
 
+  it("fans a large death inventory across distinct reachable support points", () => {
+    const state = createState();
+    const actor = state.actors.player;
+    const inventory = new InventorySystem();
+    actor.inventory.weaponSlots[1] = createWeaponState("smg");
+    actor.inventory.backpack = [
+      { itemId: "ammo.rifle", quantity: 30 },
+      { itemId: "ammo.light", quantity: 30 },
+      { itemId: "ammo.shell", quantity: 6 },
+      { itemId: "ammo.sniper", quantity: 5 },
+      { itemId: "bandage", quantity: 2 },
+      { itemId: "medkit", quantity: 1 },
+    ];
+    actor.inventory.helmetLevel = 2;
+    actor.alive = false;
+
+    inventory.dropDeadInventories(state, []);
+
+    const drops = Object.values(state.groundLoot);
+    expect(drops).toHaveLength(10);
+    for (let index = 0; index < drops.length; index += 1) {
+      const drop = drops[index]!;
+      expect(Math.hypot(
+        drop.position.x - actor.position.x,
+        drop.position.y - actor.position.y,
+        drop.position.z - actor.position.z,
+      )).toBeLessThanOrEqual(3);
+      expect(drop.position.y).toBeCloseTo(
+        getSupportHeight(
+          drop.position.x,
+          drop.position.z,
+          actor.position.y - 1.76 + 0.35,
+        ) + 0.45,
+      );
+      for (const other of drops.slice(index + 1)) {
+        expect(Math.hypot(drop.position.x - other.position.x, drop.position.z - other.position.z))
+          .toBeGreaterThanOrEqual(0.61);
+      }
+    }
+  });
+
+  it("keeps roof-edge death drops within the dead actor's 3m interaction range", () => {
+    const state = createState();
+    const actor = state.actors.player;
+    const layout = createMapLayout(state.mapSeed);
+    const building = layout.obstacles[0];
+    if (!building) throw new Error("building missing");
+    actor.position = {
+      x: building.center.x + building.width / 2 - 0.01,
+      y: building.center.y + building.height / 2 + BUILDING_ROOF_CAP_HEIGHT + 1.76,
+      z: building.center.z,
+    };
+    fillDeathInventory(actor);
+    actor.alive = false;
+
+    new InventorySystem().dropDeadInventories(state, []);
+
+    const drops = Object.values(state.groundLoot);
+    expect(drops).toHaveLength(10);
+    expect(drops.every((drop) => Math.hypot(
+      drop.position.x - actor.position.x,
+      drop.position.y - actor.position.y,
+      drop.position.z - actor.position.z,
+    ) <= 3)).toBe(true);
+  });
+
+  it("keeps several full death inventories from falling back to identical positions", () => {
+    const state = createState();
+    state.actors = {};
+    for (let index = 0; index < 4; index += 1) {
+      const actor = createActorState(`corpse-${index}`, "bot", {
+        x: 0,
+        y: getTerrainHeight(0, 0, state.mapSeed) + 1.76,
+        z: 0,
+      });
+      fillDeathInventory(actor);
+      actor.alive = false;
+      state.actors[actor.id] = actor;
+    }
+
+    new InventorySystem().dropDeadInventories(state, []);
+
+    const drops = Object.values(state.groundLoot);
+    const positions = new Set(drops.map((drop) =>
+      `${drop.position.x.toFixed(4)}:${drop.position.y.toFixed(4)}:${drop.position.z.toFixed(4)}`
+    ));
+    expect(drops).toHaveLength(40);
+    expect(positions.size).toBe(40);
+  });
+
   it("reuses inactive loot records during repeated drop and pickup", () => {
     const state = createState();
     const actor = state.actors.player;
@@ -382,3 +490,16 @@ describe("InventorySystem", () => {
     expect(actor.inventory.weaponSlots[0]?.weaponId).toBe("rifle");
   });
 });
+
+function fillDeathInventory(actor: MatchState["actors"][string]): void {
+  actor.inventory.weaponSlots[1] = createWeaponState("smg");
+  actor.inventory.backpack = [
+    { itemId: "ammo.rifle", quantity: 30 },
+    { itemId: "ammo.light", quantity: 30 },
+    { itemId: "ammo.shell", quantity: 6 },
+    { itemId: "ammo.sniper", quantity: 5 },
+    { itemId: "bandage", quantity: 2 },
+    { itemId: "medkit", quantity: 1 },
+  ];
+  actor.inventory.helmetLevel = 2;
+}

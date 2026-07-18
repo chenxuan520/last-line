@@ -391,6 +391,57 @@
 - 排行榜：存活行使用正常亮色和绿色状态；淘汰行整体变暗、红色状态并划线；玩家行无论存活状态均保留左侧高亮标记。
 - 最终自动门禁：`npm run typecheck && npm run test && npm run build && git diff --check` 全通过；新增性能守卫后 Vitest 18 files / 140 tests，完整约 252.53 秒。5-seed 42/49 武装、13/16 落区分散、49 Bot 拾取/战斗/唯一胜者与 401-seed 地图门禁全部通过；构建仅保留既有大 chunk warning。
 
+#### 2026-07-18 20:47 +0800：检查点后的安全区、空中规则与审查修复
+
+- 按用户要求先提交并推送当前实现检查点：`cc9c869 feat: expand battle royale world and AI` 已推送到 `origin/main`；未跟踪的 `session-ses_096e.md` 未提交。后续修复基于该检查点继续进行。
+- 提前进下一圈：Bot 在等待期和收缩期都以 `safeZone.targetCenter/targetRadius` 为目标，保留最多 30m 安全余量；未进入目标圈前优先转移。巡逻点与有用物资也必须位于下一圈安全余量内，避免进圈后又跑出去；精确目标不可达时依次尝试近侧进入点、中心和 8 个分散圈内点，最后才直接向中心移动。
+- 空中规则明确为：飞机内无敌且不参与权威 hit test；跳伞后可被玩家/AI 射击，但不吃安全区伤害；只有 grounded actor 计算圈伤。Bot 感知允许通过距离、视野与 `SimulationCombatWorld` LOS 发现跳伞目标，仍不会锁定飞机内目标。
+- 航线修复：自动离机进度取 `92%` 与航线离开方形岛屿的最后合法进度两者较早值；所有尚未离机 actor 固定在最后合法岛内位置离机，不再在岛外生成后被边界夹回并瞬移约百米。
+- 屋顶追击：Bot 对最后可见敌人保留 12 秒目标 ID、位置及坡道导航路径；绕楼短暂失去 LOS 不再立刻切换巡逻，目标死亡、记忆超时或到达最后位置后才清除。
+- 同 tick 受击公平性：CombatSystem 按伤害权重聚合所有攻击方向，并在整批伤害结算后写回归一化方向；不再由 actor ID 插入顺序决定 Bot 调查玩家或 AI。
+- 安全/范围：排行榜及结算卡不再拼接 `innerHTML`，改用 DOM + `textContent`，消除恶意 actor ID XSS；路边院落恢复为明确 20 处。地图 maximin 候选由每点 2000 次降至 480 次并保留 1000 次放宽间距回退，seed `832/859` 与 401-seed 覆盖/坡道/terrain 门禁继续通过。
+- 后期节奏：前两圈保持原搜集时间；第三圈起等待/收缩改为 `70/45`、`35/28`、`15/16`、`5/8` 秒，正式总预算为 802 秒（约 13 分 22 秒），伤害数值不额外提高。
+- 测试稳定性：墙碰撞性能断言改为结构性验证当前 64m 空间格候选显著少于全图墙段，移除并发环境计时阈值；GLB 成功加载测试显式 30 秒余量；完整 49 Bot 局显式 120 秒余量，断言与样本均未减少。
+- 最终验证：`npm run typecheck && npm run test && npm run build && git diff --check` 全通过；Vitest 18 files / 146 tests，完整约 118.97 秒。5-seed 落区/武装、49 Bot 唯一胜者、401-seed 地图、岛内自动离机、目标圈提前转移、空中命中/圈伤、屋顶失锁追击、同 tick 聚合方向与 XSS 修复均有回归。构建仅保留既有大 chunk warning。
+
+#### 2026-07-18 21:46 +0800：目标圈、战斗记忆与 HUD 安全最终收敛
+
+- 无枪与提前进圈平衡：无枪 Bot 对脚下武器始终即时拾取；只要仍在当前圈内，可为 120m 内可达武器做一次短绕路，超过该距离或已经在当前圈外就优先进入下一圈。新增脚下武器、反方向 80m 短绕路与 waiting 阶段目标圈转移回归；5 seed 仍全部达到至少 42/49 持枪。
+- 战斗记忆：新受击会立即清除旧敌人 ID/最后位置并切换受击调查；到达最后可见位置 2m 内也会清除记忆，避免旧目标无限抢占。临时丢 LOS 仍保留最多 12 秒坡道追击；新增“旧目标在东、新攻击者在西，立即向西反应”回归。
+- 同 tick 公平：伤害方向向量非零时按伤害权重聚合；等量对向攻击抵消为零时，使用与同时淘汰相同的 tick 稳定轮转从攻击来源中选择方向。24 tick 覆盖两个方向且命令插入正反序结果一致。
+- 空中射程：Bot 感知及开火均使用真实 3D 距离，200m 高空、水平仅 10m 的跳伞目标不会被 170m 步枪无效开火；仍需通过视野与权威 LOS。
+- HUD 安全：排行榜、结算卡、武器槽和背包全部使用 `createElement/textContent/replaceChildren`；未知 weapon/item/actor ID 不再进入动态 `innerHTML`。构造阶段仅保留由本地固定模板、数值坐标和受控地图名称生成的静态 HUD 模板。
+- 后期收圈：第三圈起等待/收缩进一步加快为 `70/45`、`35/28`、`15/16`、`5/8` 秒，总预算 802 秒（约 13 分 22 秒），前两圈与圈伤保持不变。
+- 绕枪边界：120m 短绕路武器必须位于当前圈内；Bot 已进入目标圈后，武器还必须位于目标圈安全余量内。新增“当前圈外 110m 武器不绕路”和“已进目标圈时，圈外武器与无武器场景命令完全一致”回归。
+- 决赛圈收敛：修复 `radius=0` 时多个 actor 精确站在 target center 因 `distance > radius` 为 false 而永久免圈伤；零半径现在表示没有安全内部，所有 grounded actor 进入既有公平最终伤害结算并留下唯一胜者。新增 3 人精确同点回归。
+- 最终门禁：`npm run typecheck && npm run test && npm run build && git diff --check` 全通过；Vitest 18 files / 154 tests，完整约 227.61 秒。独立完整 49 AI 局约 43.46 秒并产生唯一胜者；5-seed 武装、401-seed 地图门禁均通过。构建仅保留既有大 chunk warning。
+
+#### 2026-07-18 22:31 +0800：自动换弹与落地 HUD 切换
+
+- 自动换弹：`CombatSystem.fire` 在最后一发完成全部 pellet/trace 处理后检查对应备弹；弹匣为 0 且仍有备弹时立即复用权威 `startReload`，产生 `reload-started` 并驱动既有换弹动画。玩家与 Bot 使用同一规则；无备弹时保持空膛。
+- 航线 HUD：右上角显示逻辑由全局 `state.phase === flight` 改为玩家自身 deployment。玩家仍在飞机/跳伞时显示 `已跳伞 X / 50`；玩家 grounded 的同一帧立即切换为 `${kills} 击杀`，无需等待其余 AI 落地和 flight phase 结束。
+- 新增回归：1 发弹匣 + 30 发备弹开火后断言弹匣归零、`reloadSeconds` 进入配置时长且事件顺序为 `shot-fired → reload-started`；flight phase 中玩家从 parachuting 切 grounded 后计数由 `已跳伞 2 / 50` 立即变为 `3 击杀`。
+- 最终验证：`npm run typecheck`、定向 52 tests、完整 `npm run test`（18 files / 156 tests）、`npm run build`、`git diff --check` 全通过；完整测试约 194.51 秒，构建仅保留既有大 chunk warning。
+
+#### 2026-07-18 22:45 +0800：动态掉落分散与拾取提示一致性
+
+- 动态物资落点：死亡、手动丢弃、替换武器/装备产生的物资不再复制角色同一坐标；按 actor ID 确定性地从中心及 `0.75/1.35/2.05/2.35m` 环形候选中选择空位，水平间距至少 `0.62m`，最多覆盖常规完整死亡背包。
+- 权威支撑与可拾范围：每个候选通过当前 map seed 的 `getSupportHeight` 落到 terrain/坡道/屋顶支撑面 `+0.45m`，避让墙段和地图边界；候选最大半径保证仍在角色真实 3D `3m` 交互范围内。
+- HUD/规则一致：新增纯函数 `findPickupCandidate(actor, groundLoot)`，与 `InventorySystem.pickNearestLoot` 共用同一 3D 距离、loot ID 稳定排序及可拾条件（武器状态、背包容量、护甲耐久、头盔等级）。HUD 不再按独立的水平距离算法显示另一件物资。
+- 回归：10 件死亡物资断言全部位于权威支撑面、在 3m 内且任意两件水平距离 ≥0.61m；不可拾同级满耐久甲与可拾头盔同处时，HUD 候选和实际 `item-picked.lootId` 均为头盔。
+- 复审边界修复：flight→combat 判断忽略已死亡 actor，死亡的跳伞角色不会永久阻塞阶段；候选显式校验尸体到物资的真实 3D 距离 ≤3m，屋顶边缘不会把物资掉到 5m 外地面；候选扩为 256 个固定环点，理想 0.62m spacing 耗尽时选最大 clearance 可达点而非重叠回退。
+- 新增边界回归：屋顶边缘完整 10 件死亡掉落全部在 3m 内；4 个同位置完整尸体生成 40 件物资且 40 个坐标均不同；死亡 parachuting actor 不阻塞 combat。
+- HUD 边界：只有 `state.phase=flight` 且玩家存活、未 grounded 时显示跳伞数；空中死亡进入观战/战斗后显示击杀数。`findPickupCandidate` 对死亡或非 grounded actor 返回 null，HUD 不显示规则层无法执行的拾取提示。
+- 最终门禁：`npm run typecheck && npm run test && npm run build && git diff --check` 全通过；Vitest 18 files / 161 tests，完整约 106.40 秒。构建仅保留既有大 chunk warning。
+
+#### 2026-07-18 23:32 +0800：近景巨大物资 marker 回归修复
+
+- 用户截图确认本轮分散掉落后出现近景 marker 遮挡：原 `0.62m` 立方体在尸体 3m 内密集生成，靠近时会呈现巨大黄/黑方块；不是物资状态消失。
+- marker 视觉改为固定低矮小标记：clone 创建及每次复用同步都强制重置 `scaling=(0.34,0.12,0.34)`、rotation、`isVisible`、`visibility=1`、`isPickable=false`；显示高度从权威 loot `+0.35m` 降到 `+0.08m`。玩法拾取仍完全使用权威 3D 规则，不依赖 Babylon pick。
+- 名称提示增强：交互提示 z-index 与对比度提高；附近不可拾物也显示 `${label} · 当前无法拾取`，不再整块空白。提示签名加入玩家 y/deployment/alive、背包签名，以及 3.2m 内物资 ID/item/quantity/三维位置，loot record 复用或位置变化会立即刷新。
+- 测试：NullEngine 断言所有 loot marker 非 pickable 且 x/z scaling <0.4、y <0.2；动态掉落/HUD 候选/marker 场景定向 27 tests 通过。
+- 完整验证：`npm run test` 为 18 files / 161 tests 全通过，约 109.80 秒；`npm run build`、`git diff --check` 通过，构建仅保留既有大 chunk warning。
+
 ### 2026-07-16：任务 1–12 完成
 
 - [x] 任务 1：Vite、TypeScript、Babylon.js、Vitest、菜单、构建和静态预览。
@@ -851,3 +902,137 @@
 - 地图/AI 已在失败的完整套件中实际跑完：seed `832/859`、401-seed 几何与 `<450m`、5-seed 至少 42/49 持枪和 49 Bot 唯一胜者相关断言均通过；这不能覆盖 findings 1–2、4–6。
 - 静音生产 smoke：本机 Chrome、volume `0`，菜单显示 50 人/49 AI，生产 HUD 与 400m 小地图可进入，console 无 error/warn。另通过本地 Vite 模块完成自动离机、真实 LOS 屋顶追击、同 tick 受击方向和排行榜注入复现。
 - Builder 必须先处理 findings 1–6；writer 需补岛外自动离机、真实 LOS 完整上楼、同 tick 多来源公平性、排行榜 XSS、准确 20 院落及稳定完整测试门禁。复审前必须提供标准 `npm run test` 完整绿灯，不能记录为通过。
+
+### 2026-07-18 21:05 +0800：cc9c869 后增量与安全区/空中规则 release-gate 复审（不通过）
+
+- 审查范围：当前 `main` 相对已推送 `HEAD/origin/main`（`cc9c869`）的 20 个 tracked 文件完整增量；复核 20:15 记录的 3 高 3 中 blocker，以及提前进下一圈、空中受击和第三圈起加速要求。按要求忽略未跟踪 `session-ses_096e.md`。
+- 结论：**不通过。** 上轮岛外自动离机、真实 LOS 屋顶路径、测试门禁和 20 院落主体已闭环，标准 release 命令本轮全绿；但目标圈实现会让合法生产 seed 的部分 Bot 永久无枪，combat memory 回归了新受击响应，另有同 tick 对向受击、空中目标距离和库存 XSS 三项中风险问题。
+
+#### Findings（按严重度）
+
+1. **[高] 目标圈最高优先级会让圈外落地 Bot 放弃脚下武器，且合法生产 seed 的目标圈内武器不足以维持既有 42/49 武装门槛。** `src/controllers/BotController.ts:169-182` 在近距拾枪 `:268-274` 之前直接返回进目标圈命令；`:380-388` 又永久排除目标圈安全余量外的全部 loot。用 seeded random `73` 生成 `mapSeed=3210391758` 时，首圈 `830m` 安全余量内只有 39 把武器；把无枪 `bot-1` 放在圈外 `loot-6` 正上方（3D 距离 `1.31m`），首命令仍为 `interact=false` 并向目标圈冲刺。因此 49 Bot 中至少 10 个无法从初始资源武装，现有 42/49 测试因使用 `targetRadius=1200` 的测试配置没有覆盖生产首圈。Builder 需在不放弃进圈移动优先级的前提下允许无枪 Bot 同 tick 拾取脚下/极近武器，或保证生产目标圈内可达武器容量，并补生产首圈多 seed 武装率回归。
+2. **[高] 12 秒 combat memory 抢占新受击调查，Bot 会继续追旧目标而背对真实新攻击者；到达最后位置也未实际清除记忆。** 新伤害在 `src/controllers/BotController.ts:108-123` 更新调查方向并清导航，但不清 combat memory；随后 `:223-233` 的旧目标分支先于 `:238-251` 的受击调查返回。复现 Bot 先记住东侧目标、LOS 丢失后被西侧新攻击者命中：权威 `lastDamageDirection=(-1,0,0)`，返回命令却仍 `aim/move=(1,0,0)`。此外距离最后位置 ≤2m 时 `:223-235` 只跳过追击、不清 memory；Bot 巡逻离开后会再次被拉回，直至超时。Builder 需让新受击清除或覆盖旧 combat memory，并在到达最后可见位置时立即清除；补新攻击者优先级、到达、死亡和超时多 tick 回归。
+3. **[中] 同 tick 等量对向伤害的聚合向量为零时，仍回退到 DamageSystem 的 ID 顺序覆盖结果。** `src/game/systems/CombatSystem.ts:213-229` 聚合方向，但 `:243-253` 在长度 `<=1e-9` 时跳过覆盖；此前 `DamageSystem` 循环已逐笔写入方向。东西两侧等伤同时命中时，正反 command 插入顺序都得到 `(-1,0,0)`，仅把 ID 改为 `z-bot/a-player` 就变为 `(1,0,0)`。Builder 需在批处理时抑制逐笔方向写入，并为零/近零聚合定义不依赖 ID/kind 的明确语义；补正交、对向及近抵消测试。
+4. **[中] Bot 对跳伞目标仍使用水平距离做感知和武器射程，能向实际超出枪械射程的高空目标持续浪费弹药。** `src/controllers/BotController.ts:349-360` 的 150m 感知及 `:194-202` 的开火距离都忽略 y。实测地面步枪 Bot 与正上方 parachuting 玩家 3D 距离 200m 时，`SimulationCombatWorld.hasLineOfSight=true`、Bot 返回 `fire=true`，但 170m 步枪权威 trace 为 miss。Builder 需对空中候选使用 3D 感知/武器距离，同时保留 LOS 和视角约束，并补超距不射、入距可射及 aircraft 不可选测试。
+5. **[中] actor ID/结算 XSS 已修，但库存仍把可序列化状态 ID 拼接进 `innerHTML`，存在同类残留注入。** `src/client/ui/GameHud.ts:314-336` 将未知 `weaponId`、`itemId` fallback label 直接插入武器槽/背包 HTML。把活动武器 ID 设为 ``<img src=x onerror='window.__reviewXss=1'>`` 后执行 HUD update，实测 handler 执行且生成恶意 img。当前本地局只生成已知配置 ID，外部利用面有限，但这不满足本轮“XSS 无残留”的验收边界。Builder 需将库存也改为 DOM + `textContent`，或在进入视图前严格验证 ID；补恶意 weapon/item ID 回归。
+
+#### 已确认闭环与验证
+
+- 自动离机：额外枚举 1,344 条角度/偏移航线，岛外样本为 0；最大浮点越界约 `2.27e-13m`，首个 1/30 秒移动最大 `2.133m`。上轮 finding 1 已闭环。
+- 屋顶路径主体：真实 `SimulationCombatWorld + MovementSystem` 30Hz 跑 30 秒，经历 111 tick LOS 丢失后仍到达屋顶，最终距目标约 `0.237m`、脚底与屋顶高度一致；但新受击和到达清理问题见 finding 2。
+- 测试门禁：`npm run typecheck && npm run test && npm run build && git diff --check cc9c869 --` 全通过；Vitest 18 files / 146 tests，完整约 `84.36s`。401-seed 建筑/坡道/terrain/环境空白、seed `832/859`、5-seed 42/49（测试半径 1200）和 49 Bot 唯一胜者均通过。构建 index `840.28kB`、GLTF `625.30kB`，仅既有 chunk warning。
+- 规则/范围：正式预算确认为 802 秒，前两圈及伤害不变；飞机内拒伤且不参与 hit test，parachuting 可命中、圈伤仅 grounded。20 院落及降低采样后的 401-seed 门禁通过。排行榜 actor ID 与结果卡恶意内容使用 textContent，原复现不再执行。
+- 浏览器：本轮使用本地开发模块完成上述定向复现；按交互确认未继续执行 production smoke。用户提供的静音生产证据未作为独立通过依据。
+- Builder 必须处理 findings 1–5；writer 需补生产首圈武装率、combat memory 新受击/到达、对向聚合、空中 3D 距离和完整库存 XSS 测试，再发起复审。本轮不得记录通过。
+
+### 2026-07-18 21:08 +0800：cc9c869 后增量 release-gate 再复核（不通过）
+
+- 审查范围：当前 `main` 工作区相对已推送 `HEAD/origin/main`（`cc9c869`）的 20 个 tracked 文件增量；对照本 plan、上一轮 blockers 与新增目标圈/空中规则要求，按要求忽略未跟踪 `session-ses_096e.md`。
+- 结论：**不通过。** 自动离机、20 处院落、空中伤害主规则、后期圈时长及标准自动门禁已确认；但 21:05 记录的 2 项高风险、3 项中风险问题在当前业务代码中仍然存在，尚未达到 release gate。
+
+#### Findings（按严重度）
+
+1. **[高] 目标圈最高优先级仍会让无枪 Bot 放弃脚下武器，生产首圈也不保证既有武装门槛。** `src/controllers/BotController.ts:169-182` 在近距拾枪分支 `:268-274` 前直接返回进目标圈；`:380-388` 又排除目标圈余量外的全部 loot。实际以 seeded random `73` 生成 `mapSeed=3210391758`，首圈 830m 余量内仅 37 把武器；无枪 `bot-1` 站在圈外 `loot-6` 的 SMG 上方（3D 距离约 1.31m）仍返回 `interact=false` 并冲圈。现有 5-seed 武装测试使用 `targetRadius=1200` 的测试配置，不能覆盖生产 860m 首圈。Builder 需允许无枪 Bot 在不放弃转移优先级的前提下拾取脚下/极近武器，或以其他方式保证生产多 seed 武装容量，并补生产配置门禁。
+2. **[高] 新受击不会覆盖旧 combat memory，且到达最后位置后记忆未清。** 新伤害分支 `src/controllers/BotController.ts:108-123` 清导航但不清旧战斗记忆；`:223-232` 的旧目标追击又先于 `:238-251` 的受击调查。实际先记住东侧目标、失去 LOS、再被西侧攻击后，权威受击方向为 `(-1,0,0)`，命令仍向东 `aim/move=(1,0,0)`；进入最后位置 2m 后也只跳过当次追击，离开后在 12 秒窗口内会再次被拉回。Builder 需让新受击清除/覆盖旧记忆，并在到达最后位置时立即清除；补新攻击者、到达、死亡、超时多 tick 回归。
+3. **[中] 等量对向同 tick 伤害仍由实体 ID 决定最终受击方向。** `src/game/systems/CombatSystem.ts:213-229` 得到零聚合向量后，`:243-246` 跳过覆盖；此前 `DamageSystem.ts:21-29` 已按排序后的逐笔伤害写方向。实测东/西两侧等伤时，`a-source` 在东、`z-source` 在西得到 `(-1,0,0)`，交换两个 ID 的位置即变成 `(1,0,0)`。Builder 需抑制 batch 内逐笔方向写入，并为零/近零聚合定义不依赖 ID/kind 的语义，补对向与近抵消回归。
+4. **[中] Bot 对跳伞目标仍按水平距离感知和判断武器射程。** `src/controllers/BotController.ts:194-202,349-363` 忽略高度差。实际地面步枪 Bot 与正上方跳伞目标相距 200m 时，权威 LOS 为 true，Bot 返回 `fire=true`，但 170m 步枪权威 trace 为 miss。Builder 需使用 3D 距离做空中感知/开火判断，并补超距不射、入距可射和 aircraft 不可选测试。
+5. **[中] 排行榜/结算已改安全 DOM，但库存仍有同类 XSS 残留。** `src/client/ui/GameHud.ts:314-336` 仍把未知 `weaponId`/`itemId` fallback label 拼进 `innerHTML`；恶意可序列化 ID 可成为可执行标签。Builder 需将武器槽和背包也改为 DOM + `textContent`（或先做严格运行时 ID 校验），并补恶意 weapon/item ID 回归。
+
+#### 实际验证与已确认项
+
+- `npm run typecheck`：通过。
+- `npm run test`：18 files / 146 tests 全通过，耗时约 115.96s。
+- `npm run build`：通过；仅保留既有 `index` 840.28kB、GLTF 625.30kB 大 chunk warning。
+- `git diff --check cc9c869 -- . ':(exclude)session-ses_096e.md'`：通过。
+- 自动离机：额外离散验证 59,040 条合法角度/偏移航线，岛外离机为 0；最大浮点越界约 `4.55e-13m`，自动离机进度范围约 `0.8211–0.92`。
+- 目标圈：抽样 100 个生产 seed，首圈余量内武器数为 37–64，2 个 seed 少于 42；seed 73 的近距武器放弃路径已实际复现。
+- 地图：seed `0..400` 均实际生成恰好 20 个 coverage compound；现有 401-seed 建筑/坡道/terrain 门禁随完整测试通过。
+- 空中主规则静态与测试一致：aircraft 在 `DamageSystem` 拒伤且被 `SimulationCombatWorld` 忽略，parachuting 可命中，圈伤只筛 grounded；但空中目标距离问题见 finding 4。
+- 本轮未重复浏览器 smoke；用户提供的静音 Chrome 证据仅作参考，不替代上述未闭环功能 findings。
+
+### 2026-07-18 21:56 +0800：21:08 的 2 高 3 中 findings 闭环复核（不通过）
+
+- 审查范围：当前 `main` 工作区相对已推送 `HEAD/origin/main`（`cc9c869`）的 20 个 tracked 文件增量；定向复核 21:08 记录的 2 高 3 中 findings，并复查自动离机、目标圈、空中规则、20 院落、测试稳定性及 802 秒预算。按要求忽略未跟踪 `session-ses_096e.md`。
+- 结论：**不通过。** 原 combat memory、对向受击方向、空中 3D 距离和库存 XSS 已闭环；原无枪 Bot 的生产首圈武装问题主体也已修复，但新增的 120m 绕枪豁免范围过宽，会破坏“目标圈内不再跑出去”并在当前圈边界形成稳定往返，仍有 1 项高风险 blocker。
+
+#### Finding
+
+1. **[高] 无枪 Bot 的 120m 绕枪会离开目标圈，并可在当前圈边界永久振荡而拿不到枪。** `src/controllers/BotController.ts:186-199` 只要求 Bot 当前位于 current zone，就用 `findUsefulLoot(..., true)` 放开全部 target-zone 过滤；既没有要求 Bot 尚在 target zone 外，也没有要求候选武器仍位于 current zone。实际把 Bot 放在 target center、target radius 60m（安全余量 52.8m），武器放在 80m 外时，Bot 会直接向圈外移动。更严重的是 current radius 100m、Bot 位于 x=95m、武器位于 x=105m 时，真实 30Hz 推进 10 秒发生 36 次 current-zone 边界穿越，位置只在约 95.38–101.13m 往返，最终仍无枪且 loot 仍 available。现有短绕路测试只覆盖“Bot 在目标圈外、武器仍在大 current zone 内”，无法发现这两个分支。Builder 需将豁免限制为确实尚未进入 target zone 的 Bot，并排除 current zone 外武器（或采用不会在边界切换决策的等价约束）；补“已在 target zone 不出圈”和“current zone 外近枪不振荡”回归。
+
+#### 已确认闭环
+
+- 原 finding 1 主体：脚下武器会先 `interact`；生产 seed 73（`mapSeed=3210391758`）用正式配置、无战斗推进至全员落地后 140 秒，实际 48/49 Bot 持枪。5-seed 与 49 Bot 唯一胜者测试继续通过；剩余边界问题见本轮 finding。
+- 原 finding 2：新受击会先 `clearCombatMemory()`；东侧旧目标失去 LOS 后被西侧新攻击者命中，实际立即向西 `aim/move=(-1,0,0)`；到达最后位置后 `combatTargetId` 为 `null`。临时 LOS 丢失的 12 秒坡道追击回归继续通过。
+- 原 finding 3：非零方向按伤害聚合；零向量从去重 `damageSources` 使用共享 tick selector 选择方向。24 tick 覆盖正负方向，反转命令插入顺序结果一致。
+- 原 finding 4：感知和开火均使用 3D 距离；水平 10m、垂直 200m 的 parachuting 目标 LOS 为 true，但实际 `fire=false`。aircraft 仍不可选/不可命中，parachuting 可命中且不吃圈伤。
+- 原 finding 5：排行榜、结果卡、武器槽、背包的动态 actor/item/weapon 内容均通过 DOM + `textContent`；`GameHud` 仅构造期保留本地静态模板 `innerHTML`，未再发现状态 ID 注入路径。
+- 其他同轮要求：59,040 条角度/偏移航线离机点均合法，最大浮点越界约 `4.55e-13m`；seed `0..400` 均为准确 20 处 coverage compound；wall test 无 wall-clock 阈值；正式阶段预算为 802 秒。
+
+#### 实际验证
+
+- `npm run typecheck`：通过。
+- `npm run test`：18 files / 151 tests 全通过，本机约 137.97s。
+- `npm run build`：通过；仅保留既有 `index` 841.38kB、GLTF 625.30kB 大 chunk warning。
+- `git diff --check cc9c869 -- . ':(exclude)session-ses_096e.md'`：通过。
+- 定向规则测试：5 files / 70 tests 全通过，约 1.87s。
+- 独立 AI：`aiLootReachability` 1 file / 7 tests 全通过，约 101.52s；5-seed 武装门槛及 49 Bot 唯一胜者均通过。
+- 本轮未重复静音浏览器 smoke；HUD DOM 改动的结论基于实际 diff 与调用链，浏览器视觉/console 仍沿用用户既有证据。
+
+### 2026-07-18 22:15 +0800：最后 blocker 与零半径终局定向复核（通过）
+
+- 审查范围：当前 `main` 工作区相对已推送 `HEAD/origin/main`（`cc9c869`）的增量；仅复核 21:56 记录的 120m 绕枪 blocker，以及随修复发现的 radius=0 终局问题。按要求忽略未跟踪 `session-ses_096e.md`。
+- 结论：**通过。本次审查未发现明确中高风险 blocker。** 21:56 的最后一项高风险 finding 已闭环，零半径精确站圈心不受伤问题也已修复；无枪获取、同时淘汰公平性和 parachuting 免圈伤未回归。
+- 120m 绕枪：`BotController` 现在要求候选 weapon 位于 current zone；Bot 已进入 target zone 时，候选还必须位于 target 安全余量内。实际重跑原 current radius 100m、Bot x=95m、weapon x=105m 的 30Hz/10 秒场景，边界穿越从 36 次降为 0，最大 x 约 94.62m、最终 x 约 2.95m，不再追逐圈外 weapon。已在 target center 时，80m 圈外 weapon 与无 weapon 命令一致。
+- 无枪获取：脚下 weapon 仍返回 `interact=true` 且 move 为零；目标圈外、current zone 内的反方向 80m weapon 仍正常短绕路。新增 110m current-zone 外 weapon 和已在 target zone 的 80m 圈外 weapon 回归均通过；5-seed 仍达到至少 42/49 持枪。
+- 零半径终局：`BattleRoyaleMode` 在 `safeZone.radius <= 0` 时把所有 grounded 存活 actor 纳入圈伤，即使精确位于 target center。3 人同点实际在一 tick 后进入 `finished` 且只剩 1 人；24 tick 的 2 人样本仍覆盖 player/bot 两类胜者。parachuting actor 在 radius=0 时生命保持不变，grounded actor 继续按共享 selector 留唯一幸存者。
+- 完整 AI：49 个真实 BotController 的完整局实际进入 `finished`、仅有唯一胜者；搜集/开火/Bot 淘汰断言继续通过。
+- 实际验证：`npm run typecheck` 通过；`npm run test` 为 18 files / 154 tests 全通过，本机 wall time 约 112.13s；`npm run build` 通过，仅既有 `index` 841.53kB、GLTF 625.30kB 大 chunk warning；`git diff --check cc9c869 -- . ':(exclude)session-ses_096e.md'` 通过；独立完整 49 AI 用例 1 test 通过，约 22.32s。
+
+### 2026-07-18 22:55 +0800：cc9c869 后完整增量最终审查（不通过）
+
+- 审查范围：当前 `main` 工作区相对已推送 `HEAD/origin/main`（`cc9c869`）的 23 个 tracked 文件完整增量；对照本 plan，重点复核动态掉落、HUD/实际拾取候选、自动换弹、落地 HUD，以及此前 AI 目标圈、零半径终局、空中规则和 XSS 修复。按要求忽略未跟踪 `session-ses_096e.md`。
+- 结论：**不通过。** 自动门禁全绿，HUD 与实际拾取已共用同一候选函数，自动换弹事件顺序、marker 复用同步和此前 AI/安全区/XSS 主体未见回归；但仍有 2 项高风险功能 blocker 和 1 项中风险掉落分散问题。
+
+#### Findings（按严重度）
+
+1. **[高] 跳伞中的角色被击杀后会让整局永久停在 flight。** `src/game/systems/MovementSystem.ts:37-39` 不再推进死亡角色，因此死者会永久保留 `deployment="parachuting"`；`src/game/modes/BattleRoyaleMode.ts:91-93,129-133` 在 flight 分支提前返回，并要求包括死者在内的所有 actor 都 grounded 才进入 combat。当前空中规则又明确允许 parachuting actor 被命中（`DamageSystem.ts:14`、`SimulationCombatWorld.ts:53` 只排除 aircraft）。定向复现中，grounded 玩家击杀 1 HP 的 parachuting Bot 后继续执行 120 次 `mode.update(..., 1)`，最终 `flight.progress=1`，但 `phase` 仍为 `flight`、`result=null`、死者仍为 parachuting；安全区和唯一胜者永远不会推进。玩家若在空中死亡，`GameHud.ts:405-408` 也会在观战期间一直显示跳伞计数。Builder 必须让死亡空中角色不阻塞 flight→combat/结算，并补空中死亡后的完整阶段推进及死亡玩家观战 HUD 回归。
+2. **[高] 屋顶边缘死亡掉落会落到地面并超出权威 3m 拾取范围。** `src/game/systems/InventorySystem.ts:474-491` 只校验候选的水平半径、支撑面、墙和 spacing，没有校验候选与 actor 的真实 3D 距离。seed `0` 的 `building-0-0` 上，把 actor 放在屋顶东边缘内侧 0.42m 并掉落常规 10 件完整库存，6 件被放到地面 `y=0.45`，距 actor `5.35–5.47m`；`getPickupCandidates` 在 `:432-440` 会正确把它们排除，因此 HUD 和实际拾取虽一致，却都无法从死亡位置拾到这些物资。现有 `inventorySystem.test.ts` 只覆盖平坦地面中心，不能证明屋顶、坡道或陡坡。Builder 必须把真实 3D ≤3m 纳入落点接受条件/支撑面策略，并补屋顶边缘、室内/门边和坡道回归。
+3. **[中] 多个尸体靠近时候选耗尽会静默回退到同一点，破坏 ≥0.62m spacing。** `InventorySystem.ts:467-473` 每个尸体只有固定 57 个候选，而相邻环点和跨环点并非都满足 0.62m；候选耗尽后 `:493-499` 无条件回退 actor 中心，不再检查已有 loot。4 个同位置、各 10 件库存的尸体实际生成 40 件 loot，但只有 33 个唯一水平坐标，最小间距为 `0`；2–3 个尸体尚能通过。角色之间没有实体碰撞，决赛圈/同时死亡出现近重叠尸体并非不可达场景。Builder 需让回退仍保持 spacing（或采用可确定扩展且有界的候选策略），并补至少 4 个同点/近点完整尸体及 record 复用上界回归。
+
+#### 已确认项与验证
+
+- `findPickupCandidate/getPickupCandidates` 与 `pickLoot` 对武器替换、背包部分容量、护甲耐久、头盔等级和稳定距离/ID 排序未发现语义偏差；同 tick `dropItem+interact` 的 ignored loot 只影响该次命令，下一次交互可重新拾取。HUD 导入未形成反向 `game→client` 依赖或循环；当前生产主 chunk 为 843.33kB，未见显著新增 bundle 风险。
+- loot marker adapter 每次 sync 都会重写 position、material、metadata、source 和 enabled，inactive record 复用时状态同步完整。自动换弹位于全部 pellet/trace 之后，无备弹不触发；现有 `shot-fired → reload-started` 回归通过。仍建议 builder 在修复 blocker 时补霰弹、多方同时死亡和切枪边界，但本轮未发现可定位的自动换弹错误。
+- 实际执行 `npm run typecheck && npm run test && npm run build && git diff --check cc9c869 -- . ':(exclude)session-ses_096e.md'` 全通过；Vitest 为 18 files / 157 tests，wall time 102.93s。构建主 chunk 843.33kB、GLTF chunk 625.30kB，仅既有大 chunk warning。
+- 额外通过本地 Vite 模块实际复现上述空中死亡卡 flight、屋顶边缘 6/10 件超距和 4 尸体 spacing=0。用户提供的生产 Chrome、volume 0、50 行排行榜、65–68 FPS、console 无 error/warn 证据已参考，本轮因功能 blocker 未重复浏览器 smoke。
+- Builder 必须处理 findings 1–3；writer 需补空中死亡阶段推进/观战 HUD、屋顶/坡道真实 3D 拾取范围和多尸体 spacing 证据后再发起复审。本轮不得记录通过结论。
+
+### 2026-07-18 23:08 +0800：动态掉落 3 项 blocker 闭环及 cc9c869 完整增量复核（不通过）
+
+- 审查范围：当前 `main` 工作区相对 `cc9c869` 的 23 个 tracked 文件完整增量；重点复核 22:55 记录的 flight dead parachuter、roof edge、multi-corpse 三项 blocker，以及 HUD/Inventory 拾取候选、动态点支撑/墙避让/record 复用、自动换弹和落地 HUD。按要求忽略 `session-ses_096e.md`。
+- 对照基线：本 plan 与 `cc9c869317311f46c079b3d67f213d8c9cb9e8c1`；当前分支及远端主分支均为 `main`，工作区增量共 23 个 tracked 文件（业务/测试/README/plan）。
+- 结论：**不通过。** 三项 blocker 的规则主体已闭环，自动门禁全绿；但上一轮明确要求的死亡跳伞玩家观战 HUD 仍未修复，且 HUD 候选没有复用 Inventory 的 alive/grounded 交互前置条件，仍有 2 项中风险 HUD 一致性问题。
+
+#### Findings
+
+1. **[中][flight blocker 未完全闭环] 死亡的 parachuting 玩家在进入 combat/观战后仍永久显示跳伞计数。** `BattleRoyaleSession.ts:120-127` 始终把原始 `player` 传给 HUD；`GameHud.ts:405-408` 又只在 `deployment === "grounded"` 时显示击杀数。空中死亡玩家不会再由 Movement 改为 grounded，因此即使 `BattleRoyaleMode.ts:129-133` 已正确进入 combat，右上角仍保持 `已跳伞 X / 50`。新增 mode 测试只覆盖 dead Bot 不阻塞阶段，没有覆盖上一轮要求的死亡玩家观战 HUD。Builder 需补死亡/非存活条件并增加对应 counter/HUD 回归。
+2. **[中] HUD 拾取提示与实际 Inventory 仍未完全共享交互资格。** `GameHud.ts:200` 对任意 player 调用 `findPickupCandidate`；该函数及 `canActorPickLoot` 只判断距离和物品/容量语义，而实际入口 `InventorySystem.ts:63-65` 还要求 actor `alive && grounded`。因此 parachuting 玩家接近地面物资、或死亡 grounded 玩家尸体物资生成后，HUD 可显示 `F 拾取`，但规则必然拒绝（死亡玩家也不会再提交命令）。Builder 需让共享候选包含 actor 可交互状态，或在 HUD 使用同一前置条件，并补 parachuting/dead 场景回归。
+
+#### 已确认闭环与验证
+
+- 原 blocker 1 规则主体：flight→combat 已按每 actor `!alive || grounded` 判断；死亡 parachuting actor 不再卡住阶段。仅观战 HUD 残留见 finding 1。
+- 原 blocker 2：每个动态候选显式校验与尸体真实 3D 距离 `<=3m`；屋顶边缘完整 10 件掉落回归通过。
+- 原 blocker 3：固定全局候选顺序与扩展候选池生效；4 个同点完整尸体共 40 件得到 40 个唯一坐标，未回退重叠。
+- `canActorPickLoot` 与 `pickLoot` 的武器状态、背包容量、护甲耐久、头盔等级分支主体一致；动态点使用权威 support、墙/边界过滤，inactive loot record 和 marker 的位置、材质、metadata、source、enabled 会同步复用。交互状态缺口见 finding 2。
+- 自动换弹仍在最后一发全部 trace/pellet 后启动，事件顺序为 `shot-fired → reload-started`；grounded 玩家同帧切换击杀数的既有用例通过，未发现规则回归。
+- 实际执行 `npm run typecheck && npm run test && npm run build && git diff --check cc9c869 -- . ':(exclude)session-ses_096e.md'` 全通过；Vitest 18 files / 160 tests，wall time 105.25s；构建仅保留既有 843.46kB 主 chunk 与 625.30kB GLTF chunk warning。另定向执行 inventory + battle mode 为 2 files / 32 tests 全通过。
+- Builder 需处理上述 2 项中风险 HUD 问题；writer 需补死亡 parachuting 玩家观战 counter，以及 parachuting/dead actor 不显示不可执行拾取提示的验证后再复审。
+
+### 2026-07-18 23:20 +0800：动态掉落最新 2 项中风险最终复核（通过）
+
+- 审查范围：当前 `main` 工作区相对主分支基线 `cc9c869317311f46c079b3d67f213d8c9cb9e8c1` 的 23 个 tracked 文件完整增量；重点复核 23:08 记录的死亡 parachuting 玩家 counter、死亡/非 grounded 拾取提示 2 项中风险，并确认此前 flight transition、roof-edge 10 件掉落及 4 尸体 40 件唯一坐标 3 项仍闭环。忽略未跟踪 `session-ses_096e.md`。
+- 对照基线：本 plan 的任务 6、8、10、12、动态掉落/HUD 实现记录及最近两轮 review findings。
+- 结论：**通过。本次审查未发现明确中高风险 finding。** 最新 2 项中风险均已闭环，上一轮 3 项修复未回归。
+- 最新 2 项闭环：`combatCounterLabel` 仅在 `flight && alive && deployment !== grounded` 时显示跳伞数，死亡 parachuting 玩家在 combat 显示击杀数；`findPickupCandidate` 对死亡或非 grounded actor 返回 `null`，与 `InventorySystem.processCommand` 的交互入口边界一致。
+- 前 3 项仍闭环：flight→combat 使用 `!alive || grounded` 判断；动态掉落候选继续校验与尸体真实 3D 距离 `<=3m`；现有 roof-edge 完整 10 件和 4 个同点尸体 40 件/40 唯一坐标回归均通过。
+- 实际验证：`npm run typecheck && npm run test && npm run build && git diff --check cc9c869 -- . ':(exclude)session-ses_096e.md'` 全通过；Vitest 18 files / 161 tests，wall time 147.63s；构建仅保留既有 >500kB chunk warning。未重复浏览器 smoke。

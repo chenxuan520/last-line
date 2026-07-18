@@ -32,6 +32,20 @@ describe("SimulationCombatWorld", () => {
     expect(world.traceShot(trace({ ...shooter.position, y: shooter.position.y + 3 }, { x: 0, y: 0, z: 1 }))).toBeNull();
   });
 
+  it("ignores aircraft occupants but allows shots to hit parachuting actors", () => {
+    const shooter = createActorState("shooter", "player", { x: 0, y: 1.76, z: 0 });
+    const target = createActorState("target", "bot", { x: 0, y: 1.76, z: 10 });
+    const farTarget = createActorState("far-target", "bot", { x: 0, y: 1.76, z: 20 });
+    const state = createState(shooter, target, farTarget);
+    const world = new SimulationCombatWorld(state);
+    target.deployment = "aircraft";
+
+    expect(world.traceShot(trace(shooter.position, subtract(farTarget.position, shooter.position)))).toBe("far-target");
+
+    target.deployment = "parachuting";
+    expect(world.traceShot(trace(shooter.position, subtract(target.position, shooter.position)))).toBe("target");
+  });
+
   it("blocks shots and line of sight with static map buildings", () => {
     const obstacle = MAP_WALL_SEGMENTS[0];
     if (!obstacle) throw new Error("test wall missing");

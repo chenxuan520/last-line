@@ -12,7 +12,7 @@ export class DamageSystem {
     weaponId: string | null = null,
   ): number {
     const target = state.actors[targetId];
-    if (!target?.alive || amount <= 0) {
+    if (!target?.alive || target.deployment === "aircraft" || amount <= 0) {
       return 0;
     }
 

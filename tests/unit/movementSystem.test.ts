@@ -9,7 +9,11 @@ import {
 } from "../../src/config/map";
 import { createIdleCommand, type ActorCommand } from "../../src/game/commands/ActorCommand";
 import { createActorState, type MatchState } from "../../src/game/state/types";
-import { getSupportHeight, MovementSystem } from "../../src/game/systems/MovementSystem";
+import {
+  getSupportHeight,
+  getWallCollisionCandidateCount,
+  MovementSystem,
+} from "../../src/game/systems/MovementSystem";
 
 const GROUND_HEIGHT = 1.76;
 const ACTOR_RADIUS = 0.42;
@@ -85,11 +89,11 @@ describe("MovementSystem", () => {
     const actor = state.actors.actor;
     if (!actor) throw new Error("test actor missing");
 
-    const startedAt = performance.now();
     advance(state, movingCommand(1, 0, true), 3_000, 1 / 60);
-    const elapsed = performance.now() - startedAt;
 
-    expect(elapsed).toBeLessThan(1_500);
+    expect(getWallCollisionCandidateCount(wall.center.x, wall.center.z, layout)).toBeLessThan(
+      layout.wallSegments.length / 4,
+    );
     expect(Number.isFinite(actor.position.x)).toBe(true);
   });
 

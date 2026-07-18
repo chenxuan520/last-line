@@ -957,12 +957,13 @@ h1 {
   position: absolute;
   top: calc(50% + 43px);
   left: 50%;
+  z-index: 24;
   min-width: 150px;
   padding: 6px 16px 7px;
   border-bottom: 1px solid rgb(200 212 181 / 22%);
-  color: #d1d8cc;
-  background: linear-gradient(90deg, transparent, rgb(7 11 9 / 50%) 20%, rgb(7 11 9 / 50%) 80%, transparent);
-  font: 700 11px/1.2 var(--tactical-font);
+  color: #f0f5e8;
+  background: linear-gradient(90deg, transparent, rgb(7 11 9 / 78%) 20%, rgb(7 11 9 / 78%) 80%, transparent);
+  font: 800 12px/1.2 var(--tactical-font);
   letter-spacing: 0.04em;
   text-align: center;
   text-shadow: 0 1px 3px rgb(0 0 0 / 75%);

@@ -26,6 +26,7 @@ const FLIGHT_ALTITUDE = 180;
 const FLIGHT_HALF_LENGTH = MAP_HALF_SIZE * 1.3;
 const MAX_FLIGHT_OFFSET = MAP_HALF_SIZE * 0.55;
 const AUTO_EJECT_PROGRESS = 0.92;
+const FLIGHT_ACTOR_RADIUS = 0.42;
 const INDOOR_LOOT_POINTS_PER_ZONE = 1;
 
 type LootCategory = "weapon" | "ammo" | "medical" | "equipment";
@@ -105,14 +106,18 @@ export class BattleRoyaleMode implements GameMode {
     const progressDelta = state.flight.durationSeconds <= 0 ? 1 : deltaSeconds / state.flight.durationSeconds;
     state.flight.progress = Math.min(1, state.flight.progress + progressDelta);
     const aircraftPosition = interpolateVector(state.flight.start, state.flight.end, state.flight.progress);
+    const autoEjectProgress = Math.min(AUTO_EJECT_PROGRESS, getLastIslandFlightProgress(state.flight));
+    const autoEjectPosition = interpolateVector(state.flight.start, state.flight.end, autoEjectProgress);
 
     for (const actor of Object.values(state.actors)) {
       if (actor.deployment === "aircraft") {
-        actor.position = { ...aircraftPosition };
+        actor.position = state.flight.progress >= autoEjectProgress
+          ? { ...autoEjectPosition }
+          : { ...aircraftPosition };
       }
     }
 
-    if (state.flight.progress >= AUTO_EJECT_PROGRESS) {
+    if (state.flight.progress >= autoEjectProgress) {
       for (const actor of Object.values(state.actors)) {
         if (actor.deployment === "aircraft") {
           actor.deployment = "parachuting";
@@ -121,7 +126,7 @@ export class BattleRoyaleMode implements GameMode {
       }
     }
 
-    if (Object.values(state.actors).every((actor) => actor.deployment === "grounded")) {
+    if (Object.values(state.actors).every((actor) => !actor.alive || actor.deployment === "grounded")) {
       state.phase = "combat";
       events.push({ type: "phase-changed", phase: "combat" });
       events.push({ type: "safe-zone-changed", stageIndex: state.safeZone.stageIndex, status: "waiting" });
@@ -209,9 +214,12 @@ export class BattleRoyaleMode implements GameMode {
     }
 
     const living = Object.values(state.actors)
-      .filter((actor) => actor.alive)
+      .filter((actor) => actor.alive && actor.deployment === "grounded")
       .sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
-    const outside = living.filter((actor) => horizontalDistance(actor.position, state.safeZone.center) > state.safeZone.radius);
+    const outside = living.filter((actor) =>
+      state.safeZone.radius <= 0 ||
+      horizontalDistance(actor.position, state.safeZone.center) > state.safeZone.radius
+    );
     const allWouldDie =
       outside.length === living.length && outside.every((actor) => actor.health <= damage);
     const survivorId = allWouldDie
@@ -245,6 +253,27 @@ export class BattleRoyaleMode implements GameMode {
     }
     return stage;
   }
+}
+
+function getLastIslandFlightProgress(flight: FlightState): number {
+  const limit = MAP_HALF_SIZE - FLIGHT_ACTOR_RADIUS;
+  let entry = 0;
+  let exit = 1;
+  for (const [start, end] of [
+    [flight.start.x, flight.end.x],
+    [flight.start.z, flight.end.z],
+  ] as const) {
+    const delta = end - start;
+    if (Math.abs(delta) < 1e-9) {
+      if (start < -limit || start > limit) return 0;
+      continue;
+    }
+    const first = (-limit - start) / delta;
+    const second = (limit - start) / delta;
+    entry = Math.max(entry, Math.min(first, second));
+    exit = Math.min(exit, Math.max(first, second));
+  }
+  return Math.max(entry, Math.min(1, exit));
 }
 
 export function createBattleRoyaleState(

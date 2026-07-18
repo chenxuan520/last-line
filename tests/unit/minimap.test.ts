@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createMinimapView, projectToMinimap } from "../../src/client/ui/minimap";
-import { sortLeaderboardActors } from "../../src/client/ui/GameHud";
+import { combatCounterLabel, sortLeaderboardActors } from "../../src/client/ui/GameHud";
 import { MAP_HALF_SIZE } from "../../src/config/map";
 import { createBattleRoyaleState } from "../../src/game/modes/BattleRoyaleMode";
 
@@ -66,5 +66,25 @@ describe("minimap projection", () => {
       "player",
       "bot-2",
     ]);
+  });
+
+  it("switches the flight counter to kills as soon as the player lands", () => {
+    const state = createBattleRoyaleState("player", undefined, () => 0.5);
+    const player = state.actors.player;
+    if (!player) throw new Error("player missing");
+    state.phase = "flight";
+    player.deployment = "parachuting";
+    state.actors["bot-1"]!.deployment = "parachuting";
+
+    expect(combatCounterLabel(state, player)).toBe("已跳伞 2 / 50");
+
+    player.deployment = "grounded";
+    player.kills = 3;
+    expect(combatCounterLabel(state, player)).toBe("3 击杀");
+
+    player.deployment = "parachuting";
+    player.alive = false;
+    state.phase = "combat";
+    expect(combatCounterLabel(state, player)).toBe("3 击杀");
   });
 });

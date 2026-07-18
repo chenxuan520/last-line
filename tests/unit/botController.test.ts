@@ -114,6 +114,35 @@ describe("BotController", () => {
     expect(maximumY).toBeCloseTo(roofEyeY, 1);
   });
 
+  it("keeps pursuing the last visible rooftop position through a temporary LOS loss", () => {
+    const state = groundedState();
+    const layout = createMapLayout(state.mapSeed);
+    const obstacle = layout.obstacles[0];
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!obstacle || !bot || !player) throw new Error("test setup missing");
+    const botX = obstacle.center.x - obstacle.width / 2 - 35;
+    bot.position = { x: botX, y: getTerrainHeight(botX, obstacle.center.z, layout) + 1.76, z: obstacle.center.z };
+    player.position = {
+      x: obstacle.center.x,
+      y: obstacle.center.y + obstacle.height / 2 + BUILDING_ROOF_CAP_HEIGHT + 1.76,
+      z: obstacle.center.z,
+    };
+    bot.yaw = Math.atan2(player.position.x - bot.position.x, player.position.z - bot.position.z);
+    let visible = true;
+    const world: CombatWorld = { traceShot: () => null, hasLineOfSight: () => visible };
+    const controller = new BotController(1, () => 0.5);
+
+    controller.update(bot, state, world, 1, player.id);
+    visible = false;
+    state.elapsedSeconds += 1;
+    const hiddenCommand = controller.update(bot, state, world, 1, player.id);
+
+    expect(Math.hypot(hiddenCommand.move.x, hiddenCommand.move.z)).toBeGreaterThan(0.5);
+    expect(hiddenCommand.aimDirection.x).toBeGreaterThan(0.8);
+    expect(hiddenCommand.fire).toBe(false);
+  });
+
   it("turns toward an unseen rooftop attacker and then pursues it", () => {
     const state = groundedState();
     state.safeZone.radius = 2_000;
@@ -218,11 +247,143 @@ describe("BotController", () => {
     player.alive = false;
     state.safeZone.center = { x: 0, y: 0, z: 0 };
     state.safeZone.radius = 40;
+    state.safeZone.targetCenter = { x: 0, y: 0, z: 0 };
+    state.safeZone.targetRadius = 40;
 
     const command = new BotController(1, () => 0.5).update(bot, state, miss, 1, "player");
 
     expect(command.move.x).toBeLessThan(0);
     expect(command.sprint).toBe(true);
+  });
+
+  it("moves into the next target zone before the current zone starts shrinking", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    player.alive = false;
+    bot.position = { x: 0, y: getTerrainHeight(0, 0, state.mapSeed) + 1.76, z: 0 };
+    state.safeZone.center = { x: 0, y: 0, z: 0 };
+    state.safeZone.radius = 1_000;
+    state.safeZone.targetCenter = { x: 240, y: 0, z: 0 };
+    state.safeZone.targetRadius = 60;
+    state.safeZone.status = "waiting";
+    state.safeZone.secondsRemaining = 90;
+
+    const command = new BotController(1, () => 0.5).update(bot, state, miss, 1 / 30, player.id);
+
+    expect(command.move.x).toBeGreaterThan(0.9);
+    expect(command.sprint).toBe(true);
+  });
+
+  it("picks up a weapon at its feet before rotating into the next zone", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    player.alive = false;
+    bot.inventory.weaponSlots = [null, null];
+    bot.position = { x: 0, y: getTerrainHeight(0, 0, state.mapSeed) + 1.76, z: 0 };
+    state.safeZone.targetCenter = { x: 500, y: 0, z: 0 };
+    state.safeZone.targetRadius = 60;
+    state.groundLoot.weapon = {
+      id: "weapon",
+      itemId: "weapon.rifle",
+      quantity: 1,
+      weapon: createWeaponState("rifle"),
+      position: { x: 0, y: bot.position.y - 1.31, z: 0 },
+      available: true,
+    };
+
+    const command = new BotController(1, () => 0.5).update(bot, state, miss, 1 / 30, player.id);
+
+    expect(command.interact).toBe(true);
+    expect(command.move).toEqual({ x: 0, y: 0, z: 0 });
+  });
+
+  it("takes a short weapon detour before rotating into the next zone", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    player.alive = false;
+    bot.inventory.weaponSlots = [null, null];
+    bot.position = { x: 0, y: getTerrainHeight(0, 0, state.mapSeed) + 1.76, z: 0 };
+    state.safeZone.targetCenter = { x: 500, y: 0, z: 0 };
+    state.safeZone.targetRadius = 60;
+    state.groundLoot.weapon = {
+      id: "weapon",
+      itemId: "weapon.rifle",
+      quantity: 1,
+      weapon: createWeaponState("rifle"),
+      position: { x: -80, y: getTerrainHeight(-80, 0, state.mapSeed) + 0.45, z: 0 },
+      available: true,
+    };
+
+    const command = new BotController(1, () => 0.5).update(bot, state, miss, 1 / 30, player.id);
+
+    expect(command.move.x).toBeLessThan(-0.9);
+    expect(command.sprint).toBe(true);
+  });
+
+  it("does not detour to a nearby weapon outside the current zone", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    player.alive = false;
+    bot.inventory.weaponSlots = [null, null];
+    bot.position = { x: 0, y: getTerrainHeight(0, 0, state.mapSeed) + 1.76, z: 0 };
+    state.safeZone.center = { x: 0, y: 0, z: 0 };
+    state.safeZone.radius = 100;
+    state.safeZone.targetCenter = { x: 500, y: 0, z: 0 };
+    state.safeZone.targetRadius = 60;
+    state.groundLoot.weapon = {
+      id: "weapon",
+      itemId: "weapon.rifle",
+      quantity: 1,
+      weapon: createWeaponState("rifle"),
+      position: { x: -110, y: getTerrainHeight(-110, 0, state.mapSeed) + 0.45, z: 0 },
+      available: true,
+    };
+
+    const command = new BotController(1, () => 0.5).update(bot, state, miss, 1 / 30, player.id);
+
+    expect(command.move.x).toBeGreaterThan(0.9);
+  });
+
+  it("does not leave the target zone for a nearby weapon after arriving", () => {
+    const withWeapon = groundedState();
+    const withoutWeapon = groundedState();
+    for (const state of [withWeapon, withoutWeapon]) {
+      const bot = state.actors["bot-1"];
+      const player = state.actors.player;
+      if (!bot || !player) throw new Error("actors missing");
+      player.alive = false;
+      bot.inventory.weaponSlots = [null, null];
+      bot.position = { x: 0, y: getTerrainHeight(0, 0, state.mapSeed) + 1.76, z: 0 };
+      state.safeZone.center = { x: 0, y: 0, z: 0 };
+      state.safeZone.radius = 1_000;
+      state.safeZone.targetCenter = { x: 0, y: 0, z: 0 };
+      state.safeZone.targetRadius = 60;
+    }
+    withWeapon.groundLoot.weapon = {
+      id: "weapon",
+      itemId: "weapon.rifle",
+      quantity: 1,
+      weapon: createWeaponState("rifle"),
+      position: { x: 80, y: getTerrainHeight(80, 0, withWeapon.mapSeed) + 0.45, z: 0 },
+      available: true,
+    };
+
+    const withWeaponCommand = new BotController(1, () => 0.5).update(
+      withWeapon.actors["bot-1"]!, withWeapon, miss, 1 / 30, "player",
+    );
+    const withoutWeaponCommand = new BotController(1, () => 0.5).update(
+      withoutWeapon.actors["bot-1"]!, withoutWeapon, miss, 1 / 30, "player",
+    );
+
+    expect(withWeaponCommand).toEqual(withoutWeaponCommand);
   });
 
   it("prioritizes reaching the safe zone over fighting a visible enemy", () => {
@@ -232,6 +393,8 @@ describe("BotController", () => {
     if (!bot || !player) throw new Error("actors missing");
     state.safeZone.center = { x: 0, y: 0, z: 0 };
     state.safeZone.radius = 40;
+    state.safeZone.targetCenter = { x: 0, y: 0, z: 0 };
+    state.safeZone.targetRadius = 40;
     bot.position = { x: 200, y: 1.76, z: 0 };
     bot.yaw = Math.PI;
     player.position = { x: 200, y: 1.76, z: 15 };
@@ -252,6 +415,8 @@ describe("BotController", () => {
     player.alive = false;
     state.safeZone.center = { x: 0, y: 0, z: 0 };
     state.safeZone.radius = 40;
+    state.safeZone.targetCenter = { x: 0, y: 0, z: 0 };
+    state.safeZone.targetRadius = 40;
     bot.position = { x: 200, y: 1.76, z: 0 };
     bot.health = 20;
     bot.inventory.backpack = [{ itemId: "medkit", quantity: 1 }];
@@ -277,6 +442,52 @@ describe("BotController", () => {
     expect(command.move).toEqual({ x: 0, y: 0, z: 0 });
   });
 
+  it("lets a new hit override stale combat memory", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    const attacker = state.actors["bot-2"];
+    if (!bot || !player || !attacker) throw new Error("actors missing");
+    for (const actor of Object.values(state.actors)) {
+      actor.alive = actor.id === bot.id || actor.id === player.id || actor.id === attacker.id;
+    }
+    bot.position = { x: 0, y: 1.76, z: 0 };
+    player.position = { x: 20, y: 1.76, z: 0 };
+    attacker.position = { x: -20, y: 1.76, z: 0 };
+    bot.yaw = Math.PI / 2;
+    let playerVisible = true;
+    const world: CombatWorld = {
+      traceShot: () => null,
+      hasLineOfSight: (_observerId, targetId) => playerVisible && targetId === player.id,
+    };
+    const controller = new BotController(1, () => 0.5);
+    controller.update(bot, state, world, 1, player.id);
+    playerVisible = false;
+    state.elapsedSeconds += 1;
+    new DamageSystem().applyDamage(state, bot.id, 5, attacker.id, []);
+
+    const reaction = controller.update(bot, state, world, 1 / 30, player.id);
+
+    expect(reaction.aimDirection.x).toBeLessThan(-0.9);
+    expect(reaction.fire).toBe(false);
+  });
+
+  it("uses 3D range before firing at a parachuting target", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    for (const actor of Object.values(state.actors)) actor.alive = actor.id === bot.id || actor.id === player.id;
+    bot.position = { x: 0, y: 1.76, z: 0 };
+    player.position = { x: 10, y: 201.76, z: 0 };
+    player.deployment = "parachuting";
+    bot.yaw = Math.PI / 2;
+
+    const command = new BotController(1, () => 0.5).update(bot, state, miss, 1, player.id);
+
+    expect(command.fire).toBe(false);
+  });
+
   it("patrols the late safe zone instead of standing at its center", () => {
     const state = groundedState();
     const bot = state.actors["bot-1"];
@@ -286,6 +497,8 @@ describe("BotController", () => {
     }
     state.safeZone.center = { x: 0, y: 0, z: 0 };
     state.safeZone.radius = 120;
+    state.safeZone.targetCenter = { x: 0, y: 0, z: 0 };
+    state.safeZone.targetRadius = 120;
     bot.position = { x: 0, y: getTerrainHeight(0, 0, state.mapSeed) + 1.76, z: 0 };
     state.groundLoot = {};
 
@@ -304,6 +517,8 @@ describe("BotController", () => {
     }
     state.safeZone.center = { x: 0, y: 0, z: 0 };
     state.safeZone.radius = 1_000;
+    state.safeZone.targetCenter = { x: 0, y: 0, z: 0 };
+    state.safeZone.targetRadius = 1_000;
     bot.position = { x: 0, y: getTerrainHeight(0, 0, state.mapSeed) + 1.76, z: 0 };
     state.groundLoot = {};
 
@@ -502,6 +717,10 @@ function groundedState() {
   }
   state.phase = "combat";
   state.groundLoot = {};
+  state.safeZone.center = { x: 0, y: 0, z: 0 };
+  state.safeZone.radius = 2_000;
+  state.safeZone.targetCenter = { x: 0, y: 0, z: 0 };
+  state.safeZone.targetRadius = 2_000;
   return state;
 }
 

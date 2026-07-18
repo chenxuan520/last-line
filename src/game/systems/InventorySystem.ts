@@ -1,4 +1,11 @@
 import { ITEMS, type ItemConfig } from "../../config/items";
+import {
+  BUILDING_ROOF_CAP_HEIGHT,
+  createMapLayout,
+  MAP_HALF_SIZE,
+  type MapLayout,
+  type MapWallSegment,
+} from "../../config/map";
 import type { ActorCommand } from "../commands/ActorCommand";
 import {
   getActiveWeapon,
@@ -11,9 +18,14 @@ import {
   type WeaponSlot,
   type WeaponState,
 } from "../state/types";
+import { getSupportHeight } from "./MovementSystem";
 
 const INTERACTION_DISTANCE_SQUARED = 3 * 3;
 const TIMER_EPSILON_SECONDS = 1e-9;
+const DROP_MARKER_HEIGHT = 0.45;
+const DROP_MINIMUM_SPACING = 0.62;
+const DROP_WALL_CLEARANCE = 0.25;
+const ACTOR_EYE_HEIGHT = 1.76;
 
 export class InventorySystem {
   private readonly droppedDeadActors = new WeakSet<ActorState>();
@@ -119,19 +131,8 @@ export class InventorySystem {
     events: GameEvent[],
     ignoredLootId: EntityId | null = null,
   ): void {
-    const candidates = Object.values(state.groundLoot)
-      .filter((loot) => loot.available && loot.quantity > 0 && loot.id !== ignoredLootId)
-      .map((loot) => ({
-        loot,
-        distanceSquared:
-          (loot.position.x - actor.position.x) ** 2 +
-          (loot.position.y - actor.position.y) ** 2 +
-          (loot.position.z - actor.position.z) ** 2,
-      }))
-      .filter((candidate) => candidate.distanceSquared <= INTERACTION_DISTANCE_SQUARED)
-      .sort((left, right) => left.distanceSquared - right.distanceSquared || left.loot.id.localeCompare(right.loot.id));
-
-    for (const { loot } of candidates) {
+    const candidates = getPickupCandidates(actor, state.groundLoot, ignoredLootId);
+    for (const loot of candidates) {
       const item = ITEMS[loot.itemId];
       if (!item) continue;
       const pickedQuantity = this.pickLoot(state, actor, item, loot, events);
@@ -373,7 +374,7 @@ export class InventorySystem {
       itemId,
       quantity,
       ...(weapon ? { weapon } : {}),
-      position: { ...actor.position },
+      position: findDynamicDropPosition(state, actor),
       available: true,
       source,
     };
@@ -407,4 +408,153 @@ export class InventorySystem {
     }
     return true;
   }
+}
+
+export function findPickupCandidate(
+  actor: ActorState,
+  groundLoot: Readonly<Record<EntityId, GroundLootState>>,
+): GroundLootState | null {
+  if (!actor.alive || actor.deployment !== "grounded") return null;
+  return getPickupCandidates(actor, groundLoot)[0] ?? null;
+}
+
+export function findNearbyLootCandidate(
+  actor: ActorState,
+  groundLoot: Readonly<Record<EntityId, GroundLootState>>,
+): GroundLootState | null {
+  if (!actor.alive || actor.deployment !== "grounded") return null;
+  return Object.values(groundLoot)
+    .filter((loot) => loot.available && loot.quantity > 0 && lootDistanceSquared(actor, loot) <= INTERACTION_DISTANCE_SQUARED)
+    .sort((left, right) =>
+      lootDistanceSquared(actor, left) - lootDistanceSquared(actor, right) || left.id.localeCompare(right.id)
+    )[0] ?? null;
+}
+
+function getPickupCandidates(
+  actor: ActorState,
+  groundLoot: Readonly<Record<EntityId, GroundLootState>>,
+  ignoredLootId: EntityId | null = null,
+): GroundLootState[] {
+  return Object.values(groundLoot)
+    .filter((loot) =>
+      loot.available &&
+      loot.quantity > 0 &&
+      loot.id !== ignoredLootId &&
+      canActorPickLoot(actor, loot)
+    )
+    .map((loot) => ({
+      loot,
+      distanceSquared: lootDistanceSquared(actor, loot),
+    }))
+    .filter((candidate) => candidate.distanceSquared <= INTERACTION_DISTANCE_SQUARED)
+    .sort((left, right) => left.distanceSquared - right.distanceSquared || left.loot.id.localeCompare(right.loot.id))
+    .map((candidate) => candidate.loot);
+}
+
+function lootDistanceSquared(actor: ActorState, loot: GroundLootState): number {
+  return (
+    (loot.position.x - actor.position.x) ** 2 +
+    (loot.position.y - actor.position.y) ** 2 +
+    (loot.position.z - actor.position.z) ** 2
+  );
+}
+
+function canActorPickLoot(actor: ActorState, loot: GroundLootState): boolean {
+  const item = ITEMS[loot.itemId];
+  if (!item) return false;
+  if (item.kind === "weapon") {
+    if (!item.weaponId || loot.weapon?.weaponId !== item.weaponId) return false;
+    const emptySlot = actor.inventory.weaponSlots.some((weapon) => weapon === null);
+    const activeWeapon = getActiveWeapon(actor);
+    return emptySlot || Boolean(activeWeapon && weaponItemId(activeWeapon.weaponId));
+  }
+  if (item.kind === "armor") {
+    const level = item.level ?? 0;
+    return level > actor.inventory.armorLevel ||
+      (level === actor.inventory.armorLevel && actor.armor < actor.maxArmor);
+  }
+  if (item.kind === "helmet") return (item.level ?? 0) > actor.inventory.helmetLevel;
+  return actor.inventory.backpack.some((stack) => stack.itemId === item.id && stack.quantity < item.maxStack) ||
+    actor.inventory.backpack.length < actor.inventory.maxBackpackStacks;
+}
+
+function findDynamicDropPosition(state: MatchState, actor: ActorState): ActorState["position"] {
+  const layout = createMapLayout(state.mapSeed);
+  const existing = Object.values(state.groundLoot).filter((loot) => loot.available);
+  const offsets = [
+    ...dropRing(1.2, 20, 0),
+    ...dropRing(1.55, 28, Math.PI / 28),
+    ...dropRing(1.9, 36, 0),
+    ...dropRing(2.2, 44, Math.PI / 44),
+    ...dropRing(2.45, 50, 0),
+    ...dropRing(2.65, 56, Math.PI / 56),
+  ];
+  let fallback: { position: ActorState["position"]; clearance: number } | null = null;
+  for (const offset of offsets) {
+    const x = actor.position.x + offset.x;
+    const z = actor.position.z + offset.z;
+    const support = getSupportHeight(
+      x,
+      z,
+      actor.position.y - ACTOR_EYE_HEIGHT + 0.35,
+      layout,
+    );
+    const candidate = { x, y: support + DROP_MARKER_HEIGHT, z };
+    if (
+      Math.abs(x) > MAP_HALF_SIZE - DROP_WALL_CLEARANCE ||
+      Math.abs(z) > MAP_HALF_SIZE - DROP_WALL_CLEARANCE ||
+      vectorDistance(candidate, actor.position) > 3 ||
+      !isDropClearOfWalls(candidate, support, layout)
+    ) continue;
+    const clearance = existing.reduce(
+      (minimum, loot) => Math.min(minimum, Math.hypot(loot.position.x - x, loot.position.z - z)),
+      Number.POSITIVE_INFINITY,
+    );
+    if (clearance >= DROP_MINIMUM_SPACING) return candidate;
+    if (!fallback || clearance > fallback.clearance) fallback = { position: candidate, clearance };
+  }
+  if (fallback && fallback.clearance > 0.01) return fallback.position;
+  const support = getSupportHeight(
+    actor.position.x,
+    actor.position.z,
+    actor.position.y - ACTOR_EYE_HEIGHT + 0.35,
+    layout,
+  );
+  return { x: actor.position.x, y: support + DROP_MARKER_HEIGHT, z: actor.position.z };
+}
+
+function dropRing(radius: number, count: number, angleOffset: number): { x: number; z: number }[] {
+  return Array.from({ length: count }, (_, index) => {
+    const angle = angleOffset + index / count * Math.PI * 2;
+    return { x: Math.cos(angle) * radius, z: Math.sin(angle) * radius };
+  });
+}
+
+function isDropClearOfWalls(
+  candidate: ActorState["position"],
+  support: number,
+  layout: MapLayout,
+): boolean {
+  return layout.wallSegments.every((wall) =>
+    support >= wall.center.y + wall.height / 2 + BUILDING_ROOF_CAP_HEIGHT - 0.08 ||
+    !pointNearWall(candidate.x, candidate.z, wall)
+  );
+}
+
+function pointNearWall(x: number, z: number, wall: MapWallSegment): boolean {
+  const closestX = clamp(x, wall.center.x - wall.width / 2, wall.center.x + wall.width / 2);
+  const closestZ = clamp(z, wall.center.z - wall.depth / 2, wall.center.z + wall.depth / 2);
+  return Math.hypot(x - closestX, z - closestZ) < DROP_WALL_CLEARANCE;
+}
+
+function weaponItemId(weaponId: string): string | null {
+  return Object.values(ITEMS).find((item) => item.kind === "weapon" && item.weaponId === weaponId)?.id ?? null;
+}
+
+function vectorDistance(left: ActorState["position"], right: ActorState["position"]): number {
+  return Math.hypot(left.x - right.x, left.y - right.y, left.z - right.z);
+}
+
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.max(minimum, Math.min(maximum, value));
 }

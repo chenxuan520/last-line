@@ -289,6 +289,10 @@ function getNearbyWalls(x: number, z: number, layout: MapLayout): readonly MapWa
   return index.get(`${wallCell(x)}:${wallCell(z)}`) ?? [];
 }
 
+export function getWallCollisionCandidateCount(x: number, z: number, layout: MapLayout): number {
+  return getNearbyWalls(x, z, layout).length;
+}
+
 function wallCell(value: number): number {
   return Math.floor((value + MAP_HALF_SIZE) / WALL_COLLISION_CELL_SIZE);
 }

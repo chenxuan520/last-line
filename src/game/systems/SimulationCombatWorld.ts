@@ -54,7 +54,7 @@ export class SimulationCombatWorld implements CombatWorld {
     let nearestActorHit: ActorSurfaceHit | null = null;
     const actors = Object.values(this.state.actors).sort((left, right) => compareIds(left.id, right.id));
     for (const actor of actors) {
-      if (!actor.alive || actor.id === trace.shooterId) {
+      if (!actor.alive || actor.deployment === "aircraft" || actor.id === trace.shooterId) {
         continue;
       }
       const hit = intersectActor(trace.origin, direction, trace.range, actor);

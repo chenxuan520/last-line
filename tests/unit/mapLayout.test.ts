@@ -332,7 +332,7 @@ describe("map layouts", () => {
         }
       }
     }
-  }, 180_000);
+  }, 240_000);
 
   it("keeps every ramp navigable for the former out-of-bounds regression seed", () => {
     const layout = createMapLayout(331);

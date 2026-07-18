@@ -5,7 +5,7 @@ import {
   type BattleRoyaleConfig,
 } from "../../src/config/battleRoyale";
 import { ITEMS } from "../../src/config/items";
-import { createMapLayout } from "../../src/config/map";
+import { createMapLayout, MAP_HALF_SIZE } from "../../src/config/map";
 import { BattleRoyaleMode, createBattleRoyaleState } from "../../src/game/modes/BattleRoyaleMode";
 import { createIdleCommand } from "../../src/game/commands/ActorCommand";
 import { createWeaponState, type GameEvent } from "../../src/game/state/types";
@@ -18,7 +18,7 @@ const damageConfig: BattleRoyaleConfig = {
 };
 
 describe("BattleRoyaleMode", () => {
-  it("budgets 15 minutes while accelerating the late circles", () => {
+  it("budgets about 13 minutes while accelerating the late circles", () => {
     const budgetSeconds =
       BATTLE_ROYALE_CONFIG.flightSeconds +
       BATTLE_ROYALE_CONFIG.safeZoneStages.reduce(
@@ -26,12 +26,12 @@ describe("BattleRoyaleMode", () => {
         0,
       );
 
-    expect(budgetSeconds).toBe(15 * 60);
-    expect(budgetSeconds).toBeGreaterThanOrEqual(15 * 60);
-    expect(budgetSeconds).toBeLessThanOrEqual(20 * 60);
+    expect(budgetSeconds).toBe(802);
+    expect(budgetSeconds).toBeGreaterThanOrEqual(13 * 60);
+    expect(budgetSeconds).toBeLessThanOrEqual(14 * 60);
     const stages = BATTLE_ROYALE_CONFIG.safeZoneStages;
-    expect(stages.slice(2).map((stage) => stage.waitSeconds)).toEqual([90, 55, 30, 10]);
-    expect(stages.slice(2).map((stage) => stage.shrinkSeconds)).toEqual([55, 40, 25, 15]);
+    expect(stages.slice(2).map((stage) => stage.waitSeconds)).toEqual([70, 35, 15, 5]);
+    expect(stages.slice(2).map((stage) => stage.shrinkSeconds)).toEqual([45, 28, 16, 8]);
   });
 
   it("creates a serializable 50-person match with complete ground loot", () => {
@@ -148,7 +148,7 @@ describe("BattleRoyaleMode", () => {
     expect(state.mapSeed).toBe(mapSeed);
   });
 
-  it("auto-ejects the player at the current aircraft position", () => {
+  it("auto-ejects every remaining actor at the last legal island position", () => {
     const state = createBattleRoyaleState("player", damageConfig, () => 0.5);
     const mode = new BattleRoyaleMode(damageConfig, () => 0.5);
     mode.start(state, []);
@@ -158,12 +158,20 @@ describe("BattleRoyaleMode", () => {
     const player = state.actors.player;
     if (!player) throw new Error("player missing");
     expect(player.deployment).toBe("parachuting");
-    expect(player.position.x).toBeCloseTo(state.flight.start.x + (state.flight.end.x - state.flight.start.x) * 0.93);
-    expect(player.position.z).toBeCloseTo(state.flight.start.z + (state.flight.end.z - state.flight.start.z) * 0.93);
+    expect(Math.abs(player.position.x)).toBeLessThanOrEqual(MAP_HALF_SIZE - 0.42 + 1e-6);
+    expect(Math.abs(player.position.z)).toBeLessThanOrEqual(MAP_HALF_SIZE - 0.42 + 1e-6);
     expect(createMapLayout(state.mapSeed).lootSpawnPoints).not.toContainEqual(player.position);
     expect(Object.values(state.actors).every((actor) => actor.deployment === "parachuting")).toBe(true);
     expect(Object.values(state.actors).every((actor) => actor.position.x === player.position.x)).toBe(true);
     expect(Object.values(state.actors).every((actor) => actor.position.z === player.position.z)).toBe(true);
+    const beforeMove = { ...player.position };
+    new MovementSystem().processCommand(
+      state,
+      player.id,
+      { ...createIdleCommand(), move: { x: 1, y: 0, z: 0 } },
+      1 / 30,
+    );
+    expect(Math.hypot(player.position.x - beforeMove.x, player.position.z - beforeMove.z)).toBeLessThan(2.2);
   });
 
   it("applies outside-zone damage directly to health", () => {
@@ -187,6 +195,40 @@ describe("BattleRoyaleMode", () => {
 
     expect(player.health).toBe(90);
     expect(player.armor).toBe(50);
+  });
+
+  it("does not apply safe-zone damage until an actor is grounded", () => {
+    const state = createBattleRoyaleState("player", damageConfig, () => 0);
+    const mode = new BattleRoyaleMode(damageConfig, () => 0);
+    mode.start(state, []);
+    for (const actor of Object.values(state.actors)) {
+      actor.deployment = "grounded";
+      actor.position = { x: 0, y: 1.76, z: 0 };
+    }
+    mode.update(state, 0, []);
+    const player = state.actors.player;
+    if (!player) throw new Error("player missing");
+    player.deployment = "parachuting";
+    player.position.x = state.safeZone.radius + 100;
+
+    mode.update(state, 1, []);
+
+    expect(player.health).toBe(100);
+  });
+
+  it("does not let a dead parachuting actor block the transition to combat", () => {
+    const state = createBattleRoyaleState("player", damageConfig, () => 0.5);
+    const mode = new BattleRoyaleMode(damageConfig, () => 0.5);
+    mode.start(state, []);
+    const deadBot = state.actors["bot-1"];
+    if (!deadBot) throw new Error("bot missing");
+    for (const actor of Object.values(state.actors)) actor.deployment = "grounded";
+    deadBot.deployment = "parachuting";
+    deadBot.alive = false;
+
+    mode.update(state, 0, []);
+
+    expect(state.phase).toBe("combat");
   });
 
   it("advances every zone stage and finishes with exactly one winner", () => {
@@ -249,6 +291,31 @@ describe("BattleRoyaleMode", () => {
     }
 
     expect(winners).toEqual(new Set(["bot-1", "player"]));
+  });
+
+  it("finishes with one winner when multiple actors stand at the exact center of a zero-radius zone", () => {
+    const config: BattleRoyaleConfig = {
+      participantCount: 3,
+      flightSeconds: 1,
+      safeZoneStages: [{ waitSeconds: 100, shrinkSeconds: 1, radius: 0, damagePerSecond: 100 }],
+    };
+    const state = createBattleRoyaleState("player", config, () => 0.5);
+    const mode = new BattleRoyaleMode(config, () => 0.5);
+    mode.start(state, []);
+    state.phase = "combat";
+    state.safeZone.center = { x: 12, y: 0, z: -8 };
+    state.safeZone.radius = 0;
+    state.safeZone.damagePerSecond = 100;
+    for (const actor of Object.values(state.actors)) {
+      actor.deployment = "grounded";
+      actor.position = { x: 12, y: 1.76, z: -8 };
+      actor.health = 1;
+    }
+
+    mode.update(state, 1, []);
+
+    expect(state.phase).toBe("finished");
+    expect(Object.values(state.actors).filter((actor) => actor.alive)).toHaveLength(1);
   });
 });
 
