@@ -86,7 +86,7 @@ export class GameHud {
         </div>
         <aside class="controls-card">
           <span><b>WASD</b>移动</span><span><b>SHIFT</b>冲刺</span><span><b>SPACE</b>跳伞 / 跳跃</span><span><b>F</b>拾取</span>
-          <span><b>1 / 2</b>切枪</span><span><b>Q</b>绷带</span><span><b>H</b>急救包</span><span><b>R</b>换弹</span><span><b>观战</b>空格 / 滚轮切换</span>
+          <span><b>1 / 2</b>切枪</span><span><b>Q</b>绷带</span><span><b>H</b>急救包</span><span><b>R</b>换弹</span>
         </aside>
         <aside class="inventory-card">
           <div class="weapon-slots" data-hud="weapon-slots"></div>
