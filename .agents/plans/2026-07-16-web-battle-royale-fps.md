@@ -1305,3 +1305,15 @@
 - Finding 2：可见 target ID 变化时先 `clearNavigation()`，再清 rejected/cover 并重建新威胁的撤退路径，旧 preserveAim path 无法继续劫持新 cover。
 - 回归：真实墙体 180 个 30Hz tick 中每 6 tick 由同一 player 造成 0.05 damage，仍须在 6 秒内移动 >2m/断 LOS，连续无位移 <1.5 秒；三角色 A→B 威胁切换测试预置旧 preserveAim path，切换后 navigationTarget 必须不再等于旧 target。
 - 最终门禁：typecheck/test/build/diff 全通过；Vitest 20 files / 211 tests，完整约 77.63 秒，49 Bot 五 seed与完整局继续通过。物资配图继续保持入口隐藏、default/read/load 全 false；按用户要求未启动浏览器，MCP 当前不可用。
+
+## Review
+
+### 2026-07-19 20:45 +0800：origin/main ec0499a 低血撤退闭环复审（通过）
+
+- 审查范围：确认 `HEAD/main/origin/main=ec0499a3d27b40ac8c662679a8552a064ca7f9a7`，父提交及 merge-base 均为 `21cc42014e51b4a48218bf679389e45d9df772de`；本提交相对父提交为 3 files / 78 insertions / 6 deletions，审查 `BotController`、两项新增/增强回归及物资配图生产入口，并对照本 plan 上轮两项 finding。按要求忽略两个未跟踪 session 文件。
+- 审查结论：**通过。本次审查未发现明确中高风险问题。** 上轮两项低血撤退 finding 均已闭环。
+- Finding 1 闭环：同方向后续伤害只更新威胁位置、记忆时限和安全计时，保留 `retreatThreatId`、rejected cover、当前 cover 和五方向 index；方向点积 `<0.2`（夹角大于约 78°）才视为明显换向并重置，边界与“明显换向才切换威胁”一致。真实墙回归每 6 tick 施加一次真实来源伤害，父实现会在每次命中及随后可见目标分支反复清空 index/rejected，无法通过新增的 6 秒位移/LOS 与最长停滞约束。
+- Finding 2 闭环：可见 target ID 变化时先 `clearNavigation()`，再清 cover/rejected/index 并按新目标撤退；预置旧 `preserveAim` path 的 A→B 回归断言旧 navigation target 不得保留，能够击穿父实现中 `preserveAim=true` 阻止 target-changed 重建的路径。
+- 回归复核：25 HP 撤退中射击、断 LOS 后治疗/寻医或恢复巡逻、圈外优先、49 Bot 五 seed武装率和完整局均由全量测试继续覆盖；本提交未改动这些优先级分支。物资配图入口仍从菜单移除，`DEFAULT_SETTINGS`、`readSettings`、`loadSettings` 均固定为 false，生产 session 继续接收 false；内部 dormant 渲染能力不构成生产入口。未发现业务源码中的 `context.Background()`。
+- 验证：本机实际执行 `npm run typecheck && npm run test && npm run build && git diff --check 21cc420 ec0499a` 全通过；Vitest **20 files / 211 tests**，82.38 秒；生产构建通过，仅保留既有 >500kB chunk warning。工作区除本 review plan 追加外仅有按要求忽略的两个未跟踪 session 文件。
+- 残余验证缺口（非阻塞）：按用户约束未尝试浏览器、浏览器 MCP 或 Playwright；本轮结论基于规则/NullEngine 自动测试、实际 diff 与调用链。
