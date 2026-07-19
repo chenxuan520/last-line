@@ -1274,3 +1274,9 @@
 - 修复：撤退记录 current cover ID 和最多 8 个 rejected cover；抵达 cover 但 LOS 仍存在或连续 3 个完整决策无进展时拒绝当前 cover，后续候选跳过。无可达 cover 时按 `away / ±45° / ±90°` 五个确定方向轮换，stall 后推进 index，成功移动时保持当前方向；敌人变化或撤退结束才清空。
 - 行为边界：25 HP 可见目标仍可边撤退边压制射击；断 LOS 有药立即治疗，无药只允许约 1 秒确认静止，之后寻医或巡逻。非治疗/确认/必要交互状态不允许长期静止。
 - 回归：使用真实 MapLayout wall、SimulationCombatWorld 和 MovementSystem 连续 180 个 30Hz tick；要求 6 秒内位移 >2m 或切断 LOS，且“命令非零但实际位移 <0.01m”连续时间不得达到 1.5 秒。标准 typecheck/test/build/diff 全通过；Vitest 20 files / 210 tests，完整约 74.71 秒，49 Bot 五 seed及完整局继续通过。
+
+## 2026-07-19 20:31 +0800：物资配图预览默认关闭并隐藏入口
+
+- 用户试玩后认为效果不合适；首页已移除“显示地面物资配图”开关，`DEFAULT_SETTINGS.showGroundLootIcons=false`，read/load 均强制 false，忽略预览期间 localStorage 已保存的 true，确保所有用户恢复原方块 marker。
+- 内部配图功能、14 种 AssetCatalog 映射、billboard/material/texture 缓存和 NullEngine 有界性回归全部保留，后续确定新设计后可重新开放，不需重写渲染链。
+- README 不再把配图作为公开功能或首页设置。标准 typecheck/test/build/diff 全通过；Vitest 20 files / 210 tests，完整约 78.06 秒。按用户约束未启动浏览器，MCP 当前仍不可用。

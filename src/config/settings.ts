@@ -15,5 +15,5 @@ export const DEFAULT_SETTINGS: GameSettings = {
   sensitivity: 1,
   startWithBandage: true,
   disableAiSnipers: true,
-  showGroundLootIcons: true,
+  showGroundLootIcons: false,
 };
