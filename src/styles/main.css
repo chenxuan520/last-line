@@ -169,7 +169,8 @@ select {
 }
 
 .eyebrow,
-.build-label {
+.build-label,
+.github-link {
   color: var(--signal);
   font: 700 11px/1.2 var(--tactical-font);
   letter-spacing: 0.2em;
@@ -397,10 +398,18 @@ h1 {
   outline-offset: 3px;
 }
 
+.menu-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 18px 0 0;
+}
+
 .build-label {
   display: flex;
   align-items: center;
-  margin: 18px 0 0;
+  margin: 0;
   color: var(--ink-dim);
   font-size: 9px;
   letter-spacing: 0.15em;
@@ -411,6 +420,34 @@ h1 {
   height: 1px;
   margin: 0 10px;
   background: var(--line-strong);
+}
+
+.github-link {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink-muted);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-decoration: none;
+  transition: color 140ms ease;
+}
+
+.github-link svg {
+  width: 18px;
+  height: 18px;
+  fill: currentcolor;
+}
+
+.github-link:hover,
+.github-link:focus-visible {
+  color: var(--ink);
+}
+
+.github-link:focus-visible {
+  outline: 1px solid var(--signal-bright);
+  outline-offset: 4px;
 }
 
 .loading-panel {

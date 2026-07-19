@@ -18,6 +18,17 @@ No deployment token is stored in repository secrets. The expected site URL is:
 https://chenxuan520.github.io/last-line/
 ```
 
+## GitHub Releases
+
+Push a version tag matching `v*` to run the same typecheck, test, and build gates before publishing a GitHub Release:
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+The workflow packages the production `dist/` directory as `last-line-v0.2.0.zip`, creates a release with generated notes, and attaches the archive. Tag builds do not deploy GitHub Pages. The release job uses the workflow's short-lived `GITHUB_TOKEN`; no release secret is required.
+
 ## Cloudflare Pages Git Integration
 
 Create the Cloudflare project through the dashboard, not with Wrangler Direct Upload. Cloudflare does not allow a Direct Upload project to be converted to Git integration later.
