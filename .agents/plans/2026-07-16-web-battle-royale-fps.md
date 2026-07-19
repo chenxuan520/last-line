@@ -1267,3 +1267,10 @@
 - 有界性回归：完整 250 物资为 250 marker、14 个 Texture、14 个普通材质；同一 rifle record 复用为 death bandage 后 Mesh 身份不变、Texture 仍 14，仅新增 1 个 death 材质。14 种映射和未知 fallback 均有参数化测试。
 - 自动门禁：`npm run typecheck && npm run test && npm run build && git diff --check` 全通过；Vitest 20 files / 209 tests，完整约 77.51 秒。构建主 bundle 约 882.80kB，仅保留既有大 chunk warning。
 - MCP 验收阻塞：按用户要求两次委托均明确“只能使用浏览器 MCP 隔离能力、禁止 shell/直接浏览器/Playwright”；agent 返回当前会话未配置或暴露浏览器 MCP，因此未启动任何浏览器，也未伪造实际画面/FPS结论。当前版本可先部署供用户查看效果，MCP 可用后再补视觉验收。
+
+## 2026-07-19 19:32 +0800：低血 AI 墙边撤退停滞修复
+
+- 复现：真实 seed 0 墙面合法接触点中，敌人在前、墙在身后，直线 away 方向正好指向墙；GridNavigator 因起点处于 0.64m path halo 而无法生成 cover path，Movement 将 actor 停在 0.42m 碰撞边界。原 stalledDecisions 只清导航，下一决策再次选同方向，12 秒位移约 0.001m。
+- 修复：撤退记录 current cover ID 和最多 8 个 rejected cover；抵达 cover 但 LOS 仍存在或连续 3 个完整决策无进展时拒绝当前 cover，后续候选跳过。无可达 cover 时按 `away / ±45° / ±90°` 五个确定方向轮换，stall 后推进 index，成功移动时保持当前方向；敌人变化或撤退结束才清空。
+- 行为边界：25 HP 可见目标仍可边撤退边压制射击；断 LOS 有药立即治疗，无药只允许约 1 秒确认静止，之后寻医或巡逻。非治疗/确认/必要交互状态不允许长期静止。
+- 回归：使用真实 MapLayout wall、SimulationCombatWorld 和 MovementSystem 连续 180 个 30Hz tick；要求 6 秒内位移 >2m 或切断 LOS，且“命令非零但实际位移 <0.01m”连续时间不得达到 1.5 秒。标准 typecheck/test/build/diff 全通过；Vitest 20 files / 210 tests，完整约 74.71 秒，49 Bot 五 seed及完整局继续通过。

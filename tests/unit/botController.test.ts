@@ -241,6 +241,48 @@ describe("BotController", () => {
     expect(Math.hypot(command.move.x, command.move.z)).toBeGreaterThan(0.5);
   });
 
+  it("rotates away from a blocked retreat direction instead of staying against a real wall", () => {
+    const state = groundedState();
+    state.mapSeed = 0;
+    const layout = createMapLayout(0);
+    const wall = layout.wallSegments.find((candidate) => candidate.width > candidate.depth * 2);
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!wall || !bot || !player) throw new Error("wall retreat setup missing");
+    for (const actor of Object.values(state.actors)) actor.alive = actor.id === bot.id || actor.id === player.id;
+    const x = wall.center.x + wall.width / 2 - 0.43;
+    const z = wall.center.z - wall.depth / 2 - 0.421;
+    bot.position = { x, y: getTerrainHeight(x, z, layout) + 1.76, z };
+    bot.health = 20;
+    bot.yaw = Math.PI;
+    bot.inventory.backpack = [];
+    player.position = { x, y: getTerrainHeight(x, z - 20, layout) + 1.76, z: z - 20 };
+    const world = new SimulationCombatWorld(state);
+    expect(world.hasLineOfSight(bot.id, player.id)).toBe(true);
+    const controller = new BotController(1, () => 0.5);
+    const movement = new MovementSystem();
+    const start = { ...bot.position };
+    let stalledTicks = 0;
+    let maximumStalledTicks = 0;
+
+    for (let tick = 0; tick < 180; tick += 1) {
+      const before = { ...bot.position };
+      const command = controller.update(bot, state, world, 1 / 30, player.id);
+      movement.processCommand(state, bot.id, command, 1 / 30);
+      state.elapsedSeconds += 1 / 30;
+      const intendedMove = Math.hypot(command.move.x, command.move.z) > 0.1;
+      const moved = Math.hypot(bot.position.x - before.x, bot.position.z - before.z);
+      stalledTicks = intendedMove && moved < 0.01 ? stalledTicks + 1 : 0;
+      maximumStalledTicks = Math.max(maximumStalledTicks, stalledTicks);
+    }
+
+    expect(
+      Math.hypot(bot.position.x - start.x, bot.position.z - start.z) > 2 ||
+      !world.hasLineOfSight(bot.id, player.id),
+    ).toBe(true);
+    expect(maximumStalledTicks).toBeLessThan(45);
+  });
+
   it("uses the matching roof ramp while pursuing a visible rooftop target", () => {
     const state = groundedState();
     state.safeZone.radius = 2_000;

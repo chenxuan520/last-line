@@ -75,6 +75,9 @@ export class BotController {
   private retreatThreatId: string | null = null;
   private retreatThreatPosition: Vector3State | null = null;
   private retreatCoverTarget: Vector3State | null = null;
+  private retreatCoverId: string | null = null;
+  private readonly rejectedRetreatCoverIds = new Set<string>();
+  private retreatEscapeIndex = 0;
   private retreatUntilSeconds = -1;
   private retreatSafeSinceSeconds = -1;
   private navigationProgressKey: string | null = null;
@@ -153,6 +156,9 @@ export class BotController {
         this.retreatThreatId = null;
         this.retreatThreatPosition = { ...this.damageInvestigationTarget };
         this.retreatCoverTarget = null;
+        this.retreatCoverId = null;
+        this.rejectedRetreatCoverIds.clear();
+        this.retreatEscapeIndex = 0;
         this.retreatUntilSeconds = state.elapsedSeconds + COMBAT_MEMORY_SECONDS;
         this.retreatSafeSinceSeconds = -1;
       }
@@ -191,6 +197,8 @@ export class BotController {
       const wasMoving = Math.hypot(this.cached.move.x, this.cached.move.z) > 0.1;
       this.stalledDecisions = wasMoving && moved < 0.18 ? this.stalledDecisions + 1 : 0;
       if (this.stalledDecisions >= 3) {
+        this.rejectCurrentRetreatCover();
+        this.retreatEscapeIndex = (this.retreatEscapeIndex + 1) % 5;
         this.waypoint = null;
         this.navigationPath = [];
         this.navigationTarget = null;
@@ -200,6 +208,7 @@ export class BotController {
         this.resetNavigationProgress();
         this.weaponLandingTarget = null;
         this.retreatCoverTarget = null;
+        this.retreatCoverId = null;
         this.stalledDecisions = 0;
       }
     }
@@ -285,6 +294,12 @@ export class BotController {
     const lowHealth = actor.health <= LOW_HEALTH_RETREAT_HEALTH;
     if (!lowHealth) this.clearRetreat();
     if (target && lowHealth) {
+      if (this.retreatThreatId !== target.id) {
+        this.rejectedRetreatCoverIds.clear();
+        this.retreatEscapeIndex = 0;
+        this.retreatCoverTarget = null;
+        this.retreatCoverId = null;
+      }
       this.retreatThreatId = target.id;
       this.retreatThreatPosition = { ...target.position };
       this.retreatUntilSeconds = state.elapsedSeconds + COMBAT_MEMORY_SECONDS;
@@ -548,11 +563,17 @@ export class BotController {
     const threat = this.retreatThreatPosition;
     if (!threat) return command;
     command.aimDirection = normalize(subtract(threat, actor.position));
-    if (!this.retreatCoverTarget || horizontalDistance(actor.position, this.retreatCoverTarget) < 2) {
+    if (this.retreatCoverTarget && horizontalDistance(actor.position, this.retreatCoverTarget) < 2) {
+      this.rejectCurrentRetreatCover();
       this.retreatCoverTarget = null;
+      this.retreatCoverId = null;
+      this.clearNavigation();
+    }
+    if (!this.retreatCoverTarget) {
       const cover = this.findRetreatCover(actor, state, layout, threat);
       if (cover) {
         this.retreatCoverTarget = cover.target;
+        this.retreatCoverId = cover.coverId;
         return this.navigate(actor, cover.target, command, cover.path, true);
       }
     }
@@ -560,7 +581,10 @@ export class BotController {
       return this.navigate(actor, this.retreatCoverTarget, command, undefined, true);
     }
     this.clearNavigation();
-    command.move = normalizeFlat(subtract(actor.position, threat));
+    const away = normalizeFlat(subtract(actor.position, threat));
+    const escapeAngles = [0, Math.PI / 4, -Math.PI / 4, Math.PI / 2, -Math.PI / 2] as const;
+    const angle = escapeAngles[this.retreatEscapeIndex] ?? 0;
+    command.move = rotateFlat(away, angle);
     command.sprint = true;
     return command;
   }
@@ -570,8 +594,9 @@ export class BotController {
     state: MatchState,
     layout: ReturnType<typeof createMapLayout>,
     threat: Vector3State,
-  ): { target: Vector3State; path: Vector3State[] } | null {
+  ): { coverId: string; target: Vector3State; path: Vector3State[] } | null {
     const blockers = [...layout.wallSegments, ...layout.rockObstacles]
+      .filter((obstacle) => !this.rejectedRetreatCoverIds.has(obstacle.id))
       .map((obstacle) => ({ obstacle, distance: horizontalDistance(actor.position, obstacle.center) }))
       .filter((entry) => entry.distance <= RETREAT_COVER_SEARCH_DISTANCE)
       .sort((left, right) => left.distance - right.distance || left.obstacle.id.localeCompare(right.obstacle.id))
@@ -594,7 +619,7 @@ export class BotController {
       ) continue;
       const path = this.navigator.findPath(actor.position, target);
       pathChecks += 1;
-      if (path.length > 0) return { target, path };
+      if (path.length > 0) return { coverId: obstacle.id, target, path };
       if (pathChecks >= 4) break;
     }
     return null;
@@ -908,8 +933,20 @@ export class BotController {
     this.retreatThreatId = null;
     this.retreatThreatPosition = null;
     this.retreatCoverTarget = null;
+    this.retreatCoverId = null;
+    this.rejectedRetreatCoverIds.clear();
+    this.retreatEscapeIndex = 0;
     this.retreatUntilSeconds = -1;
     this.retreatSafeSinceSeconds = -1;
+  }
+
+  private rejectCurrentRetreatCover(): void {
+    if (!this.retreatCoverId) return;
+    this.rejectedRetreatCoverIds.add(this.retreatCoverId);
+    if (this.rejectedRetreatCoverIds.size > 8) {
+      const oldest = this.rejectedRetreatCoverIds.values().next().value;
+      if (oldest) this.rejectedRetreatCoverIds.delete(oldest);
+    }
   }
 
   private isAllowedLoot(loot: GroundLootState): boolean {
@@ -933,6 +970,16 @@ function normalize(value: Vector3State): Vector3State {
 function normalizeFlat(value: Vector3State): Vector3State {
   const length = Math.hypot(value.x, value.z);
   return length > 0 ? { x: value.x / length, y: 0, z: value.z / length } : { x: 0, y: 0, z: 0 };
+}
+
+function rotateFlat(value: Vector3State, angle: number): Vector3State {
+  const cosine = Math.cos(angle);
+  const sine = Math.sin(angle);
+  return {
+    x: value.x * cosine - value.z * sine,
+    y: 0,
+    z: value.x * sine + value.z * cosine,
+  };
 }
 
 function horizontalDistance(a: Vector3State, b: Vector3State): number {
