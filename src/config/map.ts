@@ -58,7 +58,9 @@ export const DEFAULT_MAP_SEED = 0;
 
 export const MAP_POINT_COUNT = 8;
 export const LANDING_ZONE_COUNT = 16;
-export const TOTAL_LOOT_POINTS = 240;
+export const BASE_LOOT_POINTS = 240;
+export const ADDITIONAL_MEDICAL_LOOT_POINTS = 10;
+export const TOTAL_LOOT_POINTS = BASE_LOOT_POINTS + ADDITIONAL_MEDICAL_LOOT_POINTS;
 const POI_NAMES = ["北港", "灰脊镇", "旧仓区", "高地站", "南岸村", "雷达哨", "西风农场", "东岭营地"] as const;
 const WILDERNESS_NAMES = ["林间屋", "路边村", "山脚农舍", "旧哨所", "河谷牧场", "废弃院落", "边境仓房", "丘间小屋"] as const;
 
@@ -178,6 +180,7 @@ export function createMapLayout(seed: number): MapLayout {
     roofRamps,
     rockObstacles,
     createSeededRandom(normalizedSeed ^ 0xc2b2ae35),
+    createSeededRandom(normalizedSeed ^ 0xd3a2646c),
   );
   const layout: MapLayout = {
     seed: normalizedSeed,
@@ -729,6 +732,7 @@ function createLootSpawnPoints(
   roofRamps: readonly RoofRamp[],
   rockObstacles: readonly MapRockObstacle[],
   random: () => number,
+  medicalRandom: () => number,
 ): { points: Vector3State[]; counts: number[] } {
   const counts = createLootZoneCounts(random);
   const allSelected: Vector3State[] = [];
@@ -799,7 +803,26 @@ function createLootSpawnPoints(
     }
     return selected;
   });
-  return { points, counts };
+  const medicalPoints: Vector3State[] = [];
+  for (let slot = 0; slot < ADDITIONAL_MEDICAL_LOOT_POINTS; slot += 1) {
+    const landingZone = landingZones[slot % landingZones.length] ?? landingZones[0];
+    if (!landingZone) throw new Error("Medical loot requires a landing zone");
+    let placed = false;
+    for (let attempt = 0; attempt < 320; attempt += 1) {
+      const angle = medicalRandom() * Math.PI * 2;
+      const radius = Math.sqrt(randomBetween(medicalRandom, 90 ** 2, 420 ** 2));
+      const x = round(landingZone.position.x + Math.cos(angle) * radius);
+      const z = round(landingZone.position.z + Math.sin(angle) * radius);
+      const candidate = { x, y: round(terrainHeightFromHills(x, z, terrainHills) + 0.45), z };
+      if (!isClearLootPoint(candidate, wallSegments, roofRamps, allSelected, outdoorBlockers, 12)) continue;
+      medicalPoints.push(candidate);
+      allSelected.push(candidate);
+      placed = true;
+      break;
+    }
+    if (!placed) throw new Error(`Not enough open medical loot points for slot ${slot}`);
+  }
+  return { points: [...points, ...medicalPoints], counts };
 }
 
 function hasGlobalLootClearance(candidate: Vector3State, selected: readonly Vector3State[]): boolean {

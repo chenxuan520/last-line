@@ -1125,3 +1125,13 @@
 - 关键核查：24 个 seed 岩石保持稳定 ID/可序列化布局并接入生成避让、移动空间格/支撑、导航、权威子弹/LOS 和动态掉落；建筑仍使用墙段与屋顶权威几何，门窗开口未被整栋 AABB 封闭，渲染 mesh 不参与命中。树木仍为 128 trunk + 128 合并 foliage，无临时 layer；岩石保持 24 cover + 32 decorative。飞机机舱/世界模型分离，世界模型和两条尾迹固定有界。音量默认 0、合法存储保留，0 音量不创建或播放 AudioContext。少于 5 人仅加速 shrinking，等待和圈伤不翻倍。AI 终局搜索、显式感知门禁、低血掩体撤退及圈外优先均有界。观战锁定、手动循环、停止模拟后的相机刷新及 viewed/local actor HUD 边界符合约定。
 - 本机验证：实际执行 `npm run typecheck && npm run test && npm run build && git diff --check 488d5e0 --` 全通过；Vitest 为 18 files / 173 tests，wall time 77.64s；构建仅保留既有 >500kB chunk warning。已参考本轮静音 Chrome 生产验收：航线平均 120.5/min 119.7，生存平均 119/min 112.2，console/network 0，树/岩石/尾迹计数及 volume 0 正确。
 - 残余风险：音量 localStorage/AudioContext 和完整 session 观战仍主要依赖静态调用链与人工生产验收，未新增浏览器自动化；现有大 chunk warning 未扩大为本轮阻塞项。
+
+## 2026-07-19 16:16 +0800：弹药、医疗资源、AI 恢复与枪声增强
+
+- 弹匣与弹药：四类武器容量从 `30/32/6/5` 提升 50% 为 `45/48/9/8`，`createWeaponState`、地图新枪、换弹上限和 HUD 自动读取统一配置；地面弹药堆继续保持“两弹匣”契约，同步为步枪弹 `90`、轻型弹 `96`、霰弹 `18`、狙击弹 `16`。丢枪/死亡掉落/再次拾取仍转移完整 WeaponState，不会把残弹枪免费补满。
+- 初始绷带设置：`GameSettings.startWithBandage` 默认 true，首页新增持久化开关；旧 localStorage 缺字段时按 true 迁移，显式 false 保留。Battle Royale 公共 actor 工厂按同一开关为玩家和全部 AI 各放入 1 条绷带，关闭时双方背包均为空。
+- 医疗点：保留原 240 个基础点、区域计数、位置生成 RNG、类别数量 `weapon96/ammo64/medical29/equipment51` 和前 240 件物品随机结果；使用独立 seed 流额外生成 10 个室外可达点（29/3 四舍五入），固定追加 5 个绷带点和 5 个急救包点。总 ground loot 为 250，新增点继续避让建筑、墙、坡道、大岩石并与全部点保持至少 12m。
+- AI 恢复：逃命阈值最终调整为 `health <= 25`，26 HP 继续正常战斗。低血断 LOS 后有药则治疗，无药则全图选择可携带/可腾位且导航可达的绷带或急救包；无可达药时继续撤退/巡逻而非原地等待。当前枪空弹时先切换有弹副枪；否则在撤退中换弹。两把枪均无装填和备弹时不追可见敌人，先撤退，断 LOS 后搜索任一持有武器的兼容弹药。
+- 枪声：`shot-fired` 增加开枪瞬间的 `weaponId` 和 `origin` 快照，每次射击仍只有一个事件，霰弹不会按 pellet 重复。AudioFeedback 为 rifle/smg/shotgun/sniper 使用不同短促合成 profile；当前观察对象全音量，其他 AI 枪声按距离平方衰减，每 tick 最多最近 4 个、总并发最多 8。GameApp 在开始按钮同步用户手势中启动并复用单个 AudioFeedback，session 重开不再反复销毁 AudioContext；volume 0 时 start/handleEvents 均不创建或调度音频节点。
+- 自动验证：标准 `npm run typecheck && npm run test && npm run build && git diff --check` 全通过；Vitest 18 files / 181 tests，完整约 77.02 秒。新增覆盖 25/26 HP 阈值、低血无药寻医、双枪空弹撤退、断 LOS 寻兼容弹药、有弹副枪切换、两倍弹药堆、250 点全量站立/导航/拾取、枪声事件快照、距离衰减与静音零资源路径；49 Bot 五 seed 武装率及完整唯一胜者继续通过。
+- 静音 Chrome：运行态确认 groundLoot 250、基础类别数量不变、附加医疗 5+5、四类武器 `45/48/9/8`、四类弹药 `90/96/18/16`；shot-fired 含 weaponId/origin，volume 0 下 AudioContext/oscillator/media request 均为 0，console/network 无错误。最终 10 秒 RAF 约 120 FPS；一次 HUD 采样最低值 25 属加载瞬时值，稳态样本保持高帧率。

@@ -6,6 +6,7 @@ import {
 } from "../../src/config/battleRoyale";
 import { ITEMS } from "../../src/config/items";
 import { createMapLayout, MAP_HALF_SIZE } from "../../src/config/map";
+import { WEAPONS } from "../../src/config/weapons";
 import { BattleRoyaleMode, createBattleRoyaleState } from "../../src/game/modes/BattleRoyaleMode";
 import { createIdleCommand } from "../../src/game/commands/ActorCommand";
 import { createWeaponState, type GameEvent } from "../../src/game/state/types";
@@ -43,6 +44,23 @@ describe("BattleRoyaleMode", () => {
     expect(actors.filter((actor) => actor.kind === "player")).toHaveLength(1);
     expect(actors.filter((actor) => actor.kind === "bot")).toHaveLength(49);
     expect(actors.every((actor) => actor.deployment === "aircraft")).toBe(true);
+    expect(actors.every((actor) =>
+      actor.inventory.backpack.length === 1 &&
+      actor.inventory.backpack[0]?.itemId === "bandage" &&
+      actor.inventory.backpack[0]?.quantity === 1
+    )).toBe(true);
+    expect(Object.fromEntries(Object.entries(WEAPONS).map(([id, weapon]) => [id, weapon.magazineSize]))).toEqual({
+      rifle: 45,
+      smg: 48,
+      shotgun: 9,
+      sniper: 8,
+    });
+    expect(Object.values(state.groundLoot)
+      .filter((loot) => loot.weapon)
+      .every((loot) => {
+        const weapon = loot.weapon;
+        return Boolean(weapon && weapon.ammoInMagazine === WEAPONS[weapon.weaponId]?.magazineSize);
+      })).toBe(true);
     expect(state.mapSeed).toBe(2_147_483_648);
     expect(Object.values(state.groundLoot).map((loot) => loot.position)).toEqual(
       createMapLayout(state.mapSeed).lootSpawnPoints,
@@ -68,12 +86,18 @@ describe("BattleRoyaleMode", () => {
     expect(() => JSON.parse(JSON.stringify(state)) as unknown).not.toThrow();
   });
 
+  it("can disable the shared starter bandage for both player and AI", () => {
+    const state = createBattleRoyaleState("player", damageConfig, () => 0.5, { startWithBandage: false });
+
+    expect(Object.values(state.actors).every((actor) => actor.inventory.backpack.length === 0)).toBe(true);
+  });
+
   it("stratifies each POI loot slice without clustering adjacent categories", () => {
     const state = createBattleRoyaleState("player", FAST_BATTLE_ROYALE_CONFIG, seededRandom(2026));
     const loot = Object.values(state.groundLoot);
     const layout = createMapLayout(state.mapSeed);
 
-    expect(loot).toHaveLength(240);
+    expect(loot).toHaveLength(250);
     let start = 0;
     for (const zoneCount of layout.lootZoneCounts) {
       const poiLoot = loot.slice(start, start + zoneCount);
@@ -92,6 +116,8 @@ describe("BattleRoyaleMode", () => {
       expect(new Set(ammo.map((entry) => entry.itemId))).toEqual(
         new Set(["ammo.rifle", "ammo.light", "ammo.shell", "ammo.sniper"]),
       );
+      const ammoQuantities = { "ammo.rifle": 90, "ammo.light": 96, "ammo.shell": 18, "ammo.sniper": 16 } as const;
+      expect(ammo.every((entry) => entry.quantity === ammoQuantities[entry.itemId as keyof typeof ammoQuantities])).toBe(true);
       const weaponCount = Math.max(4, Math.round(zoneCount * 0.4));
       const ammoCount = Math.max(4, Math.round(zoneCount * 0.2));
       const medicalCount = Math.max(1, Math.floor(zoneCount * 0.15));
@@ -110,6 +136,11 @@ describe("BattleRoyaleMode", () => {
       }
       start += zoneCount;
     }
+    const additionalMedical = loot.slice(start);
+    expect(additionalMedical).toHaveLength(10);
+    expect(additionalMedical.every((entry) => lootCategory(entry.itemId) === "medical")).toBe(true);
+    expect(additionalMedical.filter((entry) => entry.itemId === "bandage")).toHaveLength(5);
+    expect(additionalMedical.filter((entry) => entry.itemId === "medkit")).toHaveLength(5);
   });
 
   it("reproduces loot for the same seed and varies it for a different seed", () => {

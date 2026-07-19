@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { GridNavigator } from "../../src/ai/navigation/GridNavigator";
 import type { BattleRoyaleConfig } from "../../src/config/battleRoyale";
-import { createMapLayout, LOOT_SPAWN_POINTS, MAP_WALL_SEGMENTS } from "../../src/config/map";
+import { createMapLayout, LOOT_SPAWN_POINTS, MAP_WALL_SEGMENTS, TOTAL_LOOT_POINTS } from "../../src/config/map";
 import { WEAPONS } from "../../src/config/weapons";
 import { BotController } from "../../src/controllers/BotController";
 import { createIdleCommand, type ActorCommand } from "../../src/game/commands/ActorCommand";
@@ -29,7 +29,7 @@ describe("AI loot reachability", () => {
     player.deployment = "grounded";
     const inventory = new InventorySystem();
 
-    expect(LOOT_SPAWN_POINTS).toHaveLength(240);
+    expect(LOOT_SPAWN_POINTS).toHaveLength(TOTAL_LOOT_POINTS);
     LOOT_SPAWN_POINTS.forEach((point, index) => {
       const insideExpandedWall = MAP_WALL_SEGMENTS.some(
         (wall) =>

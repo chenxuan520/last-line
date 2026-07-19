@@ -74,14 +74,14 @@ describe("BotController", () => {
     expect(command.fire).toBe(false);
   });
 
-  it("retreats instead of firing when health falls below thirty-five percent", () => {
+  it("retreats instead of firing at twenty-five health", () => {
     const state = groundedState();
     const bot = state.actors["bot-1"];
     const player = state.actors.player;
     if (!bot || !player) throw new Error("actors missing");
     for (const actor of Object.values(state.actors)) actor.alive = actor.id === bot.id || actor.id === player.id;
     bot.position = { x: 0, y: 1.76, z: 0 };
-    bot.health = 34;
+    bot.health = 25;
     bot.yaw = Math.PI / 2;
     player.position = { x: 20, y: 1.76, z: 0 };
 
@@ -93,6 +93,22 @@ describe("BotController", () => {
     expect(command.sprint).toBe(true);
   });
 
+  it("keeps fighting above the twenty-five health retreat threshold", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    for (const actor of Object.values(state.actors)) actor.alive = actor.id === bot.id || actor.id === player.id;
+    bot.position = { x: 0, y: 1.76, z: 0 };
+    bot.health = 26;
+    bot.yaw = Math.PI / 2;
+    player.position = { x: 20, y: 1.76, z: 0 };
+
+    const command = new BotController(1, () => 0.5).update(bot, state, miss, 1, player.id);
+
+    expect(command.fire).toBe(true);
+  });
+
   it("heals only after low-health retreat breaks line of sight", () => {
     const state = groundedState();
     const bot = state.actors["bot-1"];
@@ -100,7 +116,7 @@ describe("BotController", () => {
     if (!bot || !player) throw new Error("actors missing");
     for (const actor of Object.values(state.actors)) actor.alive = actor.id === bot.id || actor.id === player.id;
     bot.position = { x: 0, y: 1.76, z: 0 };
-    bot.health = 30;
+    bot.health = 20;
     bot.yaw = Math.PI / 2;
     bot.inventory.backpack.push({ itemId: "medkit", quantity: 1 });
     player.position = { x: 20, y: 1.76, z: 0 };
@@ -117,6 +133,79 @@ describe("BotController", () => {
     expect(retreat.fire).toBe(false);
     expect(heal.useItem).toBe("medkit");
     expect(heal.move).toEqual({ x: 0, y: 0, z: 0 });
+  });
+
+  it("searches for reachable medicine after retreating without healing supplies", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    for (const actor of Object.values(state.actors)) actor.alive = actor.id === bot.id || actor.id === player.id;
+    bot.position = { x: 0, y: 1.76, z: 0 };
+    bot.health = 20;
+    bot.yaw = Math.PI / 2;
+    bot.inventory.backpack = [];
+    player.position = { x: 20, y: 1.76, z: 0 };
+    state.groundLoot.medkit = {
+      id: "medkit",
+      itemId: "medkit",
+      quantity: 1,
+      position: { x: -40, y: 0.45, z: 0 },
+      available: true,
+    };
+    let visible = true;
+    const world: CombatWorld = { traceShot: () => null, hasLineOfSight: () => visible };
+    const controller = new BotController(1, () => 0.5);
+
+    controller.update(bot, state, world, 1, player.id);
+    visible = false;
+    state.elapsedSeconds += 1;
+    const search = controller.update(bot, state, world, 1, player.id);
+
+    expect(search.useItem).toBeNull();
+    expect(search.fire).toBe(false);
+    expect(Math.hypot(search.move.x, search.move.z)).toBeGreaterThan(0.5);
+    expect(search.aimDirection.x).toBeLessThan(-0.5);
+  });
+
+  it("switches to a loaded secondary weapon when the active magazine is empty", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    for (const actor of Object.values(state.actors)) actor.alive = actor.id === bot.id || actor.id === player.id;
+    bot.position = { x: 0, y: 1.76, z: 0 };
+    bot.yaw = Math.PI / 2;
+    player.position = { x: 20, y: 1.76, z: 0 };
+    bot.inventory.weaponSlots = [createWeaponState("rifle", false), createWeaponState("smg")];
+    bot.inventory.activeWeaponSlot = 0;
+    bot.inventory.backpack = [];
+
+    const command = new BotController(1, () => 0.5).update(bot, state, miss, 1, player.id);
+    new InventorySystem().processCommand(state, bot.id, command, []);
+
+    expect(command.switchWeapon).toBe(1);
+    expect(command.fire).toBe(false);
+    expect(bot.inventory.activeWeaponSlot).toBe(1);
+  });
+
+  it("retreats from a visible enemy when both weapons are completely out of ammo", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    for (const actor of Object.values(state.actors)) actor.alive = actor.id === bot.id || actor.id === player.id;
+    bot.position = { x: 0, y: 1.76, z: 0 };
+    bot.yaw = Math.PI / 2;
+    player.position = { x: 20, y: 1.76, z: 0 };
+    bot.inventory.weaponSlots = [createWeaponState("rifle", false), createWeaponState("smg", false)];
+    bot.inventory.backpack = [];
+
+    const command = new BotController(1, () => 0.5).update(bot, state, miss, 1, player.id);
+
+    expect(command.fire).toBe(false);
+    expect(command.reload).toBe(false);
+    expect(Math.hypot(command.move.x, command.move.z)).toBeGreaterThan(0.5);
   });
 
   it("uses the matching roof ramp while pursuing a visible rooftop target", () => {
@@ -697,7 +786,7 @@ describe("BotController", () => {
     expect(secondCommand.move.x).toBeLessThan(-0.9);
   });
 
-  it("searches for compatible ammo instead of chasing an enemy with no ammunition", () => {
+  it("retreats from a visible enemy before searching for compatible ammo", () => {
     const state = groundedState();
     const bot = state.actors["bot-1"];
     const player = state.actors.player;
@@ -725,11 +814,19 @@ describe("BotController", () => {
       },
     };
 
-    const command = new BotController(1, () => 0.5).update(bot, state, miss, 1, "player");
+    let visible = true;
+    const world: CombatWorld = { traceShot: () => null, hasLineOfSight: () => visible };
+    const controller = new BotController(1, () => 0.5);
+    const retreat = controller.update(bot, state, world, 1, "player");
+    visible = false;
+    state.elapsedSeconds += 1;
+    const search = controller.update(bot, state, world, 1, "player");
 
-    expect(command.fire).toBe(false);
-    expect(command.move.x).toBeGreaterThan(0.9);
-    expect(Math.abs(command.move.z)).toBeLessThan(0.2);
+    expect(retreat.fire).toBe(false);
+    expect(Math.hypot(retreat.move.x, retreat.move.z)).toBeGreaterThan(0.5);
+    expect(search.fire).toBe(false);
+    expect(search.move.x).toBeGreaterThan(0.9);
+    expect(Math.abs(search.move.z)).toBeLessThan(0.2);
   });
 
   it("drops incompatible supplies to pick compatible ammo when the backpack is full", () => {
@@ -771,12 +868,7 @@ function groundedState() {
   const state = createBattleRoyaleState("player", undefined, () => 0.5);
   for (const actor of Object.values(state.actors)) {
     actor.deployment = "grounded";
-    actor.inventory.weaponSlots[0] = {
-      weaponId: "rifle",
-      ammoInMagazine: 30,
-      cooldownSeconds: 0,
-      reloadSeconds: 0,
-    };
+    actor.inventory.weaponSlots[0] = createWeaponState("rifle");
   }
   state.phase = "combat";
   state.groundLoot = {};

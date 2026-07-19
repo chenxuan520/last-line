@@ -167,12 +167,13 @@ export class CombatSystem {
 
     weapon.ammoInMagazine -= 1;
     weapon.cooldownSeconds += 60 / config.roundsPerMinute;
-    events.push({ type: "shot-fired", actorId: actor.id });
+    const origin = { x: actor.position.x, y: actor.position.y, z: actor.position.z };
+    events.push({ type: "shot-fired", actorId: actor.id, weaponId: config.id, origin });
     for (let pellet = 0; pellet < config.pellets; pellet += 1) {
       const direction = addSpread(normalize(command.aimDirection), config.spreadRadians, this.random);
       const trace = {
         shooterId: actor.id,
-        origin: { x: actor.position.x, y: actor.position.y, z: actor.position.z },
+        origin,
         direction,
         range: config.range,
       };

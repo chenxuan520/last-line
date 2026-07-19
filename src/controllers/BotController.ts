@@ -31,8 +31,9 @@ const ZONE_SAFETY_MARGIN = 30;
 const UNARMED_WEAPON_DETOUR_DISTANCE = 120;
 const ENDGAME_SEARCH_ACTORS = 3;
 const ENDGAME_PATROL_SECONDS = 24;
-const LOW_HEALTH_RETREAT_RATIO = 0.35;
+const LOW_HEALTH_RETREAT_HEALTH = 25;
 const RETREAT_COVER_SEARCH_DISTANCE = 85;
+type LootPurpose = "general" | "medical" | "compatible-ammo";
 
 export class BotController {
   private navigator = new GridNavigator();
@@ -133,7 +134,7 @@ export class BotController {
       this.decisionSeconds = 0;
       this.lootTargetId = null;
       this.patrolTarget = null;
-      if (actor.health / actor.maxHealth < LOW_HEALTH_RETREAT_RATIO) {
+      if (actor.health <= LOW_HEALTH_RETREAT_HEALTH) {
         this.retreatThreatId = null;
         this.retreatThreatPosition = { ...this.damageInvestigationTarget };
         this.retreatCoverTarget = null;
@@ -190,6 +191,12 @@ export class BotController {
     const activeWeapon = getActiveWeapon(actor);
     const activeWeaponConfig = activeWeapon ? WEAPONS[activeWeapon.weaponId] : undefined;
     const reserveAmmo = activeWeaponConfig ? getItemQuantity(actor, activeWeaponConfig.ammoItemId) : 0;
+    const alternateSlot = actor.inventory.activeWeaponSlot === 0 ? 1 : 0;
+    const alternateWeapon = actor.inventory.weaponSlots[alternateSlot];
+    const alternateWeaponConfig = alternateWeapon ? WEAPONS[alternateWeapon.weaponId] : undefined;
+    const alternateReserveAmmo = alternateWeaponConfig
+      ? getItemQuantity(actor, alternateWeaponConfig.ammoItemId)
+      : 0;
     const canFight = Boolean(activeWeapon && (activeWeapon.ammoInMagazine > 0 || reserveAmmo > 0));
     if (!activeWeapon && Object.values(state.groundLoot).some((loot) =>
       loot.available &&
@@ -243,7 +250,7 @@ export class BotController {
     }
 
     const target = this.findVisibleTarget(actor, state, world);
-    const lowHealth = actor.health / actor.maxHealth < LOW_HEALTH_RETREAT_RATIO;
+    const lowHealth = actor.health <= LOW_HEALTH_RETREAT_HEALTH;
     if (!lowHealth) this.clearRetreat();
     if (target && lowHealth) {
       this.retreatThreatId = target.id;
@@ -267,10 +274,28 @@ export class BotController {
         if (actor.health < 38 && getItemQuantity(actor, "medkit") > 0) command.useItem = "medkit";
         else if (getItemQuantity(actor, "bandage") > 0) command.useItem = "bandage";
         if (command.useItem) return this.cache(command);
+        const medicalLoot = this.findUsefulLoot(actor, state, false, "medical");
+        if (medicalLoot) return this.cache(this.moveToLoot(actor, medicalLoot, command));
       }
       return this.cache(this.retreatFromThreat(actor, state, layout, command));
     }
     if (state.elapsedSeconds > this.retreatUntilSeconds) this.clearRetreat();
+    if (target && (!activeWeapon || activeWeapon.ammoInMagazine === 0)) {
+      if (alternateWeapon?.ammoInMagazine && alternateWeapon.ammoInMagazine > 0) {
+        command.switchWeapon = alternateSlot;
+        command.aimDirection = normalize(subtract(target.position, actor.position));
+        return this.cache(command);
+      }
+      this.retreatThreatId = target.id;
+      this.retreatThreatPosition = { ...target.position };
+      this.retreatUntilSeconds = state.elapsedSeconds + COMBAT_MEMORY_SECONDS;
+      if (activeWeapon && reserveAmmo > 0) command.reload = true;
+      else if (alternateWeapon && alternateReserveAmmo > 0) {
+        command.switchWeapon = alternateSlot;
+        command.reload = true;
+      }
+      return this.cache(this.retreatFromThreat(actor, state, layout, command));
+    }
     if (target && activeWeapon && canFight) {
       this.combatLastKnownPosition = { ...target.position };
       this.combatMemoryUntilSeconds = state.elapsedSeconds + COMBAT_MEMORY_SECONDS;
@@ -305,6 +330,29 @@ export class BotController {
         command.move = { x: forward.z, y: 0, z: -forward.x };
       }
       return this.cache(command);
+    }
+
+    if (!target && (!activeWeapon || activeWeapon.ammoInMagazine === 0)) {
+      if (alternateWeapon?.ammoInMagazine && alternateWeapon.ammoInMagazine > 0) {
+        command.switchWeapon = alternateSlot;
+        return this.cache(command);
+      }
+      if (activeWeapon && reserveAmmo > 0) {
+        command.reload = true;
+        return this.cache(command);
+      }
+      if (alternateWeapon && alternateReserveAmmo > 0) {
+        command.switchWeapon = alternateSlot;
+        command.reload = true;
+        return this.cache(command);
+      }
+      if (activeWeapon || alternateWeapon) {
+        const ammoLoot = this.findUsefulLoot(actor, state, false, "compatible-ammo");
+        if (ammoLoot) return this.cache(this.moveToLoot(actor, ammoLoot, command));
+        this.clearCombatMemory();
+        this.damageInvestigationTarget = null;
+        this.damageInvestigationDirection = null;
+      }
     }
 
     if (
@@ -359,24 +407,7 @@ export class BotController {
       command.reload = Boolean(config && getItemQuantity(actor, config.ammoItemId) > 0);
     }
     const lootSelection = this.findUsefulLoot(actor, state);
-    if (lootSelection) {
-      const { loot, path } = lootSelection;
-      if (distanceSquared(actor.position, loot.position) <= LOOT_INTERACTION_DISTANCE ** 2) {
-        this.clearNavigation();
-        const item = ITEMS[loot.itemId];
-        const existingStack = actor.inventory.backpack.find((stack) => stack.itemId === loot.itemId);
-        if (
-          item?.kind === "ammo" &&
-          !existingStack &&
-          actor.inventory.backpack.length >= actor.inventory.maxBackpackStacks
-        ) {
-          command.dropItem = actor.inventory.backpack.find((stack) => stack.itemId !== loot.itemId)?.itemId ?? null;
-        }
-        command.interact = true;
-        return this.cache(command);
-      }
-      return this.cache(this.navigate(actor, loot.position, command, path));
-    }
+    if (lootSelection) return this.cache(this.moveToLoot(actor, lootSelection, command));
     this.lootTargetId = null;
     const patrol = this.findPatrolTarget(actor, state, layout);
     if (patrol) return this.cache(this.navigate(actor, patrol.target, command, patrol.path));
@@ -464,7 +495,6 @@ export class BotController {
     const threat = this.retreatThreatPosition;
     if (!threat) return command;
     command.fire = false;
-    command.reload = false;
     command.aimDirection = normalize(subtract(threat, actor.position));
     if (!this.retreatCoverTarget || horizontalDistance(actor.position, this.retreatCoverTarget) < 2) {
       this.retreatCoverTarget = null;
@@ -522,6 +552,7 @@ export class BotController {
     actor: ActorState,
     state: MatchState,
     allowOutsideTargetZone = false,
+    purpose: LootPurpose = "general",
   ): { loot: GroundLootState; path: Vector3State[] } | null {
     const hasWeapon = actor.inventory.weaponSlots.some((weapon) => weapon !== null);
     const activeWeapon = getActiveWeapon(actor);
@@ -532,6 +563,10 @@ export class BotController {
       activeWeapon.ammoInMagazine === 0 &&
       getItemQuantity(actor, weaponConfig.ammoItemId) === 0
     );
+    const compatibleAmmoItemIds = new Set(actor.inventory.weaponSlots.flatMap((weapon) => {
+      const ammoItemId = weapon ? WEAPONS[weapon.weaponId]?.ammoItemId : undefined;
+      return ammoItemId ? [ammoItemId] : [];
+    }));
     const lootZoneRadius = Math.max(
       0,
       state.safeZone.targetRadius - Math.min(ZONE_SAFETY_MARGIN, state.safeZone.targetRadius * 0.12),
@@ -546,6 +581,13 @@ export class BotController {
       const existingStack = actor.inventory.backpack.find((stack) => stack.itemId === item.id);
       const canCarry = Boolean(existingStack && existingStack.quantity < item.maxStack) ||
         actor.inventory.backpack.length < actor.inventory.maxBackpackStacks;
+      const canReplaceStack = actor.inventory.backpack.some((stack) => stack.itemId !== item.id);
+      if (purpose === "medical") {
+        return item.kind === "medical" && actor.health < actor.maxHealth && (canCarry || canReplaceStack);
+      }
+      if (purpose === "compatible-ammo") {
+        return item.kind === "ammo" && compatibleAmmoItemIds.has(item.id) && (canCarry || canReplaceStack);
+      }
       return hasWeapon
         ? (item.kind === "ammo" && (!needsAmmo || item.id === weaponConfig?.ammoItemId) && (needsAmmo || canCarry)) ||
           (item.kind === "medical" && actor.health < 90) ||
@@ -579,7 +621,7 @@ export class BotController {
     for (const loot of Object.values(state.groundLoot)) {
       if (!isUseful(loot)) continue;
       const distance = horizontalDistance(actor.position, loot.position);
-      if (hasWeapon && !needsAmmo && distance >= 85) continue;
+      if (purpose === "general" && hasWeapon && !needsAmmo && distance >= 85) continue;
       candidates.push({ loot, distance });
     }
     candidates.sort((left, right) => left.distance - right.distance || left.loot.id.localeCompare(right.loot.id));
@@ -602,6 +644,24 @@ export class BotController {
       }
     }
     return null;
+  }
+
+  private moveToLoot(
+    actor: ActorState,
+    selection: { loot: GroundLootState; path: Vector3State[] },
+    command: ActorCommand,
+  ): ActorCommand {
+    const { loot, path } = selection;
+    if (distanceSquared(actor.position, loot.position) > LOOT_INTERACTION_DISTANCE ** 2) {
+      return this.navigate(actor, loot.position, command, path);
+    }
+    this.clearNavigation();
+    const existingStack = actor.inventory.backpack.find((stack) => stack.itemId === loot.itemId);
+    if (!existingStack && actor.inventory.backpack.length >= actor.inventory.maxBackpackStacks) {
+      command.dropItem = actor.inventory.backpack.find((stack) => stack.itemId !== loot.itemId)?.itemId ?? null;
+    }
+    command.interact = true;
+    return command;
   }
 
   private findLandingTarget(state: MatchState): Vector3State {

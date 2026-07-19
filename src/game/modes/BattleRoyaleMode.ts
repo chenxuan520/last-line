@@ -38,10 +38,10 @@ const LOOT_TABLE: readonly { category: LootCategory; itemId: string; quantity: n
   { category: "weapon", itemId: "weapon.smg", quantity: 1 },
   { category: "weapon", itemId: "weapon.shotgun", quantity: 1 },
   { category: "weapon", itemId: "weapon.sniper", quantity: 1 },
-  { category: "ammo", itemId: "ammo.rifle", quantity: 60 },
-  { category: "ammo", itemId: "ammo.light", quantity: 80 },
-  { category: "ammo", itemId: "ammo.shell", quantity: 12 },
-  { category: "ammo", itemId: "ammo.sniper", quantity: 10 },
+  { category: "ammo", itemId: "ammo.rifle", quantity: 90 },
+  { category: "ammo", itemId: "ammo.light", quantity: 96 },
+  { category: "ammo", itemId: "ammo.shell", quantity: 18 },
+  { category: "ammo", itemId: "ammo.sniper", quantity: 16 },
   { category: "equipment", itemId: "armor.1", quantity: 1 },
   { category: "equipment", itemId: "armor.2", quantity: 1 },
   { category: "equipment", itemId: "helmet.1", quantity: 1 },
@@ -281,6 +281,7 @@ export function createBattleRoyaleState(
   playerId: EntityId,
   config: BattleRoyaleConfig = BATTLE_ROYALE_CONFIG,
   random: () => number = Math.random,
+  options: { startWithBandage?: boolean } = {},
 ): MatchState {
   if (config.participantCount < 1) {
     throw new Error("大逃杀至少需要一名参与者");
@@ -289,14 +290,15 @@ export function createBattleRoyaleState(
   const mapSeed = Math.floor(random() * 4_294_967_296) >>> 0;
   const layout = createMapLayout(mapSeed);
   const flight = createFlight(config.flightSeconds, random);
+  const startWithBandage = options.startWithBandage ?? true;
   const actors: Record<EntityId, ActorState> = {};
-  actors[playerId] = createBattleRoyaleActor(playerId, "player", flight.start);
+  actors[playerId] = createBattleRoyaleActor(playerId, "player", flight.start, startWithBandage);
   let botNumber = 1;
   while (Object.keys(actors).length < config.participantCount) {
     const botId = `bot-${botNumber}`;
     botNumber += 1;
     if (botId !== playerId) {
-      actors[botId] = createBattleRoyaleActor(botId, "bot", flight.start);
+      actors[botId] = createBattleRoyaleActor(botId, "bot", flight.start, startWithBandage);
     }
   }
 
@@ -316,12 +318,13 @@ function createBattleRoyaleActor(
   id: EntityId,
   kind: ActorState["kind"],
   position: Vector3State,
+  startWithBandage: boolean,
 ): ActorState {
   const actor = createActorState(id, kind, position);
   actor.armor = 0;
   actor.deployment = "aircraft";
   actor.inventory.weaponSlots = [null, null];
-  actor.inventory.backpack = [];
+  actor.inventory.backpack = startWithBandage ? [{ itemId: "bandage", quantity: 1 }] : [];
   actor.inventory.armorLevel = 0;
   actor.inventory.helmetLevel = 0;
   return actor;
@@ -374,6 +377,20 @@ function createGroundLoot(
       };
     }
     zoneStart += zoneCount;
+  }
+  for (let index = zoneStart; index < lootSpawnPoints.length; index += 1) {
+    const position = lootSpawnPoints[index];
+    if (!position) continue;
+    const itemId = (index - zoneStart) % 2 === 0 ? "bandage" : "medkit";
+    const id = `loot-${index}`;
+    groundLoot[id] = {
+      id,
+      itemId,
+      quantity: itemId === "bandage" ? 2 : 1,
+      position: { ...position },
+      available: true,
+      source: "spawn",
+    };
   }
   return groundLoot;
 }

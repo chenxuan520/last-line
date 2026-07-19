@@ -105,7 +105,7 @@ export interface MatchState {
 export type GameEvent =
   | { type: "match-started" }
   | { type: "phase-changed"; phase: MatchState["phase"] }
-  | { type: "shot-fired"; actorId: EntityId }
+  | { type: "shot-fired"; actorId: EntityId; weaponId: string; origin: Vector3State }
   | {
       type: "shot-traced";
       actorId: EntityId;

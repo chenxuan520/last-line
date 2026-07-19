@@ -55,6 +55,7 @@ export class BattleRoyaleSession {
     private readonly uiRoot: HTMLDivElement,
     private readonly assets: AssetCatalog,
     settings: GameSettings,
+    audio: AudioFeedback,
     private readonly onRestart: () => void,
     bundle: Awaited<ReturnType<typeof createIslandScene>>,
     state: MatchState,
@@ -71,7 +72,7 @@ export class BattleRoyaleSession {
     this.syncAircraftVisual = bundle.syncAircraftVisual;
     this.syncSafeZoneRing = bundle.syncSafeZoneRing;
     this.humanController = new HumanController(canvas, settings.sensitivity);
-    this.audio = new AudioFeedback(settings.volume);
+    this.audio = audio;
     this.effects = new CombatEffects(this.scene);
     this.combatWorld = new SimulationCombatWorld(state);
     Object.values(state.actors).forEach((actor, index) => {
@@ -85,11 +86,14 @@ export class BattleRoyaleSession {
     uiRoot: HTMLDivElement,
     assets: AssetCatalog,
     settings: GameSettings,
+    audio: AudioFeedback,
     onRestart: () => void,
   ): Promise<BattleRoyaleSession> {
-    const state = createBattleRoyaleState(PLAYER_ID);
+    const state = createBattleRoyaleState(PLAYER_ID, undefined, Math.random, {
+      startWithBandage: settings.startWithBandage,
+    });
     const bundle = await createIslandScene(engine, assets, state.actors, state.groundLoot, state.mapSeed);
-    return new BattleRoyaleSession(canvas, uiRoot, assets, settings, onRestart, bundle, state);
+    return new BattleRoyaleSession(canvas, uiRoot, assets, settings, audio, onRestart, bundle, state);
   }
 
   public start(): void {
@@ -143,7 +147,6 @@ export class BattleRoyaleSession {
   public dispose(): void {
     this.active = false;
     this.humanController.dispose();
-    this.audio.dispose();
     this.effects.dispose();
     this.scene.dispose();
   }
@@ -165,13 +168,18 @@ export class BattleRoyaleSession {
   private processEvents(): void {
     const events = this.simulation.drainEvents();
     this.hud?.handleEvents(events, PLAYER_ID);
-    this.audio.handleEvents(events, PLAYER_ID);
+    const player = this.getActor(PLAYER_ID);
+    const observer = this.spectatorActorId ? this.simulation.state.actors[this.spectatorActorId] ?? player : player;
+    this.audio.handleEvents(events, {
+      playerId: PLAYER_ID,
+      observerId: observer.id,
+      position: observer.position,
+    });
     this.effects.handleEvents(events, PLAYER_ID);
     let lootSyncNeeded = false;
     for (const event of events) {
       if (event.type === "shot-fired" && event.actorId === PLAYER_ID) {
-        const weapon = getActiveWeapon(this.getActor(PLAYER_ID));
-        if (weapon) this.humanController.applyRecoil(WEAPONS[weapon.weaponId]?.recoil ?? 0);
+        this.humanController.applyRecoil(WEAPONS[event.weaponId]?.recoil ?? 0);
       }
       if (event.type === "actor-died") {
         this.actorRoots.get(event.actorId)?.setEnabled(false);

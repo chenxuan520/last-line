@@ -54,7 +54,7 @@ describe("GameSimulation combat", () => {
     const simulation = createSimulation();
     simulation.step(1 / 30, new Map([["player", fireCommand]]), hit("bot-1"));
 
-    expect(getActiveWeapon(simulation.state.actors.player)?.ammoInMagazine).toBe(29);
+    expect(getActiveWeapon(simulation.state.actors.player)?.ammoInMagazine).toBe(44);
     expect(simulation.state.actors["bot-1"]?.armor).toBeCloseTo(34.7);
     expect(simulation.state.actors["bot-1"]?.health).toBeCloseTo(81.3);
   });
@@ -121,7 +121,7 @@ describe("GameSimulation combat", () => {
 
     simulation.step(1 / 30, new Map([["player", fireCommand]]), hit("bot-1"));
     simulation.step(1 / 30, new Map([["player", fireCommand]]), hit("bot-1"));
-    expect(weapon.ammoInMagazine).toBe(29);
+    expect(weapon.ammoInMagazine).toBe(44);
 
     weapon.cooldownSeconds = 0;
     weapon.ammoInMagazine = 0;
@@ -210,7 +210,7 @@ describe("GameSimulation combat", () => {
 
     simulation.step(1, new Map([["player", fireCommand]]), hit("bot-1"));
 
-    expect(weapon.ammoInMagazine).toBe(30);
+    expect(weapon.ammoInMagazine).toBe(45);
     expect(simulation.drainEvents().some((event) => event.type === "shot-fired")).toBe(false);
   });
 
@@ -260,7 +260,7 @@ describe("GameSimulation combat", () => {
     expect(forward.winnerId).toBe(forward.livingActorIds[0]);
     expect(forward.survivorHealth).toBe(1);
     expect(forward.shotActorIds).toEqual(["bot-1", "player"]);
-    expect(forward.droppedWeaponAmmo).toBe(29);
+    expect(forward.droppedWeaponAmmo).toBe(44);
   });
 
   it("does not always award simultaneous fire to the same actor class", () => {

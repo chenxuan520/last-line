@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { GridNavigator } from "../../src/ai/navigation/GridNavigator";
 import {
   BUILDING_ROOF_CAP_HEIGHT,
+  BASE_LOOT_POINTS,
   createMapRoadSegments,
   createMapLayout,
   getRampHeight,
@@ -285,7 +286,7 @@ describe("map layouts", () => {
     const layout = createMapLayout(20_260_718);
     const wildernessBuildings = layout.obstacles.filter((obstacle) => Number(obstacle.id.split("-")[1]) >= MAP_POINT_COUNT);
     const wildernessStart = layout.lootZoneCounts.slice(0, MAP_POINT_COUNT).reduce((total, count) => total + count, 0);
-    const wildernessLoot = layout.lootSpawnPoints.slice(wildernessStart);
+    const wildernessLoot = layout.lootSpawnPoints.slice(wildernessStart, BASE_LOOT_POINTS);
 
     expect(wildernessBuildings.length).toBeGreaterThanOrEqual(16);
     expect(wildernessLoot).toHaveLength(

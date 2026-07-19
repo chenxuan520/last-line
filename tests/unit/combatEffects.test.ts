@@ -57,7 +57,12 @@ describe("CombatEffects", () => {
     const scene = new Scene(engine);
     const effects = new CombatEffects(scene);
 
-    effects.handleEvents([{ type: "shot-fired", actorId: "player" }], "player");
+    effects.handleEvents([{
+      type: "shot-fired",
+      actorId: "player",
+      weaponId: "shotgun",
+      origin: { x: 0, y: 1.76, z: 0 },
+    }], "player");
     expect(effects.counters.activeTracers).toBe(0);
 
     effects.handleEvents([actorTrace("bot")], "player");

@@ -51,7 +51,6 @@ export class GameApp {
     this.starting = true;
     this.session?.dispose();
     this.session = null;
-    this.menuAudio.dispose();
     this.applyQuality();
     this.renderLoading(1);
     try {
@@ -61,6 +60,7 @@ export class GameApp {
         this.uiRoot,
         this.assets,
         this.settings,
+        this.menuAudio,
         this.startMatch,
       );
       this.session.start();
@@ -95,6 +95,7 @@ export class GameApp {
           <label>画面质量<select data-setting="quality"><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></label>
           <label class="volume-setting"><span>主音量 <output data-volume-output></output></span><input aria-label="主音量" data-setting="volume" type="range" min="0" max="1" step="0.1" value="${this.settings.volume}" /></label>
           <label>鼠标灵敏度<input data-setting="sensitivity" type="range" min="0.4" max="2" step="0.1" value="${this.settings.sensitivity}" /></label>
+          <label class="starter-setting"><span>初始补给</span><span class="starter-option"><input data-setting="start-with-bandage" type="checkbox" ${this.settings.startWithBandage ? "checked" : ""} /><i></i><b>携带 1 条绷带</b></span></label>
         </div>
         <button class="primary-button" data-action="start"><span>开始游戏</span><b>DEPLOY</b></button>
         <p class="build-label">PRE-ALPHA 0.2 <span></span> SINGLE PLAYER / ${BATTLE_ROYALE_CONFIG.participantCount - 1} AI</p>
@@ -117,8 +118,15 @@ export class GameApp {
     volume?.addEventListener("input", () => updateVolume(false));
     volume?.addEventListener("change", () => updateVolume(true));
     updateVolume(false);
+    const startWithBandage = this.uiRoot.querySelector<HTMLInputElement>("[data-setting='start-with-bandage']");
+    startWithBandage?.addEventListener("change", () => {
+      this.settings = { ...this.settings, startWithBandage: startWithBandage.checked };
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings));
+    });
     this.uiRoot.querySelector<HTMLButtonElement>("[data-action='start']")?.addEventListener("click", () => {
       this.readSettings();
+      this.menuAudio.setVolume(this.settings.volume);
+      this.menuAudio.start();
       void this.startMatch();
     });
   }
@@ -127,10 +135,12 @@ export class GameApp {
     const quality = this.uiRoot.querySelector<HTMLSelectElement>("[data-setting='quality']")?.value;
     const volume = Number(this.uiRoot.querySelector<HTMLInputElement>("[data-setting='volume']")?.value);
     const sensitivity = Number(this.uiRoot.querySelector<HTMLInputElement>("[data-setting='sensitivity']")?.value);
+    const startWithBandage = this.uiRoot.querySelector<HTMLInputElement>("[data-setting='start-with-bandage']")?.checked;
     this.settings = {
       quality: isQuality(quality) ? quality : DEFAULT_SETTINGS.quality,
       volume: normalizeVolume(volume),
       sensitivity: Number.isFinite(sensitivity) ? sensitivity : DEFAULT_SETTINGS.sensitivity,
+      startWithBandage: typeof startWithBandage === "boolean" ? startWithBandage : DEFAULT_SETTINGS.startWithBandage,
     };
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings));
   }
@@ -152,6 +162,9 @@ function loadSettings(): GameSettings {
       quality: isQuality(value?.quality) ? value.quality : DEFAULT_SETTINGS.quality,
       volume: typeof value?.volume === "number" ? normalizeVolume(value.volume) : DEFAULT_SETTINGS.volume,
       sensitivity: typeof value?.sensitivity === "number" ? value.sensitivity : DEFAULT_SETTINGS.sensitivity,
+      startWithBandage: typeof value?.startWithBandage === "boolean"
+        ? value.startWithBandage
+        : DEFAULT_SETTINGS.startWithBandage,
     };
   } catch {
     return { ...DEFAULT_SETTINGS };
