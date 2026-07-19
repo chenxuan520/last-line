@@ -489,6 +489,53 @@ describe("InventorySystem", () => {
     expect(Object.values(state.groundLoot)[0]).toMatchObject({ available: false, itemId: "weapon.rifle" });
     expect(actor.inventory.weaponSlots[0]?.weaponId).toBe("rifle");
   });
+
+  it("rejects a stale targeted pickup after its loot record is reused", () => {
+    const state = createState();
+    const picker = state.actors.player;
+    picker.inventory.backpack = [];
+    const dropper = createActorState("dropper", "bot", { ...picker.position });
+    dropper.deployment = "grounded";
+    dropper.inventory.backpack = [{ itemId: "ammo.shell", quantity: 18 }];
+    const stalePicker = createActorState("stale-picker", "bot", { ...picker.position });
+    stalePicker.deployment = "grounded";
+    stalePicker.inventory.maxBackpackStacks = 1;
+    stalePicker.inventory.backpack = [{ itemId: "ammo.sniper", quantity: 16 }];
+    state.actors[dropper.id] = dropper;
+    state.actors[stalePicker.id] = stalePicker;
+    state.groundLoot.target = {
+      id: "target",
+      generation: 0,
+      itemId: "ammo.rifle",
+      quantity: 1,
+      position: { x: picker.position.x, y: picker.position.y - 1.31, z: picker.position.z },
+      available: true,
+    };
+    const inventory = new InventorySystem();
+    const events: GameEvent[] = [];
+
+    inventory.processCommand(state, picker.id, command({
+      interact: true,
+      interactLootId: "target",
+      interactLootGeneration: 0,
+    }), events);
+    inventory.processCommand(state, dropper.id, command({ dropItem: "ammo.shell" }), events);
+    inventory.processCommand(state, stalePicker.id, command({
+      interact: true,
+      interactLootId: "target",
+      interactLootGeneration: 0,
+      dropItem: "ammo.sniper",
+    }), events);
+
+    expect(state.groundLoot.target).toMatchObject({
+      generation: 1,
+      itemId: "ammo.shell",
+      quantity: 18,
+      available: true,
+    });
+    expect(stalePicker.inventory.backpack).toEqual([{ itemId: "ammo.sniper", quantity: 16 }]);
+    expect(events.some((event) => event.type === "item-dropped" && event.actorId === stalePicker.id)).toBe(false);
+  });
 });
 
 function fillDeathInventory(actor: MatchState["actors"][string]): void {

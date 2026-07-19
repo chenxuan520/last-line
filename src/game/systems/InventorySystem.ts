@@ -75,7 +75,14 @@ export class InventorySystem {
       this.switchWeapon(actor, command.switchWeapon, events);
     }
     if (command.interact && command.interactLootId !== null) {
-      this.pickTargetedLoot(state, actor, command.interactLootId, command.dropItem, events);
+      this.pickTargetedLoot(
+        state,
+        actor,
+        command.interactLootId,
+        command.interactLootGeneration,
+        command.dropItem,
+        events,
+      );
     } else {
       const droppedLootId = command.dropItem !== null
         ? this.dropItem(state, actor, command.dropItem, events)
@@ -91,6 +98,7 @@ export class InventorySystem {
     state: MatchState,
     actor: ActorState,
     lootId: EntityId,
+    generation: number | null,
     replacementItemId: string | null,
     events: GameEvent[],
   ): void {
@@ -98,6 +106,8 @@ export class InventorySystem {
     const item = loot ? ITEMS[loot.itemId] : undefined;
     if (
       !loot?.available ||
+      generation === null ||
+      (loot.generation ?? 0) !== generation ||
       loot.quantity <= 0 ||
       !item ||
       lootDistanceSquared(actor, loot) > INTERACTION_DISTANCE_SQUARED
@@ -414,6 +424,7 @@ export class InventorySystem {
 
     state.groundLoot[lootId] = {
       id: lootId,
+      generation: reusable ? (reusable.generation ?? 0) + 1 : 0,
       itemId,
       quantity,
       ...(weapon ? { weapon } : {}),

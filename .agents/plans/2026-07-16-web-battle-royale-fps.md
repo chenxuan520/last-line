@@ -1179,3 +1179,27 @@
 - 单调换物：普通 general 搜刮不再为 ammo/medical 腾位；紧急 medical 只丢非医疗低价值栈，紧急 compatible-ammo 只丢与两把枪均不兼容的弹药栈。替换 item 在选择阶段确定并随精确目标传递，moveToLoot 不再临场丢背包第一项。活动槽为空但另一槽有枪时先切槽；完全无枪时才精确拾取附近枪。
 - 低血停滞：25 HP 且断 LOS 后允许约 1 秒掩体确认期；有药立即治疗，无药则搜索当前安全圈可达医疗，找不到便结束持续撤退状态并恢复圈内巡逻/搜集。仅确认期、真实治疗和必要躲避允许静止。低血且目标仍可见、武器有装填并在射程内时，AI 保持撤退移动同时压制射击；空弹/换弹/断 LOS/寻医时不射击。
 - 回归：普通满背包 12 个真实决策零丢捡；紧急兼容弹药连续 8 决策仅丢 1 次；近枪/远弹场景精确拾取弹药且双武器槽不变、零武器掉落；目标失效时 replacement 栈保留；无药断 LOS 先静止确认再产生巡逻移动。标准 `npm run typecheck && npm run test && npm run build && git diff --check` 全通过，Vitest 19 files / 186 tests，完整约 76.78 秒，49 Bot 五 seed与完整局继续通过。
+
+## 审查
+
+### 2026-07-19 17:33 +0800：origin/main 0820e61 完整 diff 与 release gate 审查（不通过）
+
+- 审查范围：已确认 `HEAD/main/origin/main=0820e61c686b8a231c09ef06eeaa110022b3bddd`，唯一父提交和 merge-base 均为 `7c7a583be3cbcdf6c7d5202442e69c4b8173cd6c`；完整增量为 5 files、308 additions / 56 deletions。对照本 plan、`AGENTS.md`、`README.md` 和本轮满背包/精确拾取/25 HP 恢复要求；忽略两个未跟踪 session 文件。
+- 审查结论：**不通过，release gate 未通过。** 常规多决策搜刮、cached tick 清理、Human F 最近拾取、目标失效不丢包、general 不腾位、medical/compatible-ammo 的 Bot 选择、近枪远弹、空活动槽切枪及 25 HP 撤退/射击/治疗/寻医/巡逻主路径未发现其他明确中高风险回归；但动态 loot record 复用仍存在可实际触发的 ABA blocker。
+
+#### Finding
+
+1. **[中] `interactLootId` 只校验可复用 record 的 ID，没有校验计划时的物品身份/代次，同一 inventory tick 可丢掉替换栈并拾取完全不同的物品。** `src/game/systems/InventorySystem.ts:97-118` 在执行时直接读取该 ID 当前记录；而 `:404-423` 会立即把任意 inactive record 原 ID 改写成新掉落。已用实际模块复现三个同位置 Bot 的合法命令顺序：第一个拾走 `rifle` ID 的 `ammo.rifle`；第二个为寻医丢下 `ammo.shell`，该掉落复用 `rifle` ID；第三个仍持有“以 `ammo.sniper` 换计划中的步枪弹”的旧 targeted command，最终丢掉 `ammo.sniper` 并拾到 `ammo.shell`。事件序列明确为 `item-picked(rifle/ammo.rifle) → item-dropped(rifle/ammo.shell) → item-dropped(med/ammo.sniper) → item-picked(rifle/ammo.shell)`。这会在拥挤争抢/换物时破坏精确拾取、单调换物和“原目标失败不丢包”，并使结果依赖同 tick 轮转顺序。Builder 必须给目标携带并校验 generation/version（或至少计划时 item identity，并阻止同 tick record ABA），且所有校验仍须发生在 drop 前；补真实同 tick `pick → record reuse → stale targeted command` 及正反命令插入顺序回归。writer 需记录该闭环后再发起复审。
+
+#### 验证
+
+- 本机实际执行 `npm run typecheck && npm run test && npm run build && git diff --check 7c7a583 0820e61` 全通过；Vitest **19 files / 186 tests**，77.45s，包含 49 Bot 五个 seed（均至少 42/49 持枪）及 49 Bot 完整局唯一胜者；构建仅有既有 >500kB chunk warning。
+- GitHub Actions `CI and GitHub Pages` run `29681644581` 的 build 与 Pages deploy 均成功。未发现业务源码中的 `context.Background()`；工作区除本条 plan 增量外仅有要求忽略的未跟踪 session 文件。
+
+## 2026-07-19 17:39 +0800：精确拾取 generation 闭环
+
+- GroundLootState 增加可选 generation：全部 spawn 初始化为 0；inactive record 每次复用递增。Bot 的 LootSelection 与 ActorCommand 同时携带 `interactLootId + interactLootGeneration`，cached tick 两者均清空。
+- Inventory targeted pickup 在任何 drop 前一次性校验目标 available、generation、3D 距离、item config、replacement 存在及交换后容量；generation 不匹配时整笔事务取消。Human F 仍保持最近可拾行为，不受 generation 命令影响。
+- 新增真实 ABA 回归：actor A 拾空 generation 0 的步枪弹 record，actor B 丢霰弹使同 ID 复用为 generation 1，actor C 持 generation 0 的旧命令并计划丢狙击弹；最终 actor C 保留狙击弹且不产生 item-dropped，复用后的霰弹记录保持可用。
+- 低血补充：`<=25 HP` 且可见目标、武器有装填/在射程内时允许保持撤退移动并压制射击；断 LOS 后有药立即治疗，无药仅静止约 1 秒确认，随后寻医或恢复巡逻，不会长期原地等待。
+- 最终验证：`npm run typecheck && npm run test && npm run build && git diff --check` 全通过；Vitest 19 files / 187 tests，完整约 73.84 秒；49 Bot 五 seed 武装率及完整唯一胜者继续通过，构建仅保留既有大 chunk warning。

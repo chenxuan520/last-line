@@ -896,12 +896,18 @@ describe("BotController", () => {
       state.elapsedSeconds += 1;
     }
 
-    expect(command).toMatchObject({ interact: true, interactLootId: "rifleAmmo", dropItem: "ammo.shell" });
+    expect(command).toMatchObject({
+      interact: true,
+      interactLootId: "rifleAmmo",
+      interactLootGeneration: 0,
+      dropItem: "ammo.shell",
+    });
     expect(bot.inventory.backpack.some((stack) => stack.itemId === "ammo.rifle")).toBe(true);
     expect(state.groundLoot.rifleAmmo?.available).toBe(false);
     expect(cachedCommand.dropItem).toBeNull();
     expect(cachedCommand.interact).toBe(false);
     expect(cachedCommand.interactLootId).toBeNull();
+    expect(cachedCommand.interactLootGeneration).toBeNull();
     expect(events.filter((event) => event.type === "item-dropped")).toHaveLength(1);
   });
 
@@ -974,7 +980,12 @@ describe("BotController", () => {
       state.elapsedSeconds += 1;
     }
 
-    expect(command).toMatchObject({ interact: true, interactLootId: "rifleAmmo", dropItem: null });
+    expect(command).toMatchObject({
+      interact: true,
+      interactLootId: "rifleAmmo",
+      interactLootGeneration: 0,
+      dropItem: null,
+    });
     expect(bot.inventory.weaponSlots.map((weapon) => weapon?.weaponId)).toEqual(["rifle", "smg"]);
     expect(state.groundLoot.shotgun.available).toBe(true);
     expect(state.groundLoot.rifleAmmo.available).toBe(false);

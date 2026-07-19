@@ -38,6 +38,7 @@ type LootPurpose = "general" | "medical" | "compatible-ammo";
 
 interface LootSelection {
   loot: GroundLootState;
+  generation: number;
   path: Vector3State[];
   replacementItemId: string | null;
 }
@@ -168,6 +169,7 @@ export class BotController {
         jump: false,
         interact: false,
         interactLootId: null,
+        interactLootGeneration: null,
         switchWeapon: null,
         useItem: null,
         dropItem: null,
@@ -226,6 +228,7 @@ export class BotController {
       this.clearNavigation();
       command.interact = true;
       command.interactLootId = nearbyGroundWeapon.id;
+      command.interactLootGeneration = nearbyGroundWeapon.generation ?? 0;
       return this.cache(command);
     }
     const targetZoneRadius = Math.max(
@@ -663,10 +666,10 @@ export class BotController {
       const significantlyBetterTargetExists = nearestUsefulDistance + 30 < currentDistance * 0.9;
       if (!significantlyBetterTargetExists) {
         if (this.navigationPath.length > 0 || distanceSquared(actor.position, currentTarget.position) <= LOOT_INTERACTION_DISTANCE ** 2) {
-          return { loot: currentTarget, path: this.navigationPath, replacementItemId };
+          return { loot: currentTarget, generation: currentTarget.generation ?? 0, path: this.navigationPath, replacementItemId };
         }
         const path = this.navigator.findPath(actor.position, currentTarget.position);
-        if (path.length > 0) return { loot: currentTarget, path, replacementItemId };
+        if (path.length > 0) return { loot: currentTarget, generation: currentTarget.generation ?? 0, path, replacementItemId };
       }
       this.clearNavigation();
     }
@@ -696,7 +699,12 @@ export class BotController {
       const path = this.navigator.findPath(actor.position, candidate.loot.position);
       if (path.length > 0) {
         this.lootTargetId = candidate.loot.id;
-        return { loot: candidate.loot, path, replacementItemId: candidate.replacementItemId };
+        return {
+          loot: candidate.loot,
+          generation: candidate.loot.generation ?? 0,
+          path,
+          replacementItemId: candidate.replacementItemId,
+        };
       }
     }
     return null;
@@ -715,6 +723,7 @@ export class BotController {
     command.dropItem = selection.replacementItemId;
     command.interact = true;
     command.interactLootId = loot.id;
+    command.interactLootGeneration = selection.generation;
     return command;
   }
 

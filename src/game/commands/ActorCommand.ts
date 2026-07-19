@@ -9,6 +9,7 @@ export interface ActorCommand {
   jump: boolean;
   interact: boolean;
   interactLootId: EntityId | null;
+  interactLootGeneration: number | null;
   switchWeapon: WeaponSlot | null;
   useItem: string | null;
   dropItem: string | null;
@@ -24,6 +25,7 @@ export function createIdleCommand(): ActorCommand {
     jump: false,
     interact: false,
     interactLootId: null,
+    interactLootGeneration: null,
     switchWeapon: null,
     useItem: null,
     dropItem: null,

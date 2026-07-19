@@ -368,6 +368,7 @@ function createGroundLoot(
       const weapon = item?.kind === "weapon" && item.weaponId ? createWeaponState(item.weaponId) : undefined;
       groundLoot[id] = {
         id,
+        generation: 0,
         itemId: entry.itemId,
         quantity: entry.quantity,
         ...(weapon ? { weapon } : {}),
@@ -385,6 +386,7 @@ function createGroundLoot(
     const id = `loot-${index}`;
     groundLoot[id] = {
       id,
+      generation: 0,
       itemId,
       quantity: itemId === "bandage" ? 2 : 1,
       position: { ...position },

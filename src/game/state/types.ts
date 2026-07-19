@@ -58,6 +58,7 @@ export interface ActorState {
 
 export interface GroundLootState {
   id: EntityId;
+  generation?: number;
   itemId: string;
   quantity: number;
   weapon?: WeaponState;
