@@ -1135,3 +1135,27 @@
 - 枪声：`shot-fired` 增加开枪瞬间的 `weaponId` 和 `origin` 快照，每次射击仍只有一个事件，霰弹不会按 pellet 重复。AudioFeedback 为 rifle/smg/shotgun/sniper 使用不同短促合成 profile；当前观察对象全音量，其他 AI 枪声按距离平方衰减，每 tick 最多最近 4 个、总并发最多 8。GameApp 在开始按钮同步用户手势中启动并复用单个 AudioFeedback，session 重开不再反复销毁 AudioContext；volume 0 时 start/handleEvents 均不创建或调度音频节点。
 - 自动验证：标准 `npm run typecheck && npm run test && npm run build && git diff --check` 全通过；Vitest 18 files / 181 tests，完整约 77.02 秒。新增覆盖 25/26 HP 阈值、低血无药寻医、双枪空弹撤退、断 LOS 寻兼容弹药、有弹副枪切换、两倍弹药堆、250 点全量站立/导航/拾取、枪声事件快照、距离衰减与静音零资源路径；49 Bot 五 seed 武装率及完整唯一胜者继续通过。
 - 静音 Chrome：运行态确认 groundLoot 250、基础类别数量不变、附加医疗 5+5、四类武器 `45/48/9/8`、四类弹药 `90/96/18/16`；shot-fired 含 weaponId/origin，volume 0 下 AudioContext/oscillator/media request 均为 0，console/network 无错误。最终 10 秒 RAF 约 120 FPS；一次 HUD 采样最低值 25 属加载瞬时值，稳态样本保持高帧率。
+
+## 审查
+
+### 2026-07-19 16:23 +0800：origin/main 2d402a1 完整 diff 与 release gate 审查（不通过）
+
+- 审查范围：已推送 `origin/main` 的 `2d402a133ff9c5bfb23a60fcdcda8ecc522902b2` 相对唯一父提交 `936b94870d7ca8c5542177856a711afcd0303b71` 的 20 文件完整 diff；对照本 plan、`AGENTS.md`、`README.md` 及本轮弹匣/弹药、初始绷带、基础 240 + 附加 10 医疗、AI 恢复与共享枪声要求。忽略未跟踪 `session-ses_08c4.md`、`session-ses_096e.md`。
+- 审查结论：**不通过。** 容量与两倍弹药、残弹 WeaponState 转移、设置迁移/公平初始绷带、基础 240 的 RNG/类别语义、追加医疗点、25/26 HP 阈值、空弹切枪/撤退补弹、shot 快照和共享 AudioContext 主链均已落地，但仍有 2 项中风险功能 blocker。
+
+#### Findings
+
+1. **[中] 低血无药 Bot 并未按记录搜索全图可达医疗，目标圈外但当前安全圈内的医疗会被永久排除。** `src/controllers/BotController.ts:272-280` 调用 `findUsefulLoot(actor, state, false, "medical")`，而 `:574-578` 会把 `targetRadius` 安全余量之外的所有候选过滤掉。实际复现：Bot 位于 target center，current radius 2000、target radius 100，20 HP；先看到敌人后断 LOS，唯一 medkit 位于 200m、仍在 current zone 内。第二次决策的 `lootTargetId` 仍为 `null`，命令继续按威胁方向撤退，未选择医疗。影响：收圈目标较小时，即使当前安全区内存在可达药品，AI 也无法完成本轮约定的主动寻医，新增测试仅把药放在 target zone 内 40m，未覆盖该边界。Builder 需解除 medical purpose 的 target-zone-only 过滤，同时显式保留 current-zone/圈外最高优先级，补 target zone 外但 current zone 内、满背包腾位及无可达药继续移动回归。
+2. **[中] 既有 8 个远端枪声占满并发槽时，玩家/当前观战对象的下一枪会被静默丢弃。** `src/client/audio/AudioFeedback.ts:51-75` 只保证同一批事件先处理 observer，`gunshot` 在 `:94-95` 对已满的跨 tick `activeGunshots` 直接返回，无法抢占先前远端 voice。用两个连续 tick 各 4 个仍在 0.18s profile 内的远端 sniper shot 填满 8 槽，再提交 player shot，oscillator 数保持 8，observer shot 未创建。影响：密集 AI 交火中本地/观战枪声会缺失，不符合“当前观察对象全音量、附近 AI 有界播放”的优先级语义。Builder 需为 observer 保留容量或在满载时抢占最旧/最远 remote voice，并用可控 AudioContext 覆盖跨 tick observer 优先、最近 4、并发不超过 8 和结束后回收。
+
+#### 验证与后续处理
+
+- 本机实际执行 `npm run typecheck && npm run test && npm run build && git diff --check` 全通过；Vitest **18 files / 181 tests**，wall time 76.55s；构建仅保留既有 >500kB chunk warning。`origin/main`、`HEAD` 均为目标 commit，未发现业务源码中的 `context.Background()`。
+- GitHub Actions `CI and GitHub Pages` run `29679548797` 成功，build 与 GitHub Pages deploy jobs 均成功。已参考本轮静音 Chrome 的 250 物资、类别/容量/弹药、shot 快照、volume 0 零音频资源、console/network 0 和约 120 RAF 证据；静音 smoke 不能覆盖 finding 2 的正音量抢占路径。
+- Builder 必须处理上述 2 项；writer 需补全图安全范围寻医及正音量多 tick 音频优先级验证后再发起复审。本轮不得记录通过结论。
+
+## 2026-07-19 16:28 +0800：寻医范围与本地枪声优先级闭环
+
+- Finding 1：`medical` purpose 不再沿用 target-zone 过滤，改为只接受当前安全圈内候选；圈外/进目标圈分支仍在寻医前执行，保持安全区最高优先级。回归把唯一 medkit 放在 target radius 20 之外、current radius 200 之内，低血 Bot 断 LOS 后能选择该可达医疗点。
+- Finding 2：枪声并发拆成 2 个 local/observer 保留 voice 与 6 个 remote voice，总上限仍为 8；远程每 tick 最近 4 条策略保持。新增 FakeAudioContext 回归跨两个 tick 填满 6 个远程 voice 后再提交本地 shotgun，确认第 7 个 oscillator 仍创建，本地声音不再被 AI 挤掉。
+- 最终门禁：`npm run typecheck && npm run test && npm run build && git diff --check` 全通过；Vitest 19 files / 182 tests，完整约 73.01 秒；49 Bot 五 seed 武装率及完整唯一胜者继续通过，构建仅保留既有大 chunk warning。

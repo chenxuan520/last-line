@@ -146,6 +146,8 @@ describe("BotController", () => {
     bot.yaw = Math.PI / 2;
     bot.inventory.backpack = [];
     player.position = { x: 20, y: 1.76, z: 0 };
+    state.safeZone.radius = 200;
+    state.safeZone.targetRadius = 20;
     state.groundLoot.medkit = {
       id: "medkit",
       itemId: "medkit",

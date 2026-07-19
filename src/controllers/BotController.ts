@@ -572,10 +572,11 @@ export class BotController {
       state.safeZone.targetRadius - Math.min(ZONE_SAFETY_MARGIN, state.safeZone.targetRadius * 0.12),
     );
     const isUseful = (loot: GroundLootState): boolean => {
-      if (
-        !loot.available ||
-        (!allowOutsideTargetZone && horizontalDistance(loot.position, state.safeZone.targetCenter) > lootZoneRadius)
-      ) return false;
+      if (!loot.available) return false;
+      const insideAllowedZone = purpose === "medical"
+        ? horizontalDistance(loot.position, state.safeZone.center) <= state.safeZone.radius
+        : allowOutsideTargetZone || horizontalDistance(loot.position, state.safeZone.targetCenter) <= lootZoneRadius;
+      if (!insideAllowedZone) return false;
       const item = ITEMS[loot.itemId];
       if (!item) return false;
       const existingStack = actor.inventory.backpack.find((stack) => stack.itemId === item.id);

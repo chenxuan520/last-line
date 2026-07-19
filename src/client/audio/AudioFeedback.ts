@@ -21,12 +21,14 @@ const GUNSHOT_PROFILES: Readonly<Record<string, GunshotProfile>> = {
   sniper: { frequency: 118, duration: 0.18, type: "sawtooth", gain: 1, range: 600 },
 };
 const MAX_REMOTE_GUNSHOTS_PER_TICK = 4;
-const MAX_ACTIVE_GUNSHOTS = 8;
+const MAX_ACTIVE_LOCAL_GUNSHOTS = 2;
+const MAX_ACTIVE_REMOTE_GUNSHOTS = 6;
 
 export class AudioFeedback {
   private context: AudioContext | null = null;
   private gain: GainNode | null = null;
-  private activeGunshots = 0;
+  private activeLocalGunshots = 0;
+  private activeRemoteGunshots = 0;
 
   public constructor(private volume: number) {}
 
@@ -50,7 +52,7 @@ export class AudioFeedback {
     if (this.volume <= 0 || !this.context || !this.gain) return;
     const shots = events.filter((event) => event.type === "shot-fired");
     for (const event of shots.filter((shot) => shot.actorId === listener.observerId)) {
-      this.gunshot(event.weaponId, 1);
+      this.gunshot(event.weaponId, 1, false);
     }
     const remoteShots = shots
       .filter((shot) => shot.actorId !== listener.observerId)
@@ -66,7 +68,11 @@ export class AudioFeedback {
       .sort((left, right) => left.distance - right.distance || left.shot.actorId.localeCompare(right.shot.actorId))
       .slice(0, MAX_REMOTE_GUNSHOTS_PER_TICK);
     for (const { shot, distance } of remoteShots) {
-      this.gunshot(shot.weaponId, gunshotDistanceGain(distance, GUNSHOT_PROFILES[shot.weaponId]?.range ?? 240));
+      this.gunshot(
+        shot.weaponId,
+        gunshotDistanceGain(distance, GUNSHOT_PROFILES[shot.weaponId]?.range ?? 240),
+        true,
+      );
     }
     for (const event of events) {
       if (event.type === "actor-damaged" && event.actorId === listener.playerId) this.tone(62, 0.14, "square");
@@ -84,15 +90,19 @@ export class AudioFeedback {
     void this.context?.close();
     this.context = null;
     this.gain = null;
-    this.activeGunshots = 0;
+    this.activeLocalGunshots = 0;
+    this.activeRemoteGunshots = 0;
   }
 
-  private gunshot(weaponId: string, gainScale: number): void {
+  private gunshot(weaponId: string, gainScale: number, remote: boolean): void {
     const context = this.context;
     const masterGain = this.gain;
     const profile = GUNSHOT_PROFILES[weaponId] ?? GUNSHOT_PROFILES.rifle;
-    if (!context || !masterGain || !profile || gainScale <= 0 || this.activeGunshots >= MAX_ACTIVE_GUNSHOTS) return;
-    this.activeGunshots += 1;
+    const activeVoices = remote ? this.activeRemoteGunshots : this.activeLocalGunshots;
+    const voiceLimit = remote ? MAX_ACTIVE_REMOTE_GUNSHOTS : MAX_ACTIVE_LOCAL_GUNSHOTS;
+    if (!context || !masterGain || !profile || gainScale <= 0 || activeVoices >= voiceLimit) return;
+    if (remote) this.activeRemoteGunshots += 1;
+    else this.activeLocalGunshots += 1;
     const oscillator = context.createOscillator();
     const envelope = context.createGain();
     oscillator.type = profile.type;
@@ -103,7 +113,8 @@ export class AudioFeedback {
     oscillator.connect(envelope);
     envelope.connect(masterGain);
     oscillator.onended = () => {
-      this.activeGunshots = Math.max(0, this.activeGunshots - 1);
+      if (remote) this.activeRemoteGunshots = Math.max(0, this.activeRemoteGunshots - 1);
+      else this.activeLocalGunshots = Math.max(0, this.activeLocalGunshots - 1);
       oscillator.disconnect();
       envelope.disconnect();
     };
