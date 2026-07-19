@@ -522,6 +522,16 @@
 - 验证：typecheck、`git diff --check`、生产 build 和完整 Vitest **20 files / 220 tests** 全通过；mapLayout 19 tests 覆盖 401 seed、多层比例、板梯/楼板、密集建筑与新增掩体，aiLootReachability 7 tests 保持五 seed 至少 42/49 武装及 49 Bot 完整局唯一胜者。构建仅保留既有 >500kB chunk warning。
 - 视觉验收缺口：当前仍无可用浏览器 MCP，按既有约束未直接启动或操作用户浏览器，因此未伪造实际画面/FPS结论。实现已提交并推送为 `b4162a3 feat: enrich world with multistory cover`；两个未跟踪 session 文件未提交。
 
+#### 2026-07-20 03:03 +0800：山体密度、楼层闪线、AI 活性与跳窗闭环
+
+- 山体/掩体：树木 `256→384`、装饰岩石 `64→96`，其中 160 棵树与 48 组岩石使用独立山坡聚簇采样；权威大岩石 `48→64`。401 seed 地图、五 seed 武装率和 49 Bot 完整局继续通过。提交 `cd4b505 fix: enrich mountain cover and stabilize floors` 已推送。
+- 楼层闪线：根因是中间楼板外沿与外墙共面重叠；中间楼板现缩进到墙体内侧，屋顶保持完整 footprint。mapLayout 回归逐块断言中间楼板四边至少缩进 0.3m。Chrome DevTools 在生产多层楼慢速转动连续 6 帧，楼层横线连续稳定，未再观察到随视角闪动；截图 `/var/folders/5j/qh0z08fj3r9f86g_2tb6x9hm0000gn/T/opencode/last-line-floor-line-dbffa4d-contact-sheet.png`。
+- HUD：左下快捷键换行由新增的常驻“观战 / 空格·滚轮切换”第 9 项造成，淘汰卡已有同语义提示，因此移除重复项。生产 DOM 实测 8 个快捷项 `top` 均为 `721px`，恢复单行；截图 `/var/folders/5j/qh0z08fj3r9f86g_2tb6x9hm0000gn/T/opencode/last-line-controls-single-row.png`。提交 `035506b fix: keep gameplay controls on one line` 已推送。
+- AI 活性：每个 Bot 仅维护常数个位置/方向数字；每 tick 做 O(1) 距离/点积检查且复用对象，不遍历其他 AI、不创建 timer/log 队列。3m 范围停留 45 秒、8 秒内方向反转 6 次，或既有移动命令连续无进展时触发强制 relocation；清理战斗/撤退/物资旧路径，圈外优先选择圈内目标，移动 6m 后解除。每轮最多做 1 次路径搜索，其余使用六方向轮换，避免性能放大。
+- 跳窗：单层/多层统一生成真实门窗墙段；窗口底边按当地支撑面抬高 0.42m，顶边保留至楼层顶下 0.08m，确保 1.8m actor 只有跳起时可通过。真实 Movement 回归断言平走被窗台阻挡、从室外跳入并从室内跳出；AI 导航仍把窗台视为 blocker，继续走门/板梯。
+- 自动门禁：typecheck、build、`git diff --check`、完整 Vitest **20 files / 223 tests** 全通过；49 Bot 完整局单独运行约 70.92 秒并产生唯一胜者，五 seed 至少 42/49 武装阈值未降低。实现提交 `dbffa4d fix: recover stalled AI and enable window jumps` 已推送；GitHub CI/Pages 与 Cloudflare Pages 均成功。
+- Chrome DevTools 生产验收：`https://lastline.011203.xyz/`，主音量始终为 0；山坡树石聚簇可见，约 120 FPS，截图 `/var/folders/5j/qh0z08fj3r9f86g_2tb6x9hm0000gn/T/opencode/last-line-glide-slope-clusters.png`。未稳定完成真实 Pointer Lock 下的“平走挡住→跳入→跳出”闭环，故跳窗的浏览器验收仍明确为未验证；console 仅有 DevTools 触发的 Pointer Lock `WrongDocumentError` 和部署查询 GitHub API 403，无生产资源 warning/error。
+
 ## 审查
 
 ### 2026-07-16 14:27 +0800：当前未提交实现审查（不通过）
