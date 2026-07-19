@@ -1280,3 +1280,28 @@
 - 用户试玩后认为效果不合适；首页已移除“显示地面物资配图”开关，`DEFAULT_SETTINGS.showGroundLootIcons=false`，read/load 均强制 false，忽略预览期间 localStorage 已保存的 true，确保所有用户恢复原方块 marker。
 - 内部配图功能、14 种 AssetCatalog 映射、billboard/material/texture 缓存和 NullEngine 有界性回归全部保留，后续确定新设计后可重新开放，不需重写渲染链。
 - README 不再把配图作为公开功能或首页设置。标准 typecheck/test/build/diff 全通过；Vitest 20 files / 210 tests，完整约 78.06 秒。按用户约束未启动浏览器，MCP 当前仍不可用。
+
+## Review
+
+### 2026-07-19 20:35 +0800：origin/main 21cc420 撤退停滞与物资配图关闭审查（不通过）
+
+- 审查范围：确认 `HEAD/main/origin/main=21cc42014e51b4a48218bf679389e45d9df772de`，提交链为 `460773f → 596d720 → 21cc420`，merge-base 为 `460773f`；审查 `460773f..21cc420` 的 8 文件增量，并对照本 plan、`AGENTS.md`、`README.md` 与用户列出的撤退、治疗/导航、设置迁移和 release gate 要求。按要求忽略两个未跟踪 session 文件。
+- 审查结论：**不通过。** 物资配图入口、默认值、菜单读取和 localStorage 加载均已强制关闭，生产 GameApp 创建的 session 会传入 false；内部 icon 渲染及 NullEngine 测试保留，README 一致。真实墙回归确实使用 `MapLayout + SimulationCombatWorld + MovementSystem` 检查实际位移/LOS，且其场景会击穿父提交的直线撤退实现；25 HP 撤退射击、断 LOS 治疗/1 秒后寻医或巡逻、圈外优先及全量回归也通过。但撤退状态还有以下两项中风险问题。
+
+#### Findings
+
+1. **[中] 同一敌人的后续命中会清空 rejected cover 和五方向进度，持续受击时可重新出现墙边停滞。** `src/controllers/BotController.ts:141-167` 对每个新伤害事件都把 `retreatThreatId` 置空，并在低血分支清空 `rejectedRetreatCoverIds`、把 `retreatEscapeIndex` 重置为 0；同一 update 到 `:296-303` 时，即使可见目标仍是原敌人，也会因 ID 已被置空再次按“敌人变化”处理。复现：让有护甲的 25 HP Bot 在新增真实墙场景中被同一个 SMG 敌人以小额伤害持续命中，并在每次命中间推进 `elapsedSeconds`；每次 `lastDamageElapsedSeconds` 更新都会把方向恢复为直线 away、允许已拒绝 cover 重试，无法保证五方向跨决策持续轮换。Builder 需只在攻击者实际变化或撤退结束时清空这些状态，并补同一敌人连续命中的墙边回归。
+2. **[中] 可见敌人切换时只清了 cover 字段，没有清旧导航，新 cover 路径会被 `preserveAim` 逻辑忽略。** `src/controllers/BotController.ts:296-301` 在 target ID 变化时未调用 `clearNavigation()`；随后 `:573-577` 虽找到并记录新 cover，但 `:813-823` 在旧 path 非空且 `preserveAim=true` 时不会因 target 变化重建路径。复现：三角色场景中先让低血 Bot 对敌人 A 选出非空 cover path，在到达前隐藏 A、显示位于另一侧且更近的敌人 B；下一完整决策会把 `retreatCoverId/Target` 改成 B 的 cover，却继续沿 A 的 waypoint 移动，停滞时还可能错误拒绝 B 的 cover。Builder 需在敌人变化时同步清理旧撤退导航，并补 A→B 切换的方向/path 回归。
+
+#### 验证与待处理
+
+- 本机实际执行 `npm run typecheck && npm run test && npm run build && git diff --check 460773f..21cc420` 全通过；Vitest **20 files / 210 tests**，80.49 秒；生产构建通过，仅保留既有 >500kB chunk warning。未发现业务源码中的 `context.Background()`。
+- Builder 需处理上述两项撤退状态问题；writer 需补同敌连续受击和敌人切换回归后再发起复审。物资配图强制关闭链无需重写。
+- 按用户约束，本轮未尝试浏览器、浏览器 MCP、Playwright 或直接启动本机浏览器；展示层仍缺实际浏览器视觉复验，但不是上述不通过结论的来源。
+
+## 2026-07-19 20:40 +0800：持续受击与威胁切换撤退状态闭环
+
+- Finding 1：新伤害只在尚无撤退威胁或攻击方向点积 `<0.2`（明显换向）时重置 cover/rejected/escape；同方向连续命中仅更新威胁位置、时限和 safeSince，不再把 escape index 清零，也保留已拒绝掩体和已知 target ID。
+- Finding 2：可见 target ID 变化时先 `clearNavigation()`，再清 rejected/cover 并重建新威胁的撤退路径，旧 preserveAim path 无法继续劫持新 cover。
+- 回归：真实墙体 180 个 30Hz tick 中每 6 tick 由同一 player 造成 0.05 damage，仍须在 6 秒内移动 >2m/断 LOS，连续无位移 <1.5 秒；三角色 A→B 威胁切换测试预置旧 preserveAim path，切换后 navigationTarget 必须不再等于旧 target。
+- 最终门禁：typecheck/test/build/diff 全通过；Vitest 20 files / 211 tests，完整约 77.63 秒，49 Bot 五 seed与完整局继续通过。物资配图继续保持入口隐藏、default/read/load 全 false；按用户要求未启动浏览器，MCP 当前不可用。

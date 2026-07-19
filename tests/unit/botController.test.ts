@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { BUILDING_ROOF_CAP_HEIGHT, createMapLayout, getTerrainHeight } from "../../src/config/map";
 import { BotController } from "../../src/controllers/BotController";
 import { createBattleRoyaleState } from "../../src/game/modes/BattleRoyaleMode";
-import { createWeaponState, getActiveWeapon } from "../../src/game/state/types";
+import { createWeaponState, getActiveWeapon, type Vector3State } from "../../src/game/state/types";
 import type { CombatWorld } from "../../src/game/systems/CombatSystem";
 import { InventorySystem } from "../../src/game/systems/InventorySystem";
 import { MovementSystem } from "../../src/game/systems/MovementSystem";
@@ -261,11 +261,13 @@ describe("BotController", () => {
     expect(world.hasLineOfSight(bot.id, player.id)).toBe(true);
     const controller = new BotController(1, () => 0.5);
     const movement = new MovementSystem();
+    const damage = new DamageSystem();
     const start = { ...bot.position };
     let stalledTicks = 0;
     let maximumStalledTicks = 0;
 
     for (let tick = 0; tick < 180; tick += 1) {
+      if (tick % 6 === 0) damage.applyDamage(state, bot.id, 0.05, player.id, []);
       const before = { ...bot.position };
       const command = controller.update(bot, state, world, 1 / 30, player.id);
       movement.processCommand(state, bot.id, command, 1 / 30);
@@ -281,6 +283,43 @@ describe("BotController", () => {
       !world.hasLineOfSight(bot.id, player.id),
     ).toBe(true);
     expect(maximumStalledTicks).toBeLessThan(45);
+  });
+
+  it("clears the previous retreat path when the visible threat changes", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    const nextThreat = state.actors["bot-2"];
+    if (!bot || !player || !nextThreat) throw new Error("threat switch setup missing");
+    for (const actor of Object.values(state.actors)) {
+      actor.alive = actor.id === bot.id || actor.id === player.id;
+    }
+    bot.position = { x: 0, y: 1.76, z: 0 };
+    bot.health = 20;
+    bot.yaw = Math.PI / 2;
+    player.position = { x: 20, y: 1.76, z: 0 };
+    nextThreat.position = { x: -20, y: 1.76, z: 0 };
+    const controller = new BotController(1, () => 0.5);
+    controller.update(bot, state, miss, 1, player.id);
+    const internals = controller as unknown as {
+      navigationPath: Vector3State[];
+      navigationTarget: Vector3State | null;
+      waypointIndex: number;
+      navigationPreservesAim: boolean;
+    };
+    const staleTarget = { x: 0, y: 1.76, z: 100 };
+    internals.navigationPath = [{ ...bot.position }, staleTarget];
+    internals.navigationTarget = staleTarget;
+    internals.waypointIndex = 1;
+    internals.navigationPreservesAim = true;
+    player.alive = false;
+    nextThreat.alive = true;
+    bot.yaw = -Math.PI / 2;
+    state.elapsedSeconds += 1;
+
+    controller.update(bot, state, miss, 1, player.id);
+
+    expect(internals.navigationTarget).not.toEqual(staleTarget);
   });
 
   it("uses the matching roof ramp while pursuing a visible rooftop target", () => {

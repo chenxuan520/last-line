@@ -153,12 +153,19 @@ export class BotController {
       this.lootTargetId = null;
       this.patrolTarget = null;
       if (actor.health <= LOW_HEALTH_RETREAT_HEALTH) {
-        this.retreatThreatId = null;
+        const previousDirection = this.retreatThreatPosition
+          ? normalizeFlat(subtract(this.retreatThreatPosition, actor.position))
+          : null;
+        const directionChanged = previousDirection !== null &&
+          previousDirection.x * horizontalDirection.x + previousDirection.z * horizontalDirection.z < 0.2;
+        if (!this.retreatThreatPosition || directionChanged) {
+          this.retreatThreatId = null;
+          this.retreatCoverTarget = null;
+          this.retreatCoverId = null;
+          this.rejectedRetreatCoverIds.clear();
+          this.retreatEscapeIndex = 0;
+        }
         this.retreatThreatPosition = { ...this.damageInvestigationTarget };
-        this.retreatCoverTarget = null;
-        this.retreatCoverId = null;
-        this.rejectedRetreatCoverIds.clear();
-        this.retreatEscapeIndex = 0;
         this.retreatUntilSeconds = state.elapsedSeconds + COMBAT_MEMORY_SECONDS;
         this.retreatSafeSinceSeconds = -1;
       }
@@ -295,6 +302,7 @@ export class BotController {
     if (!lowHealth) this.clearRetreat();
     if (target && lowHealth) {
       if (this.retreatThreatId !== target.id) {
+        this.clearNavigation();
         this.rejectedRetreatCoverIds.clear();
         this.retreatEscapeIndex = 0;
         this.retreatCoverTarget = null;
