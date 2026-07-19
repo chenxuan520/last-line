@@ -1203,3 +1203,27 @@
 - 新增真实 ABA 回归：actor A 拾空 generation 0 的步枪弹 record，actor B 丢霰弹使同 ID 复用为 generation 1，actor C 持 generation 0 的旧命令并计划丢狙击弹；最终 actor C 保留狙击弹且不产生 item-dropped，复用后的霰弹记录保持可用。
 - 低血补充：`<=25 HP` 且可见目标、武器有装填/在射程内时允许保持撤退移动并压制射击；断 LOS 后有药立即治疗，无药仅静止约 1 秒确认，随后寻医或恢复巡逻，不会长期原地等待。
 - 最终验证：`npm run typecheck && npm run test && npm run build && git diff --check` 全通过；Vitest 19 files / 187 tests，完整约 73.84 秒；49 Bot 五 seed 武装率及完整唯一胜者继续通过，构建仅保留既有大 chunk warning。
+
+## 审查
+
+### 2026-07-19 17:46 +0800：origin/main a8231e6 ABA 闭环与 release gate 复审（不通过）
+
+- 审查范围：已确认 `HEAD/main/origin/main=a8231e67b1c4b5091149029c219c9311a23a6b41`，唯一父提交和 merge-base 均为 `0820e61c686b8a231c09ef06eeaa110022b3bddd`；完整增量为 8 files、113 additions / 6 deletions。对照本 plan、`AGENTS.md`、`README.md`、17:33 的 ABA finding 及本轮用户列出的 generation、精确拾取、库存/AI 回归与 release gate 要求；忽略两个未跟踪 session 文件。
+- 审查结论：**不通过，release gate 验证尚未闭环。** 业务实现静态上已令 spawn generation 为 0、inactive record 每次复用按旧值严格 `+1`，可选 generation 对旧动态记录按 0 兼容；Bot 的近枪、general、medical、compatible-ammo 路径均携带 loot ID + generation，cached tick 同时清空；Inventory 也在 drop 前校验 available、generation、数量、item config、三维距离、replacement 存在及交换后容量，generation 不匹配不会丢包。Human F/G、死亡掉落、weapon replacement 和 25 HP 恢复主链未见明确业务回归。但上一轮明确要求的真实同 tick、正反命令插入顺序及 record 多次复用回归并未落地。
+
+#### Finding
+
+1. **[中][验证缺口] 新增 ABA 用例只覆盖一次 `generation 0→1` 的固定手工调用顺序，不能作为上一轮要求的真实同 tick/正反顺序/多次复用回归。** `tests/unit/inventorySystem.test.ts:493-538` 直接按 picker→dropper→stale-picker 顺序调用三次 `InventorySystem.processCommand`，没有经过 `GameSimulation.step` 的同 tick 多 actor 排序，没有反转 command Map 插入顺序，也没有断言同一 record 在第二次及后续复用时继续严格递增。当前源码静态上使用 `(reusable.generation ?? 0) + 1`，未发现现存运行时错误；但若错误实现退化为“复用时恒设 1”，现有新增测试和 30 次 drop/pick 用例仍会通过，却会让持有 generation 1 的旧命令在第二次复用后重新触发 ABA。最小处理：用 `GameSimulation.step` 参数化正反 command Map 插入顺序，覆盖真实 `pick→reuse→stale targeted command`；再让同一 record 至少经历 `0→1→2`，以 generation 1 的 stale command 断言 replacement 不丢、结果与插入顺序一致。无需改业务实现。
+
+#### 验证与待处理
+
+- 本机实际执行 `npm run typecheck && npm run test && npm run build && git diff --check 0820e61 a8231e6` 全通过；Vitest **19 files / 187 tests**，wall time 76.66 秒，包含 49 Bot 五 seed 武装率与完整局唯一胜者；构建仅保留既有 >500kB chunk warning。
+- GitHub Actions `CI and GitHub Pages` run `29681986959` 已成功。未发现业务源码中的 `context.Background()`；工作区仅有按要求忽略的两个未跟踪 session 文件。
+- Builder/writer 只需补上述回归证据并更新验证记录；当前实现的 ABA 防护静态判断为有效，finding 属 release-gate 必需验证缺口，不要求重写业务代码。
+
+## 2026-07-19 17:48 +0800：真实同 tick 多代复用验证闭环
+
+- 新增 GameSimulation 集成回归，所有拾取/丢弃命令通过真实 `step()` 和 `compareActorTurns` 排序执行，不再手工调用 InventorySystem。
+- 每次运行连续两个 tick：首 tick 将 target record 从 generation 0 拾空并复用为 1，generation 0 stale command 被拒绝；次 tick将同 record 从 1 拾空并复用为 2，generation 1 stale command 同样被拒绝。
+- 同一场景分别以正序和反序 command Map 插入，结果完全一致：最终 record 为 generation 2 的 bandage，两次 stale actor 均保留 `ammo.sniper`，stale item-dropped 计数为 0。该用例能击穿“复用时恒设 1”错误实现。
+- 最终门禁：`npm run typecheck && npm run test && npm run build && git diff --check` 全通过；Vitest 19 files / 188 tests，完整约 73.45 秒；49 Bot 五 seed武装率及完整唯一胜者继续通过。

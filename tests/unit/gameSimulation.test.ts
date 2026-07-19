@@ -3,6 +3,7 @@ import { WEAPONS } from "../../src/config/weapons";
 import { getTerrainHeight } from "../../src/config/map";
 import { createIdleCommand, type ActorCommand } from "../../src/game/commands/ActorCommand";
 import { GameSimulation } from "../../src/game/GameSimulation";
+import { compareActorTurns } from "../../src/game/rules/resolveSimultaneous";
 import { cycleSpectatorActorId, getReloadVisualTransform, resolveSpectatorActorId } from "../../src/app/BattleRoyaleSession";
 import { TrainingMode } from "../../src/game/modes/TrainingMode";
 import { createActorState, createWeaponState, getActiveWeapon, type MatchState } from "../../src/game/state/types";
@@ -302,6 +303,19 @@ describe("GameSimulation combat", () => {
     expect(winners).toEqual(new Set(["bot-1", "player"]));
   });
 
+  it("rejects stale targeted pickups across repeated same-tick loot record reuse in both insertion orders", () => {
+    const forward = runRepeatedLootRecordReuse(false);
+    const reversed = runRepeatedLootRecordReuse(true);
+
+    expect(reversed).toEqual(forward);
+    expect(forward).toEqual({
+      generation: 2,
+      itemId: "bandage",
+      staleBackpacks: ["ammo.sniper", "ammo.sniper"],
+      staleDropCount: 0,
+    });
+  });
+
   it.each(["rifle", "smg", "shotgun", "sniper"])("keeps %s near its configured RPM at 30 Hz", (weaponId) => {
     const durationSeconds = 30;
     const simulation = createSimulation(weaponId);
@@ -426,6 +440,83 @@ function runContestedPickup(commandOrder: readonly string[], elapsedSeconds: num
   );
   if (!winner) throw new Error("contested pickup had no winner");
   return winner.id;
+}
+
+function runRepeatedLootRecordReuse(reverseInsertion: boolean) {
+  const simulation = createSimulation();
+  const third = createActorState("bot-2", "bot", { ...simulation.state.actors.player!.position });
+  simulation.state.actors[third.id] = third;
+  const actorIds = ["player", "bot-1", "bot-2"];
+  for (const actorId of actorIds) {
+    const actor = simulation.state.actors[actorId];
+    if (!actor) throw new Error("reuse actor missing");
+    actor.position = { ...simulation.state.actors.player!.position };
+    actor.deployment = "grounded";
+    actor.inventory.backpack = [];
+  }
+  simulation.state.groundLoot.target = {
+    id: "target",
+    generation: 0,
+    itemId: "ammo.rifle",
+    quantity: 1,
+    position: {
+      x: simulation.state.actors.player!.position.x,
+      y: simulation.state.actors.player!.position.y - 1.31,
+      z: simulation.state.actors.player!.position.z,
+    },
+    available: true,
+  };
+  const staleBackpacks: string[] = [];
+  const staleActorIds: string[] = [];
+
+  for (let cycle = 0; cycle < 2; cycle += 1) {
+    const elapsedAfterStep = simulation.state.elapsedSeconds + 1 / 30;
+    const orderedIds = [...actorIds].sort((left, right) => compareActorTurns(left, right, elapsedAfterStep));
+    const pickerId = orderedIds[0];
+    const dropperId = orderedIds[1];
+    const staleId = orderedIds[2];
+    if (!pickerId || !dropperId || !staleId) throw new Error("reuse order missing");
+    const picker = simulation.state.actors[pickerId]!;
+    const dropper = simulation.state.actors[dropperId]!;
+    const stale = simulation.state.actors[staleId]!;
+    picker.inventory.backpack = [];
+    dropper.inventory.backpack = [{ itemId: cycle === 0 ? "ammo.shell" : "bandage", quantity: 1 }];
+    stale.inventory.maxBackpackStacks = 1;
+    stale.inventory.backpack = [{ itemId: "ammo.sniper", quantity: 1 }];
+    staleActorIds.push(staleId);
+    const commands = new Map<string, ActorCommand>([
+      [pickerId, {
+        ...createIdleCommand(),
+        interact: true,
+        interactLootId: "target",
+        interactLootGeneration: cycle,
+      }],
+      [dropperId, {
+        ...createIdleCommand(),
+        dropItem: cycle === 0 ? "ammo.shell" : "bandage",
+      }],
+      [staleId, {
+        ...createIdleCommand(),
+        interact: true,
+        interactLootId: "target",
+        interactLootGeneration: cycle,
+        dropItem: "ammo.sniper",
+      }],
+    ]);
+    const entries = [...commands];
+    simulation.step(1 / 30, new Map(reverseInsertion ? entries.reverse() : entries), miss);
+    staleBackpacks.push(stale.inventory.backpack[0]?.itemId ?? "missing");
+  }
+  const events = simulation.drainEvents();
+  const target = simulation.state.groundLoot.target;
+  return {
+    generation: target?.generation,
+    itemId: target?.itemId,
+    staleBackpacks,
+    staleDropCount: events.filter((event) =>
+      event.type === "item-dropped" && staleActorIds.includes(event.actorId) && event.itemId === "ammo.sniper"
+    ).length,
+  };
 }
 
 function hit(actorId: string): CombatWorld {
