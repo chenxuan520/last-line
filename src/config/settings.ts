@@ -5,6 +5,7 @@ export interface GameSettings {
   volume: number;
   sensitivity: number;
   startWithBandage: boolean;
+  disableAiSnipers: boolean;
 }
 
 export const DEFAULT_SETTINGS: GameSettings = {
@@ -12,4 +13,5 @@ export const DEFAULT_SETTINGS: GameSettings = {
   volume: 0,
   sensitivity: 1,
   startWithBandage: true,
+  disableAiSnipers: true,
 };

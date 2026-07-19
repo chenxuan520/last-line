@@ -1020,6 +1020,87 @@ describe("BotController", () => {
     expect(bot.inventory.backpack).toEqual([{ itemId: "ammo.shell", quantity: 18 }]);
     expect(events.some((event) => event.type === "item-dropped")).toBe(false);
   });
+
+  it("skips sniper weapons and ammunition when AI snipers are disabled", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    player.alive = false;
+    bot.position = { x: 0, y: 1.76, z: 0 };
+    bot.inventory.weaponSlots = [null, null];
+    bot.inventory.backpack = [];
+    state.groundLoot = {
+      sniper: {
+        id: "sniper",
+        itemId: "weapon.sniper",
+        quantity: 1,
+        weapon: createWeaponState("sniper"),
+        position: { x: 1, y: 0.45, z: 0 },
+        available: true,
+      },
+      rifle: {
+        id: "rifle",
+        itemId: "weapon.rifle",
+        quantity: 1,
+        weapon: createWeaponState("rifle"),
+        position: { x: 2, y: 0.45, z: 0 },
+        available: true,
+      },
+      sniperAmmo: {
+        id: "sniperAmmo",
+        itemId: "ammo.sniper",
+        quantity: 16,
+        position: { x: 0.5, y: 0.45, z: 0 },
+        available: true,
+      },
+    };
+    const command = new BotController(1, () => 0.5, true).update(bot, state, miss, 1, player.id);
+    new InventorySystem().processCommand(state, bot.id, command, []);
+
+    expect(command.interactLootId).toBe("rifle");
+    expect(getActiveWeapon(bot)?.weaponId).toBe("rifle");
+    expect(state.groundLoot.sniper.available).toBe(true);
+    expect(state.groundLoot.sniperAmmo.available).toBe(true);
+  });
+
+  it("drops an existing sniper and switches to an allowed secondary weapon", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    if (!bot) throw new Error("bot missing");
+    bot.inventory.weaponSlots = [createWeaponState("sniper"), createWeaponState("rifle")];
+    bot.inventory.activeWeaponSlot = 0;
+    const command = new BotController(1, () => 0.5, true).update(bot, state, miss, 1, "player");
+
+    new InventorySystem().processCommand(state, bot.id, command, []);
+
+    expect(command).toMatchObject({ fire: false, dropItem: "weapon.sniper" });
+    expect(getActiveWeapon(bot)?.weaponId).toBe("rifle");
+    expect(bot.inventory.weaponSlots.some((weapon) => weapon?.weaponId === "sniper")).toBe(false);
+  });
+
+  it("allows sniper pickup when the AI sniper restriction is disabled", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    player.alive = false;
+    bot.position = { x: 0, y: 1.76, z: 0 };
+    bot.inventory.weaponSlots = [null, null];
+    state.groundLoot.sniper = {
+      id: "sniper",
+      itemId: "weapon.sniper",
+      quantity: 1,
+      weapon: createWeaponState("sniper"),
+      position: { x: 1, y: 0.45, z: 0 },
+      available: true,
+    };
+    const command = new BotController(1, () => 0.5, false).update(bot, state, miss, 1, player.id);
+
+    new InventorySystem().processCommand(state, bot.id, command, []);
+
+    expect(getActiveWeapon(bot)?.weaponId).toBe("sniper");
+  });
 });
 
 function groundedState() {

@@ -1239,3 +1239,10 @@
 - 业务复核：spawn generation 从 0 开始，inactive record 每次复用严格 `+1`；targeted pickup 在任何 drop 前校验 available、generation、数量、item config、真实 3D 距离、replacement 存在及交换后容量。general 满包不腾位；medical/compatible-ammo 仅按紧急策略选择单调 replacement；近枪远弹绑定规划弹药 ID+generation；目标失效不丢 replacement；Human F 继续走无目标最近可拾逻辑。25 HP 可在撤退移动中压制射击；断 LOS 无药只保留约 1 秒确认期，随后寻医或巡逻，不会长期站死。
 - 验证：本机实际执行 `npm run typecheck && npm run test && npm run build && git diff --check a8231e6 0d006f7 && git diff --check 7c7a583 0d006f7` 全通过；Vitest **19 files / 188 tests**，wall time 74.46 秒，包含 49 Bot 五 seed 武装率和完整局唯一胜者；构建仅有既有 >500kB chunk warning。GitHub Actions `CI and GitHub Pages` run `29682233383` 成功。未发现业务源码中的 `context.Background()`。
 - 残余风险：本提交仅补规则集成测试，无展示层改动，本轮未重复静音浏览器 smoke；不阻塞本次 release gate。
+
+## 2026-07-19 18:54 +0800：首页 AI 狙击枪限制
+
+- GameSettings 新增 `disableAiSnipers`，默认 true；首页新增全宽“AI 规则 / 禁用狙击枪与狙击弹”开关，沿用 `last-line.settings.v1`，旧存储缺字段时默认开启、显式 false 保留。每局创建 BotController 时固定传入该设置，玩家与地图物资生成不受影响。
+- 禁用时统一过滤三条 AI 物资入口：跳伞武器落点、脚边快速拾枪、general/medical/compatible-ammo 搜索及缓存目标；`weapon.sniper` 和 `ammo.sniper` 均不会被 AI 选择。旧状态已有 sniper 时 AI 在下一完整决策停火并丢弃，若有允许的副武器则 Inventory 自动切换；双狙击可逐把清除。关闭设置后恢复原行为。
+- 回归：禁用时近狙击/远步枪只精确拾步枪且狙击弹保持地面；已有 sniper+rifle 时丢 sniper 并切 rifle；关闭限制时仍可拾 sniper。生产式 49 Bot 五 seed继续至少 42/49 武装，并断言零 sniper 持有、零 sniper ammo 背包；完整局断言 AI 零 sniper/ammo.sniper item-picked 及零 sniper shot-fired。
+- 自动验证：`npm run typecheck && npm run test && npm run build && git diff --check` 全通过；Vitest 19 files / 192 tests，完整约 74.99 秒；构建仅保留既有大 chunk warning。本阶段按用户要求先提交/审查，物资配图功能尚未开始实现；后续浏览器验收必须使用 MCP 隔离能力，禁止直接启动用户浏览器。

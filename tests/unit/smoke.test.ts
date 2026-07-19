@@ -15,6 +15,10 @@ describe("project smoke test", () => {
     expect(DEFAULT_SETTINGS.startWithBandage).toBe(true);
   });
 
+  it("disables AI sniper use for new users", () => {
+    expect(DEFAULT_SETTINGS.disableAiSnipers).toBe(true);
+  });
+
   it("attenuates remote gunshots by distance", () => {
     expect(gunshotDistanceGain(0, 300)).toBe(1);
     expect(gunshotDistanceGain(150, 300)).toBeCloseTo(0.25);

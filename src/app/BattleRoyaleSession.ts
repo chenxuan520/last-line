@@ -76,7 +76,9 @@ export class BattleRoyaleSession {
     this.effects = new CombatEffects(this.scene);
     this.combatWorld = new SimulationCombatWorld(state);
     Object.values(state.actors).forEach((actor, index) => {
-      if (actor.kind === "bot") this.botControllers.set(actor.id, new BotController(index));
+      if (actor.kind === "bot") {
+        this.botControllers.set(actor.id, new BotController(index, Math.random, settings.disableAiSnipers));
+      }
     });
   }
 

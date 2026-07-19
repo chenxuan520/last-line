@@ -34,6 +34,8 @@ const ENDGAME_PATROL_SECONDS = 24;
 const LOW_HEALTH_RETREAT_HEALTH = 25;
 const RETREAT_COVER_SEARCH_DISTANCE = 85;
 const RETREAT_HIDE_CONFIRM_SECONDS = 1;
+const SNIPER_WEAPON_ITEM_ID = "weapon.sniper";
+const SNIPER_AMMO_ITEM_ID = "ammo.sniper";
 type LootPurpose = "general" | "medical" | "compatible-ammo";
 
 interface LootSelection {
@@ -82,7 +84,11 @@ export class BotController {
   private lastDecisionPosition: Vector3State | null = null;
   private stalledDecisions = 0;
 
-  public constructor(index = 0, private readonly random: () => number = Math.random) {
+  public constructor(
+    index = 0,
+    private readonly random: () => number = Math.random,
+    private readonly disableSnipers = false,
+  ) {
     this.dropProgressJitter = randomBetween(this.random, -0.045, 0.045);
     this.landingPoiSlot = Math.max(0, index - 1) % LANDING_ZONE_COUNT;
     this.landingPoiWave = Math.floor(Math.max(0, index - 1) / LANDING_ZONE_COUNT);
@@ -200,6 +206,12 @@ export class BotController {
     this.lastDecisionPosition = { ...actor.position };
 
     const command = createIdleCommand();
+    if (this.disableSnipers && actor.inventory.weaponSlots.some((weapon) => weapon?.weaponId === "sniper")) {
+      this.lootTargetId = null;
+      this.clearNavigation();
+      command.dropItem = SNIPER_WEAPON_ITEM_ID;
+      return this.cache(command);
+    }
     const activeWeapon = getActiveWeapon(actor);
     const activeWeaponConfig = activeWeapon ? WEAPONS[activeWeapon.weaponId] : undefined;
     const reserveAmmo = activeWeaponConfig ? getItemQuantity(actor, activeWeaponConfig.ammoItemId) : 0;
@@ -218,6 +230,7 @@ export class BotController {
       ? Object.values(state.groundLoot)
         .filter((loot) =>
           loot.available &&
+          this.isAllowedLoot(loot) &&
           ITEMS[loot.itemId]?.kind === "weapon" &&
           distanceSquared(actor.position, loot.position) <= LOOT_INTERACTION_DISTANCE ** 2
         )
@@ -629,7 +642,7 @@ export class BotController {
       )?.itemId ?? actor.inventory.backpack.find((stack) => ITEMS[stack.itemId]?.kind !== "medical")?.itemId;
     };
     const isUseful = (loot: GroundLootState): boolean => {
-      if (!loot.available) return false;
+      if (!loot.available || !this.isAllowedLoot(loot)) return false;
       const insideAllowedZone = purpose === "medical"
         ? horizontalDistance(loot.position, state.safeZone.center) <= state.safeZone.radius
         : allowOutsideTargetZone || horizontalDistance(loot.position, state.safeZone.targetCenter) <= lootZoneRadius;
@@ -731,7 +744,7 @@ export class BotController {
     if (this.weaponLandingTarget) return this.weaponLandingTarget;
     const layout = createMapLayout(state.mapSeed);
     const weaponLoot = Object.values(state.groundLoot)
-      .filter((loot) => ITEMS[loot.itemId]?.kind === "weapon")
+      .filter((loot) => this.isAllowedLoot(loot) && ITEMS[loot.itemId]?.kind === "weapon")
       .sort((left, right) => left.id.localeCompare(right.id));
     const outdoorWeaponLoot = weaponLoot.filter((loot) => !pointInsideBuilding(loot.position, layout));
     const availableWeaponLoot = outdoorWeaponLoot.length > 0 ? outdoorWeaponLoot : weaponLoot;
@@ -897,6 +910,10 @@ export class BotController {
     this.retreatCoverTarget = null;
     this.retreatUntilSeconds = -1;
     this.retreatSafeSinceSeconds = -1;
+  }
+
+  private isAllowedLoot(loot: GroundLootState): boolean {
+    return !this.disableSnipers || (loot.itemId !== SNIPER_WEAPON_ITEM_ID && loot.itemId !== SNIPER_AMMO_ITEM_ID);
   }
 }
 

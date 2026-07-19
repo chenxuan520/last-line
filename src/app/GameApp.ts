@@ -96,6 +96,7 @@ export class GameApp {
           <label class="volume-setting"><span>主音量 <output data-volume-output></output></span><input aria-label="主音量" data-setting="volume" type="range" min="0" max="1" step="0.1" value="${this.settings.volume}" /></label>
           <label>鼠标灵敏度<input data-setting="sensitivity" type="range" min="0.4" max="2" step="0.1" value="${this.settings.sensitivity}" /></label>
           <label class="starter-setting"><span>初始补给</span><span class="starter-option"><input data-setting="start-with-bandage" type="checkbox" ${this.settings.startWithBandage ? "checked" : ""} /><i></i><b>携带 1 条绷带</b></span></label>
+          <label class="starter-setting ai-sniper-setting"><span>AI 规则</span><span class="starter-option"><input data-setting="disable-ai-snipers" type="checkbox" ${this.settings.disableAiSnipers ? "checked" : ""} /><i></i><b>禁用狙击枪与狙击弹</b></span></label>
         </div>
         <button class="primary-button" data-action="start"><span>开始游戏</span><b>DEPLOY</b></button>
         <p class="build-label">PRE-ALPHA 0.2 <span></span> SINGLE PLAYER / ${BATTLE_ROYALE_CONFIG.participantCount - 1} AI</p>
@@ -123,6 +124,11 @@ export class GameApp {
       this.settings = { ...this.settings, startWithBandage: startWithBandage.checked };
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings));
     });
+    const disableAiSnipers = this.uiRoot.querySelector<HTMLInputElement>("[data-setting='disable-ai-snipers']");
+    disableAiSnipers?.addEventListener("change", () => {
+      this.settings = { ...this.settings, disableAiSnipers: disableAiSnipers.checked };
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings));
+    });
     this.uiRoot.querySelector<HTMLButtonElement>("[data-action='start']")?.addEventListener("click", () => {
       this.readSettings();
       this.menuAudio.setVolume(this.settings.volume);
@@ -136,11 +142,13 @@ export class GameApp {
     const volume = Number(this.uiRoot.querySelector<HTMLInputElement>("[data-setting='volume']")?.value);
     const sensitivity = Number(this.uiRoot.querySelector<HTMLInputElement>("[data-setting='sensitivity']")?.value);
     const startWithBandage = this.uiRoot.querySelector<HTMLInputElement>("[data-setting='start-with-bandage']")?.checked;
+    const disableAiSnipers = this.uiRoot.querySelector<HTMLInputElement>("[data-setting='disable-ai-snipers']")?.checked;
     this.settings = {
       quality: isQuality(quality) ? quality : DEFAULT_SETTINGS.quality,
       volume: normalizeVolume(volume),
       sensitivity: Number.isFinite(sensitivity) ? sensitivity : DEFAULT_SETTINGS.sensitivity,
       startWithBandage: typeof startWithBandage === "boolean" ? startWithBandage : DEFAULT_SETTINGS.startWithBandage,
+      disableAiSnipers: typeof disableAiSnipers === "boolean" ? disableAiSnipers : DEFAULT_SETTINGS.disableAiSnipers,
     };
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings));
   }
@@ -165,6 +173,9 @@ function loadSettings(): GameSettings {
       startWithBandage: typeof value?.startWithBandage === "boolean"
         ? value.startWithBandage
         : DEFAULT_SETTINGS.startWithBandage,
+      disableAiSnipers: typeof value?.disableAiSnipers === "boolean"
+        ? value.disableAiSnipers
+        : DEFAULT_SETTINGS.disableAiSnipers,
     };
   } catch {
     return { ...DEFAULT_SETTINGS };

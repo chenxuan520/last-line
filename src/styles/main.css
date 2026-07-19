@@ -294,6 +294,10 @@ h1 {
   font-weight: 700;
 }
 
+.settings-grid .ai-sniper-setting {
+  grid-column: 1 / -1;
+}
+
 .settings-grid select {
   width: 100%;
   height: 23px;

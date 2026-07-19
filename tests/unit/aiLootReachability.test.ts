@@ -63,7 +63,7 @@ describe("AI loot reachability", () => {
     const simulation = new GameSimulation(state, new BattleRoyaleMode(TEST_CONFIG, random), WEAPONS);
     const bots = Object.values(state.actors).filter((actor) => actor.kind === "bot");
     const controllers = new Map(
-      bots.map((bot, index) => [bot.id, new BotController(index + 1, seededRandom(seed * 100 + index))]),
+      bots.map((bot, index) => [bot.id, new BotController(index + 1, seededRandom(seed * 100 + index), true)]),
     );
     const landingZones = createMapLayout(state.mapSeed).landingZones;
     simulation.start();
@@ -120,6 +120,8 @@ describe("AI loot reachability", () => {
       armedBots.length,
       `${armedBots.length} bots armed, ${heldWeapons} weapons held, ${availableWeapons.length} available for seed ${seed}: ${JSON.stringify(unarmedPositions)}`,
     ).toBeGreaterThanOrEqual(42);
+    expect(bots.flatMap((bot) => bot.inventory.weaponSlots).some((weapon) => weapon?.weaponId === "sniper")).toBe(false);
+    expect(bots.some((bot) => bot.inventory.backpack.some((stack) => stack.itemId === "ammo.sniper"))).toBe(false);
   }, 120_000);
 
   it("lets 49 real bot controllers loot, fight, and produce one winner", () => {
@@ -137,7 +139,7 @@ describe("AI loot reachability", () => {
     const simulation = new GameSimulation(state, new BattleRoyaleMode(config, random), WEAPONS);
     const bots = Object.values(state.actors).filter((actor) => actor.kind === "bot");
     const controllers = new Map(
-      bots.map((bot, index) => [bot.id, new BotController(index + 1, seededRandom(20_260 + index))]),
+      bots.map((bot, index) => [bot.id, new BotController(index + 1, seededRandom(20_260 + index), true)]),
     );
     const world = new SimulationCombatWorld(state);
     simulation.start();
@@ -171,6 +173,14 @@ describe("AI loot reachability", () => {
     expect(state.result?.winnerId).toBe(living[0]?.id);
     expect(allEvents.some((event) => event.type === "item-picked" && event.actorId.startsWith("bot-"))).toBe(true);
     expect(allEvents.some((event) => event.type === "shot-fired" && event.actorId.startsWith("bot-"))).toBe(true);
+    expect(allEvents.some((event) =>
+      event.type === "item-picked" &&
+      event.actorId.startsWith("bot-") &&
+      (event.itemId === "weapon.sniper" || event.itemId === "ammo.sniper")
+    )).toBe(false);
+    expect(allEvents.some((event) =>
+      event.type === "shot-fired" && event.actorId.startsWith("bot-") && event.weaponId === "sniper"
+    )).toBe(false);
     expect(allEvents.some((event) => event.type === "actor-died" && event.sourceId?.startsWith("bot-"))).toBe(true);
   }, 120_000);
 });
