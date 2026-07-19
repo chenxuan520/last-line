@@ -74,15 +74,48 @@ export class InventorySystem {
     if (command.switchWeapon !== null) {
       this.switchWeapon(actor, command.switchWeapon, events);
     }
-    const droppedLootId = command.dropItem !== null
-      ? this.dropItem(state, actor, command.dropItem, events)
-      : null;
-    if (command.interact) {
-      this.pickNearestLoot(state, actor, events, droppedLootId);
+    if (command.interact && command.interactLootId !== null) {
+      this.pickTargetedLoot(state, actor, command.interactLootId, command.dropItem, events);
+    } else {
+      const droppedLootId = command.dropItem !== null
+        ? this.dropItem(state, actor, command.dropItem, events)
+        : null;
+      if (command.interact) this.pickNearestLoot(state, actor, events, droppedLootId);
     }
     if (command.useItem !== null && !interruptsHealing) {
       this.startHealing(actor, command.useItem, events);
     }
+  }
+
+  private pickTargetedLoot(
+    state: MatchState,
+    actor: ActorState,
+    lootId: EntityId,
+    replacementItemId: string | null,
+    events: GameEvent[],
+  ): void {
+    const loot = state.groundLoot[lootId];
+    const item = loot ? ITEMS[loot.itemId] : undefined;
+    if (
+      !loot?.available ||
+      loot.quantity <= 0 ||
+      !item ||
+      lootDistanceSquared(actor, loot) > INTERACTION_DISTANCE_SQUARED
+    ) return;
+
+    if (replacementItemId !== null) {
+      if (item.kind === "weapon" || item.kind === "armor" || item.kind === "helmet") return;
+      const replacementIndex = actor.inventory.backpack.findIndex((stack) => stack.itemId === replacementItemId);
+      const existingStack = actor.inventory.backpack.find((stack) => stack.itemId === item.id);
+      const canFitAfterDrop = Boolean(existingStack && existingStack.quantity < item.maxStack) ||
+        actor.inventory.backpack.length - 1 < actor.inventory.maxBackpackStacks;
+      if (replacementIndex < 0 || replacementItemId === item.id || !canFitAfterDrop) return;
+      if (!this.dropItem(state, actor, replacementItemId, events)) return;
+    } else if (!canActorPickLoot(actor, loot)) {
+      return;
+    }
+    if (!canActorPickLoot(actor, loot)) return;
+    this.pickAvailableLoot(state, actor, item, loot, events);
   }
 
   public dropDeadInventories(state: MatchState, events: GameEvent[]): void {
@@ -135,19 +168,29 @@ export class InventorySystem {
     for (const loot of candidates) {
       const item = ITEMS[loot.itemId];
       if (!item) continue;
-      const pickedQuantity = this.pickLoot(state, actor, item, loot, events);
-      if (pickedQuantity <= 0) continue;
-      loot.quantity -= pickedQuantity;
-      if (loot.quantity === 0) loot.available = false;
-      events.push({
-        type: "item-picked",
-        actorId: actor.id,
-        lootId: loot.id,
-        itemId: loot.itemId,
-        quantity: pickedQuantity,
-      });
-      return;
+      if (this.pickAvailableLoot(state, actor, item, loot, events)) return;
     }
+  }
+
+  private pickAvailableLoot(
+    state: MatchState,
+    actor: ActorState,
+    item: ItemConfig,
+    loot: GroundLootState,
+    events: GameEvent[],
+  ): boolean {
+    const pickedQuantity = this.pickLoot(state, actor, item, loot, events);
+    if (pickedQuantity <= 0) return false;
+    loot.quantity -= pickedQuantity;
+    if (loot.quantity === 0) loot.available = false;
+    events.push({
+      type: "item-picked",
+      actorId: actor.id,
+      lootId: loot.id,
+      itemId: loot.itemId,
+      quantity: pickedQuantity,
+    });
+    return true;
   }
 
   private pickLoot(

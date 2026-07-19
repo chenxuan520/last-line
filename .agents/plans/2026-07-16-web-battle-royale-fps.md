@@ -1171,3 +1171,11 @@
 - 父提交核心复核：25 HP 撤退、26 HP 战斗；弹匣 `45/48/9/8`、弹药堆 `90/96/18/16`；基础 240 点及 `96/64/29/51` 类别/RNG 语义不变并独立追加 10 个医疗点；初始绷带默认/旧设置迁移/显式关闭及玩家-AI 同开关；空弹副枪切换、撤退换弹与断 LOS 寻兼容弹药；单次 `shot-fired` 的 weapon/origin 快照和 GameApp 级共享 AudioContext 均未见回归。
 - 验证：本机实际执行 `npm run typecheck && npm run test && npm run build && git diff --check 2d402a1 ebd2f15` 全通过；Vitest **19 files / 182 tests**，73.16s，包含 49 Bot 五 seed 武装与完整唯一胜者。构建仅有既有 >500kB chunk warning。GitHub Actions run `29679908997` 的 build 与 Pages deploy 均成功；已参考前序 volume 0 Chrome 状态/性能/console/network 证据。未发现业务源码中的 `context.Background()`。
 - 残余验证缺口（非阻塞）：FakeAudioContext 当前没有把 `onended` 分池回收、dispose 后清零和“最近 4 条”分别写成独立断言；这些行为已由直接调用链确认，且本轮无可定位运行时错误，后续修改音频池时宜补成回归。
+
+## 2026-07-19 17:27 +0800：AI 满背包与枪械丢捡循环修复
+
+- 根因：BotController 虽缓存具体 `lootTargetId`，但 ActorCommand 只传无目标 `interact`；Inventory 会重新拾取最近可用物，可能把规划的弹药误换成更近枪械。与此同时 `moveToLoot` 对所有满背包目标无条件丢第一条不同栈，下一决策又把刚丢出的医疗/弹药判为 useful，形成 bandage/medkit 或武器动态 record 的无限乒乓。
+- 精确拾取：ActorCommand 新增一次性 `interactLootId`；玩家 F 仍使用最近可拾逻辑，AI 则绑定规划 ID。Inventory 在目标仍 available、3D 距离有效且交换后能容纳时才执行 targeted pick；目标被抢或失效时不先丢物，避免争抢导致空包。Bot cached tick 会清空 interactLootId。
+- 单调换物：普通 general 搜刮不再为 ammo/medical 腾位；紧急 medical 只丢非医疗低价值栈，紧急 compatible-ammo 只丢与两把枪均不兼容的弹药栈。替换 item 在选择阶段确定并随精确目标传递，moveToLoot 不再临场丢背包第一项。活动槽为空但另一槽有枪时先切槽；完全无枪时才精确拾取附近枪。
+- 低血停滞：25 HP 且断 LOS 后允许约 1 秒掩体确认期；有药立即治疗，无药则搜索当前安全圈可达医疗，找不到便结束持续撤退状态并恢复圈内巡逻/搜集。仅确认期、真实治疗和必要躲避允许静止。低血且目标仍可见、武器有装填并在射程内时，AI 保持撤退移动同时压制射击；空弹/换弹/断 LOS/寻医时不射击。
+- 回归：普通满背包 12 个真实决策零丢捡；紧急兼容弹药连续 8 决策仅丢 1 次；近枪/远弹场景精确拾取弹药且双武器槽不变、零武器掉落；目标失效时 replacement 栈保留；无药断 LOS 先静止确认再产生巡逻移动。标准 `npm run typecheck && npm run test && npm run build && git diff --check` 全通过，Vitest 19 files / 186 tests，完整约 76.78 秒，49 Bot 五 seed与完整局继续通过。

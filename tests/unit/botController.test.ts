@@ -74,7 +74,7 @@ describe("BotController", () => {
     expect(command.fire).toBe(false);
   });
 
-  it("retreats instead of firing at twenty-five health", () => {
+  it("fires while moving toward cover at twenty-five health", () => {
     const state = groundedState();
     const bot = state.actors["bot-1"];
     const player = state.actors.player;
@@ -87,7 +87,7 @@ describe("BotController", () => {
 
     const command = new BotController(1, () => 0.5).update(bot, state, miss, 1, player.id);
 
-    expect(command.fire).toBe(false);
+    expect(command.fire).toBe(true);
     expect(command.useItem).toBeNull();
     expect(Math.hypot(command.move.x, command.move.z)).toBeGreaterThan(0.5);
     expect(command.sprint).toBe(true);
@@ -130,7 +130,7 @@ describe("BotController", () => {
     const heal = controller.update(bot, state, world, 1, player.id);
 
     expect(retreat.useItem).toBeNull();
-    expect(retreat.fire).toBe(false);
+    expect(retreat.fire).toBe(true);
     expect(heal.useItem).toBe("medkit");
     expect(heal.move).toEqual({ x: 0, y: 0, z: 0 });
   });
@@ -162,12 +162,43 @@ describe("BotController", () => {
     controller.update(bot, state, world, 1, player.id);
     visible = false;
     state.elapsedSeconds += 1;
-    const search = controller.update(bot, state, world, 1, player.id);
+    const hiding = controller.update(bot, state, world, 1, player.id);
+    state.elapsedSeconds += 1.1;
+    const search = controller.update(bot, state, world, 1.1, player.id);
 
+    expect(hiding.move).toEqual({ x: 0, y: 0, z: 0 });
     expect(search.useItem).toBeNull();
     expect(search.fire).toBe(false);
     expect(Math.hypot(search.move.x, search.move.z)).toBeGreaterThan(0.5);
     expect(search.aimDirection.x).toBeLessThan(-0.5);
+  });
+
+  it("leaves cover to patrol after confirming LOS loss when no medicine exists", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    for (const actor of Object.values(state.actors)) actor.alive = actor.id === bot.id || actor.id === player.id;
+    bot.position = { x: 0, y: 1.76, z: 0 };
+    bot.health = 20;
+    bot.yaw = Math.PI / 2;
+    bot.inventory.backpack = [];
+    player.position = { x: 20, y: 1.76, z: 0 };
+    state.groundLoot = {};
+    let visible = true;
+    const world: CombatWorld = { traceShot: () => null, hasLineOfSight: () => visible };
+    const controller = new BotController(1, () => 0.5);
+
+    controller.update(bot, state, world, 1, player.id);
+    visible = false;
+    state.elapsedSeconds += 1;
+    const hiding = controller.update(bot, state, world, 1, player.id);
+    state.elapsedSeconds += 1.1;
+    const patrol = controller.update(bot, state, world, 1.1, player.id);
+
+    expect(hiding.move).toEqual({ x: 0, y: 0, z: 0 });
+    expect(Math.hypot(patrol.move.x, patrol.move.z)).toBeGreaterThan(0.5);
+    expect(patrol.useItem).toBeNull();
   });
 
   it("switches to a loaded secondary weapon when the active magazine is empty", () => {
@@ -855,14 +886,128 @@ describe("BotController", () => {
 
     const controller = new BotController(1, () => 0.5);
     const command = controller.update(bot, state, miss, 1, "player");
-    new InventorySystem().processCommand(state, bot.id, command, []);
+    const inventory = new InventorySystem();
+    const events: import("../../src/game/state/types").GameEvent[] = [];
+    inventory.processCommand(state, bot.id, command, events);
     const cachedCommand = controller.update(bot, state, miss, 0.01, "player");
+    for (let decision = 0; decision < 8; decision += 1) {
+      const next = controller.update(bot, state, miss, 1, "player");
+      inventory.processCommand(state, bot.id, next, events);
+      state.elapsedSeconds += 1;
+    }
 
-    expect(command).toMatchObject({ interact: true, dropItem: "ammo.shell" });
+    expect(command).toMatchObject({ interact: true, interactLootId: "rifleAmmo", dropItem: "ammo.shell" });
     expect(bot.inventory.backpack.some((stack) => stack.itemId === "ammo.rifle")).toBe(true);
     expect(state.groundLoot.rifleAmmo?.available).toBe(false);
     expect(cachedCommand.dropItem).toBeNull();
     expect(cachedCommand.interact).toBe(false);
+    expect(cachedCommand.interactLootId).toBeNull();
+    expect(events.filter((event) => event.type === "item-dropped")).toHaveLength(1);
+  });
+
+  it("does not ping-pong medical stacks during ordinary full-backpack looting", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    player.alive = false;
+    bot.position = { x: 0, y: 1.76, z: 0 };
+    bot.health = 80;
+    bot.inventory.maxBackpackStacks = 1;
+    bot.inventory.backpack = [{ itemId: "bandage", quantity: 5 }];
+    state.groundLoot.medkit = {
+      id: "medkit",
+      itemId: "medkit",
+      quantity: 1,
+      position: { x: 1, y: 0.45, z: 0 },
+      available: true,
+    };
+    const controller = new BotController(1, () => 0.5);
+    const inventory = new InventorySystem();
+    const events: import("../../src/game/state/types").GameEvent[] = [];
+
+    for (let decision = 0; decision < 12; decision += 1) {
+      const command = controller.update(bot, state, miss, 1, player.id);
+      inventory.processCommand(state, bot.id, command, events);
+      state.elapsedSeconds += 1;
+    }
+
+    expect(bot.inventory.backpack).toEqual([{ itemId: "bandage", quantity: 5 }]);
+    expect(state.groundLoot.medkit.available).toBe(true);
+    expect(events.filter((event) => event.type === "item-dropped" || event.type === "item-picked")).toHaveLength(0);
+  });
+
+  it("picks the planned ammo instead of replacing weapons with a nearer gun", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    player.alive = false;
+    bot.position = { x: 0, y: 1.76, z: 0 };
+    bot.inventory.weaponSlots = [createWeaponState("rifle", false), createWeaponState("smg", false)];
+    bot.inventory.backpack = [];
+    state.groundLoot = {
+      shotgun: {
+        id: "shotgun",
+        itemId: "weapon.shotgun",
+        quantity: 1,
+        weapon: createWeaponState("shotgun"),
+        position: { x: 1, y: 0.45, z: 0 },
+        available: true,
+      },
+      rifleAmmo: {
+        id: "rifleAmmo",
+        itemId: "ammo.rifle",
+        quantity: 90,
+        position: { x: 2, y: 0.45, z: 0 },
+        available: true,
+      },
+    };
+    const controller = new BotController(1, () => 0.5);
+    const command = controller.update(bot, state, miss, 1, player.id);
+    const events: import("../../src/game/state/types").GameEvent[] = [];
+    const inventory = new InventorySystem();
+    inventory.processCommand(state, bot.id, command, events);
+    for (let decision = 0; decision < 8; decision += 1) {
+      const next = controller.update(bot, state, miss, 1, player.id);
+      inventory.processCommand(state, bot.id, next, events);
+      state.elapsedSeconds += 1;
+    }
+
+    expect(command).toMatchObject({ interact: true, interactLootId: "rifleAmmo", dropItem: null });
+    expect(bot.inventory.weaponSlots.map((weapon) => weapon?.weaponId)).toEqual(["rifle", "smg"]);
+    expect(state.groundLoot.shotgun.available).toBe(true);
+    expect(state.groundLoot.rifleAmmo.available).toBe(false);
+    expect(events.some((event) => event.type === "item-dropped")).toBe(false);
+  });
+
+  it("keeps the replacement stack when a planned loot target is no longer available", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    player.alive = false;
+    bot.position = { x: 0, y: 1.76, z: 0 };
+    const weapon = getActiveWeapon(bot);
+    if (!weapon) throw new Error("weapon missing");
+    weapon.ammoInMagazine = 0;
+    bot.inventory.maxBackpackStacks = 1;
+    bot.inventory.backpack = [{ itemId: "ammo.shell", quantity: 18 }];
+    state.groundLoot.rifleAmmo = {
+      id: "rifleAmmo",
+      itemId: "ammo.rifle",
+      quantity: 90,
+      position: { x: 1, y: 0.45, z: 0 },
+      available: true,
+    };
+    const command = new BotController(1, () => 0.5).update(bot, state, miss, 1, player.id);
+    state.groundLoot.rifleAmmo.available = false;
+    const events: import("../../src/game/state/types").GameEvent[] = [];
+
+    new InventorySystem().processCommand(state, bot.id, command, events);
+
+    expect(bot.inventory.backpack).toEqual([{ itemId: "ammo.shell", quantity: 18 }]);
+    expect(events.some((event) => event.type === "item-dropped")).toBe(false);
   });
 });
 

@@ -1,4 +1,4 @@
-import type { Vector3State, WeaponSlot } from "../state/types";
+import type { EntityId, Vector3State, WeaponSlot } from "../state/types";
 
 export interface ActorCommand {
   move: Vector3State;
@@ -8,6 +8,7 @@ export interface ActorCommand {
   sprint: boolean;
   jump: boolean;
   interact: boolean;
+  interactLootId: EntityId | null;
   switchWeapon: WeaponSlot | null;
   useItem: string | null;
   dropItem: string | null;
@@ -22,6 +23,7 @@ export function createIdleCommand(): ActorCommand {
     sprint: false,
     jump: false,
     interact: false,
+    interactLootId: null,
     switchWeapon: null,
     useItem: null,
     dropItem: null,
