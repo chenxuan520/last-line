@@ -1159,3 +1159,15 @@
 - Finding 1：`medical` purpose 不再沿用 target-zone 过滤，改为只接受当前安全圈内候选；圈外/进目标圈分支仍在寻医前执行，保持安全区最高优先级。回归把唯一 medkit 放在 target radius 20 之外、current radius 200 之内，低血 Bot 断 LOS 后能选择该可达医疗点。
 - Finding 2：枪声并发拆成 2 个 local/observer 保留 voice 与 6 个 remote voice，总上限仍为 8；远程每 tick 最近 4 条策略保持。新增 FakeAudioContext 回归跨两个 tick 填满 6 个远程 voice 后再提交本地 shotgun，确认第 7 个 oscillator 仍创建，本地声音不再被 AI 挤掉。
 - 最终门禁：`npm run typecheck && npm run test && npm run build && git diff --check` 全通过；Vitest 19 files / 182 tests，完整约 73.01 秒；49 Bot 五 seed 武装率及完整唯一胜者继续通过，构建仅保留既有大 chunk warning。
+
+## 审查
+
+### 2026-07-19 16:33 +0800：origin/main ebd2f15 blocker 闭环与 release gate 复审（通过）
+
+- 审查范围：已 fetch 并确认 `HEAD/main/origin/main=ebd2f157a4fb66be36fbe5f737db367844bbd2e4`，唯一父提交为 `2d402a133ff9c5bfb23a60fcdcda8ecc522902b2`；完整增量为 5 files、135 additions / 13 deletions。对照本 plan、`AGENTS.md`、`README.md`、16:23 两项中风险 finding，并复核父提交 20 文件核心交付；忽略未跟踪 session 文件。
+- 审查结论：**通过。本次审查未发现明确中高风险 finding；上轮两项中风险 blocker 均已闭环，当前 release gate 通过。**
+- 寻医闭环：`medical` purpose 只按 current safe zone 的 `center/radius` 过滤候选，不再受 target zone 限制；圈外/未进目标圈分支仍在低血、寻医和治疗之前执行并清理 loot target。回归明确设置 `targetRadius=20`、`current radius=200`、唯一 medkit 距中心 `40m`，其移动/瞄准断言可区分“选择医疗”与旧逻辑继续背向威胁撤退；既有圈外携药测试继续证明进圈优先。
+- 音频闭环：gunshot voice 分为 2 个 local/observer 与 6 个 remote 独立计数，总枪声并发上限为 8；remote 每 tick 仍按三维距离排序只取最近 4 个并使用平方距离衰减。local/remote 的 `onended` 闭包分别回收对应计数并断开节点，`dispose` 同时清零两个计数和 context/gain。FakeAudioContext 测试跨两个 handle/tick 将 remote 填至 6 后仍创建第 7 个 local voice；该测试在父提交旧实现中会先得到 8 个 remote、于 `toHaveLength(6)` 失败，因此真实复现旧 bug，不是空断言。既有纯函数和静音测试继续覆盖距离衰减及 volume 0 不触碰 AudioContext。
+- 父提交核心复核：25 HP 撤退、26 HP 战斗；弹匣 `45/48/9/8`、弹药堆 `90/96/18/16`；基础 240 点及 `96/64/29/51` 类别/RNG 语义不变并独立追加 10 个医疗点；初始绷带默认/旧设置迁移/显式关闭及玩家-AI 同开关；空弹副枪切换、撤退换弹与断 LOS 寻兼容弹药；单次 `shot-fired` 的 weapon/origin 快照和 GameApp 级共享 AudioContext 均未见回归。
+- 验证：本机实际执行 `npm run typecheck && npm run test && npm run build && git diff --check 2d402a1 ebd2f15` 全通过；Vitest **19 files / 182 tests**，73.16s，包含 49 Bot 五 seed 武装与完整唯一胜者。构建仅有既有 >500kB chunk warning。GitHub Actions run `29679908997` 的 build 与 Pages deploy 均成功；已参考前序 volume 0 Chrome 状态/性能/console/network 证据。未发现业务源码中的 `context.Background()`。
+- 残余验证缺口（非阻塞）：FakeAudioContext 当前没有把 `onended` 分池回收、dispose 后清零和“最近 4 条”分别写成独立断言；这些行为已由直接调用链确认，且本轮无可定位运行时错误，后续修改音频池时宜补成回归。
