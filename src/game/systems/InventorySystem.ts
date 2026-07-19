@@ -4,7 +4,7 @@ import {
   createMapLayout,
   MAP_HALF_SIZE,
   type MapLayout,
-  type MapWallSegment,
+  type MapObstacle,
 } from "../../config/map";
 import type { ActorCommand } from "../commands/ActorCommand";
 import {
@@ -535,13 +535,19 @@ function isDropClearOfWalls(
   support: number,
   layout: MapLayout,
 ): boolean {
-  return layout.wallSegments.every((wall) =>
-    support >= wall.center.y + wall.height / 2 + BUILDING_ROOF_CAP_HEIGHT - 0.08 ||
-    !pointNearWall(candidate.x, candidate.z, wall)
+  return (
+    layout.wallSegments.every((wall) =>
+      support >= wall.center.y + wall.height / 2 + BUILDING_ROOF_CAP_HEIGHT - 0.08 ||
+      !pointNearWall(candidate.x, candidate.z, wall)
+    ) &&
+    layout.rockObstacles.every((rock) =>
+      support >= rock.center.y + rock.height / 2 - 0.08 ||
+      !pointNearWall(candidate.x, candidate.z, rock)
+    )
   );
 }
 
-function pointNearWall(x: number, z: number, wall: MapWallSegment): boolean {
+function pointNearWall(x: number, z: number, wall: MapObstacle): boolean {
   const closestX = clamp(x, wall.center.x - wall.width / 2, wall.center.x + wall.width / 2);
   const closestZ = clamp(z, wall.center.z - wall.depth / 2, wall.center.z + wall.depth / 2);
   return Math.hypot(x - closestX, z - closestZ) < DROP_WALL_CLEARANCE;

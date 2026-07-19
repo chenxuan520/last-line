@@ -74,6 +74,51 @@ describe("BotController", () => {
     expect(command.fire).toBe(false);
   });
 
+  it("retreats instead of firing when health falls below thirty-five percent", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    for (const actor of Object.values(state.actors)) actor.alive = actor.id === bot.id || actor.id === player.id;
+    bot.position = { x: 0, y: 1.76, z: 0 };
+    bot.health = 34;
+    bot.yaw = Math.PI / 2;
+    player.position = { x: 20, y: 1.76, z: 0 };
+
+    const command = new BotController(1, () => 0.5).update(bot, state, miss, 1, player.id);
+
+    expect(command.fire).toBe(false);
+    expect(command.useItem).toBeNull();
+    expect(Math.hypot(command.move.x, command.move.z)).toBeGreaterThan(0.5);
+    expect(command.sprint).toBe(true);
+  });
+
+  it("heals only after low-health retreat breaks line of sight", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    for (const actor of Object.values(state.actors)) actor.alive = actor.id === bot.id || actor.id === player.id;
+    bot.position = { x: 0, y: 1.76, z: 0 };
+    bot.health = 30;
+    bot.yaw = Math.PI / 2;
+    bot.inventory.backpack.push({ itemId: "medkit", quantity: 1 });
+    player.position = { x: 20, y: 1.76, z: 0 };
+    let visible = true;
+    const world: CombatWorld = { traceShot: () => null, hasLineOfSight: () => visible };
+    const controller = new BotController(1, () => 0.5);
+
+    const retreat = controller.update(bot, state, world, 1, player.id);
+    visible = false;
+    state.elapsedSeconds += 1;
+    const heal = controller.update(bot, state, world, 1, player.id);
+
+    expect(retreat.useItem).toBeNull();
+    expect(retreat.fire).toBe(false);
+    expect(heal.useItem).toBe("medkit");
+    expect(heal.move).toEqual({ x: 0, y: 0, z: 0 });
+  });
+
   it("uses the matching roof ramp while pursuing a visible rooftop target", () => {
     const state = groundedState();
     state.safeZone.radius = 2_000;
@@ -503,6 +548,24 @@ describe("BotController", () => {
     state.groundLoot = {};
 
     const command = new BotController(1, () => 0.5).update(bot, state, miss, 1 / 30, "player");
+
+    expect(Math.hypot(command.move.x, command.move.z)).toBeGreaterThan(0.9);
+    expect(command.sprint).toBe(true);
+  });
+
+  it("keeps searching the current zone when the final target radius is zero", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    for (const actor of Object.values(state.actors)) actor.alive = actor.id === bot.id || actor.id === player.id;
+    state.safeZone.radius = 120;
+    state.safeZone.targetRadius = 0;
+    bot.position = { x: 0, y: getTerrainHeight(0, 0, state.mapSeed) + 1.76, z: 0 };
+    player.position = { x: 500, y: getTerrainHeight(500, 0, state.mapSeed) + 1.76, z: 0 };
+    const hidden: CombatWorld = { traceShot: () => null, hasLineOfSight: () => false };
+
+    const command = new BotController(1, () => 0.5).update(bot, state, hidden, 1 / 30, player.id);
 
     expect(Math.hypot(command.move.x, command.move.z)).toBeGreaterThan(0.9);
     expect(command.sprint).toBe(true);

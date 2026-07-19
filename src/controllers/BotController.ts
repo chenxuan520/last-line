@@ -29,6 +29,10 @@ const DAMAGE_INVESTIGATION_DISTANCE = 30;
 const COMBAT_MEMORY_SECONDS = 12;
 const ZONE_SAFETY_MARGIN = 30;
 const UNARMED_WEAPON_DETOUR_DISTANCE = 120;
+const ENDGAME_SEARCH_ACTORS = 3;
+const ENDGAME_PATROL_SECONDS = 24;
+const LOW_HEALTH_RETREAT_RATIO = 0.35;
+const RETREAT_COVER_SEARCH_DISTANCE = 85;
 
 export class BotController {
   private navigator = new GridNavigator();
@@ -49,14 +53,18 @@ export class BotController {
   private navigationTarget: Vector3State | null = null;
   private lootTargetId: string | null = null;
   private patrolTarget: Vector3State | null = null;
+  private patrolTargetUntilSeconds = -1;
   private patrolSequence = 0;
   private lastObservedDamageElapsedSeconds = -1;
   private damageInvestigationTarget: Vector3State | null = null;
   private damageInvestigationDirection: Vector3State | null = null;
   private damageInvestigationUntilSeconds = -1;
-  private combatTargetId: string | null = null;
   private combatLastKnownPosition: Vector3State | null = null;
   private combatMemoryUntilSeconds = -1;
+  private retreatThreatId: string | null = null;
+  private retreatThreatPosition: Vector3State | null = null;
+  private retreatCoverTarget: Vector3State | null = null;
+  private retreatUntilSeconds = -1;
   private navigationProgressKey: string | null = null;
   private navigationProgressDistance = Number.POSITIVE_INFINITY;
   private navigationNoProgressDecisions = 0;
@@ -81,17 +89,22 @@ export class BotController {
     this.updateDeltaSeconds = deltaSeconds;
     const layout = createMapLayout(state.mapSeed);
     if (state.mapSeed !== this.navigatorSeed) {
-      this.navigator = new GridNavigator(layout.obstacles, layout.roofRamps, layout.wallSegments);
+      this.navigator = new GridNavigator(layout.obstacles, layout.roofRamps, [
+        ...layout.wallSegments,
+        ...layout.rockObstacles,
+      ]);
       this.navigatorSeed = state.mapSeed;
       this.waypoint = null;
       this.navigationPath = [];
       this.navigationTarget = null;
       this.lootTargetId = null;
       this.patrolTarget = null;
+      this.patrolTargetUntilSeconds = -1;
       this.damageInvestigationTarget = null;
       this.damageInvestigationDirection = null;
       this.damageInvestigationUntilSeconds = -1;
       this.clearCombatMemory();
+      this.clearRetreat();
       this.resetNavigationProgress();
     }
     if (!actor.alive) {
@@ -120,15 +133,23 @@ export class BotController {
       this.decisionSeconds = 0;
       this.lootTargetId = null;
       this.patrolTarget = null;
+      if (actor.health / actor.maxHealth < LOW_HEALTH_RETREAT_RATIO) {
+        this.retreatThreatId = null;
+        this.retreatThreatPosition = { ...this.damageInvestigationTarget };
+        this.retreatCoverTarget = null;
+        this.retreatUntilSeconds = state.elapsedSeconds + COMBAT_MEMORY_SECONDS;
+      }
       this.clearCombatMemory();
       this.clearNavigation();
     }
 
     const player = state.actors[playerId];
     const playerDistance = player?.alive ? horizontalDistance(actor.position, player.position) : Number.POSITIVE_INFINITY;
+    const livingActors = Object.values(state.actors).filter((candidate) => candidate.alive).length;
+    const endgameSearch = livingActors <= ENDGAME_SEARCH_ACTORS;
     this.decisionSeconds -= deltaSeconds;
     this.fireSeconds -= deltaSeconds;
-    const interval = playerDistance < 80 ? 0.08 : 0.22 + (numericId(actor.id) % 4) * 0.04;
+    const interval = endgameSearch ? 0.1 : playerDistance < 80 ? 0.08 : 0.22 + (numericId(actor.id) % 4) * 0.04;
     if (this.decisionSeconds > 0) {
       const command = {
         ...this.cached,
@@ -156,8 +177,10 @@ export class BotController {
         this.navigationTarget = null;
         this.lootTargetId = null;
         this.patrolTarget = null;
+        this.patrolTargetUntilSeconds = -1;
         this.resetNavigationProgress();
         this.weaponLandingTarget = null;
+        this.retreatCoverTarget = null;
         this.stalledDecisions = 0;
       }
     }
@@ -183,6 +206,7 @@ export class BotController {
     );
     const outsideTargetZone = horizontalDistance(actor.position, state.safeZone.targetCenter) > targetZoneRadius;
     const outsideCurrentZone = horizontalDistance(actor.position, state.safeZone.center) > state.safeZone.radius;
+    const shouldEnterTargetZone = outsideTargetZone && (!endgameSearch || targetZoneRadius >= 24);
     const nearbyWeapon = !activeWeapon && !outsideCurrentZone
       ? this.findUsefulLoot(actor, state, true)
       : null;
@@ -208,19 +232,46 @@ export class BotController {
       }
       return this.cache(this.navigate(actor, nearbyWeapon.loot.position, command, nearbyWeapon.path));
     }
-    if (outsideTargetZone || outsideCurrentZone) {
+    if (shouldEnterTargetZone || outsideCurrentZone) {
       this.lootTargetId = null;
       this.patrolTarget = null;
-      const center = outsideTargetZone ? state.safeZone.targetCenter : state.safeZone.center;
-      const radius = outsideTargetZone
+      const center = shouldEnterTargetZone ? state.safeZone.targetCenter : state.safeZone.center;
+      const radius = shouldEnterTargetZone
         ? targetZoneRadius
         : Math.max(0, state.safeZone.radius - ZONE_SAFETY_MARGIN);
       return this.cache(this.navigateIntoZone(actor, center, radius, command));
     }
 
     const target = this.findVisibleTarget(actor, state, world);
+    const lowHealth = actor.health / actor.maxHealth < LOW_HEALTH_RETREAT_RATIO;
+    if (!lowHealth) this.clearRetreat();
+    if (target && lowHealth) {
+      this.retreatThreatId = target.id;
+      this.retreatThreatPosition = { ...target.position };
+      this.retreatUntilSeconds = state.elapsedSeconds + COMBAT_MEMORY_SECONDS;
+      this.clearCombatMemory();
+      this.lootTargetId = null;
+      this.patrolTarget = null;
+      return this.cache(this.retreatFromThreat(actor, state, layout, command));
+    }
+    if (
+      lowHealth &&
+      this.retreatThreatPosition &&
+      state.elapsedSeconds <= this.retreatUntilSeconds
+    ) {
+      const threatHasLineOfSight = this.retreatThreatId
+        ? world.hasLineOfSight?.(actor.id, this.retreatThreatId) === true
+        : !this.retreatCoverTarget || horizontalDistance(actor.position, this.retreatCoverTarget) >= 2;
+      if (!threatHasLineOfSight) {
+        this.clearNavigation();
+        if (actor.health < 38 && getItemQuantity(actor, "medkit") > 0) command.useItem = "medkit";
+        else if (getItemQuantity(actor, "bandage") > 0) command.useItem = "bandage";
+        if (command.useItem) return this.cache(command);
+      }
+      return this.cache(this.retreatFromThreat(actor, state, layout, command));
+    }
+    if (state.elapsedSeconds > this.retreatUntilSeconds) this.clearRetreat();
     if (target && activeWeapon && canFight) {
-      this.combatTargetId = target.id;
       this.combatLastKnownPosition = { ...target.position };
       this.combatMemoryUntilSeconds = state.elapsedSeconds + COMBAT_MEMORY_SECONDS;
       this.damageInvestigationTarget = null;
@@ -256,10 +307,8 @@ export class BotController {
       return this.cache(command);
     }
 
-    const rememberedTarget = this.combatTargetId ? state.actors[this.combatTargetId] : undefined;
     if (
       !target &&
-      rememberedTarget?.alive &&
       this.combatLastKnownPosition &&
       state.elapsedSeconds <= this.combatMemoryUntilSeconds &&
       horizontalDistance(actor.position, this.combatLastKnownPosition) > 2
@@ -269,8 +318,7 @@ export class BotController {
     }
     if (
       !target &&
-      (!rememberedTarget?.alive ||
-        state.elapsedSeconds > this.combatMemoryUntilSeconds ||
+      (state.elapsedSeconds > this.combatMemoryUntilSeconds ||
         (this.combatLastKnownPosition && horizontalDistance(actor.position, this.combatLastKnownPosition) <= 2))
     ) {
       this.clearCombatMemory();
@@ -342,14 +390,18 @@ export class BotController {
     layout: ReturnType<typeof createMapLayout>,
   ): { target: Vector3State; path: Vector3State[] } | null {
     const livingActors = Object.values(state.actors).filter((candidate) => candidate.alive).length;
-    const patrolCenter = state.safeZone.targetCenter;
+    const endgameSearch = livingActors <= ENDGAME_SEARCH_ACTORS;
+    const searchCurrentZone = endgameSearch && state.safeZone.targetRadius < 24;
+    const patrolCenter = searchCurrentZone ? state.safeZone.center : state.safeZone.targetCenter;
+    const zoneRadius = searchCurrentZone ? state.safeZone.radius : state.safeZone.targetRadius;
     const patrolRadius = Math.max(
       0,
-      state.safeZone.targetRadius - Math.min(ZONE_SAFETY_MARGIN, state.safeZone.targetRadius * 0.12),
+      zoneRadius - Math.min(ZONE_SAFETY_MARGIN, zoneRadius * 0.12),
     );
     const lateGame = livingActors <= LATE_GAME_PATROL_ACTORS || patrolRadius <= LATE_GAME_PATROL_RADIUS;
     if (
       this.patrolTarget &&
+      (!endgameSearch || state.elapsedSeconds <= this.patrolTargetUntilSeconds) &&
       horizontalDistance(actor.position, this.patrolTarget) >= 2 &&
       horizontalDistance(this.patrolTarget, patrolCenter) <= patrolRadius
     ) {
@@ -363,10 +415,15 @@ export class BotController {
 
     this.patrolTarget = null;
     this.patrolSequence += 1;
-    const usableRadius = Math.max(0, Math.min(patrolRadius * 0.68 - 1, lateGame ? 260 : 180));
+    const usableRadius = Math.max(0, Math.min(
+      patrolRadius * (endgameSearch ? 0.9 : 0.68) - 1,
+      endgameSearch ? 420 : lateGame ? 260 : 180,
+    ));
     for (let attempt = 0; attempt < 12; attempt += 1) {
       const angle = numericId(actor.id) * 2.399963 + (this.patrolSequence + attempt) * 1.618034;
-      const radiusScale = 0.35 + ((numericId(actor.id) + this.patrolSequence + attempt * 3) % 6) * 0.1;
+      const radiusScale = endgameSearch
+        ? [0.82, 0.5, 0.68][(numericId(actor.id) + this.patrolSequence + attempt) % 3] ?? 0.68
+        : 0.35 + ((numericId(actor.id) + this.patrolSequence + attempt * 3) % 6) * 0.1;
       const radius = usableRadius * radiusScale;
       const x = patrolCenter.x + Math.cos(angle) * radius;
       const z = patrolCenter.z + Math.sin(angle) * radius;
@@ -374,6 +431,7 @@ export class BotController {
       const path = this.navigator.findPath(actor.position, candidate);
       if (path.length === 0 || horizontalDistance(actor.position, candidate) < 2) continue;
       this.patrolTarget = candidate;
+      this.patrolTargetUntilSeconds = state.elapsedSeconds + ENDGAME_PATROL_SECONDS;
       return { target: candidate, path };
     }
     return null;
@@ -390,11 +448,74 @@ export class BotController {
       if (distance > 150 || distance >= nearestDistance) continue;
       const direction = normalizeFlat(offset);
       const inView = distance < 12 || direction.x * facing.x + direction.z * facing.z > -0.2;
-      if (!inView || world.hasLineOfSight?.(actor.id, candidate.id) === false) continue;
+      if (!inView || world.hasLineOfSight?.(actor.id, candidate.id) !== true) continue;
       nearest = candidate;
       nearestDistance = distance;
     }
     return nearest;
+  }
+
+  private retreatFromThreat(
+    actor: ActorState,
+    state: MatchState,
+    layout: ReturnType<typeof createMapLayout>,
+    command: ActorCommand,
+  ): ActorCommand {
+    const threat = this.retreatThreatPosition;
+    if (!threat) return command;
+    command.fire = false;
+    command.reload = false;
+    command.aimDirection = normalize(subtract(threat, actor.position));
+    if (!this.retreatCoverTarget || horizontalDistance(actor.position, this.retreatCoverTarget) < 2) {
+      this.retreatCoverTarget = null;
+      const cover = this.findRetreatCover(actor, state, layout, threat);
+      if (cover) {
+        this.retreatCoverTarget = cover.target;
+        return this.navigate(actor, cover.target, command, cover.path, true);
+      }
+    }
+    if (this.retreatCoverTarget) {
+      return this.navigate(actor, this.retreatCoverTarget, command, undefined, true);
+    }
+    this.clearNavigation();
+    command.move = normalizeFlat(subtract(actor.position, threat));
+    command.sprint = true;
+    return command;
+  }
+
+  private findRetreatCover(
+    actor: ActorState,
+    state: MatchState,
+    layout: ReturnType<typeof createMapLayout>,
+    threat: Vector3State,
+  ): { target: Vector3State; path: Vector3State[] } | null {
+    const blockers = [...layout.wallSegments, ...layout.rockObstacles]
+      .map((obstacle) => ({ obstacle, distance: horizontalDistance(actor.position, obstacle.center) }))
+      .filter((entry) => entry.distance <= RETREAT_COVER_SEARCH_DISTANCE)
+      .sort((left, right) => left.distance - right.distance || left.obstacle.id.localeCompare(right.obstacle.id))
+      .slice(0, 8);
+    let pathChecks = 0;
+    for (const { obstacle } of blockers) {
+      const away = normalizeFlat(subtract(obstacle.center, threat));
+      if (away.x === 0 && away.z === 0) continue;
+      const edgeDistance = Math.min(
+        Math.abs(away.x) > 1e-6 ? obstacle.width / 2 / Math.abs(away.x) : Number.POSITIVE_INFINITY,
+        Math.abs(away.z) > 1e-6 ? obstacle.depth / 2 / Math.abs(away.z) : Number.POSITIVE_INFINITY,
+      );
+      const x = obstacle.center.x + away.x * (edgeDistance + 1.15);
+      const z = obstacle.center.z + away.z * (edgeDistance + 1.15);
+      const target = { x, y: getTerrainHeight(x, z, layout) + 1.76, z };
+      if (horizontalDistance(actor.position, target) < 3) continue;
+      if (
+        state.safeZone.radius > 2 &&
+        horizontalDistance(target, state.safeZone.center) > state.safeZone.radius - 1
+      ) continue;
+      const path = this.navigator.findPath(actor.position, target);
+      pathChecks += 1;
+      if (path.length > 0) return { target, path };
+      if (pathChecks >= 4) break;
+    }
+    return null;
   }
 
   private findUsefulLoot(
@@ -642,9 +763,16 @@ export class BotController {
   }
 
   private clearCombatMemory(): void {
-    this.combatTargetId = null;
     this.combatLastKnownPosition = null;
     this.combatMemoryUntilSeconds = -1;
+  }
+
+  private clearRetreat(): void {
+    if (this.retreatCoverTarget) this.clearNavigation();
+    this.retreatThreatId = null;
+    this.retreatThreatPosition = null;
+    this.retreatCoverTarget = null;
+    this.retreatUntilSeconds = -1;
   }
 }
 

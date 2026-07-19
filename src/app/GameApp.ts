@@ -1,5 +1,6 @@
 import { Engine } from "@babylonjs/core/Engines/engine";
 import { AssetCatalog } from "../assets/AssetCatalog";
+import { AudioFeedback } from "../client/audio/AudioFeedback";
 import { BATTLE_ROYALE_CONFIG } from "../config/battleRoyale";
 import { DEFAULT_SETTINGS, type GameSettings, type QualityLevel } from "../config/settings";
 import { BattleRoyaleSession } from "./BattleRoyaleSession";
@@ -11,6 +12,7 @@ export class GameApp {
   private assets: AssetCatalog | null = null;
   private session: BattleRoyaleSession | null = null;
   private settings = loadSettings();
+  private readonly menuAudio = new AudioFeedback(0);
   private starting = false;
 
   public constructor(
@@ -40,6 +42,7 @@ export class GameApp {
     window.removeEventListener("resize", this.handleResize);
     this.engine.stopRenderLoop();
     this.session?.dispose();
+    this.menuAudio.dispose();
     this.engine.dispose();
   }
 
@@ -48,6 +51,7 @@ export class GameApp {
     this.starting = true;
     this.session?.dispose();
     this.session = null;
+    this.menuAudio.dispose();
     this.applyQuality();
     this.renderLoading(1);
     try {
@@ -89,7 +93,7 @@ export class GameApp {
         <p class="menu-description">穿越随机航线空降苍岬岛，搜集武器和补给，在不断收缩的安全区内成为最后一名幸存者。</p>
         <div class="settings-grid" aria-label="游戏设置">
           <label>画面质量<select data-setting="quality"><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></label>
-          <label>主音量<input data-setting="volume" type="range" min="0" max="1" step="0.1" value="${this.settings.volume}" /></label>
+          <label class="volume-setting"><span>主音量 <output data-volume-output></output></span><input aria-label="主音量" data-setting="volume" type="range" min="0" max="1" step="0.1" value="${this.settings.volume}" /></label>
           <label>鼠标灵敏度<input data-setting="sensitivity" type="range" min="0.4" max="2" step="0.1" value="${this.settings.sensitivity}" /></label>
         </div>
         <button class="primary-button" data-action="start"><span>开始游戏</span><b>DEPLOY</b></button>
@@ -98,6 +102,21 @@ export class GameApp {
     `;
     const quality = this.uiRoot.querySelector<HTMLSelectElement>("[data-setting='quality']");
     if (quality) quality.value = this.settings.quality;
+    const volume = this.uiRoot.querySelector<HTMLInputElement>("[data-setting='volume']");
+    const volumeOutput = this.uiRoot.querySelector<HTMLOutputElement>("[data-volume-output]");
+    const updateVolume = (preview: boolean): void => {
+      if (!volume) return;
+      const nextVolume = normalizeVolume(Number(volume.value));
+      this.settings = { ...this.settings, volume: nextVolume };
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings));
+      volume.style.setProperty("--range-progress", `${nextVolume * 100}%`);
+      if (volumeOutput) volumeOutput.textContent = nextVolume === 0 ? "静音" : `${Math.round(nextVolume * 100)}%`;
+      this.menuAudio.setVolume(nextVolume);
+      if (preview) this.menuAudio.preview();
+    };
+    volume?.addEventListener("input", () => updateVolume(false));
+    volume?.addEventListener("change", () => updateVolume(true));
+    updateVolume(false);
     this.uiRoot.querySelector<HTMLButtonElement>("[data-action='start']")?.addEventListener("click", () => {
       this.readSettings();
       void this.startMatch();
@@ -110,7 +129,7 @@ export class GameApp {
     const sensitivity = Number(this.uiRoot.querySelector<HTMLInputElement>("[data-setting='sensitivity']")?.value);
     this.settings = {
       quality: isQuality(quality) ? quality : DEFAULT_SETTINGS.quality,
-      volume: Number.isFinite(volume) ? volume : DEFAULT_SETTINGS.volume,
+      volume: normalizeVolume(volume),
       sensitivity: Number.isFinite(sensitivity) ? sensitivity : DEFAULT_SETTINGS.sensitivity,
     };
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings));
@@ -131,7 +150,7 @@ function loadSettings(): GameSettings {
     const value = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "null") as Partial<GameSettings> | null;
     return {
       quality: isQuality(value?.quality) ? value.quality : DEFAULT_SETTINGS.quality,
-      volume: typeof value?.volume === "number" ? value.volume : DEFAULT_SETTINGS.volume,
+      volume: typeof value?.volume === "number" ? normalizeVolume(value.volume) : DEFAULT_SETTINGS.volume,
       sensitivity: typeof value?.sensitivity === "number" ? value.sensitivity : DEFAULT_SETTINGS.sensitivity,
     };
   } catch {
@@ -141,4 +160,8 @@ function loadSettings(): GameSettings {
 
 function isQuality(value: unknown): value is QualityLevel {
   return value === "low" || value === "medium" || value === "high";
+}
+
+function normalizeVolume(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : DEFAULT_SETTINGS.volume;
 }

@@ -5,6 +5,7 @@ import {
   createMapLayout,
   getTerrainHeight,
   MAP_HALF_SIZE,
+  MAP_ROCK_OBSTACLES,
   MAP_WALL_SEGMENTS,
 } from "../../src/config/map";
 import { createIdleCommand, type ActorCommand } from "../../src/game/commands/ActorCommand";
@@ -78,6 +79,22 @@ describe("MovementSystem", () => {
     const closestZ = clamp(actor.position.z, wall.center.z - wall.depth / 2, wall.center.z + wall.depth / 2);
     expect(Math.hypot(actor.position.x - closestX, actor.position.z - closestZ)).toBeGreaterThanOrEqual(
       ACTOR_RADIUS,
+    );
+  });
+
+  it("blocks movement with authoritative cover rocks", () => {
+    const rock = MAP_ROCK_OBSTACLES[0];
+    if (!rock) throw new Error("test cover rock missing");
+    const state = createState(rock.center.x - rock.width / 2 - ACTOR_RADIUS - 1, rock.center.z);
+    const actor = state.actors.actor;
+    if (!actor) throw new Error("test actor missing");
+
+    advance(state, movingCommand(1, 0, true), 120, 1 / 60);
+
+    expect(actor.position.x).toBeLessThanOrEqual(rock.center.x - rock.width / 2 - ACTOR_RADIUS + 0.002);
+    expect(getSupportHeight(rock.center.x, rock.center.z, Number.POSITIVE_INFINITY, createMapLayout(0))).toBeCloseTo(
+      rock.center.y + rock.height / 2,
+      5,
     );
   });
 
@@ -203,6 +220,18 @@ describe("GridNavigator", () => {
     expect(path[0]).toEqual(start);
     expect(path.at(-1)).toEqual(target);
     expect(path.length).toBeGreaterThan(4);
+  });
+
+  it("routes around authoritative rock cover", () => {
+    const rock = { id: "cover-rock", center: { x: 0, y: 2, z: 0 }, width: 8, height: 4, depth: 7, color: "#666" };
+    const start = { x: -10, y: GROUND_HEIGHT, z: 0 };
+    const target = { x: 10, y: GROUND_HEIGHT, z: 0 };
+
+    const path = new GridNavigator([], [], [rock]).findPath(start, target);
+
+    expect(path[0]).toEqual(start);
+    expect(path.at(-1)).toEqual(target);
+    expect(path.length).toBeGreaterThan(2);
   });
 
   it("routes rooftop actors down the matching ramp", () => {

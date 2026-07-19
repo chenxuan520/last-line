@@ -8,6 +8,6 @@ export interface GameSettings {
 
 export const DEFAULT_SETTINGS: GameSettings = {
   quality: "medium",
-  volume: 0.7,
+  volume: 0,
   sensitivity: 1,
 };

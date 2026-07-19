@@ -1094,3 +1094,34 @@
 - 本 commit 的测试调整仅为 timeout 余量（AI 60→120 秒、完整圈 30 秒、NullEngine 30→60 秒）以及空间格重复移动 3000→300 步；未减少 seed、几何、完整局或候选墙段断言。300 步仍会持续撞墙，结构断言仍直接要求当前格候选少于全图墙段的 1/4，足以验证本门禁目的。
 - 本机实际执行 `npm run typecheck && npm run test && npm run build && git diff --check` 全通过；Vitest 18 files / 162 tests，wall time 90.52 秒。独立 `mapLayout` 17 tests / 76.03 秒、`aiLootReachability` 7 tests / 66.87 秒全通过。构建仅保留既有 >500kB chunk warning。
 - GitHub Actions `CI and GitHub Pages` run `29652937142` 对 d651b7c 成功，build 与 GitHub Pages deploy jobs 均成功。自动换弹、落地计数、AI target zone、空中规则和零半径唯一胜者的现有回归随完整套件通过；未发现 `context.Background()`。
+
+### 2026-07-19 01:26 +0800：origin/main 488d5e0 与当前 release gate 最终复核（通过）
+
+- 审查范围：已推送 `origin/main` 的 `488d5e0d6b898ca1f06eb38e0725229df7e9371d` 相对父提交 `d651b7cf7b4014867fb43dbe4b9cb6470c588c53` 的 3 个文件完整 diff，并复核当前 main release gate；对照本 plan、`AGENTS.md`、`README.md` 及 01:09 上轮唯一 finding，忽略未跟踪 `session-ses_096e.md`。
+- 结论：**通过。本次审查未发现明确中高风险 finding。** `HEAD/main/origin/main` 经 fetch 后均为 `488d5e0`，本提交仅补充 `maxBackpackStacks` 签名依赖、对应回归和 plan 记录，没有无关业务改动。
+- 上轮 finding 已闭环：`pickupPromptSignature` 已纳入 `maxBackpackStacks`；新增回归覆盖容量 `1→2` 后签名变化，提示由“当前无法拾取”刷新为 `F 拾取 步枪弹`。逐项对照 `canActorPickLoot` 后，签名已覆盖 alive/deployment、玩家三维位置、armor/maxArmor、armorLevel/helmetLevel、active slot、双槽 weapon ID、背包 item/quantity/max stacks，以及 3.2m 内可用 loot 的 id/item/quantity/三维位置；未发现仍会改变正常拾取资格的运行时状态遗漏。
+- 视觉与掉落复核：`IslandScene.ts` 相对原基线 `cc9c869` 的 blob hash 完全一致；marker 仍为 `0.62m` box、默认 scale `(1,1,1)`、原 rotation/position 同步和 `isPickable=true`，没有再次缩小。动态掉落业务源码未被本提交修改，候选仍从 `1.2/1.55/1.9/2.2/2.45/2.65m` 环选择并校验与 actor 的真实三维距离 `<=3m`；屋顶边缘 10 件、4 个同点尸体 40 个唯一坐标和 marker NullEngine 回归随完整套件通过。
+- 本机验证：`npm run typecheck` 通过；`npm run test` 为 **18 files / 163 tests** 全通过（79.63s）；`npm run build` 通过，仅保留既有 >500kB chunk warning；工作区及 `488d5e0^..488d5e0` 的 `git diff --check` 均通过。未发现业务源码中的 `context.Background()`。
+- 远端验证：GitHub Actions `CI and GitHub Pages` run `29653749439` 成功，build 与 GitHub Pages deploy jobs 均成功。残余验证缺口仅为本轮未重复人工静音浏览器 smoke，不阻塞本次定向修复与自动 release gate。
+
+## 2026-07-19 14:24 +0800：环境、掩体、终局 AI 与观战体验增强
+
+- 地形与植被：现有单一地形 mesh 增加 seed 确定的顶点色明暗斑块、地表纹路和高度等值变化，不新增贴图、地表 mesh 或帧内计算；128 棵树仍保持每棵 1 个树干 + 1 个合并树冠，树冠由三个七边低模层合并，普通树约 17–21m，12 棵大树约 25–28m，单树冠低于 160 顶点。
+- 权威岩石掩体：每个 seed 生成 24 个稳定 ID、JSON 可序列化的大岩石，避让建筑、坡道、道路、其他岩石与地面物资；已进入移动空间格、垂直支撑、GridNavigator、SimulationCombatWorld 子弹/LOS 和死亡掉落避让。房屋继续只由真实墙段/屋顶挡弹，门窗开口不被错误封死。渲染使用 24 个权威大岩石替换原 56 个装饰岩石中的一部分，另保留 32 个小装饰岩石，总岩石 mesh 数不增加。
+- 飞机：保留相机内机舱框架，新增独立世界空间的低模运输机（机身、主翼、尾翼、垂尾、驾驶舱、双发动机）和两条固定半透明尾迹；跳伞后飞机按 `FlightState.start/end/progress` 继续飞行，不跟随玩家下降。尾迹不使用粒子、历史队列或逐帧分配。
+- 声音：新用户主音量默认 `0`，已有 localStorage 偏好保留；主菜单滑杆显示“静音/百分比”和填充进度，输入时立即持久化，松开且音量大于 0 时短促试听。自动化与浏览器验收始终保持音量 0。
+- 安全区与 AI：存活人数从 5 降到 4 时，仅 active shrinking 的墙钟推进变为 2 倍，等待时间和圈伤 DPS 不变。3 人及以下 Bot 使用当前安全区的有寿命覆盖巡逻点，最终 targetRadius=0 时不再精确站圈心停滞；感知必须明确通过范围、视野和权威 LOS。生命低于 35% 且存在威胁时 Bot 停火，从实际墙段/大岩石中有界选择背向威胁的可达掩体，切断 LOS 后才按共享物品规则治疗。
+- 观战与 HUD：玩家死亡只在首次选择击杀者或稳定存活角色，后续死亡事件不自动切换；空格、滚轮下/上分别手动循环存活观察对象。相机允许锁定已死亡观察对象直到用户切换；底部生命、护甲、头盔、武器、备弹、双武器槽、背包和治疗状态读取当前观察对象，本地小地图、拾取提示和排行榜高亮仍绑定玩家，避免观战产生可执行提示或信息泄露。
+- 受伤/淘汰表现：`actor-damaged` 触发 520ms 四角红色暗角，中心和准星保持透明；淘汰卡恢复居中，背景 alpha 约 0.58–0.68、阴影减弱，后方观战画面可见。安全区死亡提示为“正在观察存活角色”，有存活击杀者时才显示“正在观察击杀者”。
+- 自动验证：`npm run typecheck && npm run test && npm run build && git diff --check` 全通过；Vitest 18 files / 173 tests，完整约 96.04 秒。新增覆盖岩石 seed/物资避让、移动/支撑、导航、子弹/LOS，树木高度/低模预算，飞机固定对象池，4 人缩圈，低血撤退、断 LOS 治疗、零半径终局搜索，击杀者锁定和空格/滚轮观战；49 Bot 五 seed 武装率阈值及完整唯一胜者保持通过。
+- 静音 Chrome 生产验收：主菜单默认静音；飞机跳伞后继续独立飞行且双尾迹可见；tree trunk/foliage 为 128/128、cover/small rock 为 24/32、trail 为 2，无临时 foliage layer 残留；四角受伤暗角与半透明居中淘汰卡观感通过。50 人航线阶段 15.25 秒平均约 120.5 FPS、最低 119.7，生存阶段平均约 119、最低 112.2；console 0 error/warn，network 0 failure。
+
+## 审查
+
+### 2026-07-19 14:29 +0800：488d5e0 基线完整 tracked diff 最终审查（通过）
+
+- 审查范围：当前 `main` 工作区相对 `HEAD/origin/main=488d5e0d6b898ca1f06eb38e0725229df7e9371d` 的 26 个 tracked 文件、875 additions / 114 deletions；忽略未跟踪 `session-ses_08c4.md`、`session-ses_096e.md`。对照本 plan、`AGENTS.md`、`README.md` 及本轮岩石、植被/地面、飞机、音量、安全区、AI、观战和 UI 要求。
+- 审查结论：**通过。本次审查未发现明确中高风险 finding。** 改动均可追溯到本轮需求；未发现无关业务语义调整或业务源码中的 `context.Background()`。
+- 关键核查：24 个 seed 岩石保持稳定 ID/可序列化布局并接入生成避让、移动空间格/支撑、导航、权威子弹/LOS 和动态掉落；建筑仍使用墙段与屋顶权威几何，门窗开口未被整栋 AABB 封闭，渲染 mesh 不参与命中。树木仍为 128 trunk + 128 合并 foliage，无临时 layer；岩石保持 24 cover + 32 decorative。飞机机舱/世界模型分离，世界模型和两条尾迹固定有界。音量默认 0、合法存储保留，0 音量不创建或播放 AudioContext。少于 5 人仅加速 shrinking，等待和圈伤不翻倍。AI 终局搜索、显式感知门禁、低血掩体撤退及圈外优先均有界。观战锁定、手动循环、停止模拟后的相机刷新及 viewed/local actor HUD 边界符合约定。
+- 本机验证：实际执行 `npm run typecheck && npm run test && npm run build && git diff --check 488d5e0 --` 全通过；Vitest 为 18 files / 173 tests，wall time 77.64s；构建仅保留既有 >500kB chunk warning。已参考本轮静音 Chrome 生产验收：航线平均 120.5/min 119.7，生存平均 119/min 112.2，console/network 0，树/岩石/尾迹计数及 volume 0 正确。
+- 残余风险：音量 localStorage/AudioContext 和完整 session 观战仍主要依赖静态调用链与人工生产验收，未新增浏览器自动化；现有大 chunk warning 未扩大为本轮阻塞项。

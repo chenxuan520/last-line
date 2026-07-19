@@ -31,7 +31,8 @@ export class BattleRoyaleSession {
   private readonly lootMeshes;
   private readonly syncLootMeshes;
   private readonly viewWeaponRoot;
-  private readonly aircraftVisualRoot;
+  private readonly aircraftInteriorRoot;
+  private readonly syncAircraftVisual;
   private readonly syncSafeZoneRing;
   private readonly simulation: GameSimulation;
   private readonly clock = new FixedStepClock();
@@ -47,6 +48,7 @@ export class BattleRoyaleSession {
   private playerEliminated = false;
   private spectatorActorId: EntityId | null = null;
   private lastVisualElapsedSeconds = -1;
+  private lastVisualActorId: EntityId | null = null;
 
   private constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -65,7 +67,8 @@ export class BattleRoyaleSession {
     this.lootMeshes = bundle.lootMeshes;
     this.syncLootMeshes = bundle.syncLootMeshes;
     this.viewWeaponRoot = bundle.viewWeaponRoot;
-    this.aircraftVisualRoot = bundle.aircraftVisualRoot;
+    this.aircraftInteriorRoot = bundle.aircraftInteriorRoot;
+    this.syncAircraftVisual = bundle.syncAircraftVisual;
     this.syncSafeZoneRing = bundle.syncSafeZoneRing;
     this.humanController = new HumanController(canvas, settings.sensitivity);
     this.audio = new AudioFeedback(settings.volume);
@@ -110,6 +113,15 @@ export class BattleRoyaleSession {
     if (!this.active) return;
     const player = this.getActor(PLAYER_ID);
     this.humanController.rememberActor(player);
+    const spectatorSwitch = this.humanController.consumeSpectatorSwitchRequest();
+    if (!player.alive && spectatorSwitch) {
+      this.spectatorActorId = cycleSpectatorActorId(
+        PLAYER_ID,
+        this.spectatorActorId,
+        this.simulation.state.actors,
+        spectatorSwitch,
+      );
+    }
     const pointerLocked = document.pointerLockElement === this.canvas;
     const shouldAdvance = this.simulation.state.phase !== "finished" && (pointerLocked || !player.alive);
     if (shouldAdvance) {
@@ -120,6 +132,7 @@ export class BattleRoyaleSession {
     this.hud?.update(
       this.simulation.state,
       player,
+      this.spectatorActorId ? this.simulation.state.actors[this.spectatorActorId] ?? player : player,
       pointerLocked,
       fps,
       this.humanController.isScoped(player),
@@ -162,6 +175,12 @@ export class BattleRoyaleSession {
       }
       if (event.type === "actor-died") {
         this.actorRoots.get(event.actorId)?.setEnabled(false);
+        this.spectatorActorId = resolveSpectatorActorId(
+          PLAYER_ID,
+          this.spectatorActorId,
+          event,
+          this.simulation.state.actors,
+        );
         if (event.actorId === PLAYER_ID && !this.playerEliminated) {
           this.playerEliminated = true;
           if (document.pointerLockElement === this.canvas) void document.exitPointerLock();
@@ -173,14 +192,9 @@ export class BattleRoyaleSession {
             placement,
             this.getActor(PLAYER_ID).kills,
             event.sourceId ? `被 ${killerLabel} 使用 ${weaponLabel ?? "武器"} 淘汰` : "被安全区淘汰",
+            Boolean(event.sourceId && this.spectatorActorId === event.sourceId),
           );
         }
-        this.spectatorActorId = resolveSpectatorActorId(
-          PLAYER_ID,
-          this.spectatorActorId,
-          event,
-          this.simulation.state.actors,
-        );
       }
       if (event.type === "item-picked") {
         const loot = this.simulation.state.groundLoot[event.lootId];
@@ -198,16 +212,24 @@ export class BattleRoyaleSession {
   private syncVisuals(): void {
     const player = this.getActor(PLAYER_ID);
     const spectator = this.spectatorActorId ? this.simulation.state.actors[this.spectatorActorId] : undefined;
-    const cameraActor = spectator?.alive ? spectator : player;
+    const cameraActor = spectator ?? player;
     const activeViewWeapon = getActiveWeapon(cameraActor);
     const scoped = cameraActor.id === PLAYER_ID && this.humanController.isScoped(player);
     this.camera.fov = scoped ? WEAPONS[activeViewWeapon?.weaponId ?? ""]?.scopeFov ?? 1.18 : 1.18;
     this.viewWeaponRoot.setEnabled(Boolean(activeViewWeapon) && !scoped && cameraActor.deployment === "grounded");
     setActorWeaponVisual(this.viewWeaponRoot, activeViewWeapon?.weaponId ?? null);
     this.syncReloadVisual(activeViewWeapon);
-    if (this.lastVisualElapsedSeconds !== this.simulation.state.elapsedSeconds) {
+    if (
+      this.lastVisualElapsedSeconds !== this.simulation.state.elapsedSeconds ||
+      this.lastVisualActorId !== cameraActor.id
+    ) {
       this.lastVisualElapsedSeconds = this.simulation.state.elapsedSeconds;
-      this.aircraftVisualRoot.setEnabled(cameraActor.id === PLAYER_ID && player.deployment === "aircraft");
+      this.lastVisualActorId = cameraActor.id;
+      this.aircraftInteriorRoot.setEnabled(cameraActor.id === PLAYER_ID && player.deployment === "aircraft");
+      this.syncAircraftVisual(
+        this.simulation.state.flight,
+        this.simulation.state.phase === "flight" && player.deployment !== "aircraft",
+      );
       this.camera.position.set(cameraActor.position.x, cameraActor.position.y, cameraActor.position.z);
       this.camera.rotation.set(cameraActor.pitch, cameraActor.yaw, 0);
       for (const [actorId, root] of this.actorRoots) {
@@ -267,12 +289,35 @@ export function resolveSpectatorActorId(
   event: Extract<GameEvent, { type: "actor-died" }>,
   actors: Readonly<Record<EntityId, ActorState>>,
 ): EntityId | null {
-  if (event.actorId !== playerId && event.actorId !== currentSpectatorId) return currentSpectatorId;
+  if (event.actorId !== playerId || currentSpectatorId !== null) return currentSpectatorId;
   const killer = event.sourceId ? actors[event.sourceId] : undefined;
   if (killer?.alive && killer.id !== playerId) return killer.id;
   return Object.values(actors)
     .filter((actor) => actor.alive && actor.id !== playerId)
     .sort((left, right) => left.id.localeCompare(right.id))[0]?.id ?? null;
+}
+
+export function cycleSpectatorActorId(
+  playerId: EntityId,
+  currentSpectatorId: EntityId | null,
+  actors: Readonly<Record<EntityId, ActorState>>,
+  direction: -1 | 1,
+): EntityId | null {
+  const candidates = Object.values(actors)
+    .filter((actor) => actor.alive && actor.id !== playerId)
+    .sort((left, right) => left.id.localeCompare(right.id));
+  if (candidates.length === 0) return currentSpectatorId;
+  const currentIndex = candidates.findIndex((actor) => actor.id === currentSpectatorId);
+  if (currentIndex >= 0) {
+    return candidates[(currentIndex + direction + candidates.length) % candidates.length]?.id ?? currentSpectatorId;
+  }
+  if (currentSpectatorId) {
+    const next = direction > 0
+      ? candidates.find((actor) => actor.id > currentSpectatorId) ?? candidates[0]
+      : [...candidates].reverse().find((actor) => actor.id < currentSpectatorId) ?? candidates.at(-1);
+    return next?.id ?? currentSpectatorId;
+  }
+  return direction > 0 ? candidates[0]?.id ?? null : candidates.at(-1)?.id ?? null;
 }
 
 export function getReloadVisualTransform(

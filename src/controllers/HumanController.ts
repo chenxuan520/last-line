@@ -4,6 +4,7 @@ import { WEAPONS } from "../config/weapons";
 import { getActiveWeapon, getItemQuantity, type ActorState, type WeaponSlot } from "../game/state/types";
 
 const MOVEMENT_KEYS = new Set(["KeyW", "KeyA", "KeyS", "KeyD", "ShiftLeft", "ShiftRight"]);
+export type SpectatorSwitchDirection = -1 | 1;
 
 export class HumanController {
   private readonly pressedKeys = new Set<string>();
@@ -20,6 +21,7 @@ export class HumanController {
   private switchWeaponRequested: WeaponSlot | null = null;
   private useItemRequested: string | null = null;
   private dropItemRequested: string | null = null;
+  private spectatorSwitchRequested: SpectatorSwitchDirection | null = null;
 
   public constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -92,6 +94,12 @@ export class HumanController {
     return this.leaderboardHeld;
   }
 
+  public consumeSpectatorSwitchRequest(): SpectatorSwitchDirection | null {
+    const request = this.spectatorSwitchRequested;
+    this.spectatorSwitchRequested = null;
+    return request;
+  }
+
   public acknowledgeActorState(actor: ActorState): void {
     this.lastActor = actor;
     if (!this.canScope(actor)) this.scopeHeld = false;
@@ -114,6 +122,11 @@ export class HumanController {
     if (event.code === "Tab") {
       event.preventDefault();
       this.leaderboardHeld = true;
+      return;
+    }
+    if (event.code === "Space" && !event.repeat && this.lastActor && !this.lastActor.alive) {
+      event.preventDefault();
+      this.spectatorSwitchRequested = 1;
       return;
     }
     if (document.pointerLockElement !== this.canvas) {
@@ -190,9 +203,15 @@ export class HumanController {
   };
 
   private readonly handleWheel = (event: WheelEvent): void => {
-    if (document.pointerLockElement !== this.canvas || event.deltaY === 0) {
+    if (event.deltaY === 0) {
       return;
     }
+    if (this.lastActor && !this.lastActor.alive) {
+      event.preventDefault();
+      this.spectatorSwitchRequested = event.deltaY > 0 ? 1 : -1;
+      return;
+    }
+    if (document.pointerLockElement !== this.canvas) return;
     event.preventDefault();
     const actor = this.lastActor;
     if (!actor) {

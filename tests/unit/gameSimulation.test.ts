@@ -3,7 +3,7 @@ import { WEAPONS } from "../../src/config/weapons";
 import { getTerrainHeight } from "../../src/config/map";
 import { createIdleCommand, type ActorCommand } from "../../src/game/commands/ActorCommand";
 import { GameSimulation } from "../../src/game/GameSimulation";
-import { getReloadVisualTransform, resolveSpectatorActorId } from "../../src/app/BattleRoyaleSession";
+import { cycleSpectatorActorId, getReloadVisualTransform, resolveSpectatorActorId } from "../../src/app/BattleRoyaleSession";
 import { TrainingMode } from "../../src/game/modes/TrainingMode";
 import { createActorState, createWeaponState, getActiveWeapon, type MatchState } from "../../src/game/state/types";
 import { CombatSystem, type CombatWorld } from "../../src/game/systems/CombatSystem";
@@ -227,7 +227,7 @@ describe("GameSimulation combat", () => {
     expect(getReloadVisualTransform(weapon)).toBeNull();
   });
 
-  it("switches spectating to the killer and chains when that killer dies", () => {
+  it("locks spectating to the killer until the user cycles manually", () => {
     const simulation = createSimulation();
     const bot2 = createActorState("bot-2", "bot", { x: 20, y: 1.76, z: 0 });
     simulation.state.actors[bot2.id] = bot2;
@@ -247,7 +247,8 @@ describe("GameSimulation combat", () => {
       sourceId: "bot-2",
       weaponId: "rifle",
     };
-    expect(resolveSpectatorActorId("player", "bot-1", killerDeath, simulation.state.actors)).toBe("bot-2");
+    expect(resolveSpectatorActorId("player", "bot-1", killerDeath, simulation.state.actors)).toBe("bot-1");
+    expect(cycleSpectatorActorId("player", "bot-1", simulation.state.actors, 1)).toBe("bot-2");
   });
 
   it("settles same-tick mutual fire independently of command insertion order", () => {

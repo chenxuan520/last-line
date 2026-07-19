@@ -6,6 +6,7 @@ import {
   getTerrainHeight,
   MAP_HALF_SIZE,
   MAP_OBSTACLES,
+  MAP_ROCK_OBSTACLES,
   MAP_WALL_SEGMENTS,
 } from "../../src/config/map";
 import { createActorState, type MatchState, type Vector3State } from "../../src/game/state/types";
@@ -65,6 +66,29 @@ describe("SimulationCombatWorld", () => {
     const hit = world.traceShotDetailed(trace(shooter.position, subtract(target.position, shooter.position)));
     expect(hit).toMatchObject({ targetId: null, hitType: "environment" });
     expect(Math.hypot(hit.normal.x, hit.normal.y, hit.normal.z)).toBeCloseTo(1);
+    expect(world.hasLineOfSight("shooter", "target")).toBe(false);
+  });
+
+  it("blocks shots and line of sight with authoritative cover rocks", () => {
+    const rock = MAP_ROCK_OBSTACLES[0];
+    if (!rock) throw new Error("test cover rock missing");
+    const shooter = createActorState("shooter", "player", {
+      x: rock.center.x - rock.width / 2 - 5,
+      y: rock.center.y,
+      z: rock.center.z,
+    });
+    const target = createActorState("target", "bot", {
+      x: rock.center.x + rock.width / 2 + 5,
+      y: rock.center.y,
+      z: rock.center.z,
+    });
+    const state = createState(shooter, target);
+    shooter.position.y = rock.center.y;
+    target.position.y = rock.center.y;
+    const world = new SimulationCombatWorld(state);
+
+    const hit = world.traceShotDetailed(trace(shooter.position, subtract(target.position, shooter.position)));
+    expect(hit).toMatchObject({ targetId: null, hitType: "environment" });
     expect(world.hasLineOfSight("shooter", "target")).toBe(false);
   });
 

@@ -2,6 +2,7 @@ import {
   BUILDING_ROOF_CAP_HEIGHT,
   MAP_HALF_SIZE,
   MAP_OBSTACLES,
+  MAP_ROCK_OBSTACLES,
   MAP_ROOF_RAMPS,
   MAP_WALL_SEGMENTS,
   type MapObstacle,
@@ -13,12 +14,13 @@ const DEFAULT_CLEARANCE = 0.4;
 const PATH_CLEARANCE = 0.64;
 const WAYPOINT_PADDING = 0.13;
 const MAX_PATH_SEARCH_NODES = 256;
+const DEFAULT_BLOCKING_OBSTACLES = [...MAP_WALL_SEGMENTS, ...MAP_ROCK_OBSTACLES];
 
 export class GridNavigator {
   public constructor(
     private readonly obstacles: readonly MapObstacle[] = MAP_OBSTACLES,
     private readonly roofRamps: readonly RoofRamp[] = MAP_ROOF_RAMPS,
-    private readonly blockingObstacles: readonly MapObstacle[] = MAP_WALL_SEGMENTS,
+    private readonly blockingObstacles: readonly MapObstacle[] = DEFAULT_BLOCKING_OBSTACLES,
     private readonly clearance = DEFAULT_CLEARANCE,
   ) {}
 

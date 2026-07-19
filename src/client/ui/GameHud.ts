@@ -85,7 +85,7 @@ export class GameHud {
         </div>
         <aside class="controls-card">
           <span><b>WASD</b>移动</span><span><b>SHIFT</b>冲刺</span><span><b>SPACE</b>跳伞 / 跳跃</span><span><b>F</b>拾取</span>
-          <span><b>1 / 2</b>切枪</span><span><b>Q</b>绷带</span><span><b>H</b>急救包</span><span><b>R</b>换弹</span>
+          <span><b>1 / 2</b>切枪</span><span><b>Q</b>绷带</span><span><b>H</b>急救包</span><span><b>R</b>换弹</span><span><b>观战</b>空格 / 滚轮切换</span>
         </aside>
         <aside class="inventory-card">
           <div class="weapon-slots" data-hud="weapon-slots"></div>
@@ -128,20 +128,21 @@ export class GameHud {
   public update(
     state: MatchState,
     player: ActorState,
+    viewedActor: ActorState,
     pointerLocked: boolean,
     fps: number,
     scoped = false,
     leaderboardVisible = false,
   ): void {
-    this.setText("health", Math.ceil(player.health).toString());
-    this.setText("armor", Math.ceil(player.armor).toString());
-    this.setText("helmet", player.inventory.helmetLevel.toString());
-    setWidth(this.requireElement("health-bar"), player.health / player.maxHealth * 100);
-    setWidth(this.requireElement("armor-bar"), player.maxArmor > 0 ? player.armor / player.maxArmor * 100 : 0);
+    this.setText("health", Math.ceil(viewedActor.health).toString());
+    this.setText("armor", Math.ceil(viewedActor.armor).toString());
+    this.setText("helmet", viewedActor.inventory.helmetLevel.toString());
+    setWidth(this.requireElement("health-bar"), viewedActor.health / viewedActor.maxHealth * 100);
+    setWidth(this.requireElement("armor-bar"), viewedActor.maxArmor > 0 ? viewedActor.armor / viewedActor.maxArmor * 100 : 0);
     this.setText("alive", Object.values(state.actors).filter((actor) => actor.alive).length.toString());
     this.setText("kills", combatCounterLabel(state, player));
     this.setText("performance", `${Math.round(fps)} FPS`);
-    this.setText("phase", phaseLabel(state, player));
+    this.setText("phase", player.alive ? phaseLabel(state, player) : `观战 · ${actorLabel(viewedActor.id, player.id)}`);
     this.setText("zone-label", zoneLabel(state));
     this.setText("zone-time", formatSeconds(state.safeZone.secondsRemaining));
     const minimapSignature = [
@@ -161,15 +162,15 @@ export class GameHud {
       this.updateMinimap(state, player);
       this.minimapSignature = minimapSignature;
     }
-    const healingSignature = player.inventory.usingItem
-      ? `${player.inventory.usingItem.itemId}:${player.inventory.usingItem.remainingSeconds.toFixed(1)}`
+    const healingSignature = viewedActor.inventory.usingItem
+      ? `${viewedActor.id}:${viewedActor.inventory.usingItem.itemId}:${viewedActor.inventory.usingItem.remainingSeconds.toFixed(1)}`
       : "none";
     if (healingSignature !== this.healingSignature) {
-      this.updateHealing(player);
+      this.updateHealing(viewedActor);
       this.healingSignature = healingSignature;
     }
 
-    const weapon = getActiveWeapon(player);
+    const weapon = getActiveWeapon(viewedActor);
     const config = weapon ? WEAPONS[weapon.weaponId] : undefined;
     const scopedWeapon = config?.scopeFov !== undefined;
     this.requireElement("scope").classList.toggle("is-visible", scoped);
@@ -184,15 +185,16 @@ export class GameHud {
     }
     this.setText("weapon-name", config?.label ?? "未装备");
     this.setText("ammo", weapon ? weapon.ammoInMagazine.toString().padStart(2, "0") : "--");
-    this.setText("reserve", getReserveAmmo(player).toString());
+    this.setText("reserve", getReserveAmmo(viewedActor).toString());
     const inventorySignature = JSON.stringify({
-      activeWeaponSlot: player.inventory.activeWeaponSlot,
-      weaponIds: player.inventory.weaponSlots.map((slot) => slot?.weaponId ?? null),
-      backpack: player.inventory.backpack,
+      actorId: viewedActor.id,
+      activeWeaponSlot: viewedActor.inventory.activeWeaponSlot,
+      weaponIds: viewedActor.inventory.weaponSlots.map((slot) => slot?.weaponId ?? null),
+      backpack: viewedActor.inventory.backpack,
     });
     if (inventorySignature !== this.inventorySignature) {
-      this.renderWeaponSlots(player);
-      this.renderBackpack(player);
+      this.renderWeaponSlots(viewedActor);
+      this.renderBackpack(viewedActor);
       this.inventorySignature = inventorySignature;
     }
     const promptSignature = pickupPromptSignature(player, state.groundLoot);
@@ -260,8 +262,14 @@ export class GameHud {
     }
   }
 
-  public showEliminated(placement: number, kills: number, eliminatedBy: string): void {
-    this.showResultCard("任务失败", `${eliminatedBy} · 第 ${placement} 名 · ${kills} 次淘汰`, "重新部署");
+  public showEliminated(placement: number, kills: number, eliminatedBy: string, spectatingKiller: boolean): void {
+    this.showResultCard(
+      "任务失败",
+      `${eliminatedBy} · 第 ${placement} 名 · ${kills} 次淘汰`,
+      "重新部署",
+      `${spectatingKiller ? "正在观察击杀者" : "正在观察存活角色"} · 空格或滚轮切换目标`,
+    );
+    this.requireElement("result").classList.add("is-eliminated");
   }
 
   public showResult(result: MatchResult, playerId: string, kills: number): void {
@@ -269,7 +277,7 @@ export class GameHud {
     this.showResultCard(victory ? "最后防线" : "对局结束", victory ? `成功存活 · ${kills} 次淘汰` : `胜者 ${result.winnerId ?? "无"}`, "再来一局");
   }
 
-  private showResultCard(title: string, detail: string, buttonLabel: string): void {
+  private showResultCard(title: string, detail: string, buttonLabel: string, hint?: string): void {
     if (this.resultVisible) return;
     this.resultVisible = true;
     const result = this.requireElement("result");
@@ -283,7 +291,9 @@ export class GameHud {
     button.dataset.action = "restart";
     button.textContent = buttonLabel;
     button.addEventListener("click", this.onRestart);
-    result.replaceChildren(heading, body, button);
+    const hintElement = document.createElement("small");
+    hintElement.textContent = hint ?? "";
+    result.replaceChildren(heading, body, ...(hint ? [hintElement] : []), button);
   }
 
   private appendFeed(text: string): void {

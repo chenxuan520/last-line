@@ -50,7 +50,32 @@ describe("map layouts", () => {
     expect(second.obstacles.map((obstacle) => obstacle.center)).not.toEqual(
       first.obstacles.map((obstacle) => obstacle.center),
     );
+    expect(second.rockObstacles.map((obstacle) => obstacle.center)).not.toEqual(
+      first.rockObstacles.map((obstacle) => obstacle.center),
+    );
     expect(second.lootSpawnPoints).not.toEqual(first.lootSpawnPoints);
+  });
+
+  it("creates stable full-height rock cover clear of buildings and loot", () => {
+    for (const seed of [1, 7, 19, 42, 99]) {
+      const layout = createMapLayout(seed);
+      expect(layout.rockObstacles).toHaveLength(24);
+      expect(new Set(layout.rockObstacles.map((rock) => rock.id)).size).toBe(24);
+      for (const [index, rock] of layout.rockObstacles.entries()) {
+        expect(rock.id).toBe(`cover-rock-${index}`);
+        expect(rock.width).toBeGreaterThanOrEqual(5.5);
+        expect(rock.depth).toBeGreaterThanOrEqual(5);
+        expect(rock.height).toBeGreaterThanOrEqual(3.4);
+        expect(layout.obstacles.every((obstacle) =>
+          Math.abs(rock.center.x - obstacle.center.x) >= (rock.width + obstacle.width) / 2 + 8 ||
+          Math.abs(rock.center.z - obstacle.center.z) >= (rock.depth + obstacle.depth) / 2 + 8
+        )).toBe(true);
+        expect(layout.lootSpawnPoints.every((loot) =>
+          Math.abs(loot.x - rock.center.x) > rock.width / 2 + 0.5 ||
+          Math.abs(loot.z - rock.center.z) > rock.depth / 2 + 0.5
+        )).toBe(true);
+      }
+    }
   });
 
   it("creates prominent mountains while keeping generated settlements in buildable valleys", () => {

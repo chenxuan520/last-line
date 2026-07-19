@@ -137,6 +137,7 @@ export class BattleRoyaleMode implements GameMode {
     let remaining = deltaSeconds;
     let transitions = 0;
     const transitionLimit = this.config.safeZoneStages.length * 2 + 1;
+    const shrinkSpeed = Object.values(state.actors).filter((actor) => actor.alive).length < 5 ? 2 : 1;
 
     while (state.safeZone.status !== "closed" && transitions < transitionLimit) {
       if (state.safeZone.status === "waiting") {
@@ -165,9 +166,9 @@ export class BattleRoyaleMode implements GameMode {
       if (stage.shrinkSeconds > 0 && remaining === 0) {
         return;
       }
-      const consumed = Math.min(remaining, state.safeZone.secondsRemaining);
+      const consumed = Math.min(remaining * shrinkSpeed, state.safeZone.secondsRemaining);
       state.safeZone.secondsRemaining = Math.max(0, state.safeZone.secondsRemaining - consumed);
-      remaining -= consumed;
+      remaining -= consumed / shrinkSpeed;
       const progress = stage.shrinkSeconds === 0 ? 1 : 1 - state.safeZone.secondsRemaining / stage.shrinkSeconds;
       state.safeZone.center = interpolateVector(state.safeZone.startCenter, state.safeZone.targetCenter, progress);
       state.safeZone.radius = interpolate(state.safeZone.startRadius, state.safeZone.targetRadius, progress);

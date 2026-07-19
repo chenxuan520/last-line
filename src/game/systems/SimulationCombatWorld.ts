@@ -37,6 +37,12 @@ export class SimulationCombatWorld implements CombatWorld {
         nearestEnvironment = hit;
       }
     }
+    for (const rock of layout.rockObstacles) {
+      const hit = intersectObstacle(trace.origin, direction, trace.range, rock);
+      if (hit && (!nearestEnvironment || hit.distance < nearestEnvironment.distance)) {
+        nearestEnvironment = hit;
+      }
+    }
     for (const obstacle of layout.obstacles) {
       const hit = intersectRoofCap(trace.origin, direction, trace.range, obstacle);
       if (hit && (!nearestEnvironment || hit.distance < nearestEnvironment.distance)) {

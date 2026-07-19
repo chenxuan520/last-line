@@ -5,7 +5,7 @@ import {
   getTerrainHeight,
   MAP_HALF_SIZE,
   type MapLayout,
-  type MapWallSegment,
+  type MapObstacle,
 } from "../../config/map";
 import type { ActorCommand } from "../commands/ActorCommand";
 import type { ActorState, EntityId, MatchState, Vector3State } from "../state/types";
@@ -25,7 +25,7 @@ const MAX_COLLISION_STEP = ACTOR_RADIUS / 2;
 const MAX_STEP_UP = 0.35;
 const SURFACE_EPSILON = 0.08;
 const WALL_COLLISION_CELL_SIZE = 64;
-const wallCollisionIndexes = new WeakMap<MapLayout, Map<string, MapWallSegment[]>>();
+const wallCollisionIndexes = new WeakMap<MapLayout, Map<string, MapObstacle[]>>();
 
 export class MovementSystem {
   public processCommand(
@@ -207,19 +207,19 @@ function collides(x: number, z: number, eyeY: number, layout: MapLayout): boolea
   const feetY = eyeY - EYE_HEIGHT;
   const candidateSupport = getSupportHeight(x, z, feetY + MAX_STEP_UP, layout);
   const effectiveFeetY = Math.max(feetY, candidateSupport);
-  for (const wall of getNearbyWalls(x, z, layout)) {
-    if (collidesWithWall(x, z, effectiveFeetY, wall)) return true;
+  for (const obstacle of getNearbyWalls(x, z, layout)) {
+    if (collidesWithBlocker(x, z, effectiveFeetY, obstacle)) return true;
   }
   return false;
 }
 
-function collidesWithWall(
+function collidesWithBlocker(
   x: number,
   z: number,
   feetY: number,
-  wall: MapLayout["wallSegments"][number],
+  wall: MapObstacle,
 ): boolean {
-  const roofY = wall.center.y + wall.height / 2 + BUILDING_ROOF_CAP_HEIGHT;
+  const roofY = wall.center.y + wall.height / 2 + ("obstacleId" in wall ? BUILDING_ROOF_CAP_HEIGHT : 0);
   if (feetY >= roofY - SURFACE_EPSILON) return false;
   const halfWidth = wall.width / 2;
   const halfDepth = wall.depth / 2;
@@ -236,7 +236,7 @@ function resolveWallOverlap(actor: ActorState, layout: MapLayout): void {
   const padding = ACTOR_RADIUS + 0.001;
   for (let iteration = 0; iteration < 8 && collides(actor.position.x, actor.position.z, actor.position.y, layout); iteration += 1) {
     const candidates = getNearbyWalls(actor.position.x, actor.position.z, layout)
-      .filter((wall) => collidesWithWall(actor.position.x, actor.position.z, feetY, wall))
+      .filter((wall) => collidesWithBlocker(actor.position.x, actor.position.z, feetY, wall))
       .flatMap((wall) => {
         const minimumX = wall.center.x - wall.width / 2 - padding;
         const maximumX = wall.center.x + wall.width / 2 + padding;
@@ -266,11 +266,11 @@ function resolveWallOverlap(actor: ActorState, layout: MapLayout): void {
   }
 }
 
-function getNearbyWalls(x: number, z: number, layout: MapLayout): readonly MapWallSegment[] {
+function getNearbyWalls(x: number, z: number, layout: MapLayout): readonly MapObstacle[] {
   let index = wallCollisionIndexes.get(layout);
   if (!index) {
-    index = new Map<string, MapWallSegment[]>();
-    for (const wall of layout.wallSegments) {
+    index = new Map<string, MapObstacle[]>();
+    for (const wall of [...layout.wallSegments, ...layout.rockObstacles]) {
       const minimumCellX = wallCell(wall.center.x - wall.width / 2 - ACTOR_RADIUS);
       const maximumCellX = wallCell(wall.center.x + wall.width / 2 + ACTOR_RADIUS);
       const minimumCellZ = wallCell(wall.center.z - wall.depth / 2 - ACTOR_RADIUS);
@@ -318,6 +318,16 @@ export function getSupportHeight(
       Math.abs(z - obstacle.center.z) <= obstacle.depth / 2
     ) {
       support = Math.max(support, roofY);
+    }
+  }
+  for (const rock of layout.rockObstacles) {
+    const rockTop = rock.center.y + rock.height / 2;
+    if (
+      rockTop <= maximumY + SURFACE_EPSILON &&
+      Math.abs(x - rock.center.x) <= rock.width / 2 &&
+      Math.abs(z - rock.center.z) <= rock.depth / 2
+    ) {
+      support = Math.max(support, rockTop);
     }
   }
   return support;

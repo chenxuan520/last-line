@@ -41,7 +41,25 @@ describe("IslandScene lifecycle", () => {
       expect(bundle.lootMeshes.get("death")?.metadata?.lootSource).toBe("death");
       expect(bundle.viewWeaponRoot.isEnabled()).toBe(false);
       expect(bundle.camera.minZ).toBeGreaterThanOrEqual(0.1);
+      expect(bundle.aircraftInteriorRoot.isEnabled()).toBe(true);
+      expect(bundle.aircraftVisualRoot.isEnabled()).toBe(false);
+      const sceneMeshCount = bundle.scene.meshes.length;
+      bundle.syncAircraftVisual({
+        start: { x: -100, y: 180, z: -50 },
+        end: { x: 100, y: 180, z: 50 },
+        durationSeconds: 60,
+        progress: 0.5,
+      }, true);
       expect(bundle.aircraftVisualRoot.isEnabled()).toBe(true);
+      expect(bundle.aircraftVisualRoot.position.asArray()).toEqual([0, 180, 0]);
+      expect(bundle.aircraftVisualRoot.parent).toBeNull();
+      expect(bundle.aircraftInteriorRoot.parent).toBe(bundle.camera);
+      expect(bundle.aircraftVisualRoot.getChildMeshes().filter((mesh) => mesh.metadata?.aircraftTrail)).toHaveLength(2);
+      expect(bundle.aircraftVisualRoot.getChildMeshes().every((mesh) => !mesh.isPickable && !mesh.checkCollisions)).toBe(true);
+      for (let sync = 0; sync < 100; sync += 1) {
+        bundle.syncAircraftVisual({ ...state.flight, progress: sync / 100 }, true);
+      }
+      expect(bundle.scene.meshes).toHaveLength(sceneMeshCount);
       expect(bundle.viewWeaponRoot.getChildMeshes().every((mesh) => !mesh.isEnabled())).toBe(true);
       expect([...bundle.actorRoots.values()].every((root) => !root.isEnabled())).toBe(true);
 
@@ -58,8 +76,25 @@ describe("IslandScene lifecycle", () => {
           Array.from(colors.slice(index * 4, index * 4 + 3), (channel) => channel.toFixed(3)).join(","),
         ),
       );
+      const treeTrunks = bundle.scene.meshes.filter((mesh) => /^tree-trunk-\d+$/.test(mesh.name));
+      const treeFoliage = bundle.scene.meshes.filter((mesh) => /^tree-foliage-\d+$/.test(mesh.name));
       expect(Math.max(...heights) - Math.min(...heights)).toBeGreaterThan(5);
-      expect(terrainColors.size).toBeGreaterThanOrEqual(7);
+      expect(terrainColors.size).toBeGreaterThan(100);
+      expect(treeTrunks).toHaveLength(128);
+      expect(treeFoliage).toHaveLength(128);
+      expect(treeFoliage.every((mesh) => mesh.getTotalVertices() < 160)).toBe(true);
+      expect(treeFoliage.every((mesh) =>
+        mesh.getBoundingInfo().boundingBox.maximumWorld.y - getTerrainHeight(mesh.position.x, mesh.position.z, layout) > 15
+      )).toBe(true);
+      expect(Math.max(...treeFoliage.map((mesh) =>
+        mesh.getBoundingInfo().boundingBox.maximumWorld.y - getTerrainHeight(mesh.position.x, mesh.position.z, layout)
+      ))).toBeGreaterThan(24);
+      expect(layout.rockObstacles.every((rock) => {
+        const mesh = bundle.scene.getMeshByName(rock.id);
+        return mesh?.metadata?.obstacleId === rock.id &&
+          mesh.scaling.x === rock.width && mesh.scaling.y === rock.height && mesh.scaling.z === rock.depth;
+      })).toBe(true);
+      expect(bundle.scene.meshes.filter((mesh) => /^rock-\d+$/.test(mesh.name))).toHaveLength(32);
       expect(layeredSurfaces).toHaveLength(0);
       expect(bundle.scene.meshes.filter((mesh) => mesh.name.startsWith("ocean-"))).toHaveLength(4);
       const floorMeshes = bundle.scene.meshes.filter(

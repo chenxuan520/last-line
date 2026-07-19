@@ -27,7 +27,7 @@ import {
   TERRAIN_GRID_SUBDIVISIONS,
   type MapLayout,
 } from "../../../config/map";
-import { getActiveWeapon, type ActorState, type EntityId, type GroundLootState } from "../../../game/state/types";
+import { getActiveWeapon, type ActorState, type EntityId, type FlightState, type GroundLootState } from "../../../game/state/types";
 import { syncLootMarkerViews, type LootMarkerViewAdapter } from "../LootMarkerViewAdapter";
 import { loadCatalogModel } from "../loadCatalogModel";
 
@@ -91,6 +91,7 @@ interface IslandMaterials {
   loot: StandardMaterial;
   deathLoot: StandardMaterial;
   safeZone: StandardMaterial;
+  aircraftTrail: StandardMaterial;
 }
 
 export interface IslandSceneBundle {
@@ -100,7 +101,9 @@ export interface IslandSceneBundle {
   lootMeshes: Map<EntityId, Mesh>;
   syncLootMeshes: (groundLoot: Readonly<Record<EntityId, GroundLootState>>) => void;
   viewWeaponRoot: TransformNode;
+  aircraftInteriorRoot: TransformNode;
   aircraftVisualRoot: TransformNode;
+  syncAircraftVisual: (flight: FlightState, visible: boolean) => void;
   safeZoneRing: Mesh;
   syncSafeZoneRing: (centerX: number, centerZ: number, radius: number) => void;
 }
@@ -144,8 +147,20 @@ export async function createIslandScene(
 
   const actorRoots = createActors(scene, actors, materials);
   const camera = createCamera(scene, player);
-  const aircraftVisualRoot = createAircraftVisual(scene, camera, materials);
-  aircraftVisualRoot.setEnabled(player.deployment === "aircraft");
+  const aircraftInteriorRoot = createAircraftInterior(scene, camera, materials);
+  aircraftInteriorRoot.setEnabled(player.deployment === "aircraft");
+  const aircraftVisualRoot = createAircraftVisual(scene, materials);
+  aircraftVisualRoot.setEnabled(false);
+  const syncAircraftVisual = (flight: FlightState, visible: boolean): void => {
+    const progress = Math.max(0, Math.min(1, flight.progress));
+    aircraftVisualRoot.position.set(
+      lerp(flight.start.x, flight.end.x, progress),
+      lerp(flight.start.y, flight.end.y, progress),
+      lerp(flight.start.z, flight.end.z, progress),
+    );
+    aircraftVisualRoot.rotation.y = Math.atan2(flight.end.x - flight.start.x, flight.end.z - flight.start.z);
+    aircraftVisualRoot.setEnabled(visible && progress < 1);
+  };
   const viewWeaponRoot = createViewWeapon(scene, camera, materials);
   setActorWeaponVisual(viewWeaponRoot, getActiveWeapon(player)?.weaponId ?? null);
   viewWeaponRoot.setEnabled(Boolean(getActiveWeapon(player)));
@@ -161,7 +176,9 @@ export async function createIslandScene(
     lootMeshes,
     syncLootMeshes,
     viewWeaponRoot,
+    aircraftInteriorRoot,
     aircraftVisualRoot,
+    syncAircraftVisual,
     safeZoneRing,
     syncSafeZoneRing,
   };
@@ -278,6 +295,10 @@ function createMaterials(scene: Scene, assets: AssetCatalog): IslandMaterials {
   safeZone.disableLighting = true;
   safeZone.alpha = 0.9;
   safeZone.backFaceCulling = false;
+  const aircraftTrail = material(scene, "aircraft-trail-material", "#dfe8de");
+  aircraftTrail.emissiveColor = Color3.FromHexString("#dfe8de").scale(0.7);
+  aircraftTrail.disableLighting = true;
+  aircraftTrail.alpha = 0.16;
 
   const ground = material(scene, "island-ground-material", "#ffffff");
   const roadShoulder = material(scene, "road-shoulder-material", "#746b52");
@@ -308,6 +329,7 @@ function createMaterials(scene: Scene, assets: AssetCatalog): IslandMaterials {
     loot,
     deathLoot,
     safeZone,
+    aircraftTrail,
   };
 }
 
@@ -356,7 +378,7 @@ function applyTerrainSurface(ground: Mesh, layout: MapLayout): void {
     const x = positions[index] ?? 0;
     const z = positions[index + 2] ?? 0;
     const height = getTerrainHeight(x, z, layout);
-    const color = getTerrainColor(x, z, height, layout.mapPoints, roadSegments);
+    const color = getTerrainColor(x, z, height, layout.seed, layout.mapPoints, roadSegments);
     positions[index + 1] = height;
     colors.push(color.r, color.g, color.b, 1);
   }
@@ -406,10 +428,12 @@ function getTerrainColor(
   x: number,
   z: number,
   height: number,
+  seed: number,
   mapPoints: MapLayout["mapPoints"],
   roadSegments: ReadonlyArray<readonly [number, number, number, number]>,
 ): Color3 {
   let color = height > 4 ? TERRAIN_COLORS.highland : TERRAIN_COLORS.ground;
+  let naturalSurface = true;
   for (const [patchX, patchZ, width, depth, rotation, type] of TERRAIN_PATCHES) {
     const cosine = Math.cos(rotation);
     const sine = Math.sin(rotation);
@@ -424,6 +448,7 @@ function getTerrainColor(
   }
   if (roadSegments.some(([startX, startZ, endX, endZ]) => pointToSegmentDistance(x, z, startX, startZ, endX, endZ) <= 6)) {
     color = TERRAIN_COLORS.roadShoulder;
+    naturalSurface = false;
   }
   mapPoints.forEach((point, index) => {
     const poiType = POI_TYPES[index];
@@ -432,17 +457,28 @@ function getTerrainColor(
     const depth = poiType === "town" ? 118 : 106;
     if (Math.abs(x - point.position.x) <= width / 2 && Math.abs(z - point.position.z) <= depth / 2) {
       color = index % 2 === 0 ? TERRAIN_COLORS.paving : TERRAIN_COLORS.roadShoulder;
+      naturalSurface = false;
     }
   });
   if (roadSegments.some(([startX, startZ, endX, endZ]) => pointToSegmentDistance(x, z, startX, startZ, endX, endZ) <= 3.75)) {
     color = TERRAIN_COLORS.road;
+    naturalSurface = false;
   }
   mapPoints.forEach((point, index) => {
     if (Math.hypot(x - point.position.x, z - point.position.z) <= 15) {
       color = index % 2 === 0 ? TERRAIN_COLORS.poiDark : TERRAIN_COLORS.poiAccent;
+      naturalSurface = false;
     }
   });
-  return color;
+  return naturalSurface ? color.scale(terrainSurfaceShade(x, z, height, seed)) : color;
+}
+
+function terrainSurfaceShade(x: number, z: number, height: number, seed: number): number {
+  const seedOffset = (seed & 1023) * 0.013;
+  const broadPatches = Math.sin(x * 0.016 + seedOffset) * Math.cos(z * 0.014 - seedOffset);
+  const groundStreaks = Math.sin(x * 0.075 + z * 0.03 + seedOffset * 1.7);
+  const contourBands = Math.sin(height * 1.9 + x * 0.005 - z * 0.004);
+  return 0.98 + broadPatches * 0.055 + groundStreaks * 0.028 + contourBands * 0.018;
 }
 
 function pointToSegmentDistance(
@@ -551,18 +587,30 @@ function createVegetation(
   const treeCount = 128;
   const trunkTemplate = CreateCylinder(
     "tree-trunk-template",
-    { height: 2.8, diameterTop: 0.5, diameterBottom: 0.8, tessellation: 5 },
+    { height: 5.8, diameterTop: 0.55, diameterBottom: 1.1, tessellation: 7 },
     scene,
   );
   trunkTemplate.material = trunkMaterial;
   trunkTemplate.isVisible = false;
   trunkTemplate.isPickable = false;
 
-  const foliageTemplate = CreateCylinder(
-    "tree-foliage-template",
-    { height: 6.2, diameterTop: 0.2, diameterBottom: 4.2, tessellation: 6 },
-    scene,
-  );
+  const foliageLayers = [
+    { y: -2.1, height: 7.2, diameterTop: 0.5, diameterBottom: 7 },
+    { y: 1.4, height: 6, diameterTop: 0.4, diameterBottom: 5.8 },
+    { y: 4.8, height: 5.2, diameterTop: 0.15, diameterBottom: 4.2 },
+  ].map((layer, index) => {
+    const mesh = CreateCylinder(
+      `tree-foliage-layer-${index}`,
+      { ...layer, tessellation: 7 },
+      scene,
+    );
+    mesh.position.y = layer.y;
+    mesh.rotation.y = index * Math.PI / 7;
+    return mesh;
+  });
+  const foliageTemplate = Mesh.MergeMeshes(foliageLayers, true, true);
+  if (!foliageTemplate) throw new Error("Unable to create tree foliage template");
+  foliageTemplate.name = "tree-foliage-template";
   foliageTemplate.material = foliageMaterial;
   foliageTemplate.isVisible = false;
   foliageTemplate.isPickable = false;
@@ -573,20 +621,27 @@ function createVegetation(
     if (!position) continue;
     const { x, z } = position;
     const terrainY = getTerrainHeight(x, z, layout);
+    const treeScale = index % 11 === 0 ? 1.4 : 0.96 + (index % 4) * 0.025;
+    const foliageScaleY = treeScale * (0.94 + (index % 4) * 0.055);
 
     const trunk = trunkTemplate.clone(`tree-trunk-${index}`);
     if (trunk) {
-      trunk.position.set(x, terrainY + 1.4, z);
+      trunk.position.set(x, terrainY + 2.9 * treeScale, z);
+      trunk.scaling.set(treeScale * (0.92 + (index % 3) * 0.04), treeScale, treeScale * 0.96);
       trunk.isVisible = true;
       markDecoration(trunk, "vegetation");
     }
 
     const foliage = foliageTemplate.clone(`tree-foliage-${index}`);
     if (foliage) {
-      foliage.position.set(x, terrainY + 5.7, z);
+      foliage.position.set(x, terrainY + 5.8 * treeScale + 5.7 * foliageScaleY - 0.25, z);
       foliage.isVisible = true;
       foliage.rotation.y = random() * Math.PI * 2;
-      foliage.scaling.y = 0.82 + (index % 3) * 0.12;
+      foliage.scaling.set(
+        treeScale * (0.9 + (index % 3) * 0.06),
+        foliageScaleY,
+        treeScale * (0.9 + ((index + 1) % 3) * 0.06),
+      );
       markDecoration(foliage, "vegetation");
     }
   }
@@ -598,13 +653,25 @@ function createNaturalDetails(
   shrubMaterial: StandardMaterial,
   layout: MapLayout,
 ): void {
-  const rockCount = 56;
+  const rockCount = 32;
   const shrubCount = 80;
   const random = createVisualRandom(layout.seed ^ 0x02e5be93);
   const rockTemplate = CreateSphere("rock-template", { diameter: 1, segments: 5 }, scene);
   rockTemplate.material = rockMaterial;
   rockTemplate.isVisible = false;
   rockTemplate.isPickable = false;
+
+  for (const rock of layout.rockObstacles) {
+    const mesh = rockTemplate.clone(rock.id);
+    if (!mesh) continue;
+    mesh.position.set(rock.center.x, rock.center.y, rock.center.z);
+    mesh.scaling.set(rock.width, rock.height, rock.depth);
+    mesh.isVisible = true;
+    mesh.checkCollisions = false;
+    mesh.isPickable = false;
+    mesh.metadata = { decoration: "cover-rock", obstacleId: rock.id };
+    mesh.freezeWorldMatrix();
+  }
 
   for (let index = 0; index < rockCount; index += 1) {
     const rock = rockTemplate.clone(`rock-${index}`);
@@ -867,8 +934,8 @@ function createCamera(scene: Scene, player: ActorState): UniversalCamera {
   return camera;
 }
 
-function createAircraftVisual(scene: Scene, camera: UniversalCamera, materials: IslandMaterials): TransformNode {
-  const root = new TransformNode("aircraft-visual-root", scene);
+function createAircraftInterior(scene: Scene, camera: UniversalCamera, materials: IslandMaterials): TransformNode {
+  const root = new TransformNode("aircraft-interior-root", scene);
   root.parent = camera;
   const frameMaterial = materials.gear;
   const pieces: ReadonlyArray<readonly [string, number, number, number, number, number, number]> = [
@@ -885,6 +952,51 @@ function createAircraftVisual(scene: Scene, camera: UniversalCamera, materials: 
     piece.isPickable = false;
     piece.metadata = { decoration: "aircraft" };
   });
+  return root;
+}
+
+function createAircraftVisual(scene: Scene, materials: IslandMaterials): TransformNode {
+  const root = new TransformNode("aircraft-visual-root", scene);
+  const addPart = (mesh: Mesh, material: StandardMaterial, trail = false): void => {
+    mesh.parent = root;
+    mesh.material = material;
+    mesh.checkCollisions = false;
+    mesh.isPickable = false;
+    mesh.metadata = { decoration: "aircraft", aircraftTrail: trail };
+  };
+
+  const fuselage = CreateCapsule("aircraft-fuselage", { height: 15, radius: 1.55, tessellation: 8, subdivisions: 2 }, scene);
+  fuselage.rotation.x = Math.PI / 2;
+  addPart(fuselage, materials.wallTrim);
+  const wings = CreateBox("aircraft-wings", { width: 23, height: 0.42, depth: 4.2 }, scene);
+  wings.position.z = -0.4;
+  addPart(wings, materials.gear);
+  const tailWing = CreateBox("aircraft-tail-wing", { width: 8.5, height: 0.32, depth: 2.2 }, scene);
+  tailWing.position.z = -5.8;
+  addPart(tailWing, materials.gear);
+  const tailFin = CreateBox("aircraft-tail-fin", { width: 0.45, height: 3.8, depth: 2.4 }, scene);
+  tailFin.position.set(0, 2, -5.8);
+  addPart(tailFin, materials.gear);
+  const cockpit = CreateBox("aircraft-cockpit", { width: 2.2, height: 1, depth: 3.2 }, scene);
+  cockpit.position.set(0, 1.15, 4.4);
+  addPart(cockpit, materials.window);
+  for (const direction of [-1, 1]) {
+    const engine = CreateCylinder(
+      `aircraft-engine-${direction < 0 ? "left" : "right"}`,
+      { height: 4.2, diameter: 1.55, tessellation: 8 },
+      scene,
+    );
+    engine.position.set(direction * 5.2, -0.55, -0.1);
+    engine.rotation.x = Math.PI / 2;
+    addPart(engine, materials.poiDark);
+    const trail = CreateBox(
+      `aircraft-trail-${direction < 0 ? "left" : "right"}`,
+      { width: 0.42, height: 0.42, depth: 76 },
+      scene,
+    );
+    trail.position.set(direction * 5.2, -0.55, -40.2);
+    addPart(trail, materials.aircraftTrail, true);
+  }
   return root;
 }
 
@@ -1183,7 +1295,7 @@ function randomNaturalPosition(
   for (let attempt = 0; attempt < 80; attempt += 1) {
     const x = lerp(-limit, limit, random());
     const z = lerp(-limit, limit, random());
-    const blocked = layout.obstacles.some((obstacle) =>
+    const blocked = [...layout.obstacles, ...layout.rockObstacles].some((obstacle) =>
       Math.abs(x - obstacle.center.x) <= obstacle.width / 2 + clearance &&
       Math.abs(z - obstacle.center.z) <= obstacle.depth / 2 + clearance
     );

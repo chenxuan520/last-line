@@ -4,7 +4,12 @@ export class AudioFeedback {
   private context: AudioContext | null = null;
   private gain: GainNode | null = null;
 
-  public constructor(private readonly volume: number) {}
+  public constructor(private volume: number) {}
+
+  public setVolume(volume: number): void {
+    this.volume = Math.max(0, Math.min(1, volume));
+    if (this.gain) this.gain.gain.value = this.volume * 0.16;
+  }
 
   public start(): void {
     if (this.volume <= 0) return;
@@ -24,6 +29,12 @@ export class AudioFeedback {
       if (event.type === "actor-damaged" && event.actorId === playerId) this.tone(62, 0.14, "square");
       if (event.type === "item-picked" && event.actorId === playerId) this.tone(620, 0.08, "sine");
     }
+  }
+
+  public preview(): void {
+    if (this.volume <= 0) return;
+    this.start();
+    this.tone(520, 0.08, "sine");
   }
 
   public dispose(): void {

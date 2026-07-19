@@ -231,6 +231,40 @@ describe("BattleRoyaleMode", () => {
     expect(state.phase).toBe("combat");
   });
 
+  it("doubles only active shrinking when fewer than five actors remain", () => {
+    const config: BattleRoyaleConfig = {
+      participantCount: 5,
+      flightSeconds: 1,
+      safeZoneStages: [{ waitSeconds: 10, shrinkSeconds: 10, radius: 100, damagePerSecond: 0 }],
+    };
+    const createShrinkingState = () => {
+      const state = createBattleRoyaleState("player", config, () => 0.5);
+      const mode = new BattleRoyaleMode(config, () => 0.5);
+      mode.start(state, []);
+      state.phase = "combat";
+      state.safeZone.status = "shrinking";
+      state.safeZone.secondsRemaining = 10;
+      state.safeZone.startRadius = 200;
+      state.safeZone.radius = 200;
+      state.safeZone.targetRadius = 100;
+      for (const actor of Object.values(state.actors)) actor.deployment = "grounded";
+      return { state, mode };
+    };
+    const fiveAlive = createShrinkingState();
+    const fourAlive = createShrinkingState();
+    const removed = fourAlive.state.actors["bot-1"];
+    if (!removed) throw new Error("bot missing");
+    removed.alive = false;
+
+    fiveAlive.mode.update(fiveAlive.state, 1, []);
+    fourAlive.mode.update(fourAlive.state, 1, []);
+
+    expect(fiveAlive.state.safeZone.secondsRemaining).toBe(9);
+    expect(fiveAlive.state.safeZone.radius).toBe(190);
+    expect(fourAlive.state.safeZone.secondsRemaining).toBe(8);
+    expect(fourAlive.state.safeZone.radius).toBe(180);
+  });
+
   it("advances every zone stage and finishes with exactly one winner", () => {
     const state = createBattleRoyaleState("player", FAST_BATTLE_ROYALE_CONFIG, () => 0);
     const mode = new BattleRoyaleMode(FAST_BATTLE_ROYALE_CONFIG, () => 0);

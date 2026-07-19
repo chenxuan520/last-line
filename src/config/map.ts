@@ -13,6 +13,8 @@ export interface MapWallSegment extends MapObstacle {
   obstacleId: string;
 }
 
+export interface MapRockObstacle extends MapObstacle {}
+
 export interface MapPoint {
   name: string;
   position: Vector3State;
@@ -42,6 +44,7 @@ export interface MapLayout {
   readonly terrainHills: readonly TerrainHill[];
   readonly obstacles: readonly MapObstacle[];
   readonly wallSegments: readonly MapWallSegment[];
+  readonly rockObstacles: readonly MapRockObstacle[];
   readonly roofRamps: readonly RoofRamp[];
   readonly lootSpawnPoints: readonly Vector3State[];
   readonly lootZoneCounts: readonly number[];
@@ -95,6 +98,7 @@ const LANDING_ZONE_MINIMUM_DISTANCE = 300;
 const POINT_MAP_MARGIN = 210;
 const MOUNTAIN_COUNT = 16;
 const COVERAGE_COMPOUND_COUNT = 20;
+const COVER_ROCK_COUNT = 24;
 const MAP_LAYOUT_CACHE_LIMIT = 8;
 const mapLayoutCache = new Map<number, MapLayout>();
 const terrainGridCache = new WeakMap<readonly TerrainHill[], Float32Array>();
@@ -158,6 +162,13 @@ export function createMapLayout(seed: number): MapLayout {
     const poi = buildingAreas[pointIndex] ?? buildingAreas[0];
     return createRoofRamp(obstacle, poi as MapPoint, terrainHills);
   });
+  const rockObstacles = createCoverRocks(
+    terrainHills,
+    obstacles,
+    roofRamps,
+    landingZones,
+    createSeededRandom(normalizedSeed ^ 0x165667b1),
+  );
 
   const { points: lootSpawnPoints, counts: lootZoneCounts } = createLootSpawnPoints(
     landingZones,
@@ -165,6 +176,7 @@ export function createMapLayout(seed: number): MapLayout {
     obstacles,
     wallSegments,
     roofRamps,
+    rockObstacles,
     createSeededRandom(normalizedSeed ^ 0xc2b2ae35),
   );
   const layout: MapLayout = {
@@ -174,6 +186,7 @@ export function createMapLayout(seed: number): MapLayout {
     terrainHills,
     obstacles,
     wallSegments,
+    rockObstacles,
     roofRamps,
     lootSpawnPoints,
     lootZoneCounts,
@@ -276,6 +289,7 @@ const DEFAULT_MAP_LAYOUT = createMapLayout(DEFAULT_MAP_SEED);
 export const TERRAIN_HILLS: readonly TerrainHill[] = DEFAULT_MAP_LAYOUT.terrainHills;
 export const MAP_OBSTACLES: readonly MapObstacle[] = DEFAULT_MAP_LAYOUT.obstacles;
 export const MAP_WALL_SEGMENTS: readonly MapWallSegment[] = DEFAULT_MAP_LAYOUT.wallSegments;
+export const MAP_ROCK_OBSTACLES: readonly MapRockObstacle[] = DEFAULT_MAP_LAYOUT.rockObstacles;
 export const MAP_ROOF_RAMPS: readonly RoofRamp[] = DEFAULT_MAP_LAYOUT.roofRamps;
 export const LOOT_SPAWN_POINTS: readonly Vector3State[] = DEFAULT_MAP_LAYOUT.lootSpawnPoints;
 export const MAP_POINTS: readonly MapPoint[] = DEFAULT_MAP_LAYOUT.mapPoints;
@@ -542,6 +556,70 @@ function footprintInsideMap(x: number, z: number, width: number, depth: number):
   return Math.abs(x) + width / 2 <= limit && Math.abs(z) + depth / 2 <= limit;
 }
 
+function createCoverRocks(
+  terrainHills: readonly TerrainHill[],
+  obstacles: readonly MapObstacle[],
+  roofRamps: readonly RoofRamp[],
+  landingZones: readonly MapPoint[],
+  random: () => number,
+): MapRockObstacle[] {
+  const rocks: MapRockObstacle[] = [];
+  const roads = createMapRoadSegments(landingZones);
+  for (let index = 0; index < COVER_ROCK_COUNT; index += 1) {
+    let rock: MapRockObstacle | null = null;
+    for (let attempt = 0; attempt < 800 && !rock; attempt += 1) {
+      const width = round(randomBetween(random, 5.5, 9));
+      const depth = round(randomBetween(random, 5, 8.5));
+      const height = round(randomBetween(random, 3.4, 5.4));
+      const x = round(randomBetween(random, -1_100, 1_100));
+      const z = round(randomBetween(random, -1_100, 1_100));
+      if (!footprintInsideMap(x, z, width, depth)) continue;
+      const terrainRange = getFootprintTerrainRange(x, z, width, depth, terrainHills);
+      if (terrainRange.maximum - terrainRange.minimum > 0.9) continue;
+      const candidate: MapRockObstacle = {
+        id: `cover-rock-${index}`,
+        center: { x, y: round(terrainRange.minimum + height / 2 - 0.15), z },
+        width,
+        height,
+        depth,
+        color: "#65685e",
+      };
+      if (obstacles.some((obstacle) => footprintsOverlap(candidate, obstacle, 8))) continue;
+      if (rocks.some((existing) => footprintsOverlap(candidate, existing, 18))) continue;
+      if (roofRamps.some((ramp) => rampIntersectsBuilding(ramp, candidate, 8))) continue;
+      if (roads.some(([startX, startZ, endX, endZ]) =>
+        pointToSegmentDistance(x, z, startX, startZ, endX, endZ) <= Math.max(width, depth) / 2 + 7
+      )) continue;
+      rock = candidate;
+    }
+    if (!rock) throw new Error(`Unable to place cover rock ${index}`);
+    rocks.push(rock);
+  }
+  return rocks;
+}
+
+function footprintsOverlap(left: MapObstacle, right: MapObstacle, padding: number): boolean {
+  return (
+    Math.abs(left.center.x - right.center.x) < (left.width + right.width) / 2 + padding &&
+    Math.abs(left.center.z - right.center.z) < (left.depth + right.depth) / 2 + padding
+  );
+}
+
+function pointToSegmentDistance(
+  x: number,
+  z: number,
+  startX: number,
+  startZ: number,
+  endX: number,
+  endZ: number,
+): number {
+  const deltaX = endX - startX;
+  const deltaZ = endZ - startZ;
+  const lengthSquared = deltaX * deltaX + deltaZ * deltaZ;
+  const progress = Math.max(0, Math.min(1, ((x - startX) * deltaX + (z - startZ) * deltaZ) / lengthSquared));
+  return Math.hypot(x - (startX + deltaX * progress), z - (startZ + deltaZ * progress));
+}
+
 function rampInsideMap(ramp: RoofRamp): boolean {
   const limit = MAP_HALF_SIZE - MAP_GEOMETRY_MARGIN;
   return (
@@ -649,10 +727,12 @@ function createLootSpawnPoints(
   obstacles: readonly MapObstacle[],
   wallSegments: readonly MapWallSegment[],
   roofRamps: readonly RoofRamp[],
+  rockObstacles: readonly MapRockObstacle[],
   random: () => number,
 ): { points: Vector3State[]; counts: number[] } {
   const counts = createLootZoneCounts(random);
   const allSelected: Vector3State[] = [];
+  const outdoorBlockers = [...obstacles, ...rockObstacles];
   const points = landingZones.flatMap((point, pointIndex) => {
     const zoneCount = counts[pointIndex] ?? 10;
     const minimumSpacing = 38 - (zoneCount - 10) * 2;
@@ -674,7 +754,7 @@ function createLootSpawnPoints(
           z,
         };
         if (
-          !isClearLootPoint(candidate, wallSegments, roofRamps, selected, obstacles, minimumSpacing) ||
+          !isClearLootPoint(candidate, wallSegments, roofRamps, selected, outdoorBlockers, minimumSpacing) ||
           !hasGlobalLootClearance(candidate, allSelected)
         ) continue;
         selected.push(candidate);
@@ -707,7 +787,7 @@ function createLootSpawnPoints(
       const z = round(point.position.z + Math.sin(angle) * radius);
       const candidate = { x, y: round(terrainHeightFromHills(x, z, terrainHills) + 0.45), z };
       if (
-        isClearLootPoint(candidate, wallSegments, roofRamps, selected, obstacles, minimumSpacing) &&
+        isClearLootPoint(candidate, wallSegments, roofRamps, selected, outdoorBlockers, minimumSpacing) &&
         hasGlobalLootClearance(candidate, allSelected)
       ) {
         selected.push(candidate);

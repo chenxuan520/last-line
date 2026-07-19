@@ -216,6 +216,32 @@ describe("HumanController weapon switching", () => {
     expect(controller.isLeaderboardVisible()).toBe(true);
     controller.dispose();
   });
+
+  it("uses space and the wheel to cycle spectators after death without pointer lock", () => {
+    const canvas = new EventTarget() as HTMLCanvasElement;
+    const documentTarget = new EventTarget() as Document;
+    Object.defineProperty(documentTarget, "pointerLockElement", { configurable: true, value: null });
+    vi.stubGlobal("document", documentTarget);
+    const actor = createActorState("player", "player", { x: 0, y: 1.76, z: 0 });
+    actor.alive = false;
+    const controller = new HumanController(canvas);
+    controller.rememberActor(actor);
+
+    const space = keyEvent("Space");
+    documentTarget.dispatchEvent(space);
+    expect(space.defaultPrevented).toBe(true);
+    expect(controller.consumeSpectatorSwitchRequest()).toBe(1);
+    expect(controller.consumeSpectatorSwitchRequest()).toBeNull();
+
+    const previous = wheelEvent(-1);
+    documentTarget.dispatchEvent(previous);
+    expect(previous.defaultPrevented).toBe(true);
+    expect(controller.consumeSpectatorSwitchRequest()).toBe(-1);
+
+    documentTarget.dispatchEvent(wheelEvent(1));
+    expect(controller.consumeSpectatorSwitchRequest()).toBe(1);
+    controller.dispose();
+  });
 });
 
 function createState(actor: ReturnType<typeof createActorState>): MatchState {
@@ -248,7 +274,7 @@ function createState(actor: ReturnType<typeof createActorState>): MatchState {
 }
 
 function keyEvent(code: string): Event {
-  return Object.assign(new Event("keydown"), { code, repeat: false });
+  return Object.assign(new Event("keydown", { cancelable: true }), { code, repeat: false });
 }
 
 function wheelEvent(deltaY: number): Event {
