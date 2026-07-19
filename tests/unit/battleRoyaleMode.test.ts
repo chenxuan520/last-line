@@ -19,7 +19,7 @@ const damageConfig: BattleRoyaleConfig = {
 };
 
 describe("BattleRoyaleMode", () => {
-  it("budgets about 13 minutes while accelerating the late circles", () => {
+  it("budgets about 10 minutes with shorter opening circles", () => {
     const budgetSeconds =
       BATTLE_ROYALE_CONFIG.flightSeconds +
       BATTLE_ROYALE_CONFIG.safeZoneStages.reduce(
@@ -27,10 +27,14 @@ describe("BattleRoyaleMode", () => {
         0,
       );
 
-    expect(budgetSeconds).toBe(802);
-    expect(budgetSeconds).toBeGreaterThanOrEqual(13 * 60);
-    expect(budgetSeconds).toBeLessThanOrEqual(14 * 60);
+    expect(budgetSeconds).toBe(607);
+    expect(budgetSeconds).toBeGreaterThanOrEqual(10 * 60);
+    expect(budgetSeconds).toBeLessThanOrEqual(11 * 60);
     const stages = BATTLE_ROYALE_CONFIG.safeZoneStages;
+    expect(stages.slice(0, 2).map((stage) => [stage.waitSeconds, stage.shrinkSeconds])).toEqual([
+      [120, 60],
+      [90, 55],
+    ]);
     expect(stages.slice(2).map((stage) => stage.waitSeconds)).toEqual([70, 35, 15, 5]);
     expect(stages.slice(2).map((stage) => stage.shrinkSeconds)).toEqual([45, 28, 16, 8]);
   });
