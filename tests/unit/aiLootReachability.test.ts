@@ -182,7 +182,7 @@ describe("AI loot reachability", () => {
       event.type === "shot-fired" && event.actorId.startsWith("bot-") && event.weaponId === "sniper"
     )).toBe(false);
     expect(allEvents.some((event) => event.type === "actor-died" && event.sourceId?.startsWith("bot-"))).toBe(true);
-  }, 120_000);
+  }, 180_000);
 });
 
 function seededRandom(seed: number): () => number {

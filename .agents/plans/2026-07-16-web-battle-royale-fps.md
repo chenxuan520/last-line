@@ -531,6 +531,7 @@
 - 跳窗：单层/多层统一生成真实门窗墙段；窗口底边按当地支撑面抬高 0.42m，顶边保留至楼层顶下 0.08m，确保 1.8m actor 只有跳起时可通过。真实 Movement 回归断言平走被窗台阻挡、从室外跳入并从室内跳出；AI 导航仍把窗台视为 blocker，继续走门/板梯。
 - 自动门禁：typecheck、build、`git diff --check`、完整 Vitest **20 files / 223 tests** 全通过；49 Bot 完整局单独运行约 70.92 秒并产生唯一胜者，五 seed 至少 42/49 武装阈值未降低。实现提交 `dbffa4d fix: recover stalled AI and enable window jumps` 已推送；GitHub CI/Pages 与 Cloudflare Pages 均成功。
 - Chrome DevTools 生产验收：`https://lastline.011203.xyz/`，主音量始终为 0；山坡树石聚簇可见，约 120 FPS，截图 `/var/folders/5j/qh0z08fj3r9f86g_2tb6x9hm0000gn/T/opencode/last-line-glide-slope-clusters.png`。未稳定完成真实 Pointer Lock 下的“平走挡住→跳入→跳出”闭环，故跳窗的浏览器验收仍明确为未验证；console 仅有 DevTools 触发的 Pointer Lock `WrongDocumentError` 和部署查询 GitHub API 403，无生产资源 warning/error。
+- CI 稳定性：文档提交 run `29699949943` 在并发环境中命中 49 Bot 完整局原 `120s` 单测超时；同一实现的前一轮 CI、本机完整套件和单独完整局均通过。仅将该重型用例超时余量调到 `180s`，保留 1,200 tick、49 个真实 Controller、唯一胜者、拾取/开火/Bot 击杀、零 AI 狙击等全部断言，不降低 seed、武装率或业务阈值。
 
 ## 审查
 
