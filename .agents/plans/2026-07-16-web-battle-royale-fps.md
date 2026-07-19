@@ -286,7 +286,7 @@
 
 - 2026-07-16 01:40：根据已确认的 brainstorming 结论创建正式计划；锁定 Web 桌面端、20 人 AI 大逃杀、Babylon.js + TypeScript、可替换 2D/3D 素材、未来联网与 5v5 边界。
 
-## 实现
+## Build
 
 ### 更新日志
 
@@ -489,6 +489,15 @@
 - 真实规则集成：19 个 `BotController` 使用 `SimulationCombatWorld` 完成搜集、交火并产生唯一胜者。
 - 生命周期：Babylon `NullEngine` 连续创建/销毁 4 个岛屿场景后 scene 和 loot marker 引用归零。
 - 终审：最后一轮定向代码审查通过，无明确高风险 finding。
+
+#### 2026-07-19 21:26 +0800：首页 GitHub 入口与 tag 自动 Release
+
+- 首页菜单底部新增经典 GitHub mark 与 `GitHub` 源码链接，指向 `https://github.com/chenxuan520/last-line`，新标签页打开并包含可访问名称、键盘焦点和 hover 状态；版本信息与链接组成同一 footer，不影响开始按钮。涉及 `src/app/GameApp.ts`、`src/styles/main.css`。
+- `.github/workflows/ci.yml` 新增 `v*` tag 触发：复用 Node.js 24 的 typecheck、Vitest、build 门禁，将 `dist/` 压缩为 `last-line-<tag>.zip`，通过短期 `GITHUB_TOKEN` 创建带自动 notes 的 GitHub Release 并上传附件；tag 不触发 Pages 部署。`docs/deployment.md` 已补标签命令、产物名和权限说明。
+- 首次 `v0.0.1` 实测中，build、211 tests、zip 和 artifact 上传均成功，但 release job 因未 checkout 且 `gh` 无仓库上下文失败；最小修复为显式设置 `GH_REPO=${{ github.repository }}`。修复提交 `1bd6c0e` 在 main run `29688620907` 通过，GitHub Pages 与 Cloudflare Pages 均成功。
+- 经用户明确同意，删除失败测试 tag 后将 `v0.0.1` 重建到 `1bd6c0e`。最终 tag run `29688772791` 全部通过：build/release 成功、Pages 按预期跳过；Release 为 `https://github.com/chenxuan520/last-line/releases/tag/v0.0.1`，附件 `last-line-v0.0.1.zip` 状态 uploaded，大小 1,013,531 字节。
+- 下载 Release 附件后执行 zip 完整性校验，无压缩错误；产物包含 `dist/index.html` 和 256 个 `dist/assets/*` 条目。自动验证另包含 `npm run typecheck`、20 files / 211 tests、`npm run build`、workflow YAML 解析和 `git diff --check`，均通过。首页视觉改动未做浏览器检查：当前无可用浏览器 MCP，且继续遵守不直接启动用户浏览器的约束。
+- 业务与 CI/CD 改动已分别提交并推送：`8136676 feat: add GitHub link and tagged releases`、`1bd6c0e fix: identify repository in release job`；两个既存未跟踪 session 文件继续保持未提交。
 
 ## 审查
 
