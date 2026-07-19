@@ -90,5 +90,6 @@ jobs:
 
       - name: Create GitHub Release
         env:
+          GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" "release-dist/last-line-${GITHUB_REF_NAME}.zip" --verify-tag --generate-notes --title "$GITHUB_REF_NAME"
