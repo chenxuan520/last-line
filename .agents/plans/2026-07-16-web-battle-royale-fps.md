@@ -499,6 +499,12 @@
 - 下载 Release 附件后执行 zip 完整性校验，无压缩错误；产物包含 `dist/index.html` 和 256 个 `dist/assets/*` 条目。自动验证另包含 `npm run typecheck`、20 files / 211 tests、`npm run build`、workflow YAML 解析和 `git diff --check`，均通过。首页视觉改动未做浏览器检查：当前无可用浏览器 MCP，且继续遵守不直接启动用户浏览器的约束。
 - 业务与 CI/CD 改动已分别提交并推送：`8136676 feat: add GitHub link and tagged releases`、`1bd6c0e fix: identify repository in release job`；两个既存未跟踪 session 文件继续保持未提交。
 
+#### 2026-07-19 21:45 +0800：前两圈等待与收缩节奏缩短
+
+- 按用户最终口径将正式配置第一圈调整为等待/收缩 `120/60` 秒，第二圈调整为 `90/55` 秒；第三圈至决赛圈继续保持 `70/45`、`35/28`、`15/16`、`5/8` 秒，半径、圈伤、航线和 fast config 均未修改。
+- 正式理论预算由 802 秒改为 607 秒（约 10 分 07 秒，含 60 秒航线）；存活少于 5 人时既有收缩速度翻倍逻辑保持不变。README 已同步当前节奏。
+- `battleRoyaleMode` 预算回归新增前两圈精确 wait/shrink 断言，并将总预算断言更新为 607 秒。定向 15 tests、typecheck、完整 20 files / 211 tests、build 与 `git diff --check` 均通过；实现已提交并推送为 `eaf5181 tune: shorten opening safe-zone stages`。
+
 ## 审查
 
 ### 2026-07-16 14:27 +0800：当前未提交实现审查（不通过）
