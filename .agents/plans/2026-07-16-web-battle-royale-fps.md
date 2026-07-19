@@ -1227,3 +1227,15 @@
 - 每次运行连续两个 tick：首 tick 将 target record 从 generation 0 拾空并复用为 1，generation 0 stale command 被拒绝；次 tick将同 record 从 1 拾空并复用为 2，generation 1 stale command 同样被拒绝。
 - 同一场景分别以正序和反序 command Map 插入，结果完全一致：最终 record 为 generation 2 的 bandage，两次 stale actor 均保留 `ammo.sniper`，stale item-dropped 计数为 0。该用例能击穿“复用时恒设 1”错误实现。
 - 最终门禁：`npm run typecheck && npm run test && npm run build && git diff --check` 全通过；Vitest 19 files / 188 tests，完整约 73.45 秒；49 Bot 五 seed武装率及完整唯一胜者继续通过。
+
+## 审查
+
+### 2026-07-19 17:51 +0800：origin/main 0d006f7 最终复审与 release gate（通过）
+
+- 审查范围：fetch 后确认 `HEAD/main/origin/main=0d006f7a7663a22dda241b2b0b043bffb04702cb`，唯一父提交及与父提交的 merge-base 均为 `a8231e67b1c4b5091149029c219c9311a23a6b41`；本提交相对父提交仅新增 plan 记录和 `tests/unit/gameSimulation.test.ts` 集成回归，共 2 files / 115 additions。并回看 `0820e61+a8231e6` 相对 `7c7a583` 的满背包、精确拾取、generation/ABA、低血恢复业务链；忽略两个未跟踪 session 文件。
+- 审查结论：**通过。本次审查未发现明确问题，17:33 的 ABA 业务 blocker 与 17:46 的验证 blocker 均已闭环，当前 release gate 通过。** `0d006f7` 未改业务代码，也未引入与需求无关的行为变更。
+- 集成证据：新增用例真实调用 `GameSimulation.step()`；每个 tick 按该步结束时刻调用同一 `compareActorTurns` 只用于构造 picker→dropper→stale 角色，实际 Inventory 执行仍由 `GameSimulation` 内部排序。正、反两种 command `Map` 插入顺序结果完全一致，因此若 `step` 不再按 `compareActorTurns` 排序，反序场景会失败，不是手工固定 `InventorySystem.processCommand` 顺序。
+- 多代 ABA 证据：同一 `target` record 连续两 tick 真实经历 `generation 0→1→2`；generation 0 和 1 的 stale targeted command 均被拒，两名 stale actor 都保留 `ammo.sniper`，且 stale `item-dropped` 为 0，最终 generation 2 的 `bandage` record 保持。若复用错误地恒设 generation 1，第二代 stale command 会通过并改变背包，同时最终 generation 断言也会失败，新增测试可击穿该错误实现。
+- 业务复核：spawn generation 从 0 开始，inactive record 每次复用严格 `+1`；targeted pickup 在任何 drop 前校验 available、generation、数量、item config、真实 3D 距离、replacement 存在及交换后容量。general 满包不腾位；medical/compatible-ammo 仅按紧急策略选择单调 replacement；近枪远弹绑定规划弹药 ID+generation；目标失效不丢 replacement；Human F 继续走无目标最近可拾逻辑。25 HP 可在撤退移动中压制射击；断 LOS 无药只保留约 1 秒确认期，随后寻医或巡逻，不会长期站死。
+- 验证：本机实际执行 `npm run typecheck && npm run test && npm run build && git diff --check a8231e6 0d006f7 && git diff --check 7c7a583 0d006f7` 全通过；Vitest **19 files / 188 tests**，wall time 74.46 秒，包含 49 Bot 五 seed 武装率和完整局唯一胜者；构建仅有既有 >500kB chunk warning。GitHub Actions `CI and GitHub Pages` run `29682233383` 成功。未发现业务源码中的 `context.Background()`。
+- 残余风险：本提交仅补规则集成测试，无展示层改动，本轮未重复静音浏览器 smoke；不阻塞本次 release gate。
