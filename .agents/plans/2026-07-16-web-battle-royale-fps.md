@@ -1246,3 +1246,15 @@
 - 禁用时统一过滤三条 AI 物资入口：跳伞武器落点、脚边快速拾枪、general/medical/compatible-ammo 搜索及缓存目标；`weapon.sniper` 和 `ammo.sniper` 均不会被 AI 选择。旧状态已有 sniper 时 AI 在下一完整决策停火并丢弃，若有允许的副武器则 Inventory 自动切换；双狙击可逐把清除。关闭设置后恢复原行为。
 - 回归：禁用时近狙击/远步枪只精确拾步枪且狙击弹保持地面；已有 sniper+rifle 时丢 sniper 并切 rifle；关闭限制时仍可拾 sniper。生产式 49 Bot 五 seed继续至少 42/49 武装，并断言零 sniper 持有、零 sniper ammo 背包；完整局断言 AI 零 sniper/ammo.sniper item-picked 及零 sniper shot-fired。
 - 自动验证：`npm run typecheck && npm run test && npm run build && git diff --check` 全通过；Vitest 19 files / 192 tests，完整约 74.99 秒；构建仅保留既有大 chunk warning。本阶段按用户要求先提交/审查，物资配图功能尚未开始实现；后续浏览器验收必须使用 MCP 隔离能力，禁止直接启动用户浏览器。
+
+## 审查
+
+### 2026-07-19 18:58 +0800：origin/main 897b8ee 首页禁用 AI 狙击枪与 release gate 复审（通过）
+
+- 审查范围：fetch 后确认 `HEAD/main/origin/main=897b8ee7070ee65b981299ff3788aaadee2bd0a0`，唯一父提交及 merge-base 均为 `4ee04542e1d4abc3163ea7f9b59c4efc3f2e4baa`；仅审查该提交中“首页禁用 AI 狙击枪”相关的 10 文件增量并复核 release gate，忽略两个未跟踪 session 文件。对照本 plan、`AGENTS.md`、`README.md` 和用户列出的设置迁移、AI 全入口限制、旧状态清理、49 Bot 门槛及 UI 要求。
+- 审查结论：**通过。本次审查未发现明确中高风险 finding，release gate 通过。** `disableAiSnipers` 默认 true；旧存储缺字段回落 true、显式 false 保留，开关 change 即时持久化，开始对局还会重读 DOM。生产 `BattleRoyaleSession` 为全部 Bot 显式传入该值，Controller 保存为每局只读布尔值，不存在仅测试传 true、生产漏传的问题。
+- AI 行为复核：禁用时跳伞落点、脚边快速拾枪及 general/medical/compatible-ammo 的缓存目标和新目标统一经过 sniper weapon/ammo 过滤；地图生成及玩家规则未改。已有 sniper 的清理分支先于战斗决策返回无开火的 drop 命令，Inventory 会在丢活动 sniper 后自动切换副武器；双 sniper 会在后续完整决策逐把清除。设置 false 时上述分支和过滤均关闭，既有拾取、弹药与开火链保持原行为。
+- 测试证据复核：五个 seed 继续逐例断言至少 `42/49` Bot 武装，阈值未降低，并直接断言所有 Bot 零 sniper weapon、零 `ammo.sniper`；完整 49 Bot 局直接断言零 sniper/ammo sniper `item-picked` 及零 sniper `shot-fired`。生产接线另由 `BattleRoyaleSession.ts` 实际调用链确认。
+- UI 复核：第五项使用原生 checkbox 的包裹 label，键盘焦点样式沿用既有 switch，并以 `grid-column: 1 / -1` 独占整行；未发现明显布局、无障碍或持久化中高风险。本轮按约束未启动或操作本机浏览器，也未使用浏览器验证。
+- 本机验证：实际执行 `npm run typecheck && npm run test && npm run build && git diff --check 4ee0454..897b8ee` 全通过；Vitest **19 files / 192 tests**，wall time 76.88 秒；构建仅保留既有 >500kB chunk warning。未发现业务源码中的 `context.Background()`。
+- 残余验证缺口（非阻塞）：尚无独立 DOM/localStorage 自动化覆盖旧存储迁移、显式 false 和即时写入，也没有单独的双 sniper 多决策用例；本次结论由明确分支、Inventory 调用链、现有定向测试和全量门禁共同支撑。
