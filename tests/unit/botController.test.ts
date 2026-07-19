@@ -326,7 +326,7 @@ describe("BotController", () => {
     const state = groundedState();
     state.safeZone.radius = 2_000;
     const layout = createMapLayout(state.mapSeed);
-    const obstacle = layout.obstacles[0];
+    const obstacle = layout.obstacles.find((entry) => entry.storyCount === 1);
     const bot = state.actors["bot-1"];
     const player = state.actors.player;
     if (!obstacle || !bot || !player) throw new Error("test setup missing");
@@ -362,10 +362,45 @@ describe("BotController", () => {
     expect(maximumY).toBeCloseTo(roofEyeY, 1);
   });
 
+  it("climbs every internal ramp while pursuing a three-story rooftop target", () => {
+    const state = groundedState();
+    state.safeZone.radius = 2_000;
+    const layout = createMapLayout(state.mapSeed);
+    const building = layout.obstacles.find((entry) => entry.storyCount === 3);
+    const firstRamp = layout.roofRamps.find((entry) => entry.obstacleId === building?.id && entry.fromLevel === 0);
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!building || !firstRamp || !bot || !player) throw new Error("multi-story test setup missing");
+    for (const actor of Object.values(state.actors)) actor.alive = actor.id === bot.id || actor.id === player.id;
+    bot.position = {
+      x: firstRamp.centerX,
+      y: firstRamp.bottomY + 1.76,
+      z: firstRamp.startZ,
+    };
+    player.position = {
+      x: building.center.x,
+      y: building.baseY + building.storyHeight * building.storyCount + BUILDING_ROOF_CAP_HEIGHT + 1.76,
+      z: building.center.z,
+    };
+    bot.yaw = Math.atan2(player.position.x - bot.position.x, player.position.z - bot.position.z);
+    const controller = new BotController(1, () => 0.5);
+    const movement = new MovementSystem();
+    let maximumY = bot.position.y;
+
+    for (let step = 0; step < 2_400; step += 1) {
+      const command = controller.update(bot, state, miss, 1 / 30, player.id);
+      movement.processCommand(state, bot.id, command, 1 / 30);
+      state.elapsedSeconds += 1 / 30;
+      maximumY = Math.max(maximumY, bot.position.y);
+    }
+
+    expect(maximumY).toBeCloseTo(player.position.y, 1);
+  });
+
   it("keeps pursuing the last visible rooftop position through a temporary LOS loss", () => {
     const state = groundedState();
     const layout = createMapLayout(state.mapSeed);
-    const obstacle = layout.obstacles[0];
+    const obstacle = layout.obstacles.find((entry) => entry.storyCount === 1);
     const bot = state.actors["bot-1"];
     const player = state.actors.player;
     if (!obstacle || !bot || !player) throw new Error("test setup missing");
@@ -395,7 +430,7 @@ describe("BotController", () => {
     const state = groundedState();
     state.safeZone.radius = 2_000;
     const layout = createMapLayout(state.mapSeed);
-    const obstacle = layout.obstacles[0];
+    const obstacle = layout.obstacles.find((entry) => entry.storyCount === 1);
     const bot = state.actors["bot-1"];
     const player = state.actors.player;
     if (!obstacle || !bot || !player) throw new Error("test setup missing");
@@ -432,8 +467,8 @@ describe("BotController", () => {
   it("consumes cached roof-ramp waypoints at the production 30Hz fixed step", () => {
     const state = groundedState();
     const layout = createMapLayout(state.mapSeed);
-    const obstacle = layout.obstacles[0];
-    const ramp = layout.roofRamps[0];
+    const obstacle = layout.obstacles.find((entry) => entry.storyCount === 1);
+    const ramp = layout.roofRamps.find((entry) => entry.obstacleId === obstacle?.id);
     const bot = state.actors["bot-1"];
     const player = state.actors.player;
     if (!obstacle || !ramp || !bot || !player) throw new Error("test setup missing");

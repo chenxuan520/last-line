@@ -1,11 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  BUILDING_ROOF_CAP_HEIGHT,
   createMapLayout,
   getRampHeight,
   getTerrainHeight,
   MAP_HALF_SIZE,
-  MAP_OBSTACLES,
   MAP_ROCK_OBSTACLES,
   MAP_WALL_SEGMENTS,
 } from "../../src/config/map";
@@ -92,10 +90,39 @@ describe("SimulationCombatWorld", () => {
     expect(world.hasLineOfSight("shooter", "target")).toBe(false);
   });
 
+  it("blocks shots and line of sight with generated fence and hay cover", () => {
+    const layout = createMapLayout(0);
+    for (const kind of ["fence", "hay"] as const) {
+      const cover = layout.coverObstacles.find((entry) => entry.kind === kind);
+      if (!cover) throw new Error(`${kind} cover missing`);
+      const horizontal = cover.width >= cover.depth;
+      const shooter = createActorState("shooter", "player", {
+        x: cover.center.x - (horizontal ? cover.width / 2 + 5 : 0),
+        y: cover.center.y,
+        z: cover.center.z - (horizontal ? 0 : cover.depth / 2 + 5),
+      });
+      const target = createActorState("target", "bot", {
+        x: cover.center.x + (horizontal ? cover.width / 2 + 5 : 0),
+        y: cover.center.y,
+        z: cover.center.z + (horizontal ? 0 : cover.depth / 2 + 5),
+      });
+      const state = createState(shooter, target);
+      shooter.position.y = cover.center.y;
+      target.position.y = cover.center.y;
+      const world = new SimulationCombatWorld(state);
+      expect(world.traceShotDetailed(trace(shooter.position, subtract(target.position, shooter.position))))
+        .toMatchObject({ targetId: null, hitType: "environment" });
+      expect(world.hasLineOfSight(shooter.id, target.id)).toBe(false);
+    }
+  });
+
   it("hits the visible top of building roof caps", () => {
-    const obstacle = MAP_OBSTACLES[0];
+    const layout = createMapLayout(0);
+    const obstacle = layout.obstacles.find((entry) => entry.storyCount === 1);
     if (!obstacle) throw new Error("test obstacle missing");
-    const roofY = obstacle.center.y + obstacle.height / 2 + BUILDING_ROOF_CAP_HEIGHT;
+    const roof = layout.floorSlabs.find((slab) => slab.obstacleId === obstacle.id && slab.kind === "roof");
+    if (!roof) throw new Error("test roof missing");
+    const roofY = roof.center.y + roof.height / 2;
     const shooter = createActorState("shooter", "player", {
       x: obstacle.center.x,
       y: roofY + 5,
@@ -126,7 +153,7 @@ describe("SimulationCombatWorld", () => {
   });
 
   it("blocks shots with roof ramps", () => {
-    const ramp = createMapLayout(0).roofRamps[0];
+    const ramp = createMapLayout(0).roofRamps.find((entry) => entry.kind === "exterior");
     if (!ramp) throw new Error("test ramp missing");
     const z = (ramp.startZ + ramp.endZ) / 2;
     const surfaceY = getRampHeight(ramp, ramp.centerX, z);
@@ -141,6 +168,53 @@ describe("SimulationCombatWorld", () => {
     expect(hit).toMatchObject({ targetId: null, hitType: "environment" });
     expect(hit.point.y).toBeCloseTo(surfaceY, 5);
     expect(Math.abs(hit.normal.z)).toBeGreaterThan(0.1);
+  });
+
+  it("blocks shots with upper floors while leaving stairwell openings clear", () => {
+    const layout = createMapLayout(0);
+    const building = layout.obstacles.find((entry) => entry.storyCount === 3);
+    const stairwell = building?.stairwell;
+    const slab = layout.floorSlabs.find((entry) => entry.obstacleId === building?.id && entry.level === 1);
+    if (!building || !stairwell || !slab) throw new Error("multi-story geometry missing");
+    const slabTop = slab.center.y + slab.height / 2;
+    const slabShooter = createActorState("shooter", "player", { x: slab.center.x, y: slabTop + 2, z: slab.center.z });
+    const slabState = createState(slabShooter);
+    slabShooter.position = { x: slab.center.x, y: slabTop + 2, z: slab.center.z };
+
+    const slabHit = new SimulationCombatWorld(slabState).traceShotDetailed(
+      trace(slabShooter.position, { x: 0, y: -1, z: 0 }),
+    );
+
+    expect(slabHit.point.y).toBeCloseTo(slabTop, 5);
+    const openingX = stairwell.centerX + stairwell.width / 2 - 0.15;
+    const roofY = building.baseY + building.storyHeight * building.storyCount + 0.18;
+    const openingShooter = createActorState("shooter", "player", { x: openingX, y: roofY + 5, z: stairwell.centerZ });
+    const openingState = createState(openingShooter);
+    openingShooter.position = { x: openingX, y: roofY + 5, z: stairwell.centerZ };
+    const openingHit = new SimulationCombatWorld(openingState).traceShotDetailed(
+      trace(openingShooter.position, { x: 0, y: -1, z: 0 }),
+    );
+    expect(openingHit.point.y).toBeCloseTo(getTerrainHeight(openingX, stairwell.centerZ, layout), 2);
+  });
+
+  it("allows line of sight through upper-story windows and blocks the adjacent wall", () => {
+    const layout = createMapLayout(0);
+    const opening = layout.wallOpenings.find((entry) => entry.side === "front" && entry.storyIndex === 1);
+    const building = layout.obstacles.find((entry) => entry.id === opening?.obstacleId);
+    if (!opening || !building) throw new Error("upper window missing");
+    const outsideZ = building.center.z - building.depth / 2 - 4;
+    const insideZ = building.center.z - building.depth / 2 + 3;
+    const shooter = createActorState("shooter", "player", { x: opening.center.x, y: opening.center.y, z: outsideZ });
+    const target = createActorState("target", "bot", { x: opening.center.x, y: opening.center.y, z: insideZ });
+    const state = createState(shooter, target);
+    shooter.position = { x: opening.center.x, y: opening.center.y, z: outsideZ };
+    target.position = { x: opening.center.x, y: opening.center.y, z: insideZ };
+    expect(new SimulationCombatWorld(state).hasLineOfSight(shooter.id, target.id)).toBe(true);
+
+    const blockedX = opening.center.x + opening.width / 2 + 0.6;
+    shooter.position.x = blockedX;
+    target.position.x = blockedX;
+    expect(new SimulationCombatWorld(state).hasLineOfSight(shooter.id, target.id)).toBe(false);
   });
 
   it("does not create invisible terrain impacts outside the island", () => {

@@ -108,10 +108,7 @@ export class BotController {
     this.updateDeltaSeconds = deltaSeconds;
     const layout = createMapLayout(state.mapSeed);
     if (state.mapSeed !== this.navigatorSeed) {
-      this.navigator = new GridNavigator(layout.obstacles, layout.roofRamps, [
-        ...layout.wallSegments,
-        ...layout.rockObstacles,
-      ]);
+      this.navigator = new GridNavigator(layout);
       this.navigatorSeed = state.mapSeed;
       this.waypoint = null;
       this.navigationPath = [];
@@ -603,7 +600,7 @@ export class BotController {
     layout: ReturnType<typeof createMapLayout>,
     threat: Vector3State,
   ): { coverId: string; target: Vector3State; path: Vector3State[] } | null {
-    const blockers = [...layout.wallSegments, ...layout.rockObstacles]
+    const blockers = [...layout.wallSegments, ...layout.rockObstacles, ...layout.coverObstacles]
       .filter((obstacle) => !this.rejectedRetreatCoverIds.has(obstacle.id))
       .map((obstacle) => ({ obstacle, distance: horizontalDistance(actor.position, obstacle.center) }))
       .filter((entry) => entry.distance <= RETREAT_COVER_SEARCH_DISTANCE)
@@ -818,7 +815,9 @@ export class BotController {
     validatedPath?: readonly Vector3State[],
     preserveAim = false,
   ): ActorCommand {
-    const targetChanged = this.navigationTarget?.x !== target.x || this.navigationTarget.z !== target.z;
+    const targetChanged = this.navigationTarget?.x !== target.x ||
+      this.navigationTarget.z !== target.z ||
+      Math.abs((this.navigationTarget?.y ?? target.y) - target.y) > 0.2;
     const navigationModeChanged = this.navigationPreservesAim !== preserveAim;
     if (this.navigationPath.length === 0 || navigationModeChanged || (targetChanged && !preserveAim)) {
       const path = validatedPath ?? this.navigator.findPath(actor.position, target);
@@ -835,7 +834,7 @@ export class BotController {
   private updateNavigationMovement(actor: ActorState, command: ActorCommand): void {
     while (
       this.waypointIndex < this.navigationPath.length &&
-      horizontalDistance(actor.position, this.navigationPath[this.waypointIndex] as Vector3State) < WAYPOINT_REACHED_DISTANCE
+      spatialDistance(actor.position, this.navigationPath[this.waypointIndex] as Vector3State) < WAYPOINT_REACHED_DISTANCE
     ) {
       this.waypointIndex += 1;
     }
@@ -846,8 +845,8 @@ export class BotController {
       command.move = { x: 0, y: 0, z: 0 };
       return;
     }
-    const waypointKey = `${this.waypointIndex}:${this.waypoint.x}:${this.waypoint.z}`;
-    const waypointDistance = horizontalDistance(actor.position, this.waypoint);
+    const waypointKey = `${this.waypointIndex}:${this.waypoint.x}:${this.waypoint.y}:${this.waypoint.z}`;
+    const waypointDistance = spatialDistance(actor.position, this.waypoint);
     if (waypointKey !== this.navigationProgressKey) {
       this.navigationProgressKey = waypointKey;
       this.navigationProgressDistance = waypointDistance;
@@ -992,6 +991,10 @@ function rotateFlat(value: Vector3State, angle: number): Vector3State {
 
 function horizontalDistance(a: Vector3State, b: Vector3State): number {
   return Math.hypot(a.x - b.x, a.z - b.z);
+}
+
+function spatialDistance(a: Vector3State, b: Vector3State): number {
+  return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 }
 
 function vectorDistance(a: Vector3State, b: Vector3State): number {

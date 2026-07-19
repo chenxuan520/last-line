@@ -4,7 +4,13 @@ import { getTerrainHeight } from "../../src/config/map";
 import { createIdleCommand, type ActorCommand } from "../../src/game/commands/ActorCommand";
 import { GameSimulation } from "../../src/game/GameSimulation";
 import { compareActorTurns } from "../../src/game/rules/resolveSimultaneous";
-import { cycleSpectatorActorId, getReloadVisualTransform, resolveSpectatorActorId } from "../../src/app/BattleRoyaleSession";
+import {
+  cycleSpectatorActorId,
+  getReloadVisualTransform,
+  resolveSpectatorActorId,
+  updateJumpVisualPose,
+  type JumpVisualState,
+} from "../../src/app/BattleRoyaleSession";
 import { TrainingMode } from "../../src/game/modes/TrainingMode";
 import { createActorState, createWeaponState, getActiveWeapon, type MatchState } from "../../src/game/state/types";
 import { CombatSystem, type CombatWorld } from "../../src/game/systems/CombatSystem";
@@ -226,6 +232,37 @@ describe("GameSimulation combat", () => {
     });
     weapon.reloadSeconds = 0;
     expect(getReloadVisualTransform(weapon)).toBeNull();
+  });
+
+  it("derives takeoff, airborne, and landing feedback from vertical velocity", () => {
+    const actor = createActorState("jumper", "player", { x: 0, y: 1.76, z: 0 });
+    const state: JumpVisualState = {
+      wasAirborne: false,
+      landingStartedSeconds: Number.NEGATIVE_INFINITY,
+    };
+    actor.velocity.y = 7.8;
+    const takeoff = updateJumpVisualPose(actor, state, 0);
+    expect(takeoff.actorRotationX).toBeLessThan(0);
+    expect(takeoff.weaponY).toBeLessThan(0);
+
+    actor.velocity.y = -4;
+    const falling = updateJumpVisualPose(actor, state, 0.4);
+    expect(falling.actorRotationX).toBeGreaterThan(0);
+    expect(falling.weaponRotationX).toBeGreaterThan(0);
+
+    actor.velocity.y = 0;
+    updateJumpVisualPose(actor, state, 0.8);
+    const landing = updateJumpVisualPose(actor, state, 0.92);
+    expect(landing.actorY).toBeLessThan(0);
+    expect(landing.cameraY).toBeLessThan(0);
+    expect(landing.weaponY).toBeLessThan(0);
+    expect(updateJumpVisualPose(actor, state, 1.1)).toEqual({
+      actorY: 0,
+      actorRotationX: 0,
+      cameraY: 0,
+      weaponY: 0,
+      weaponRotationX: 0,
+    });
   });
 
   it("locks spectating to the killer until the user cycles manually", () => {

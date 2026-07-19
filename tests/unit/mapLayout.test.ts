@@ -60,8 +60,8 @@ describe("map layouts", () => {
   it("creates stable full-height rock cover clear of buildings and loot", () => {
     for (const seed of [1, 7, 19, 42, 99]) {
       const layout = createMapLayout(seed);
-      expect(layout.rockObstacles).toHaveLength(24);
-      expect(new Set(layout.rockObstacles.map((rock) => rock.id)).size).toBe(24);
+      expect(layout.rockObstacles).toHaveLength(48);
+      expect(new Set(layout.rockObstacles.map((rock) => rock.id)).size).toBe(48);
       for (const [index, rock] of layout.rockObstacles.entries()) {
         expect(rock.id).toBe(`cover-rock-${index}`);
         expect(rock.width).toBeGreaterThanOrEqual(5.5);
@@ -74,6 +74,28 @@ describe("map layouts", () => {
         expect(layout.lootSpawnPoints.every((loot) =>
           Math.abs(loot.x - rock.center.x) > rock.width / 2 + 0.5 ||
           Math.abs(loot.z - rock.center.z) > rock.depth / 2 + 0.5
+        )).toBe(true);
+      }
+    }
+  });
+
+  it("adds deterministic fence and hay cover around denser settlements", () => {
+    for (const seed of [1, 7, 19, 42, 99]) {
+      const layout = createMapLayout(seed);
+      const fences = layout.coverObstacles.filter((cover) => cover.kind === "fence");
+      const hay = layout.coverObstacles.filter((cover) => cover.kind === "hay");
+      expect(fences).toHaveLength(96);
+      expect(hay).toHaveLength(72);
+      expect(new Set(layout.coverObstacles.map((cover) => cover.id)).size).toBe(168);
+      for (const cover of layout.coverObstacles) {
+        expect(cover.height).toBeGreaterThanOrEqual(1.25);
+        expect(layout.obstacles.every((building) =>
+          Math.abs(cover.center.x - building.center.x) >= (cover.width + building.width) / 2 + 3 ||
+          Math.abs(cover.center.z - building.center.z) >= (cover.depth + building.depth) / 2 + 3
+        )).toBe(true);
+        expect(layout.lootSpawnPoints.every((loot) =>
+          Math.abs(loot.x - cover.center.x) > cover.width / 2 + 0.5 ||
+          Math.abs(loot.z - cover.center.z) > cover.depth / 2 + 0.5
         )).toBe(true);
       }
     }
@@ -99,8 +121,10 @@ describe("map layouts", () => {
       expect(obstacle.width).toBeLessThanOrEqual(34);
       expect(obstacle.depth).toBeGreaterThanOrEqual(16);
       expect(obstacle.depth).toBeLessThanOrEqual(33);
-      expect(obstacle.height).toBeGreaterThanOrEqual(3.2);
-      expect(obstacle.height).toBeLessThanOrEqual(4.4);
+      expect(obstacle.storyHeight).toBeGreaterThanOrEqual(3.2);
+      expect(obstacle.storyHeight).toBeLessThanOrEqual(4.4);
+      expect([1, 2, 3]).toContain(obstacle.storyCount);
+      expect(obstacle.height).toBeCloseTo(obstacle.storyHeight * obstacle.storyCount, 3);
 
       for (const other of layout.obstacles.slice(index + 1)) {
         const overlapsX = Math.abs(obstacle.center.x - other.center.x) < (obstacle.width + other.width) / 2;
@@ -108,6 +132,9 @@ describe("map layouts", () => {
         expect(overlapsX && overlapsZ).toBe(false);
       }
     }
+    expect(layout.obstacles.filter((obstacle) => obstacle.storyCount > 1)).toHaveLength(
+      Math.round(layout.obstacles.length * 0.2),
+    );
   });
 
   it("randomizes building positions beyond fixed grid slots", () => {
@@ -115,7 +142,7 @@ describe("map layouts", () => {
     const xs = new Set(layout.obstacles.map((obstacle) => Math.round(obstacle.center.x)));
     const zs = new Set(layout.obstacles.map((obstacle) => Math.round(obstacle.center.z)));
 
-    expect(layout.obstacles.length).toBeGreaterThanOrEqual(96);
+    expect(layout.obstacles.length).toBeGreaterThanOrEqual(188);
     expect(xs.size).toBeGreaterThan(18);
     expect(zs.size).toBeGreaterThan(18);
   });
@@ -198,20 +225,36 @@ describe("map layouts", () => {
     }
   }, 60_000);
 
-  it("creates one matching ramp per building and uses layout terrain heights", () => {
+  it("creates connected ramps and opened floor slabs for every building level", () => {
     const layout = createMapLayout(314_159);
 
-    expect(layout.roofRamps).toHaveLength(layout.obstacles.length);
-    layout.roofRamps.forEach((ramp, index) => {
-      const obstacle = layout.obstacles[index];
-      if (!obstacle) throw new Error("ramp building missing");
-      expect(ramp.id).toBe(`ramp-${obstacle.id}`);
-      expect(ramp.centerX).toBe(obstacle.center.x);
-      expect(ramp.topY).toBeCloseTo(obstacle.center.y + obstacle.height / 2 + BUILDING_ROOF_CAP_HEIGHT);
-      expect(getRampHeight(ramp, ramp.centerX, (ramp.startZ + ramp.endZ) / 2)).toBeCloseTo(
-        (ramp.bottomY + ramp.topY) / 2,
+    for (const obstacle of layout.obstacles) {
+      const ramps = layout.roofRamps.filter((ramp) => ramp.obstacleId === obstacle.id);
+      const slabs = layout.floorSlabs.filter((slab) => slab.obstacleId === obstacle.id);
+      expect(ramps).toHaveLength(obstacle.storyCount);
+      expect(new Set(ramps.map((ramp) => ramp.fromLevel))).toEqual(
+        new Set(Array.from({ length: obstacle.storyCount }, (_, level) => level)),
       );
-    });
+      for (const ramp of ramps) {
+        expect(ramp.toLevel).toBe(ramp.fromLevel + 1);
+        expect(getRampHeight(ramp, ramp.centerX, (ramp.startZ + ramp.endZ) / 2)).toBeCloseTo(
+          (ramp.bottomY + ramp.topY) / 2,
+        );
+      }
+      expect(ramps.at(-1)?.topY).toBeCloseTo(
+        obstacle.baseY + obstacle.storyHeight * obstacle.storyCount + BUILDING_ROOF_CAP_HEIGHT,
+      );
+      if (obstacle.storyCount === 1) {
+        expect(ramps[0]?.id).toBe(`ramp-${obstacle.id}`);
+        expect(slabs).toHaveLength(1);
+      } else {
+        expect(obstacle.stairwell).not.toBeNull();
+        expect(slabs).toHaveLength(obstacle.storyCount * 4);
+        expect(layout.wallOpenings.filter((opening) => opening.obstacleId === obstacle.id)).toHaveLength(
+          obstacle.storyCount * 4,
+        );
+      }
+    }
 
     const hill = layout.terrainHills[0];
     if (!hill) throw new Error("terrain hill missing");
@@ -302,7 +345,7 @@ describe("map layouts", () => {
       const layout = createMapLayout(seed);
       for (const ramp of layout.roofRamps) {
         for (const obstacle of layout.obstacles) {
-          if (ramp.id === `ramp-${obstacle.id}`) continue;
+          if (ramp.obstacleId === obstacle.id) continue;
           const overlapsX = Math.abs(ramp.centerX - obstacle.center.x) < ramp.width / 2 + obstacle.width / 2;
           const rampMinimumZ = Math.min(ramp.startZ, ramp.endZ);
           const rampMaximumZ = Math.max(ramp.startZ, ramp.endZ);
@@ -362,10 +405,10 @@ describe("map layouts", () => {
 
   it("keeps every ramp navigable for the former out-of-bounds regression seed", () => {
     const layout = createMapLayout(331);
-    const navigator = new GridNavigator(layout.obstacles, layout.roofRamps, layout.wallSegments);
-    layout.roofRamps.forEach((ramp, index) => {
-      const obstacle = layout.obstacles[index];
-      if (!obstacle) throw new Error("ramp building missing");
+    const navigator = new GridNavigator(layout);
+    layout.obstacles.forEach((obstacle) => {
+      const ramp = layout.roofRamps.find((entry) => entry.obstacleId === obstacle.id && entry.fromLevel === 0);
+      if (!ramp) throw new Error("ramp building missing");
       const ground = {
         x: ramp.centerX,
         y: getTerrainHeight(ramp.centerX, ramp.startZ, layout) + 1.76,

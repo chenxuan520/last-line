@@ -3,7 +3,12 @@ import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { AssetCatalog } from "../assets/AssetCatalog";
 import { AudioFeedback } from "../client/audio/AudioFeedback";
 import { CombatEffects } from "../client/render/CombatEffects";
-import { createIslandScene, setActorParachuteVisual, setActorWeaponVisual } from "../client/render/scenes/IslandScene";
+import {
+  applyActorVisualPose,
+  createIslandScene,
+  setActorParachuteVisual,
+  setActorWeaponVisual,
+} from "../client/render/scenes/IslandScene";
 import { GameHud } from "../client/ui/GameHud";
 import type { GameSettings } from "../config/settings";
 import { WEAPONS } from "../config/weapons";
@@ -23,11 +28,26 @@ import {
 import { SimulationCombatWorld } from "../game/systems/SimulationCombatWorld";
 
 const PLAYER_ID = "player";
+const LANDING_VISUAL_SECONDS = 0.24;
+
+export interface JumpVisualState {
+  wasAirborne: boolean;
+  landingStartedSeconds: number;
+}
+
+export interface JumpVisualPose {
+  actorY: number;
+  actorRotationX: number;
+  cameraY: number;
+  weaponY: number;
+  weaponRotationX: number;
+}
 
 export class BattleRoyaleSession {
   public readonly scene;
   private readonly camera;
   private readonly actorRoots: Map<EntityId, TransformNode>;
+  private readonly actorVisualRoots: Map<EntityId, TransformNode>;
   private readonly lootMeshes;
   private readonly syncLootMeshes;
   private readonly viewWeaponRoot;
@@ -42,7 +62,7 @@ export class BattleRoyaleSession {
   private readonly audio: AudioFeedback;
   private readonly effects: CombatEffects;
   private readonly actorVisualSignatures = new Map<EntityId, string>();
-  private reloadVisualActive = false;
+  private readonly jumpVisualStates = new Map<EntityId, JumpVisualState>();
   private hud: GameHud | null = null;
   private active = false;
   private playerEliminated = false;
@@ -65,6 +85,7 @@ export class BattleRoyaleSession {
     this.scene = bundle.scene;
     this.camera = bundle.camera;
     this.actorRoots = bundle.actorRoots;
+    this.actorVisualRoots = bundle.actorVisualRoots;
     this.lootMeshes = bundle.lootMeshes;
     this.syncLootMeshes = bundle.syncLootMeshes;
     this.viewWeaponRoot = bundle.viewWeaponRoot;
@@ -235,7 +256,6 @@ export class BattleRoyaleSession {
     this.camera.fov = scoped ? WEAPONS[activeViewWeapon?.weaponId ?? ""]?.scopeFov ?? 1.18 : 1.18;
     this.viewWeaponRoot.setEnabled(Boolean(activeViewWeapon) && !scoped && cameraActor.deployment === "grounded");
     setActorWeaponVisual(this.viewWeaponRoot, activeViewWeapon?.weaponId ?? null);
-    this.syncReloadVisual(activeViewWeapon);
     if (
       this.lastVisualElapsedSeconds !== this.simulation.state.elapsedSeconds ||
       this.lastVisualActorId !== cameraActor.id
@@ -247,12 +267,25 @@ export class BattleRoyaleSession {
         this.simulation.state.flight,
         this.simulation.state.phase === "flight" && player.deployment !== "aircraft",
       );
-      this.camera.position.set(cameraActor.position.x, cameraActor.position.y, cameraActor.position.z);
+      const jumpPoses = new Map<EntityId, JumpVisualPose>();
+      for (const actor of Object.values(this.simulation.state.actors)) {
+        jumpPoses.set(actor.id, this.getJumpVisualPose(actor));
+      }
+      const cameraJumpPose = jumpPoses.get(cameraActor.id) ?? neutralJumpVisualPose();
+      this.camera.position.set(
+        cameraActor.position.x,
+        cameraActor.position.y + cameraJumpPose.cameraY,
+        cameraActor.position.z,
+      );
       this.camera.rotation.set(cameraActor.pitch, cameraActor.yaw, 0);
+      this.syncViewWeaponVisual(activeViewWeapon, cameraJumpPose);
       for (const [actorId, root] of this.actorRoots) {
         const actor = this.getActor(actorId);
         root.position.set(actor.position.x, actor.position.y, actor.position.z);
         root.rotation.y = actor.yaw;
+        const pose = jumpPoses.get(actorId) ?? neutralJumpVisualPose();
+        const visualRoot = this.actorVisualRoots.get(actorId);
+        if (visualRoot) applyActorVisualPose(visualRoot, pose.actorY, pose.actorRotationX);
         const signature = `${actor.alive}:${actor.deployment}:${getActiveWeapon(actor)?.weaponId ?? "none"}:${actorId === cameraActor.id}`;
         if (this.actorVisualSignatures.get(actorId) !== signature) {
           root.setEnabled(actor.alive && actor.deployment !== "aircraft" && actorId !== cameraActor.id);
@@ -273,17 +306,26 @@ export class BattleRoyaleSession {
     }
   }
 
-  private syncReloadVisual(weapon: ReturnType<typeof getActiveWeapon>): void {
-    const transform = getReloadVisualTransform(weapon);
-    if (transform) {
-      this.viewWeaponRoot.position.set(0, transform.y, 0);
-      this.viewWeaponRoot.rotation.set(transform.rotationX, 0, transform.rotationZ);
-      this.reloadVisualActive = true;
-    } else if (this.reloadVisualActive) {
-      this.viewWeaponRoot.position.setAll(0);
-      this.viewWeaponRoot.rotation.setAll(0);
-      this.reloadVisualActive = false;
+  private syncViewWeaponVisual(
+    weapon: ReturnType<typeof getActiveWeapon>,
+    jumpPose: JumpVisualPose,
+  ): void {
+    const reload = getReloadVisualTransform(weapon);
+    this.viewWeaponRoot.position.set(0, (reload?.y ?? 0) + jumpPose.weaponY, 0);
+    this.viewWeaponRoot.rotation.set(
+      (reload?.rotationX ?? 0) + jumpPose.weaponRotationX,
+      0,
+      reload?.rotationZ ?? 0,
+    );
+  }
+
+  private getJumpVisualPose(actor: ActorState): JumpVisualPose {
+    let state = this.jumpVisualStates.get(actor.id);
+    if (!state) {
+      state = { wasAirborne: false, landingStartedSeconds: Number.NEGATIVE_INFINITY };
+      this.jumpVisualStates.set(actor.id, state);
     }
+    return updateJumpVisualPose(actor, state, this.simulation.state.elapsedSeconds);
   }
 
   private getActor(actorId: EntityId): ActorState {
@@ -335,6 +377,51 @@ export function cycleSpectatorActorId(
     return next?.id ?? currentSpectatorId;
   }
   return direction > 0 ? candidates[0]?.id ?? null : candidates.at(-1)?.id ?? null;
+}
+
+function neutralJumpVisualPose(): JumpVisualPose {
+  return {
+    actorY: 0,
+    actorRotationX: 0,
+    cameraY: 0,
+    weaponY: 0,
+    weaponRotationX: 0,
+  };
+}
+
+export function updateJumpVisualPose(
+  actor: ActorState,
+  state: JumpVisualState,
+  elapsedSeconds: number,
+): JumpVisualPose {
+  if (actor.deployment !== "grounded") {
+    state.wasAirborne = false;
+    state.landingStartedSeconds = Number.NEGATIVE_INFINITY;
+    return neutralJumpVisualPose();
+  }
+  const airborne = Math.abs(actor.velocity.y) > 0.01;
+  if (state.wasAirborne && !airborne) state.landingStartedSeconds = elapsedSeconds;
+  state.wasAirborne = airborne;
+  if (airborne) {
+    const vertical = Math.max(-1, Math.min(1, actor.velocity.y / 8));
+    return {
+      actorY: -0.045 * Math.max(0, vertical),
+      actorRotationX: -0.13 * vertical,
+      cameraY: 0,
+      weaponY: -0.045 * vertical,
+      weaponRotationX: -0.09 * vertical,
+    };
+  }
+  const landingProgress = (elapsedSeconds - state.landingStartedSeconds) / LANDING_VISUAL_SECONDS;
+  if (landingProgress < 0 || landingProgress >= 1) return neutralJumpVisualPose();
+  const impact = Math.sin(landingProgress * Math.PI) * (1 - landingProgress * 0.35);
+  return {
+    actorY: -0.13 * impact,
+    actorRotationX: 0.12 * impact,
+    cameraY: -0.08 * impact,
+    weaponY: -0.16 * impact,
+    weaponRotationX: 0.18 * impact,
+  };
 }
 
 export function getReloadVisualTransform(

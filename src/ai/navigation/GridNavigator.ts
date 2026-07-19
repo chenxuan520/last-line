@@ -1,10 +1,13 @@
 import {
-  BUILDING_ROOF_CAP_HEIGHT,
+  createMapLayout,
+  getTerrainHeight,
+  MAP_COVER_OBSTACLES,
   MAP_HALF_SIZE,
-  MAP_OBSTACLES,
   MAP_ROCK_OBSTACLES,
   MAP_ROOF_RAMPS,
   MAP_WALL_SEGMENTS,
+  type MapBuilding,
+  type MapLayout,
   type MapObstacle,
   type RoofRamp,
 } from "../../config/map";
@@ -14,48 +17,63 @@ const DEFAULT_CLEARANCE = 0.4;
 const PATH_CLEARANCE = 0.64;
 const WAYPOINT_PADDING = 0.13;
 const MAX_PATH_SEARCH_NODES = 256;
-const DEFAULT_BLOCKING_OBSTACLES = [...MAP_WALL_SEGMENTS, ...MAP_ROCK_OBSTACLES];
+const ACTOR_EYE_HEIGHT = 1.76;
+const ACTOR_HEIGHT = 1.8;
+const DEFAULT_BLOCKING_OBSTACLES = [...MAP_WALL_SEGMENTS, ...MAP_ROCK_OBSTACLES, ...MAP_COVER_OBSTACLES];
 
 export class GridNavigator {
+  private readonly layout: MapLayout | null;
+  private readonly obstacles: readonly MapObstacle[];
+  private readonly buildings: readonly MapBuilding[];
+  private readonly roofRamps: readonly RoofRamp[];
+  private readonly blockingObstacles: readonly MapObstacle[];
+  private readonly clearance: number;
+
   public constructor(
-    private readonly obstacles: readonly MapObstacle[] = MAP_OBSTACLES,
-    private readonly roofRamps: readonly RoofRamp[] = MAP_ROOF_RAMPS,
-    private readonly blockingObstacles: readonly MapObstacle[] = DEFAULT_BLOCKING_OBSTACLES,
-    private readonly clearance = DEFAULT_CLEARANCE,
-  ) {}
+    layoutOrObstacles: MapLayout | readonly MapObstacle[] = createMapLayout(0),
+    roofRamps: readonly RoofRamp[] = MAP_ROOF_RAMPS,
+    blockingObstacles: readonly MapObstacle[] = DEFAULT_BLOCKING_OBSTACLES,
+    clearance = DEFAULT_CLEARANCE,
+  ) {
+    this.layout = isMapLayout(layoutOrObstacles) ? layoutOrObstacles : null;
+    this.obstacles = this.layout?.obstacles ?? layoutOrObstacles as readonly MapObstacle[];
+    this.buildings = this.obstacles.filter(isMapBuilding);
+    this.roofRamps = this.layout?.roofRamps ?? roofRamps;
+    this.blockingObstacles = this.layout
+      ? [...this.layout.wallSegments, ...this.layout.rockObstacles, ...this.layout.coverObstacles]
+      : blockingObstacles;
+    this.clearance = clearance;
+  }
 
   public findPath(start: Vector3State, target: Vector3State): Vector3State[] {
-    const startRoof = this.findRoof(start);
-    const targetRoof = this.findRoof(target);
-    if (startRoof?.id === targetRoof?.id && startRoof) {
-      return [{ ...start }, { ...target }];
+    const startLocation = this.findLocation(start);
+    const targetLocation = this.findLocation(target);
+    const normalizedStart = this.normalizePoint(start, startLocation);
+    const normalizedTarget = this.normalizePoint(target, targetLocation);
+    if (sameLocation(startLocation, targetLocation)) {
+      return this.findSurfacePath(normalizedStart, normalizedTarget, startLocation);
     }
-    const startRamp = startRoof ? this.findRamp(startRoof) : null;
-    const targetRamp = targetRoof ? this.findRamp(targetRoof) : null;
-    if ((startRoof && !startRamp) || (targetRoof && !targetRamp)) return [];
 
-    const groundStart = startRamp ? { x: startRamp.centerX, y: start.y, z: startRamp.startZ } : start;
-    const groundTarget = targetRamp ? { x: targetRamp.centerX, y: target.y, z: targetRamp.startZ } : target;
-    const groundPath = this.findGroundPath(groundStart, groundTarget);
+    const startExit = this.pathToGround(normalizedStart, startLocation);
+    const targetEntrance = this.pathFromGround(normalizedTarget, targetLocation);
+    if (!startExit || !targetEntrance) return [];
+    const groundPath = this.findSurfacePath(startExit.ground, targetEntrance.ground, GROUND_LOCATION);
     if (groundPath.length === 0) return [];
-
-    const path: Vector3State[] = startRamp
-      ? [{ ...start }, { x: startRamp.centerX, y: start.y, z: startRamp.endZ }, ...groundPath]
-      : groundPath;
-    if (targetRamp) {
-      path.push({ x: targetRamp.centerX, y: target.y, z: targetRamp.endZ }, { ...target });
-    }
+    const path = [...startExit.path];
+    appendPath(path, groundPath);
+    appendPath(path, targetEntrance.path);
     return path;
   }
 
-  private findGroundPath(start: Vector3State, target: Vector3State): Vector3State[] {
-    if (this.isBlocked(start) || this.isBlocked(target)) {
+  private findSurfacePath(start: Vector3State, target: Vector3State, location: SurfaceLocation): Vector3State[] {
+    const blockers = this.blockersForLocation(location);
+    if (this.isBlocked(start, blockers) || this.isBlocked(target, blockers)) {
       return [];
     }
     if (start.x === target.x && start.z === target.z) {
       return [{ ...start }];
     }
-    if (this.hasLineOfSight(start, target)) {
+    if (this.hasLineOfSight(start, target, blockers)) {
       return [{ ...start }, { ...target }];
     }
 
@@ -77,11 +95,11 @@ export class GridNavigator {
       }
       const current = open.splice(currentIndex, 1)[0];
       if (!current) break;
-      if (this.hasLineOfSight(current.point, target)) {
+      if (this.hasLineOfSight(current.point, target, blockers)) {
         return [...current.path, { ...target }];
       }
 
-      const blockers = this.blockingObstacles
+      const nearestBlockers = blockers
         .map((obstacle) => ({
           obstacle,
           progress: segmentObstacleEntryProgress(
@@ -95,9 +113,9 @@ export class GridNavigator {
         .sort((left, right) => left.progress - right.progress)
         .slice(0, 3);
 
-      for (const { obstacle } of blockers) {
+      for (const { obstacle } of nearestBlockers) {
         for (const waypoint of obstacleCorners(obstacle, start.y, cornerOffset)) {
-          if (this.isBlocked(waypoint) || !this.hasLineOfSight(current.point, waypoint)) continue;
+          if (this.isBlocked(waypoint, blockers) || !this.hasLineOfSight(current.point, waypoint, blockers)) continue;
           const distance = current.distance + horizontalDistance(current.point, waypoint);
           const key = pointKey(waypoint);
           if (distance >= (bestDistances.get(key) ?? Number.POSITIVE_INFINITY)) continue;
@@ -114,30 +132,162 @@ export class GridNavigator {
     return [];
   }
 
-  private findRoof(point: Vector3State): MapObstacle | null {
-    return this.obstacles.find((obstacle) => {
-      const roofY = obstacle.center.y + obstacle.height / 2 + BUILDING_ROOF_CAP_HEIGHT;
-      return point.y >= roofY + 0.2 && pointInsideObstacle(point, obstacle, 0);
-    }) ?? null;
+  private findLocation(point: Vector3State): SurfaceLocation {
+    for (const building of this.buildings) {
+      if (!pointInsideObstacle(point, building, 0)) continue;
+      for (let level = building.storyCount; level >= 1; level -= 1) {
+        const supportY = building.baseY + level * building.storyHeight + 0.18;
+        if (point.y >= supportY + 0.15) return { building, level, supportY };
+      }
+    }
+    return { ...GROUND_LOCATION, supportY: this.groundSupport(point) };
   }
 
-  private findRamp(obstacle: MapObstacle): RoofRamp | null {
-    return this.roofRamps.find((ramp) => ramp.id === `ramp-${obstacle.id}`) ?? null;
+  private normalizePoint(point: Vector3State, location: SurfaceLocation): Vector3State {
+    return { x: point.x, y: location.supportY + ACTOR_EYE_HEIGHT, z: point.z };
   }
 
-  private isBlocked(point: Vector3State): boolean {
+  private pathToGround(start: Vector3State, location: SurfaceLocation): GroundTransition | null {
+    if (!location.building || location.level === 0) return { path: [{ ...start }], ground: { ...start } };
+    const path = [{ ...start }];
+    const firstRamp = this.rampForLevel(location.building, location.level - 1);
+    if (!firstRamp) return null;
+    const approach = this.rampApproach(location.building, firstRamp, location.level);
+    const surfacePath = this.findSurfacePath(start, approach, location);
+    if (surfacePath.length === 0) return null;
+    path.length = 0;
+    appendPath(path, surfacePath);
+    for (let level = location.level - 1; level >= 0; level -= 1) {
+      const ramp = this.rampForLevel(location.building, level);
+      if (!ramp) return null;
+      appendPoint(path, rampPoint(ramp, true));
+      appendPoint(path, rampPoint(ramp, false));
+    }
+    const ground = path.at(-1);
+    return ground ? { path, ground } : null;
+  }
+
+  private pathFromGround(target: Vector3State, location: SurfaceLocation): GroundTransition | null {
+    if (!location.building || location.level === 0) return { path: [{ ...target }], ground: { ...target } };
+    const ramps: RoofRamp[] = [];
+    for (let level = 0; level < location.level; level += 1) {
+      const ramp = this.rampForLevel(location.building, level);
+      if (!ramp) return null;
+      ramps.push(ramp);
+    }
+    const firstRamp = ramps[0];
+    if (!firstRamp) return null;
+    const ground = rampPoint(firstRamp, false);
+    const path: Vector3State[] = [{ ...ground }];
+    for (const ramp of ramps) {
+      appendPoint(path, rampPoint(ramp, false));
+      appendPoint(path, rampPoint(ramp, true));
+    }
+    const approach = this.rampApproach(location.building, ramps.at(-1) as RoofRamp, location.level);
+    appendPoint(path, approach);
+    const surfacePath = this.findSurfacePath(approach, target, location);
+    if (surfacePath.length === 0) return null;
+    appendPath(path, surfacePath);
+    return { path, ground };
+  }
+
+  private rampForLevel(building: MapBuilding, fromLevel: number): RoofRamp | null {
+    return this.roofRamps.find((ramp) => ramp.obstacleId === building.id && ramp.fromLevel === fromLevel) ?? null;
+  }
+
+  private rampApproach(building: MapBuilding, ramp: RoofRamp, level: number): Vector3State {
+    const stairwell = building.stairwell;
+    if (!stairwell) return rampPoint(ramp, true);
+    return {
+      x: stairwell.centerX - stairwell.side * (
+        stairwell.width / 2 + Math.max(this.clearance, PATH_CLEARANCE) + WAYPOINT_PADDING + 0.1
+      ),
+      y: building.baseY + level * building.storyHeight + 0.18 + ACTOR_EYE_HEIGHT,
+      z: ramp.endZ,
+    };
+  }
+
+  private blockersForLocation(location: SurfaceLocation): MapObstacle[] {
+    const supportY = location.supportY;
+    const blockers = this.blockingObstacles.filter((obstacle) => {
+      const bottomY = obstacle.center.y - obstacle.height / 2;
+      const topY = obstacle.center.y + obstacle.height / 2;
+      return bottomY < supportY + ACTOR_HEIGHT && topY > supportY + 0.05;
+    });
+    if (location.building?.stairwell && location.level > 0) {
+      const stairwell = location.building.stairwell;
+      blockers.push({
+        id: `${location.building.id}-stairwell-${location.level}`,
+        center: { x: stairwell.centerX, y: supportY + ACTOR_HEIGHT / 2, z: stairwell.centerZ },
+        width: stairwell.width,
+        height: ACTOR_HEIGHT,
+        depth: stairwell.depth,
+        color: "#000000",
+      });
+    }
+    return blockers;
+  }
+
+  private groundSupport(point: Vector3State): number {
+    return this.layout ? getTerrainHeight(point.x, point.z, this.layout) : point.y - ACTOR_EYE_HEIGHT;
+  }
+
+  private isBlocked(point: Vector3State, blockers: readonly MapObstacle[]): boolean {
     const mapLimit = MAP_HALF_SIZE - this.clearance;
     if (point.x < -mapLimit || point.x > mapLimit || point.z < -mapLimit || point.z > mapLimit) {
       return true;
     }
-    return this.blockingObstacles.some((obstacle) => pointInsideObstacle(point, obstacle, this.clearance));
+    return blockers.some((obstacle) => pointInsideObstacle(point, obstacle, this.clearance));
   }
 
-  private hasLineOfSight(start: Vector3State, target: Vector3State): boolean {
-    return !this.blockingObstacles.some((obstacle) =>
+  private hasLineOfSight(start: Vector3State, target: Vector3State, blockers: readonly MapObstacle[]): boolean {
+    return !blockers.some((obstacle) =>
       segmentIntersectsObstacle(start, target, obstacle, Math.max(this.clearance, PATH_CLEARANCE)),
     );
   }
+}
+
+interface SurfaceLocation {
+  building: MapBuilding | null;
+  level: number;
+  supportY: number;
+}
+
+interface GroundTransition {
+  path: Vector3State[];
+  ground: Vector3State;
+}
+
+const GROUND_LOCATION: SurfaceLocation = { building: null, level: 0, supportY: 0 };
+
+function sameLocation(left: SurfaceLocation, right: SurfaceLocation): boolean {
+  return left.level === right.level && left.building?.id === right.building?.id;
+}
+
+function rampPoint(ramp: RoofRamp, top: boolean): Vector3State {
+  return {
+    x: ramp.centerX,
+    y: (top ? ramp.topY : ramp.bottomY) + ACTOR_EYE_HEIGHT,
+    z: top ? ramp.endZ : ramp.startZ,
+  };
+}
+
+function appendPath(target: Vector3State[], points: readonly Vector3State[]): void {
+  for (const point of points) appendPoint(target, point);
+}
+
+function appendPoint(target: Vector3State[], point: Vector3State): void {
+  const previous = target.at(-1);
+  if (previous && horizontalDistance(previous, point) < 1e-6 && Math.abs(previous.y - point.y) < 1e-6) return;
+  target.push({ ...point });
+}
+
+function isMapLayout(value: MapLayout | readonly MapObstacle[]): value is MapLayout {
+  return !Array.isArray(value) && "floorSlabs" in value;
+}
+
+function isMapBuilding(obstacle: MapObstacle): obstacle is MapBuilding {
+  return "storyCount" in obstacle && "storyHeight" in obstacle && "baseY" in obstacle;
 }
 
 interface PathSearchNode {

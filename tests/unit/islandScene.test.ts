@@ -1,8 +1,12 @@
 import { NullEngine } from "@babylonjs/core/Engines/nullEngine";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AssetCatalog } from "../../src/assets/AssetCatalog";
-import { createIslandScene, setActorWeaponVisual } from "../../src/client/render/scenes/IslandScene";
-import { BUILDING_ROOF_CAP_HEIGHT, createMapLayout, getTerrainHeight } from "../../src/config/map";
+import {
+  applyActorVisualPose,
+  createIslandScene,
+  setActorWeaponVisual,
+} from "../../src/client/render/scenes/IslandScene";
+import { createMapLayout, getTerrainHeight } from "../../src/config/map";
 import { createBattleRoyaleState } from "../../src/game/modes/BattleRoyaleMode";
 import { createWeaponState } from "../../src/game/state/types";
 
@@ -80,8 +84,8 @@ describe("IslandScene lifecycle", () => {
       const treeFoliage = bundle.scene.meshes.filter((mesh) => /^tree-foliage-\d+$/.test(mesh.name));
       expect(Math.max(...heights) - Math.min(...heights)).toBeGreaterThan(5);
       expect(terrainColors.size).toBeGreaterThan(100);
-      expect(treeTrunks).toHaveLength(128);
-      expect(treeFoliage).toHaveLength(128);
+      expect(treeTrunks).toHaveLength(256);
+      expect(treeFoliage).toHaveLength(256);
       expect(treeFoliage.every((mesh) => mesh.getTotalVertices() < 160)).toBe(true);
       expect(treeFoliage.every((mesh) =>
         mesh.getBoundingInfo().boundingBox.maximumWorld.y - getTerrainHeight(mesh.position.x, mesh.position.z, layout) > 15
@@ -94,7 +98,13 @@ describe("IslandScene lifecycle", () => {
         return mesh?.metadata?.obstacleId === rock.id &&
           mesh.scaling.x === rock.width && mesh.scaling.y === rock.height && mesh.scaling.z === rock.depth;
       })).toBe(true);
-      expect(bundle.scene.meshes.filter((mesh) => /^rock-\d+$/.test(mesh.name))).toHaveLength(32);
+      const coverMeshes = bundle.scene.meshes.filter((mesh) => mesh.metadata?.decoration === "cover-prop");
+      expect(coverMeshes.filter((mesh) => mesh.metadata?.coverKind === "fence")).toHaveLength(1);
+      expect(coverMeshes.find((mesh) => mesh.metadata?.coverKind === "fence")?.metadata?.sourceCount).toBe(96 * 5);
+      expect(coverMeshes.filter((mesh) => mesh.metadata?.coverKind === "hay")).toHaveLength(1);
+      expect(coverMeshes.find((mesh) => mesh.metadata?.coverKind === "hay")?.metadata?.sourceCount).toBe(72 * 3);
+      expect(bundle.scene.meshes.filter((mesh) => /^rock-\d+$/.test(mesh.name))).toHaveLength(64);
+      expect(bundle.scene.meshes.filter((mesh) => /^shrub-\d+$/.test(mesh.name))).toHaveLength(180);
       expect(layeredSurfaces).toHaveLength(0);
       expect(bundle.scene.meshes.filter((mesh) => mesh.name.startsWith("ocean-"))).toHaveLength(4);
       const floorMeshes = bundle.scene.meshes.filter(
@@ -124,16 +134,17 @@ describe("IslandScene lifecycle", () => {
         expect(getTerrainHeight(x, z, layout)).toBeCloseTo(y, 5);
       }
       expect(decorations.every((mesh) => !mesh.isPickable && !mesh.checkCollisions)).toBe(true);
-      expect(collisionMeshes).toHaveLength(layout.wallSegments.length + 1);
-      expect(bundle.scene.meshes.length).toBeLessThan(5_400);
-      layout.obstacles.forEach((obstacle, index) => {
-        const roof = bundle.scene.getMeshByName(`building-roof-${index}`);
-        expect(roof?.getBoundingInfo().boundingBox.maximumWorld.y).toBeCloseTo(
-          obstacle.center.y + obstacle.height / 2 + BUILDING_ROOF_CAP_HEIGHT,
-        );
-        expect(roof?.getBoundingInfo().boundingBox.extendSizeWorld.x).toBeCloseTo(obstacle.width / 2);
-        expect(roof?.getBoundingInfo().boundingBox.extendSizeWorld.z).toBeCloseTo(obstacle.depth / 2);
-      });
+      expect(collisionMeshes).toHaveLength(new Set(layout.wallSegments.map((wall) => wall.color)).size + 1);
+      expect(bundle.scene.meshes.length).toBeLessThan(4_000);
+      const slabBatch = bundle.scene.getMeshByName("building-slabs-batch");
+      expect(slabBatch?.metadata?.sourceCount).toBe(layout.floorSlabs.length);
+      expect(slabBatch?.getTotalVertices()).toBe(layout.floorSlabs.length * 24);
+      const openingPieceCount =
+        layout.wallOpenings.filter((opening) => opening.kind === "window").length * 4 +
+        layout.wallOpenings.filter((opening) => opening.kind === "door").length * 3 +
+        layout.obstacles.filter((obstacle) => obstacle.storyCount === 1).length * 6;
+      expect(bundle.scene.getMeshByName("building-openings-batch")?.metadata?.sourceCount).toBe(openingPieceCount);
+      expect(bundle.scene.getMeshByName("building-ramps-batch")?.metadata?.sourceCount).toBe(layout.roofRamps.length);
       const ringPositions = bundle.safeZoneRing.getVerticesData("position") ?? [];
       for (let ringIndex = 0; ringIndex < ringPositions.length; ringIndex += 6 * 12) {
         const x = ringPositions[ringIndex] ?? 0;
@@ -159,7 +170,15 @@ describe("IslandScene lifecycle", () => {
 
       const bot = state.actors["bot-1"];
       const botRoot = bundle.actorRoots.get("bot-1");
-      if (!bot || !botRoot) throw new Error("test bot missing");
+      const botVisualRoot = bundle.actorVisualRoots.get("bot-1");
+      if (!bot || !botRoot || !botVisualRoot) throw new Error("test bot missing");
+      expect(botVisualRoot.parent).toBe(botRoot);
+      expect(botRoot.getChildMeshes(true)).toHaveLength(0);
+      const originalBotPosition = botRoot.position.clone();
+      applyActorVisualPose(botVisualRoot, -0.1, 0.12);
+      expect(botVisualRoot.position.y).toBe(-0.1);
+      expect(botVisualRoot.rotation.x).toBe(0.12);
+      expect(botRoot.position).toEqual(originalBotPosition);
       const weaponMeshes = botRoot.getChildMeshes(false).filter((mesh) => mesh.metadata?.actorVisual === "weapon");
       const parachuteMeshes = botRoot.getChildMeshes(false).filter((mesh) => mesh.metadata?.actorVisual === "parachute");
       expect(parachuteMeshes).toHaveLength(1);

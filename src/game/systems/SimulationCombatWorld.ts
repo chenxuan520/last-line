@@ -1,5 +1,4 @@
 import {
-  BUILDING_ROOF_CAP_HEIGHT,
   createMapLayout,
   getTerrainHeight,
   getRampHeight,
@@ -43,8 +42,14 @@ export class SimulationCombatWorld implements CombatWorld {
         nearestEnvironment = hit;
       }
     }
-    for (const obstacle of layout.obstacles) {
-      const hit = intersectRoofCap(trace.origin, direction, trace.range, obstacle);
+    for (const cover of layout.coverObstacles) {
+      const hit = intersectObstacle(trace.origin, direction, trace.range, cover);
+      if (hit && (!nearestEnvironment || hit.distance < nearestEnvironment.distance)) {
+        nearestEnvironment = hit;
+      }
+    }
+    for (const slab of layout.floorSlabs) {
+      const hit = intersectObstacle(trace.origin, direction, trace.range, slab);
       if (hit && (!nearestEnvironment || hit.distance < nearestEnvironment.distance)) {
         nearestEnvironment = hit;
       }
@@ -258,26 +263,6 @@ function intersectBox(
     }
   }
   return near <= range ? { distance: near, normal: hitNormal } : null;
-}
-
-function intersectRoofCap(
-  origin: Vector3State,
-  direction: Vector3State,
-  range: number,
-  obstacle: MapObstacle,
-): SurfaceHit | null {
-  const roofMinimumY = obstacle.center.y + obstacle.height / 2;
-  const roofMaximumY = roofMinimumY + BUILDING_ROOF_CAP_HEIGHT;
-  return intersectBox(
-    origin,
-    direction,
-    range,
-    [
-      ["x", obstacle.center.x - obstacle.width / 2, obstacle.center.x + obstacle.width / 2],
-      ["y", roofMinimumY, roofMaximumY],
-      ["z", obstacle.center.z - obstacle.depth / 2, obstacle.center.z + obstacle.depth / 2],
-    ],
-  );
 }
 
 function intersectTerrain(

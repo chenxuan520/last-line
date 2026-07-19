@@ -22,13 +22,13 @@ import type { AssetCatalog } from "../../../assets/AssetCatalog";
 import type { AssetEntry } from "../../../assets/types";
 import { getItemIconAssetId } from "../../itemIcon";
 import {
-  BUILDING_ROOF_CAP_HEIGHT,
   createMapRoadSegments,
   createMapLayout,
   getTerrainHeight,
   MAP_SIZE,
   TERRAIN_GRID_SUBDIVISIONS,
   type MapLayout,
+  type MapWallOpening,
 } from "../../../config/map";
 import { getActiveWeapon, type ActorState, type EntityId, type FlightState, type GroundLootState } from "../../../game/state/types";
 import { syncLootMarkerViews, type LootMarkerViewAdapter } from "../LootMarkerViewAdapter";
@@ -78,6 +78,8 @@ interface IslandMaterials {
   foliage: StandardMaterial;
   shrub: StandardMaterial;
   rock: StandardMaterial;
+  fence: StandardMaterial;
+  hay: StandardMaterial;
   poiAccent: StandardMaterial;
   poiDark: StandardMaterial;
   roof: StandardMaterial;
@@ -101,6 +103,7 @@ export interface IslandSceneBundle {
   scene: Scene;
   camera: UniversalCamera;
   actorRoots: Map<EntityId, TransformNode>;
+  actorVisualRoots: Map<EntityId, TransformNode>;
   lootMeshes: Map<EntityId, Mesh>;
   syncLootMeshes: (groundLoot: Readonly<Record<EntityId, GroundLootState>>) => void;
   viewWeaponRoot: TransformNode;
@@ -149,7 +152,7 @@ export async function createIslandScene(
   createIslandEnvironment(scene, materials, layout);
   createPois(scene, materials, layout);
 
-  const actorRoots = createActors(scene, actors, materials);
+  const { actorRoots, actorVisualRoots } = createActors(scene, actors, materials);
   const camera = createCamera(scene, player);
   const aircraftInteriorRoot = createAircraftInterior(scene, camera, materials);
   aircraftInteriorRoot.setEnabled(player.deployment === "aircraft");
@@ -168,7 +171,7 @@ export async function createIslandScene(
   const viewWeaponRoot = createViewWeapon(scene, camera, materials);
   setActorWeaponVisual(viewWeaponRoot, getActiveWeapon(player)?.weaponId ?? null);
   viewWeaponRoot.setEnabled(Boolean(getActiveWeapon(player)));
-  await replaceCatalogModels(scene, assets, actors, actorRoots, viewWeaponRoot);
+  await replaceCatalogModels(scene, assets, actors, actorRoots, actorVisualRoots, viewWeaponRoot);
 
   const { lootMeshes, syncLootMeshes } = createLootMeshes(
     scene,
@@ -184,6 +187,7 @@ export async function createIslandScene(
     scene,
     camera,
     actorRoots,
+    actorVisualRoots,
     lootMeshes,
     syncLootMeshes,
     viewWeaponRoot,
@@ -200,6 +204,7 @@ async function replaceCatalogModels(
   assets: AssetCatalog,
   actors: Readonly<Record<EntityId, ActorState>>,
   actorRoots: Map<EntityId, TransformNode>,
+  actorVisualRoots: Map<EntityId, TransformNode>,
   viewWeaponRoot: TransformNode,
 ): Promise<void> {
   const weaponIds = ["rifle", "smg", "shotgun", "sniper"] as const;
@@ -212,12 +217,13 @@ async function replaceCatalogModels(
     for (const actor of Object.values(actors)) {
       if (actor.kind !== "bot") continue;
       const root = actorRoots.get(actor.id);
-      if (!root) continue;
+      const visualRoot = actorVisualRoots.get(actor.id);
+      if (!root || !visualRoot) continue;
       root.getChildMeshes()
         .filter((mesh) => mesh.metadata?.actorVisual !== "weapon" && mesh.metadata?.actorVisual !== "parachute")
         .forEach((mesh) => mesh.setEnabled(false));
       const instance = character.container.instantiateModelsToScene((name) => `${actor.id}-${name}`);
-      attachModel(instance.rootNodes, root, character.descriptor);
+      attachModel(instance.rootNodes, visualRoot, character.descriptor);
     }
     scene.onDisposeObservable.addOnce(() => character.container.dispose());
   }
@@ -231,10 +237,11 @@ async function replaceCatalogModels(
     for (const actor of Object.values(actors)) {
       if (actor.kind !== "bot") continue;
       const root = actorRoots.get(actor.id);
-      if (!root) continue;
+      const visualRoot = actorVisualRoots.get(actor.id);
+      if (!root || !visualRoot) continue;
       suppressProceduralWeapon(root, weaponId);
       const instance = weapon.container.instantiateModelsToScene((name) => `${actor.id}-${weaponId}-${name}`);
-      attachModel(instance.rootNodes, root, weapon.descriptor, false, weaponId);
+      attachModel(instance.rootNodes, visualRoot, weapon.descriptor, false, weaponId);
       setActorWeaponVisual(root, getActiveWeapon(actor)?.weaponId ?? null);
     }
     const player = Object.values(actors).find((actor) => actor.kind === "player");
@@ -324,6 +331,8 @@ function createMaterials(scene: Scene, assets: AssetCatalog): IslandMaterials {
     foliage: material(scene, "tree-foliage-material", "#34533a"),
     shrub: material(scene, "shrub-material", "#496545"),
     rock: material(scene, "rock-material", "#65685e"),
+    fence: material(scene, "fence-material", "#655443"),
+    hay: material(scene, "hay-material", "#a28a4f"),
     poiAccent: material(scene, "poi-accent-material", "#a37848"),
     poiDark: material(scene, "poi-dark-material", "#434b4f"),
     roof: material(scene, "building-roof-material", "#343b3b"),
@@ -357,6 +366,7 @@ function createIslandEnvironment(scene: Scene, materials: IslandMaterials, layou
   markEnvironment(ground, "island-ground");
 
   const buildingMaterials = new Map<string, StandardMaterial>();
+  const buildingWallMeshes = new Map<string, Mesh[]>();
   for (const wall of layout.wallSegments) {
     let buildingMaterial = buildingMaterials.get(wall.color);
     if (!buildingMaterial) {
@@ -371,13 +381,74 @@ function createIslandEnvironment(scene: Scene, materials: IslandMaterials, layou
     );
     wallMesh.position.set(wall.center.x, wall.center.y, wall.center.z);
     wallMesh.material = buildingMaterial;
-    markEnvironment(wallMesh, wall.id);
+    const meshes = buildingWallMeshes.get(wall.color);
+    if (meshes) meshes.push(wallMesh);
+    else buildingWallMeshes.set(wall.color, [wallMesh]);
+  }
+  for (const [color, meshes] of buildingWallMeshes) {
+    const merged = Mesh.MergeMeshes(meshes, true, true);
+    if (!merged) throw new Error(`Unable to merge building walls for ${color}`);
+    merged.name = `building-walls-${color.replace("#", "")}`;
+    merged.material = buildingMaterials.get(color) ?? null;
+    markEnvironment(merged, `building-walls-${color}`);
   }
 
   createBuildingDetails(scene, materials, layout);
   createRoofRamps(scene, materials, layout);
+  createCoverProps(scene, materials, layout);
   createVegetation(scene, materials.trunk, materials.foliage, layout);
   createNaturalDetails(scene, materials.rock, materials.shrub, layout);
+  mergeStaticBatch(
+    scene,
+    "building-slabs-batch",
+    (mesh) => mesh.metadata?.decoration === "building-detail" &&
+      (mesh.metadata?.detailType === "floor" || mesh.metadata?.detailType === "roof"),
+    { decoration: "building-detail", detailType: "floor-slabs" },
+  );
+  mergeStaticBatch(
+    scene,
+    "building-openings-batch",
+    (mesh) => mesh.metadata?.decoration === "building-detail" &&
+      (mesh.metadata?.detailType === "door" || mesh.metadata?.detailType === "window"),
+    { decoration: "building-detail", detailType: "openings" },
+  );
+  mergeStaticBatch(
+    scene,
+    "building-ramps-batch",
+    (mesh) => mesh.metadata?.decoration === "roof-ramp",
+    { decoration: "roof-ramp" },
+  );
+  mergeStaticBatch(
+    scene,
+    "fence-cover-batch",
+    (mesh) => mesh.metadata?.decoration === "cover-prop" && mesh.metadata?.coverKind === "fence",
+    { decoration: "cover-prop", coverKind: "fence" },
+  );
+  mergeStaticBatch(
+    scene,
+    "hay-cover-batch",
+    (mesh) => mesh.metadata?.decoration === "cover-prop" && mesh.metadata?.coverKind === "hay",
+    { decoration: "cover-prop", coverKind: "hay" },
+  );
+}
+
+function mergeStaticBatch(
+  scene: Scene,
+  name: string,
+  predicate: (mesh: Mesh) => boolean,
+  metadata: Record<string, unknown>,
+): void {
+  const meshes = scene.meshes.filter((mesh): mesh is Mesh => mesh instanceof Mesh && predicate(mesh));
+  if (meshes.length === 0) return;
+  const material = meshes[0]?.material ?? null;
+  const merged = Mesh.MergeMeshes(meshes, true, true);
+  if (!merged) throw new Error(`Unable to merge ${name}`);
+  merged.name = name;
+  merged.material = material;
+  merged.checkCollisions = false;
+  merged.isPickable = false;
+  merged.metadata = { ...metadata, sourceCount: meshes.length };
+  merged.freezeWorldMatrix();
 }
 
 function applyTerrainSurface(ground: Mesh, layout: MapLayout): void {
@@ -517,22 +588,49 @@ function createBuildingDetails(scene: Scene, materials: IslandMaterials, layout:
   trimTemplate.isVisible = false;
   trimTemplate.isPickable = false;
 
-  layout.obstacles.forEach((obstacle, index) => {
-    const roof = roofTemplate.clone(`building-roof-${index}`);
-    if (roof) {
-      roof.position.set(
-        obstacle.center.x,
-        obstacle.center.y + obstacle.height / 2 + BUILDING_ROOF_CAP_HEIGHT / 2,
-        obstacle.center.z,
-      );
-      roof.scaling.set(obstacle.width, BUILDING_ROOF_CAP_HEIGHT, obstacle.depth);
-      roof.isVisible = true;
-      markBuildingDetail(roof, obstacle.id, "roof");
-    }
+  for (const slab of layout.floorSlabs) {
+    const mesh = roofTemplate.clone(slab.id);
+    if (!mesh) continue;
+    mesh.position.set(slab.center.x, slab.center.y, slab.center.z);
+    mesh.scaling.set(slab.width, slab.height, slab.depth);
+    mesh.isVisible = true;
+    markBuildingDetail(mesh, slab.obstacleId, slab.kind);
+  }
 
-    createOpeningFrame(trimTemplate, obstacle, index, "door", -1);
-    createOpeningFrame(trimTemplate, obstacle, index, "window", 1);
+  layout.obstacles.forEach((obstacle, index) => {
+    if (obstacle.storyCount === 1) {
+      createOpeningFrame(trimTemplate, obstacle, index, "door", -1);
+      createOpeningFrame(trimTemplate, obstacle, index, "window", 1);
+    }
   });
+  layout.wallOpenings.forEach((opening, index) => createWallOpeningFrame(trimTemplate, opening, index));
+}
+
+function createWallOpeningFrame(template: Mesh, opening: MapWallOpening, index: number): void {
+  const horizontalAlongX = opening.side === "front" || opening.side === "back";
+  const thickness = 0.12;
+  const pieces: Array<readonly [string, number, number, number]> = [
+    ["left", -opening.width / 2, 0, opening.height],
+    ["right", opening.width / 2, 0, opening.height],
+    ["top", 0, opening.height / 2, thickness],
+  ];
+  if (opening.kind === "window") pieces.push(["bottom", 0, -opening.height / 2, thickness]);
+  for (const [pieceName, horizontalOffset, verticalOffset, pieceHeight] of pieces) {
+    const piece = template.clone(`building-opening-${index}-${pieceName}`);
+    if (!piece) continue;
+    piece.position.set(
+      opening.center.x + (horizontalAlongX ? horizontalOffset : 0),
+      opening.center.y + verticalOffset,
+      opening.center.z + (horizontalAlongX ? 0 : horizontalOffset),
+    );
+    piece.scaling.set(
+      horizontalAlongX ? (pieceName === "top" || pieceName === "bottom" ? opening.width : thickness) : thickness,
+      pieceHeight,
+      horizontalAlongX ? thickness : (pieceName === "top" || pieceName === "bottom" ? opening.width : thickness),
+    );
+    piece.isVisible = true;
+    markBuildingDetail(piece, opening.obstacleId, opening.kind);
+  }
 }
 
 function createOpeningFrame(
@@ -589,13 +687,72 @@ function createRoofRamps(scene: Scene, materials: IslandMaterials, layout: MapLa
   }
 }
 
+function createCoverProps(scene: Scene, materials: IslandMaterials, layout: MapLayout): void {
+  for (const cover of layout.coverObstacles) {
+    if (cover.kind === "hay") {
+      const baseY = cover.center.y - cover.height / 2;
+      for (const [pieceIndex, xOffset, yRatio, widthRatio, heightRatio] of [
+        [0, -0.24, 0.28, 0.48, 0.56],
+        [1, 0.24, 0.28, 0.48, 0.56],
+        [2, 0, 0.76, 0.52, 0.4],
+      ] as const) {
+        const pieceHeight = cover.height * heightRatio;
+        const hay = CreateBox(
+          `${cover.id}-bale-${pieceIndex}`,
+          { width: cover.width * widthRatio, height: pieceHeight, depth: cover.depth * 0.9 },
+          scene,
+        );
+        hay.position.set(
+          cover.center.x + cover.width * xOffset,
+          baseY + cover.height * yRatio,
+          cover.center.z,
+        );
+        hay.material = materials.hay;
+        markCoverProp(hay, cover.id, cover.kind);
+      }
+      continue;
+    }
+    const horizontal = cover.width > cover.depth;
+    const longSize = horizontal ? cover.width : cover.depth;
+    const baseY = cover.center.y - cover.height / 2;
+    for (const [railIndex, heightRatio] of [0.38, 0.72].entries()) {
+      const rail = CreateBox(
+        `${cover.id}-rail-${railIndex}`,
+        {
+          width: horizontal ? longSize : 0.16,
+          height: 0.16,
+          depth: horizontal ? 0.16 : longSize,
+        },
+        scene,
+      );
+      rail.position.set(cover.center.x, baseY + cover.height * heightRatio, cover.center.z);
+      rail.material = materials.fence;
+      markCoverProp(rail, cover.id, cover.kind);
+    }
+    for (const [postIndex, offset] of [-0.5, 0, 0.5].entries()) {
+      const post = CreateBox(
+        `${cover.id}-post-${postIndex}`,
+        { width: 0.22, height: cover.height, depth: 0.22 },
+        scene,
+      );
+      post.position.set(
+        cover.center.x + (horizontal ? longSize * offset : 0),
+        cover.center.y,
+        cover.center.z + (horizontal ? 0 : longSize * offset),
+      );
+      post.material = materials.fence;
+      markCoverProp(post, cover.id, cover.kind);
+    }
+  }
+}
+
 function createVegetation(
   scene: Scene,
   trunkMaterial: StandardMaterial,
   foliageMaterial: StandardMaterial,
   layout: MapLayout,
 ): void {
-  const treeCount = 128;
+  const treeCount = 256;
   const trunkTemplate = CreateCylinder(
     "tree-trunk-template",
     { height: 5.8, diameterTop: 0.55, diameterBottom: 1.1, tessellation: 7 },
@@ -664,8 +821,8 @@ function createNaturalDetails(
   shrubMaterial: StandardMaterial,
   layout: MapLayout,
 ): void {
-  const rockCount = 32;
-  const shrubCount = 80;
+  const rockCount = 64;
+  const shrubCount = 180;
   const random = createVisualRandom(layout.seed ^ 0x02e5be93);
   const rockTemplate = CreateSphere("rock-template", { diameter: 1, segments: 5 }, scene);
   rockTemplate.material = rockMaterial;
@@ -795,8 +952,9 @@ function createActors(
   scene: Scene,
   actors: Readonly<Record<EntityId, ActorState>>,
   materials: IslandMaterials,
-): Map<EntityId, TransformNode> {
+): { actorRoots: Map<EntityId, TransformNode>; actorVisualRoots: Map<EntityId, TransformNode> } {
   const actorRoots = new Map<EntityId, TransformNode>();
+  const actorVisualRoots = new Map<EntityId, TransformNode>();
 
   for (const actor of Object.values(actors)) {
     const root = new TransformNode(`actor-${actor.id}`, scene);
@@ -804,19 +962,27 @@ function createActors(
     root.rotation.y = actor.yaw;
     root.metadata = { actorId: actor.id, actorKind: actor.kind };
     root.setEnabled(actor.alive && actor.deployment !== "aircraft");
+    const visualRoot = new TransformNode(`actor-visual-${actor.id}`, scene);
+    visualRoot.parent = root;
 
     if (actor.kind === "player") {
       createPlayerHitbox(scene, root, actor.id, materials.playerHitbox);
     } else {
-      createBot(scene, root, actor.id, materials);
+      createBot(scene, visualRoot, actor.id, materials);
       setActorWeaponVisual(root, getActiveWeapon(actor)?.weaponId ?? null);
       setActorParachuteVisual(root, actor.deployment === "parachuting");
     }
 
     actorRoots.set(actor.id, root);
+    actorVisualRoots.set(actor.id, visualRoot);
   }
 
-  return actorRoots;
+  return { actorRoots, actorVisualRoots };
+}
+
+export function applyActorVisualPose(root: TransformNode, y: number, rotationX: number): void {
+  root.position.set(0, y, 0);
+  root.rotation.set(rotationX, 0, 0);
 }
 
 function createPlayerHitbox(
@@ -1306,6 +1472,13 @@ function markNaturalDetail(mesh: Mesh, detailType: "rock" | "shrub"): void {
   mesh.freezeWorldMatrix();
 }
 
+function markCoverProp(mesh: Mesh, obstacleId: string, coverKind: "fence" | "hay"): void {
+  mesh.checkCollisions = false;
+  mesh.isPickable = false;
+  mesh.metadata = { decoration: "cover-prop", obstacleId, coverKind };
+  mesh.freezeWorldMatrix();
+}
+
 function markPoiDecoration(mesh: Mesh, poiName: string, poiType: string): void {
   mesh.checkCollisions = false;
   mesh.isPickable = false;
@@ -1355,7 +1528,7 @@ function randomNaturalPosition(
   for (let attempt = 0; attempt < 80; attempt += 1) {
     const x = lerp(-limit, limit, random());
     const z = lerp(-limit, limit, random());
-    const blocked = [...layout.obstacles, ...layout.rockObstacles].some((obstacle) =>
+    const blocked = [...layout.obstacles, ...layout.rockObstacles, ...layout.coverObstacles].some((obstacle) =>
       Math.abs(x - obstacle.center.x) <= obstacle.width / 2 + clearance &&
       Math.abs(z - obstacle.center.z) <= obstacle.depth / 2 + clearance
     );

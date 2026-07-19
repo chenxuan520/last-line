@@ -98,6 +98,32 @@ describe("MovementSystem", () => {
     );
   });
 
+  it("blocks movement and routes around generated fence cover", () => {
+    const layout = createMapLayout(0);
+    const fence = layout.coverObstacles.find((cover) => cover.kind === "fence");
+    if (!fence) throw new Error("test fence missing");
+    const horizontal = fence.width > fence.depth;
+    const startX = horizontal ? fence.center.x : fence.center.x - fence.width / 2 - ACTOR_RADIUS - 1;
+    const startZ = horizontal ? fence.center.z - fence.depth / 2 - ACTOR_RADIUS - 1 : fence.center.z;
+    const state = createState(startX, startZ);
+    const actor = state.actors.actor;
+    if (!actor) throw new Error("test actor missing");
+    advance(state, movingCommand(horizontal ? 0 : 1, horizontal ? 1 : 0, true), 120, 1 / 60);
+
+    if (horizontal) {
+      expect(actor.position.z).toBeLessThanOrEqual(fence.center.z - fence.depth / 2 - ACTOR_RADIUS + 0.002);
+    } else {
+      expect(actor.position.x).toBeLessThanOrEqual(fence.center.x - fence.width / 2 - ACTOR_RADIUS + 0.002);
+    }
+    const target = {
+      x: horizontal ? startX : fence.center.x + fence.width / 2 + ACTOR_RADIUS + 2,
+      y: actor.position.y,
+      z: horizontal ? fence.center.z + fence.depth / 2 + ACTOR_RADIUS + 2 : startZ,
+    };
+    expect(new GridNavigator(layout).findPath({ x: startX, y: actor.position.y, z: startZ }, target).length)
+      .toBeGreaterThan(2);
+  });
+
   it("keeps wall collision queries local to the current spatial cell", () => {
     const layout = createMapLayout(0);
     const wall = layout.wallSegments[0];
@@ -163,8 +189,8 @@ describe("MovementSystem", () => {
 
   it("walks up a roof ramp, jumps on the roof, and falls back to terrain", () => {
     const layout = createMapLayout(0);
-    const ramp = layout.roofRamps[0];
-    const obstacle = layout.obstacles[0];
+    const ramp = layout.roofRamps.find((entry) => entry.kind === "exterior");
+    const obstacle = layout.obstacles.find((entry) => entry.id === ramp?.obstacleId);
     if (!ramp || !obstacle) throw new Error("test ramp missing");
     const state = createState(ramp.centerX, ramp.startZ, ramp.bottomY + GROUND_HEIGHT);
     const actor = state.actors.actor;
@@ -184,6 +210,58 @@ describe("MovementSystem", () => {
     advance(state, movingCommand(1, 0), 180, 1 / 60);
     advance(state, createIdleCommand(), 90, 1 / 60);
     expect(actor.position.y).toBeCloseTo(getTerrainHeight(actor.position.x, actor.position.z, layout) + GROUND_HEIGHT, 1);
+  });
+
+  it("reaches a 1.7 meter jump apex and lands on the same support", () => {
+    const state = createState(0, 0);
+    const actor = state.actors.actor;
+    if (!actor) throw new Error("test actor missing");
+    const supportY = actor.position.y;
+    let maximumY = supportY;
+
+    new MovementSystem().processCommand(state, actor.id, { ...createIdleCommand(), jump: true }, 1 / 30);
+    for (let tick = 0; tick < 90; tick += 1) {
+      new MovementSystem().processCommand(state, actor.id, createIdleCommand(), 1 / 30);
+      maximumY = Math.max(maximumY, actor.position.y);
+    }
+
+    expect(maximumY - supportY).toBeCloseTo(1.7, 2);
+    expect(actor.position.y).toBeCloseTo(supportY, 5);
+    expect(actor.velocity.y).toBe(0);
+  });
+
+  it("walks through every internal ramp onto a multi-story roof", () => {
+    const layout = createMapLayout(0);
+    const building = layout.obstacles.find((entry) => entry.storyCount === 3);
+    if (!building) throw new Error("three-story building missing");
+    const ramps = layout.roofRamps
+      .filter((ramp) => ramp.obstacleId === building.id)
+      .sort((left, right) => left.fromLevel - right.fromLevel);
+    const firstRamp = ramps[0];
+    if (!firstRamp) throw new Error("internal ramp missing");
+    const state = createState(firstRamp.centerX, firstRamp.startZ, firstRamp.bottomY + GROUND_HEIGHT);
+    const actor = state.actors.actor;
+    if (!actor) throw new Error("test actor missing");
+
+    for (const ramp of ramps) {
+      const direction = Math.sign(ramp.endZ - ramp.startZ) || 1;
+      for (let tick = 0; tick < 240 && direction * (ramp.endZ - actor.position.z) > 0.08; tick += 1) {
+        new MovementSystem().processCommand(state, actor.id, movingCommand(0, direction), 1 / 60);
+      }
+      new MovementSystem().processCommand(state, actor.id, createIdleCommand(), 1 / 60);
+      expect(actor.position.y, ramp.id).toBeCloseTo(
+        getSupportHeight(actor.position.x, actor.position.z, actor.position.y - GROUND_HEIGHT + 0.35, layout) + GROUND_HEIGHT,
+        1,
+      );
+      expect(actor.position.y, ramp.id).toBeGreaterThanOrEqual(ramp.topY + GROUND_HEIGHT - 0.2);
+    }
+
+    const horizontalDirection = Math.sign(building.center.x - actor.position.x) || 1;
+    advance(state, movingCommand(horizontalDirection, 0), 45, 1 / 60);
+    expect(actor.position.y).toBeCloseTo(
+      building.baseY + building.storyHeight * building.storyCount + BUILDING_ROOF_CAP_HEIGHT + GROUND_HEIGHT,
+      1,
+    );
   });
 });
 
@@ -236,8 +314,8 @@ describe("GridNavigator", () => {
 
   it("routes rooftop actors down the matching ramp", () => {
     const layout = createMapLayout(0);
-    const obstacle = layout.obstacles[0];
-    const ramp = layout.roofRamps[0];
+    const ramp = layout.roofRamps.find((entry) => entry.kind === "exterior");
+    const obstacle = layout.obstacles.find((entry) => entry.id === ramp?.obstacleId);
     if (!obstacle || !ramp) throw new Error("test rooftop missing");
     const start = {
       x: obstacle.center.x,
@@ -246,12 +324,12 @@ describe("GridNavigator", () => {
     };
     const target = { x: ramp.centerX, y: getTerrainHeight(ramp.centerX, ramp.startZ, layout), z: ramp.startZ - 8 };
 
-    const path = new GridNavigator(layout.obstacles, layout.roofRamps, layout.wallSegments).findPath(start, target);
+    const path = new GridNavigator(layout).findPath(start, target);
 
     expect(path.length).toBeGreaterThanOrEqual(4);
     expect(path.some((point) => point.x === ramp.centerX && point.z === ramp.endZ)).toBe(true);
     expect(path.some((point) => point.x === ramp.centerX && point.z === ramp.startZ)).toBe(true);
-    expect(path.at(-1)).toEqual(target);
+    expect(path.at(-1)).toEqual({ ...target, y: getTerrainHeight(target.x, target.z, layout) + GROUND_HEIGHT });
   });
 });
 

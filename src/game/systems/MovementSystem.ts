@@ -4,8 +4,11 @@ import {
   getRampHeight,
   getTerrainHeight,
   MAP_HALF_SIZE,
+  type MapFloorSlab,
   type MapLayout,
   type MapObstacle,
+  type MapRockObstacle,
+  type RoofRamp,
 } from "../../config/map";
 import type { ActorCommand } from "../commands/ActorCommand";
 import type { ActorState, EntityId, MatchState, Vector3State } from "../state/types";
@@ -17,15 +20,25 @@ const MAX_GLIDE_SPEED = 64;
 const GLIDE_ACCELERATION_ALTITUDE = 20;
 const GLIDE_SPEED_PER_METER = 0.4;
 const PARACHUTE_DESCENT_SPEED = 5;
-const JUMP_SPEED = 6.5;
 const GRAVITY = 18;
+const JUMP_APEX_HEIGHT = 1.7;
+const JUMP_SPEED = Math.sqrt(2 * GRAVITY * JUMP_APEX_HEIGHT);
 const EYE_HEIGHT = 1.76;
+const ACTOR_HEIGHT = 1.8;
+const ACTOR_HEAD_ABOVE_EYE = ACTOR_HEIGHT - EYE_HEIGHT;
 const ACTOR_RADIUS = 0.42;
 const MAX_COLLISION_STEP = ACTOR_RADIUS / 2;
 const MAX_STEP_UP = 0.35;
 const SURFACE_EPSILON = 0.08;
 const WALL_COLLISION_CELL_SIZE = 64;
 const wallCollisionIndexes = new WeakMap<MapLayout, Map<string, MapObstacle[]>>();
+const supportIndexes = new WeakMap<MapLayout, Map<string, SupportCell>>();
+
+interface SupportCell {
+  ramps: RoofRamp[];
+  slabs: MapFloorSlab[];
+  rocks: MapRockObstacle[];
+}
 
 export class MovementSystem {
   public processCommand(
@@ -143,8 +156,22 @@ export class MovementSystem {
     }
 
     const previousY = actor.position.y;
+    const previousVelocityY = actor.velocity.y;
     actor.position.y += actor.velocity.y * deltaSeconds - 0.5 * GRAVITY * deltaSeconds * deltaSeconds;
     actor.velocity.y -= GRAVITY * deltaSeconds;
+    if (previousVelocityY > 0) {
+      const ceiling = getCeilingBottom(
+        actor.position.x,
+        actor.position.z,
+        previousY + ACTOR_HEAD_ABOVE_EYE,
+        actor.position.y + ACTOR_HEAD_ABOVE_EYE,
+        layout,
+      );
+      if (ceiling !== null) {
+        actor.position.y = ceiling - ACTOR_HEAD_ABOVE_EYE;
+        actor.velocity.y = 0;
+      }
+    }
     const landingSupport = getSupportHeight(
       actor.position.x,
       actor.position.z,
@@ -219,8 +246,10 @@ function collidesWithBlocker(
   feetY: number,
   wall: MapObstacle,
 ): boolean {
+  const actorTopY = feetY + ACTOR_HEIGHT;
+  const wallBottomY = wall.center.y - wall.height / 2;
   const roofY = wall.center.y + wall.height / 2 + ("obstacleId" in wall ? BUILDING_ROOF_CAP_HEIGHT : 0);
-  if (feetY >= roofY - SURFACE_EPSILON) return false;
+  if (feetY >= roofY - SURFACE_EPSILON || actorTopY <= wallBottomY + SURFACE_EPSILON) return false;
   const halfWidth = wall.width / 2;
   const halfDepth = wall.depth / 2;
   const closestX = clamp(x, wall.center.x - halfWidth, wall.center.x + halfWidth);
@@ -270,7 +299,7 @@ function getNearbyWalls(x: number, z: number, layout: MapLayout): readonly MapOb
   let index = wallCollisionIndexes.get(layout);
   if (!index) {
     index = new Map<string, MapObstacle[]>();
-    for (const wall of [...layout.wallSegments, ...layout.rockObstacles]) {
+    for (const wall of [...layout.wallSegments, ...layout.rockObstacles, ...layout.coverObstacles]) {
       const minimumCellX = wallCell(wall.center.x - wall.width / 2 - ACTOR_RADIUS);
       const maximumCellX = wallCell(wall.center.x + wall.width / 2 + ACTOR_RADIUS);
       const minimumCellZ = wallCell(wall.center.z - wall.depth / 2 - ACTOR_RADIUS);
@@ -304,23 +333,24 @@ export function getSupportHeight(
   layout: MapLayout = createMapLayout(0),
 ): number {
   let support = getTerrainHeight(x, z, layout);
-  for (const ramp of layout.roofRamps) {
+  const nearby = getNearbySupports(x, z, layout);
+  for (const ramp of nearby.ramps) {
     const rampHeight = getRampHeight(ramp, x, z);
     if (rampHeight !== null && rampHeight <= maximumY + SURFACE_EPSILON) {
       support = Math.max(support, rampHeight);
     }
   }
-  for (const obstacle of layout.obstacles) {
-    const roofY = obstacle.center.y + obstacle.height / 2 + BUILDING_ROOF_CAP_HEIGHT;
+  for (const slab of nearby.slabs) {
+    const roofY = slab.center.y + slab.height / 2;
     if (
       roofY <= maximumY + SURFACE_EPSILON &&
-      Math.abs(x - obstacle.center.x) <= obstacle.width / 2 &&
-      Math.abs(z - obstacle.center.z) <= obstacle.depth / 2
+      Math.abs(x - slab.center.x) <= slab.width / 2 &&
+      Math.abs(z - slab.center.z) <= slab.depth / 2
     ) {
       support = Math.max(support, roofY);
     }
   }
-  for (const rock of layout.rockObstacles) {
+  for (const rock of nearby.rocks) {
     const rockTop = rock.center.y + rock.height / 2;
     if (
       rockTop <= maximumY + SURFACE_EPSILON &&
@@ -331,6 +361,95 @@ export function getSupportHeight(
     }
   }
   return support;
+}
+
+function getCeilingBottom(
+  x: number,
+  z: number,
+  previousTopY: number,
+  nextTopY: number,
+  layout: MapLayout,
+): number | null {
+  if (nextTopY <= previousTopY) return null;
+  let nearest = Number.POSITIVE_INFINITY;
+  for (const slab of getNearbySupports(x, z, layout).slabs) {
+    const bottomY = slab.center.y - slab.height / 2;
+    if (
+      bottomY >= previousTopY - SURFACE_EPSILON &&
+      bottomY <= nextTopY + SURFACE_EPSILON &&
+      Math.abs(x - slab.center.x) <= slab.width / 2 &&
+      Math.abs(z - slab.center.z) <= slab.depth / 2
+    ) {
+      nearest = Math.min(nearest, bottomY);
+    }
+  }
+  return Number.isFinite(nearest) ? nearest : null;
+}
+
+function getNearbySupports(x: number, z: number, layout: MapLayout): SupportCell {
+  let index = supportIndexes.get(layout);
+  if (!index) {
+    index = new Map<string, SupportCell>();
+    for (const ramp of layout.roofRamps) {
+      addSupportToIndex(
+        index,
+        "ramps",
+        ramp,
+        ramp.centerX - ramp.width / 2,
+        ramp.centerX + ramp.width / 2,
+        Math.min(ramp.startZ, ramp.endZ),
+        Math.max(ramp.startZ, ramp.endZ),
+      );
+    }
+    for (const slab of layout.floorSlabs) {
+      addSupportToIndex(
+        index,
+        "slabs",
+        slab,
+        slab.center.x - slab.width / 2,
+        slab.center.x + slab.width / 2,
+        slab.center.z - slab.depth / 2,
+        slab.center.z + slab.depth / 2,
+      );
+    }
+    for (const rock of layout.rockObstacles) {
+      addSupportToIndex(
+        index,
+        "rocks",
+        rock,
+        rock.center.x - rock.width / 2,
+        rock.center.x + rock.width / 2,
+        rock.center.z - rock.depth / 2,
+        rock.center.z + rock.depth / 2,
+      );
+    }
+    supportIndexes.set(layout, index);
+  }
+  return index.get(`${wallCell(x)}:${wallCell(z)}`) ?? { ramps: [], slabs: [], rocks: [] };
+}
+
+function addSupportToIndex(
+  index: Map<string, SupportCell>,
+  kind: keyof SupportCell,
+  support: RoofRamp | MapFloorSlab | MapRockObstacle,
+  minimumX: number,
+  maximumX: number,
+  minimumZ: number,
+  maximumZ: number,
+): void {
+  for (let cellX = wallCell(minimumX); cellX <= wallCell(maximumX); cellX += 1) {
+    for (let cellZ = wallCell(minimumZ); cellZ <= wallCell(maximumZ); cellZ += 1) {
+      const key = `${cellX}:${cellZ}`;
+      let cell = index.get(key);
+      if (!cell) {
+        cell = { ramps: [], slabs: [], rocks: [] };
+        index.set(key, cell);
+      }
+      if (kind === "ramps") cell.ramps.push(support as RoofRamp);
+      if (kind === "slabs") cell.slabs.push(support as MapFloorSlab);
+      if (kind === "rocks") cell.rocks.push(support as MapRockObstacle);
+    }
+  }
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {

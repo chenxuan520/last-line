@@ -590,15 +590,22 @@ function isDropClearOfWalls(
   layout: MapLayout,
 ): boolean {
   return (
-    layout.wallSegments.every((wall) =>
-      support >= wall.center.y + wall.height / 2 + BUILDING_ROOF_CAP_HEIGHT - 0.08 ||
-      !pointNearWall(candidate.x, candidate.z, wall)
-    ) &&
-    layout.rockObstacles.every((rock) =>
-      support >= rock.center.y + rock.height / 2 - 0.08 ||
-      !pointNearWall(candidate.x, candidate.z, rock)
-    )
+    layout.wallSegments.every((wall) => !blocksDrop(candidate, support, wall, BUILDING_ROOF_CAP_HEIGHT)) &&
+    layout.rockObstacles.every((rock) => !blocksDrop(candidate, support, rock)) &&
+    layout.coverObstacles.every((cover) => !blocksDrop(candidate, support, cover))
   );
+}
+
+function blocksDrop(
+  candidate: ActorState["position"],
+  support: number,
+  obstacle: MapObstacle,
+  topPadding = 0,
+): boolean {
+  const bottom = obstacle.center.y - obstacle.height / 2;
+  const top = obstacle.center.y + obstacle.height / 2 + topPadding;
+  return support < top - 0.08 && support + DROP_MARKER_HEIGHT > bottom - 0.08 &&
+    pointNearWall(candidate.x, candidate.z, obstacle);
 }
 
 function pointNearWall(x: number, z: number, wall: MapObstacle): boolean {
