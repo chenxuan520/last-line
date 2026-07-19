@@ -597,12 +597,6 @@ function createBuildingDetails(scene: Scene, materials: IslandMaterials, layout:
     markBuildingDetail(mesh, slab.obstacleId, slab.kind);
   }
 
-  layout.obstacles.forEach((obstacle, index) => {
-    if (obstacle.storyCount === 1) {
-      createOpeningFrame(trimTemplate, obstacle, index, "door", -1);
-      createOpeningFrame(trimTemplate, obstacle, index, "window", 1);
-    }
-  });
   layout.wallOpenings.forEach((opening, index) => createWallOpeningFrame(trimTemplate, opening, index));
 }
 
@@ -630,34 +624,6 @@ function createWallOpeningFrame(template: Mesh, opening: MapWallOpening, index: 
     );
     piece.isVisible = true;
     markBuildingDetail(piece, opening.obstacleId, opening.kind);
-  }
-}
-
-function createOpeningFrame(
-  template: Mesh,
-  obstacle: { id: string; center: { x: number; y: number; z: number }; width: number; height: number; depth: number },
-  index: number,
-  detailType: "door" | "window",
-  side: -1 | 1,
-): void {
-  const baseY = obstacle.center.y - obstacle.height / 2;
-  const openingWidth = detailType === "door" ? Math.min(4.2, obstacle.width * 0.34) : Math.min(3.6, obstacle.width * 0.3);
-  const openingHeight = detailType === "door" ? 3.0 : 2.2;
-  const z = obstacle.center.z + side * (obstacle.depth / 2 + 0.02);
-  const y = baseY + openingHeight / 2;
-  const thickness = 0.12;
-  const pieces: ReadonlyArray<readonly [string, number, number, number, number]> = [
-    ["left", obstacle.center.x - openingWidth / 2, y, thickness, openingHeight],
-    ["right", obstacle.center.x + openingWidth / 2, y, thickness, openingHeight],
-    ["top", obstacle.center.x, baseY + openingHeight, openingWidth + thickness, thickness],
-  ];
-  for (const [pieceName, x, pieceY, width, height] of pieces) {
-    const piece = template.clone(`building-${detailType}-frame-${index}-${pieceName}`);
-    if (!piece) continue;
-    piece.position.set(x, pieceY, z);
-    piece.scaling.set(width, height, thickness);
-    piece.isVisible = true;
-    markBuildingDetail(piece, obstacle.id, detailType);
   }
 }
 

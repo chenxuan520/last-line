@@ -150,8 +150,7 @@ describe("IslandScene lifecycle", () => {
       expect(slabBatch?.getTotalVertices()).toBe(layout.floorSlabs.length * 24);
       const openingPieceCount =
         layout.wallOpenings.filter((opening) => opening.kind === "window").length * 4 +
-        layout.wallOpenings.filter((opening) => opening.kind === "door").length * 3 +
-        layout.obstacles.filter((obstacle) => obstacle.storyCount === 1).length * 6;
+        layout.wallOpenings.filter((opening) => opening.kind === "door").length * 3;
       expect(bundle.scene.getMeshByName("building-openings-batch")?.metadata?.sourceCount).toBe(openingPieceCount);
       expect(bundle.scene.getMeshByName("building-ramps-batch")?.metadata?.sourceCount).toBe(layout.roofRamps.length);
       const ringPositions = bundle.safeZoneRing.getVerticesData("position") ?? [];

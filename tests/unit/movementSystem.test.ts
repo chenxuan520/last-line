@@ -230,6 +230,35 @@ describe("MovementSystem", () => {
     expect(actor.velocity.y).toBe(0);
   });
 
+  it("blocks walking at windows but allows jumping in and back out", () => {
+    const layout = createMapLayout(0);
+    const building = layout.obstacles.find((entry) => entry.storyCount === 1);
+    const window = layout.wallOpenings.find((entry) =>
+      entry.obstacleId === building?.id && entry.side === "back" && entry.storyIndex === 0
+    );
+    if (!building || !window) throw new Error("test window missing");
+    const outsideZ = building.center.z + building.depth / 2 + ACTOR_RADIUS + 0.8;
+    const state = createState(window.center.x, outsideZ);
+    const actor = state.actors.actor;
+    if (!actor) throw new Error("test actor missing");
+
+    advance(state, movingCommand(0, -1), 90, 1 / 60);
+    expect(actor.position.z).toBeGreaterThan(building.center.z + building.depth / 2);
+
+    actor.position = {
+      x: window.center.x,
+      y: getTerrainHeight(window.center.x, outsideZ, layout) + GROUND_HEIGHT,
+      z: outsideZ,
+    };
+    actor.velocity = { x: 0, y: 0, z: 0 };
+    advance(state, { ...movingCommand(0, -1), jump: true }, 60, 1 / 60);
+    expect(actor.position.z).toBeLessThan(building.center.z + building.depth / 2 - 0.5);
+
+    advance(state, createIdleCommand(), 120, 1 / 60);
+    advance(state, { ...movingCommand(0, 1), jump: true }, 60, 1 / 60);
+    expect(actor.position.z).toBeGreaterThan(building.center.z + building.depth / 2 + 0.3);
+  });
+
   it("walks through every internal ramp onto a multi-story roof", () => {
     const layout = createMapLayout(0);
     const building = layout.obstacles.find((entry) => entry.storyCount === 3);

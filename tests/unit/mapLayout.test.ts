@@ -244,6 +244,12 @@ describe("map layouts", () => {
       expect(ramps.at(-1)?.topY).toBeCloseTo(
         obstacle.baseY + obstacle.storyHeight * obstacle.storyCount + BUILDING_ROOF_CAP_HEIGHT,
       );
+      expect(layout.wallOpenings.filter((opening) => opening.obstacleId === obstacle.id)).toHaveLength(
+        obstacle.storyCount * 4,
+      );
+      expect(layout.wallOpenings
+        .filter((opening) => opening.obstacleId === obstacle.id && opening.kind === "window")
+        .every((opening) => opening.height >= 1.8)).toBe(true);
       if (obstacle.storyCount === 1) {
         expect(ramps[0]?.id).toBe(`ramp-${obstacle.id}`);
         expect(slabs).toHaveLength(1);
@@ -256,9 +262,6 @@ describe("map layouts", () => {
           expect(slab.center.z - slab.depth / 2).toBeGreaterThanOrEqual(obstacle.center.z - obstacle.depth / 2 + 0.3);
           expect(slab.center.z + slab.depth / 2).toBeLessThanOrEqual(obstacle.center.z + obstacle.depth / 2 - 0.3);
         }
-        expect(layout.wallOpenings.filter((opening) => opening.obstacleId === obstacle.id)).toHaveLength(
-          obstacle.storyCount * 4,
-        );
       }
     }
 

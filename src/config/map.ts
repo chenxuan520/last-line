@@ -206,7 +206,7 @@ export function createMapLayout(seed: number): MapLayout {
   const buildingAreas = createBuildingAreas(mapPoints, wildernessPoints, coveragePoints);
   const obstacleRandom = createSeededRandom(normalizedSeed ^ 0x85ebca6b);
   const baseObstacles = createSeededBuildings(terrainHills, buildingAreas, obstacleRandom);
-  const baseWallGeometry = createWallSegments(baseObstacles);
+  const baseWallGeometry = createWallSegments(baseObstacles, terrainHills);
   const baseRoofRamps = baseObstacles.map((obstacle) => {
     const pointIndex = Number(obstacle.id.split("-")[1]);
     const poi = buildingAreas[pointIndex] ?? buildingAreas[0];
@@ -244,7 +244,7 @@ export function createMapLayout(seed: number): MapLayout {
     terrainHills,
     createSeededRandom(normalizedSeed ^ 0x7f4a7c15),
   );
-  const { wallSegments, wallOpenings } = createWallSegments(obstacles);
+  const { wallSegments, wallOpenings } = createWallSegments(obstacles, terrainHills);
   const floorSlabs = obstacles.flatMap(createBuildingFloorSlabs);
   const roofRamps = obstacles.flatMap((obstacle) => {
     if (obstacle.storyCount > 1) return createInternalRamps(obstacle, terrainHills);
@@ -968,45 +968,21 @@ function terrainSampleCoordinates(minimum: number, maximum: number): number[] {
   return coordinates;
 }
 
-function createWallSegments(obstacles: readonly MapBuilding[]): {
+function createWallSegments(obstacles: readonly MapBuilding[], terrainHills: readonly TerrainHill[]): {
   wallSegments: MapWallSegment[];
   wallOpenings: MapWallOpening[];
 } {
   const wallSegments: MapWallSegment[] = [];
   const wallOpenings: MapWallOpening[] = [];
   for (const obstacle of obstacles) {
-    if (obstacle.storyCount > 1) {
-      for (let storyIndex = 0; storyIndex < obstacle.storyCount; storyIndex += 1) {
-        for (const side of ["front", "back", "left", "right"] as const) {
-          const kind = storyIndex === 0 && side === "front" ? "door" : "window";
-          const geometry = createFacadeGeometry(obstacle, storyIndex, side, kind);
-          wallSegments.push(...geometry.wallSegments);
-          wallOpenings.push(geometry.opening);
-        }
+    for (let storyIndex = 0; storyIndex < obstacle.storyCount; storyIndex += 1) {
+      for (const side of ["front", "back", "left", "right"] as const) {
+        const kind = storyIndex === 0 && side === "front" ? "door" : "window";
+        const geometry = createFacadeGeometry(obstacle, storyIndex, side, kind, terrainHills);
+        wallSegments.push(...geometry.wallSegments);
+        wallOpenings.push(geometry.opening);
       }
-      continue;
     }
-    const doorWidth = Math.min(4.2, obstacle.width * 0.34);
-    const windowWidth = Math.min(3.6, obstacle.width * 0.3);
-    const sideOpeningDepth = Math.min(5.2, obstacle.depth * 0.34);
-    const wallHeight = obstacle.height;
-    const sideDepth = Math.max(1, (obstacle.depth - sideOpeningDepth) / 2);
-    const frontWidth = Math.max(1, (obstacle.width - doorWidth) / 2);
-    const backWidth = Math.max(1, (obstacle.width - windowWidth) / 2);
-    const frontZ = obstacle.center.z - obstacle.depth / 2 + BUILDING_WALL_THICKNESS / 2;
-    const backZ = obstacle.center.z + obstacle.depth / 2 - BUILDING_WALL_THICKNESS / 2;
-    const leftX = obstacle.center.x - obstacle.width / 2 + BUILDING_WALL_THICKNESS / 2;
-    const rightX = obstacle.center.x + obstacle.width / 2 - BUILDING_WALL_THICKNESS / 2;
-    wallSegments.push(
-      wallSegment(obstacle, "front-left", obstacle.center.x - doorWidth / 2 - frontWidth / 2, frontZ, frontWidth, BUILDING_WALL_THICKNESS, wallHeight),
-      wallSegment(obstacle, "front-right", obstacle.center.x + doorWidth / 2 + frontWidth / 2, frontZ, frontWidth, BUILDING_WALL_THICKNESS, wallHeight),
-      wallSegment(obstacle, "back-left", obstacle.center.x - windowWidth / 2 - backWidth / 2, backZ, backWidth, BUILDING_WALL_THICKNESS, wallHeight),
-      wallSegment(obstacle, "back-right", obstacle.center.x + windowWidth / 2 + backWidth / 2, backZ, backWidth, BUILDING_WALL_THICKNESS, wallHeight),
-      wallSegment(obstacle, "left-front", leftX, obstacle.center.z - sideOpeningDepth / 2 - sideDepth / 2, BUILDING_WALL_THICKNESS, sideDepth, wallHeight),
-      wallSegment(obstacle, "left-back", leftX, obstacle.center.z + sideOpeningDepth / 2 + sideDepth / 2, BUILDING_WALL_THICKNESS, sideDepth, wallHeight),
-      wallSegment(obstacle, "right-front", rightX, obstacle.center.z - sideOpeningDepth / 2 - sideDepth / 2, BUILDING_WALL_THICKNESS, sideDepth, wallHeight),
-      wallSegment(obstacle, "right-back", rightX, obstacle.center.z + sideOpeningDepth / 2 + sideDepth / 2, BUILDING_WALL_THICKNESS, sideDepth, wallHeight),
-    );
   }
   return { wallSegments, wallOpenings };
 }
@@ -1016,6 +992,7 @@ function createFacadeGeometry(
   storyIndex: number,
   side: MapWallOpening["side"],
   kind: MapWallOpening["kind"],
+  terrainHills: readonly TerrainHill[],
 ): { wallSegments: MapWallSegment[]; opening: MapWallOpening } {
   const horizontalAlongX = side === "front" || side === "back";
   const span = horizontalAlongX ? building.width : building.depth;
@@ -1023,13 +1000,16 @@ function createFacadeGeometry(
     ? Math.min(4.2, span * 0.34)
     : Math.min(horizontalAlongX ? 3.6 : 5.2, span * 0.3);
   const storyBottom = building.baseY + storyIndex * building.storyHeight;
-  const openingBottom = kind === "door" ? storyBottom : storyBottom + 0.9;
-  const openingHeight = kind === "door"
-    ? Math.min(3, building.storyHeight - 0.2)
-    : Math.min(1.4, building.storyHeight - 1.3);
-  const openingTop = openingBottom + openingHeight;
   const storyTop = storyBottom + building.storyHeight;
   const position = facadePosition(building, side);
+  const localSupport = storyIndex === 0
+    ? Math.max(storyBottom, terrainHeightFromHills(position.x, position.z, terrainHills))
+    : storyBottom + BUILDING_ROOF_CAP_HEIGHT;
+  const openingBottom = kind === "door" ? localSupport : localSupport + 0.42;
+  const openingTop = kind === "door"
+    ? Math.min(storyTop - 0.08, openingBottom + 3)
+    : storyTop - 0.08;
+  const openingHeight = openingTop - openingBottom;
   const opening: MapWallOpening = {
     id: `${building.id}-opening-${side}-${storyIndex}`,
     obstacleId: building.id,
@@ -1079,18 +1059,6 @@ function facadePosition(building: MapBuilding, side: MapWallOpening["side"]): { 
     return { x: round(building.center.x - building.width / 2 + BUILDING_WALL_THICKNESS / 2), z: building.center.z };
   }
   return { x: round(building.center.x + building.width / 2 - BUILDING_WALL_THICKNESS / 2), z: building.center.z };
-}
-
-function wallSegment(
-  obstacle: MapBuilding,
-  suffix: string,
-  x: number,
-  z: number,
-  width: number,
-  depth: number,
-  height: number,
-): MapWallSegment {
-  return wallSegmentAt(obstacle, suffix, x, obstacle.center.y, z, width, depth, height);
 }
 
 function wallSegmentAt(

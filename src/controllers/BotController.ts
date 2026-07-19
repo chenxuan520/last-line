@@ -34,6 +34,15 @@ const ENDGAME_PATROL_SECONDS = 24;
 const LOW_HEALTH_RETREAT_HEALTH = 25;
 const RETREAT_COVER_SEARCH_DISTANCE = 85;
 const RETREAT_HIDE_CONFIRM_SECONDS = 1;
+const MAX_STATIONARY_SECONDS = 45;
+const STATIONARY_RADIUS = 3;
+const OSCILLATION_WINDOW_SECONDS = 8;
+const OSCILLATION_REVERSAL_LIMIT = 6;
+const FORCED_RELOCATION_SECONDS = 20;
+const FORCED_RELOCATION_CLEAR_DISTANCE = 6;
+const FORCED_RELOCATION_PATH_CHECKS = 1;
+const ACTOR_EYE_HEIGHT = 1.76;
+const ACTOR_HEIGHT = 1.8;
 const SNIPER_WEAPON_ITEM_ID = "weapon.sniper";
 const SNIPER_AMMO_ITEM_ID = "ammo.sniper";
 type LootPurpose = "general" | "medical" | "compatible-ammo";
@@ -86,6 +95,16 @@ export class BotController {
   private updateDeltaSeconds = 0;
   private lastDecisionPosition: Vector3State | null = null;
   private stalledDecisions = 0;
+  private livenessAnchor: Vector3State | null = null;
+  private livenessAnchorSeconds = 0;
+  private livenessLastPosition: Vector3State | null = null;
+  private livenessLastDirection: Vector3State | null = null;
+  private oscillationWindowStartedSeconds = 0;
+  private oscillationReversals = 0;
+  private forcedRelocationOrigin: Vector3State | null = null;
+  private forcedRelocationTarget: Vector3State | null = null;
+  private forcedRelocationUntilSeconds = -1;
+  private forcedRelocationSequence = 0;
 
   public constructor(
     index = 0,
@@ -134,6 +153,7 @@ export class BotController {
     if (actor.deployment === "parachuting") {
       return this.moveToward(actor, this.findLandingTarget(state), false);
     }
+    const livenessTriggered = this.updateLiveness(actor, state);
 
     if (
       actor.lastDamageDirection &&
@@ -177,6 +197,7 @@ export class BotController {
     this.decisionSeconds -= deltaSeconds;
     this.fireSeconds -= deltaSeconds;
     const interval = endgameSearch ? 0.1 : playerDistance < 80 ? 0.08 : 0.22 + (numericId(actor.id) % 4) * 0.04;
+    if (livenessTriggered) this.decisionSeconds = 0;
     if (this.decisionSeconds > 0) {
       const command = {
         ...this.cached,
@@ -213,6 +234,12 @@ export class BotController {
         this.weaponLandingTarget = null;
         this.retreatCoverTarget = null;
         this.retreatCoverId = null;
+        if (state.elapsedSeconds <= this.forcedRelocationUntilSeconds) {
+          this.forcedRelocationTarget = null;
+          this.forcedRelocationSequence += 1;
+        } else {
+          this.startForcedRelocation(actor, state);
+        }
         this.stalledDecisions = 0;
       }
     }
@@ -264,6 +291,9 @@ export class BotController {
     const outsideTargetZone = horizontalDistance(actor.position, state.safeZone.targetCenter) > targetZoneRadius;
     const outsideCurrentZone = horizontalDistance(actor.position, state.safeZone.center) > state.safeZone.radius;
     const shouldEnterTargetZone = outsideTargetZone && (!endgameSearch || targetZoneRadius >= 24);
+    if (state.elapsedSeconds <= this.forcedRelocationUntilSeconds) {
+      return this.cache(this.forceRelocation(actor, state, command));
+    }
     const nearbyWeapon = !activeWeapon && !outsideCurrentZone
       ? this.findUsefulLoot(actor, state, true)
       : null;
@@ -600,7 +630,13 @@ export class BotController {
     layout: ReturnType<typeof createMapLayout>,
     threat: Vector3State,
   ): { coverId: string; target: Vector3State; path: Vector3State[] } | null {
+    const actorFeetY = actor.position.y - ACTOR_EYE_HEIGHT;
+    const actorTopY = actorFeetY + ACTOR_HEIGHT;
     const blockers = [...layout.wallSegments, ...layout.rockObstacles, ...layout.coverObstacles]
+      .filter((obstacle) =>
+        obstacle.center.y - obstacle.height / 2 < actorTopY &&
+        obstacle.center.y + obstacle.height / 2 > actorFeetY
+      )
       .filter((obstacle) => !this.rejectedRetreatCoverIds.has(obstacle.id))
       .map((obstacle) => ({ obstacle, distance: horizontalDistance(actor.position, obstacle.center) }))
       .filter((entry) => entry.distance <= RETREAT_COVER_SEARCH_DISTANCE)
@@ -871,6 +907,154 @@ export class BotController {
       : direction;
     if (!this.navigationPreservesAim) command.aimDirection = { ...command.move };
     command.sprint = true;
+  }
+
+  private updateLiveness(actor: ActorState, state: MatchState): boolean {
+    const elapsedSeconds = state.elapsedSeconds;
+    if (!this.livenessAnchor) {
+      this.livenessAnchor = { ...actor.position };
+      this.livenessAnchorSeconds = elapsedSeconds;
+      this.livenessLastPosition = { ...actor.position };
+      this.oscillationWindowStartedSeconds = elapsedSeconds;
+      return false;
+    }
+    if (
+      this.forcedRelocationOrigin &&
+      horizontalDistance(actor.position, this.forcedRelocationOrigin) >= FORCED_RELOCATION_CLEAR_DISTANCE
+    ) {
+      this.clearForcedRelocation();
+    }
+    const anchorDistance = horizontalDistance(actor.position, this.livenessAnchor);
+    if (anchorDistance >= STATIONARY_RADIUS) {
+      this.livenessAnchor.x = actor.position.x;
+      this.livenessAnchor.y = actor.position.y;
+      this.livenessAnchor.z = actor.position.z;
+      this.livenessAnchorSeconds = elapsedSeconds;
+    }
+    if (this.livenessLastPosition) {
+      const displacementX = actor.position.x - this.livenessLastPosition.x;
+      const displacementZ = actor.position.z - this.livenessLastPosition.z;
+      const distance = Math.hypot(displacementX, displacementZ);
+      if (distance >= 0.08) {
+        const directionX = displacementX / distance;
+        const directionZ = displacementZ / distance;
+        if (elapsedSeconds - this.oscillationWindowStartedSeconds > OSCILLATION_WINDOW_SECONDS) {
+          this.oscillationWindowStartedSeconds = elapsedSeconds;
+          this.oscillationReversals = 0;
+        }
+        if (
+          this.livenessLastDirection &&
+          directionX * this.livenessLastDirection.x + directionZ * this.livenessLastDirection.z < -0.6
+        ) {
+          this.oscillationReversals += 1;
+        }
+        if (this.livenessLastDirection) {
+          this.livenessLastDirection.x = directionX;
+          this.livenessLastDirection.z = directionZ;
+        } else {
+          this.livenessLastDirection = { x: directionX, y: 0, z: directionZ };
+        }
+      }
+    }
+    if (this.livenessLastPosition) {
+      this.livenessLastPosition.x = actor.position.x;
+      this.livenessLastPosition.y = actor.position.y;
+      this.livenessLastPosition.z = actor.position.z;
+    }
+    const stationary = elapsedSeconds - this.livenessAnchorSeconds >= MAX_STATIONARY_SECONDS;
+    const oscillating = this.oscillationReversals >= OSCILLATION_REVERSAL_LIMIT &&
+      elapsedSeconds - this.oscillationWindowStartedSeconds <= OSCILLATION_WINDOW_SECONDS;
+    if (
+      (stationary || oscillating) &&
+      elapsedSeconds > this.forcedRelocationUntilSeconds
+    ) {
+      this.startForcedRelocation(actor, state);
+      return true;
+    }
+    return false;
+  }
+
+  private startForcedRelocation(actor: ActorState, state: MatchState): void {
+    this.forcedRelocationOrigin = { ...actor.position };
+    this.forcedRelocationTarget = null;
+    this.forcedRelocationUntilSeconds = state.elapsedSeconds + FORCED_RELOCATION_SECONDS;
+    this.forcedRelocationSequence += 1;
+    this.oscillationWindowStartedSeconds = state.elapsedSeconds;
+    this.oscillationReversals = 0;
+    this.livenessLastDirection = null;
+    this.lootTargetId = null;
+    this.patrolTarget = null;
+    this.patrolTargetUntilSeconds = -1;
+    this.damageInvestigationTarget = null;
+    this.damageInvestigationDirection = null;
+    this.clearCombatMemory();
+    this.clearRetreat();
+    this.clearNavigation();
+  }
+
+  private clearForcedRelocation(): void {
+    this.forcedRelocationOrigin = null;
+    this.forcedRelocationTarget = null;
+    this.forcedRelocationUntilSeconds = -1;
+  }
+
+  private forceRelocation(actor: ActorState, state: MatchState, command: ActorCommand): ActorCommand {
+    this.clearCombatMemory();
+    this.damageInvestigationTarget = null;
+    this.damageInvestigationDirection = null;
+    if (this.retreatThreatPosition) this.clearRetreat();
+    if (
+      this.forcedRelocationTarget &&
+      horizontalDistance(actor.position, this.forcedRelocationTarget) >= 3
+    ) {
+      return this.navigate(actor, this.forcedRelocationTarget, command);
+    }
+    this.forcedRelocationTarget = null;
+    this.clearNavigation();
+    const outsideCurrentZone = horizontalDistance(actor.position, state.safeZone.center) > state.safeZone.radius;
+    const center = outsideCurrentZone ? state.safeZone.center : state.safeZone.targetCenter;
+    const radius = outsideCurrentZone ? state.safeZone.radius : state.safeZone.targetRadius;
+    const candidates: Vector3State[] = [];
+    if (outsideCurrentZone && radius > 0) {
+      const fromCenter = normalizeFlat(subtract(actor.position, center));
+      candidates.push({
+        x: center.x + fromCenter.x * radius * 0.55,
+        y: center.y,
+        z: center.z + fromCenter.z * radius * 0.55,
+      });
+    }
+    candidates.push({ ...center });
+    for (let offset = 0; offset < 3; offset += 1) {
+      const angle = numericId(actor.id) * 2.399963 +
+        (this.forcedRelocationSequence + offset) * Math.PI / 6;
+      const targetRadius = Math.min(60, Math.max(18, radius * 0.58));
+      candidates.push({
+        x: center.x + Math.cos(angle) * targetRadius,
+        y: center.y,
+        z: center.z + Math.sin(angle) * targetRadius,
+      });
+    }
+    let pathChecks = 0;
+    for (const candidate of candidates) {
+      const target = {
+        x: candidate.x,
+        y: getTerrainHeight(candidate.x, candidate.z, state.mapSeed) + 1.76,
+        z: candidate.z,
+      };
+      if (horizontalDistance(actor.position, target) < 8) continue;
+      if (pathChecks >= FORCED_RELOCATION_PATH_CHECKS) break;
+      pathChecks += 1;
+      const path = this.navigator.findPath(actor.position, target);
+      if (path.length === 0) continue;
+      this.forcedRelocationTarget = target;
+      return this.navigate(actor, target, command, path);
+    }
+    const escapeAngles = [0, Math.PI / 4, -Math.PI / 4, Math.PI / 2, -Math.PI / 2, Math.PI] as const;
+    const towardCenter = normalizeFlat(subtract(center, actor.position));
+    command.move = rotateFlat(towardCenter, escapeAngles[this.forcedRelocationSequence % escapeAngles.length] ?? 0);
+    command.aimDirection = { ...command.move };
+    command.sprint = true;
+    return command;
   }
 
   private moveToward(actor: ActorState, target: Vector3State, sprint: boolean): ActorCommand {

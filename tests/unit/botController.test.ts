@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { BUILDING_ROOF_CAP_HEIGHT, createMapLayout, getTerrainHeight } from "../../src/config/map";
 import { BotController } from "../../src/controllers/BotController";
+import { createIdleCommand } from "../../src/game/commands/ActorCommand";
 import { createBattleRoyaleState } from "../../src/game/modes/BattleRoyaleMode";
 import { createWeaponState, getActiveWeapon, type Vector3State } from "../../src/game/state/types";
 import type { CombatWorld } from "../../src/game/systems/CombatSystem";
@@ -245,12 +246,16 @@ describe("BotController", () => {
     const state = groundedState();
     state.mapSeed = 0;
     const layout = createMapLayout(0);
-    const wall = layout.wallSegments.find((candidate) => candidate.width > candidate.depth * 2);
+    const wall = layout.wallSegments.find((candidate) =>
+      candidate.width > candidate.depth * 2 &&
+      candidate.height > 3 &&
+      candidate.center.y - candidate.height / 2 <= getTerrainHeight(candidate.center.x, candidate.center.z, layout) + 0.2
+    );
     const bot = state.actors["bot-1"];
     const player = state.actors.player;
     if (!wall || !bot || !player) throw new Error("wall retreat setup missing");
     for (const actor of Object.values(state.actors)) actor.alive = actor.id === bot.id || actor.id === player.id;
-    const x = wall.center.x + wall.width / 2 - 0.43;
+    const x = wall.center.x + wall.width / 2 - 2.5;
     const z = wall.center.z - wall.depth / 2 - 0.421;
     bot.position = { x, y: getTerrainHeight(x, z, layout) + 1.76, z };
     bot.health = 20;
@@ -1216,6 +1221,54 @@ describe("BotController", () => {
     new InventorySystem().processCommand(state, bot.id, command, []);
 
     expect(getActiveWeapon(bot)?.weaponId).toBe("sniper");
+  });
+
+  it("forces a new relocation before a grounded bot can stay in place for one minute", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    if (!bot) throw new Error("bot missing");
+    for (const actor of Object.values(state.actors)) actor.alive = actor.id === bot.id;
+    bot.health = 20;
+    state.safeZone.center = { x: 400, y: 0, z: 0 };
+    state.safeZone.radius = 80;
+    state.safeZone.targetCenter = { x: 400, y: 0, z: 0 };
+    state.safeZone.targetRadius = 80;
+    const controller = new BotController(1, () => 0.5);
+    let command = createIdleCommand();
+
+    for (let tick = 0; tick < 46 * 30; tick += 1) {
+      state.elapsedSeconds += 1 / 30;
+      command = controller.update(bot, state, miss, 1 / 30, "player");
+    }
+
+    const internals = controller as unknown as {
+      forcedRelocationUntilSeconds: number;
+    };
+    expect(internals.forcedRelocationUntilSeconds).toBeGreaterThan(state.elapsedSeconds);
+    expect(Math.hypot(command.move.x, command.move.z)).toBeGreaterThan(0.5);
+    expect(command.sprint).toBe(true);
+  });
+
+  it("breaks repeated left-right oscillation without waiting for damage", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    if (!bot) throw new Error("bot missing");
+    for (const actor of Object.values(state.actors)) actor.alive = actor.id === bot.id;
+    bot.position = { x: 0, y: 1.76, z: 0 };
+    const controller = new BotController(1, () => 0.5);
+    controller.update(bot, state, miss, 1 / 30, "player");
+    let command = createIdleCommand();
+
+    for (let reversal = 0; reversal < 8; reversal += 1) {
+      bot.position.x = reversal % 2 === 0 ? -0.7 : 0.7;
+      state.elapsedSeconds += 0.5;
+      command = controller.update(bot, state, miss, 0.5, "player");
+    }
+
+    const internals = controller as unknown as { forcedRelocationUntilSeconds: number };
+    expect(internals.forcedRelocationUntilSeconds).toBeGreaterThan(state.elapsedSeconds);
+    expect(Math.hypot(command.move.x, command.move.z)).toBeGreaterThan(0.5);
+    expect(command.sprint).toBe(true);
   });
 });
 
