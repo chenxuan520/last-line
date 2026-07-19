@@ -3,6 +3,7 @@ import { BATTLE_ROYALE_CONFIG } from "../../config/battleRoyale";
 import { ITEMS } from "../../config/items";
 import { createMapLayout, createMapRoadSegments, MAP_SIZE } from "../../config/map";
 import { WEAPONS } from "../../config/weapons";
+import { getItemIconAssetId } from "../itemIcon";
 import {
   getActiveWeapon,
   getItemLabel,
@@ -175,7 +176,7 @@ export class GameHud {
     const scopedWeapon = config?.scopeFov !== undefined;
     this.requireElement("scope").classList.toggle("is-visible", scoped);
     this.requireElement("crosshair").classList.toggle("is-hidden", scopedWeapon);
-    const weaponIconId = weapon ? `ui.weapon.${weapon.weaponId}` : "";
+    const weaponIconId = weapon ? getItemIconAssetId(`weapon.${weapon.weaponId}`) : "";
     if (weaponIconId !== this.weaponIconId) {
       const weaponIcon = this.requireElement("weapon-icon") as HTMLImageElement;
       weaponIcon.hidden = !weaponIconId;
@@ -316,7 +317,7 @@ export class GameHud {
       if (index === player.inventory.activeWeaponSlot) slot.classList.add("is-active");
       if (candidate) {
         const icon = document.createElement("img");
-        icon.src = this.resolveIconUrl(`ui.weapon.${candidate.weaponId}`);
+        icon.src = this.resolveIconUrl(getItemIconAssetId(`weapon.${candidate.weaponId}`));
         icon.alt = "";
         slot.append(icon);
       } else {
@@ -344,7 +345,7 @@ export class GameHud {
       const item = document.createElement("span");
       item.className = "item-stack";
       const icon = document.createElement("img");
-      icon.src = this.resolveIconUrl(`ui.item.${stack.itemId}`);
+      icon.src = this.resolveIconUrl(getItemIconAssetId(stack.itemId));
       icon.alt = "";
       const label = document.createElement("span");
       label.textContent = `${getItemLabel(stack.itemId)} ×${stack.quantity}`;

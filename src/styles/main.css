@@ -294,7 +294,8 @@ h1 {
   font-weight: 700;
 }
 
-.settings-grid .ai-sniper-setting {
+.settings-grid .ai-sniper-setting,
+.settings-grid .loot-icon-setting {
   grid-column: 1 / -1;
 }
 

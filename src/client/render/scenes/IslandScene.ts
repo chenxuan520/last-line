@@ -4,12 +4,14 @@ import type { Engine } from "@babylonjs/core/Engines/engine";
 import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
+import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import { CreateCapsule } from "@babylonjs/core/Meshes/Builders/capsuleBuilder";
 import { CreateCylinder } from "@babylonjs/core/Meshes/Builders/cylinderBuilder";
 import { CreateGround } from "@babylonjs/core/Meshes/Builders/groundBuilder";
+import { CreatePlane } from "@babylonjs/core/Meshes/Builders/planeBuilder";
 import { CreateSphere } from "@babylonjs/core/Meshes/Builders/sphereBuilder";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
@@ -18,6 +20,7 @@ import type { Node } from "@babylonjs/core/node";
 import { Scene } from "@babylonjs/core/scene";
 import type { AssetCatalog } from "../../../assets/AssetCatalog";
 import type { AssetEntry } from "../../../assets/types";
+import { getItemIconAssetId } from "../../itemIcon";
 import {
   BUILDING_ROOF_CAP_HEIGHT,
   createMapRoadSegments,
@@ -114,6 +117,7 @@ export async function createIslandScene(
   actors: Readonly<Record<EntityId, ActorState>>,
   groundLoot: Readonly<Record<EntityId, GroundLootState>>,
   mapSeed = 0,
+  showGroundLootIcons = false,
 ): Promise<IslandSceneBundle> {
   const player = Object.values(actors).find((actor) => actor.kind === "player");
   if (!player) {
@@ -166,7 +170,14 @@ export async function createIslandScene(
   viewWeaponRoot.setEnabled(Boolean(getActiveWeapon(player)));
   await replaceCatalogModels(scene, assets, actors, actorRoots, viewWeaponRoot);
 
-  const { lootMeshes, syncLootMeshes } = createLootMeshes(scene, groundLoot, materials.loot, materials.deathLoot);
+  const { lootMeshes, syncLootMeshes } = createLootMeshes(
+    scene,
+    groundLoot,
+    materials.loot,
+    materials.deathLoot,
+    assets,
+    showGroundLootIcons,
+  );
   const { mesh: safeZoneRing, sync: syncSafeZoneRing } = createSafeZoneRing(scene, materials.safeZone, layout);
 
   return {
@@ -1124,15 +1135,55 @@ function createLootMeshes(
   groundLoot: Readonly<Record<EntityId, GroundLootState>>,
   lootMaterial: StandardMaterial,
   deathLootMaterial: StandardMaterial,
+  assets: AssetCatalog,
+  showGroundLootIcons: boolean,
 ): {
   lootMeshes: Map<EntityId, Mesh>;
   syncLootMeshes: (groundLoot: Readonly<Record<EntityId, GroundLootState>>) => void;
 } {
-  const template = CreateBox("loot-marker-template", { size: 0.62 }, scene);
-  template.rotation.set(0, Math.PI / 4, Math.PI / 4);
+  const template = showGroundLootIcons
+    ? CreatePlane("loot-marker-template", { size: 1.05 }, scene)
+    : CreateBox("loot-marker-template", { size: 0.62 }, scene);
+  if (showGroundLootIcons) {
+    template.billboardMode = Mesh.BILLBOARDMODE_ALL | Mesh.BILLBOARDMODE_USE_POSITION;
+  } else {
+    template.rotation.set(0, Math.PI / 4, Math.PI / 4);
+  }
   template.material = lootMaterial;
   template.isVisible = false;
   template.isPickable = false;
+  const textures = new Map<string, Texture>();
+  const iconMaterials = new Map<string, StandardMaterial>();
+  const resolvedIcons = new Map<string, AssetEntry>();
+  const getIconMaterial = (assetId: string, death: boolean): { material: StandardMaterial; resolvedId: string } => {
+    let resolved = resolvedIcons.get(assetId);
+    if (!resolved) {
+      resolved = assets.resolve(assetId, "image");
+      resolvedIcons.set(assetId, resolved);
+    }
+    const key = `${resolved.id}:${death ? "death" : "spawn"}`;
+    let iconMaterial = iconMaterials.get(key);
+    if (!iconMaterial) {
+      let texture = textures.get(resolved.id);
+      if (!texture) {
+        if (!resolved.url) throw new Error(`Loot icon ${resolved.id} has no URL`);
+        texture = new Texture(resolved.url, scene, false, false);
+        texture.name = `loot-icon-texture-${resolved.id}`;
+        texture.hasAlpha = resolved.type === "svg";
+        textures.set(resolved.id, texture);
+      }
+      iconMaterial = new StandardMaterial(`loot-icon-material-${key}`, scene);
+      iconMaterial.diffuseTexture = texture;
+      iconMaterial.diffuseColor = death ? Color3.FromHexString("#ff8169") : Color3.White();
+      iconMaterial.emissiveColor = death ? Color3.FromHexString("#7a251d") : Color3.FromHexString("#252a22");
+      iconMaterial.specularColor = Color3.Black();
+      iconMaterial.disableLighting = true;
+      iconMaterial.backFaceCulling = false;
+      iconMaterial.useAlphaFromDiffuseTexture = texture.hasAlpha;
+      iconMaterials.set(key, iconMaterial);
+    }
+    return { material: iconMaterial, resolvedId: resolved.id };
+  };
 
   const lootMeshes = new Map<EntityId, Mesh>();
   const adapter: LootMarkerViewAdapter<Mesh> = {
@@ -1146,13 +1197,17 @@ function createLootMeshes(
       return marker;
     },
     update(marker, loot) {
-      marker.material = loot.source === "death" ? deathLootMaterial : lootMaterial;
-      marker.position.set(loot.position.x, loot.position.y, loot.position.z);
+      const assetId = getItemIconAssetId(loot.itemId);
+      const icon = showGroundLootIcons ? getIconMaterial(assetId, loot.source === "death") : null;
+      marker.material = icon?.material ?? (loot.source === "death" ? deathLootMaterial : lootMaterial);
+      marker.position.set(loot.position.x, loot.position.y + (showGroundLootIcons ? 0.5 : 0), loot.position.z);
       marker.metadata = {
         lootId: loot.id,
         itemId: loot.itemId,
-        assetId: "ui.weapon.rifle",
+        assetId,
+        resolvedAssetId: icon?.resolvedId ?? assetId,
         lootSource: loot.source ?? "spawn",
+        lootIcon: showGroundLootIcons,
       };
       marker.setEnabled(loot.available);
     },
@@ -1162,7 +1217,12 @@ function createLootMeshes(
   };
 
   syncLootMeshes(groundLoot);
-  scene.onDisposeObservable.addOnce(() => lootMeshes.clear());
+  scene.onDisposeObservable.addOnce(() => {
+    lootMeshes.clear();
+    textures.clear();
+    iconMaterials.clear();
+    resolvedIcons.clear();
+  });
 
   return { lootMeshes, syncLootMeshes };
 }

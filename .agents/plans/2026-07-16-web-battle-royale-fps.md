@@ -1258,3 +1258,12 @@
 - UI 复核：第五项使用原生 checkbox 的包裹 label，键盘焦点样式沿用既有 switch，并以 `grid-column: 1 / -1` 独占整行；未发现明显布局、无障碍或持久化中高风险。本轮按约束未启动或操作本机浏览器，也未使用浏览器验证。
 - 本机验证：实际执行 `npm run typecheck && npm run test && npm run build && git diff --check 4ee0454..897b8ee` 全通过；Vitest **19 files / 192 tests**，wall time 76.88 秒；构建仅保留既有 >500kB chunk warning。未发现业务源码中的 `context.Background()`。
 - 残余验证缺口（非阻塞）：尚无独立 DOM/localStorage 自动化覆盖旧存储迁移、显式 false 和即时写入，也没有单独的双 sniper 多决策用例；本次结论由明确分支、Inventory 调用链、现有定向测试和全量门禁共同支撑。
+
+## 2026-07-19 19:12 +0800：可选地面物资配图预览
+
+- 设置：首页新增 `showGroundLootIcons`，“物资辨识 / 显示地面物资配图”默认 true、change 即时保存，旧 `last-line.settings.v1` 缺字段时默认开启；关闭后 createIslandScene 保留原 `0.62m` 旋转方块路径。
+- 资源：新增客户端纯映射 `getItemIconAssetId`，14/14 地面物品分别解析到 manifest 现有 `ui.weapon.*` / `ui.item.*`，未知物品使用 `fallback.ui`；GameHud 当前武器、双槽和背包也复用同一映射，未向权威 ItemConfig 写入路径。
+- 渲染：开启后每条 loot record 仍只对应一个 `1.05m` billboard plane，不增加子 mesh；视觉中心在权威位置上方 0.5m。相同 resolved asset 共享 Texture，按 spawn/death 共享材质并以红色 tint 区分死亡掉落；BattleRoyaleSession 不再旋转 icon marker。record generation/item/source 变化时保持同一 Mesh，只更新共享材质和 metadata。
+- 有界性回归：完整 250 物资为 250 marker、14 个 Texture、14 个普通材质；同一 rifle record 复用为 death bandage 后 Mesh 身份不变、Texture 仍 14，仅新增 1 个 death 材质。14 种映射和未知 fallback 均有参数化测试。
+- 自动门禁：`npm run typecheck && npm run test && npm run build && git diff --check` 全通过；Vitest 20 files / 209 tests，完整约 77.51 秒。构建主 bundle 约 882.80kB，仅保留既有大 chunk warning。
+- MCP 验收阻塞：按用户要求两次委托均明确“只能使用浏览器 MCP 隔离能力、禁止 shell/直接浏览器/Playwright”；agent 返回当前会话未配置或暴露浏览器 MCP，因此未启动任何浏览器，也未伪造实际画面/FPS结论。当前版本可先部署供用户查看效果，MCP 可用后再补视觉验收。

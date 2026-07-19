@@ -94,7 +94,14 @@ export class BattleRoyaleSession {
     const state = createBattleRoyaleState(PLAYER_ID, undefined, Math.random, {
       startWithBandage: settings.startWithBandage,
     });
-    const bundle = await createIslandScene(engine, assets, state.actors, state.groundLoot, state.mapSeed);
+    const bundle = await createIslandScene(
+      engine,
+      assets,
+      state.actors,
+      state.groundLoot,
+      state.mapSeed,
+      settings.showGroundLootIcons,
+    );
     return new BattleRoyaleSession(canvas, uiRoot, assets, settings, audio, onRestart, bundle, state);
   }
 
@@ -259,7 +266,7 @@ export class BattleRoyaleSession {
       for (const [lootId, mesh] of this.lootMeshes) {
         const loot = this.simulation.state.groundLoot[lootId];
         mesh.setEnabled(Boolean(loot?.available));
-        if (loot?.available) mesh.rotation.y += 0.06;
+        if (loot?.available && mesh.metadata?.lootIcon !== true) mesh.rotation.y += 0.06;
       }
       const zone = this.simulation.state.safeZone;
       this.syncSafeZoneRing(zone.center.x, zone.center.z, zone.radius);

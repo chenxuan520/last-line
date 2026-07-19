@@ -190,6 +190,52 @@ describe("IslandScene lifecycle", () => {
     engine.dispose();
   }, 60_000);
 
+  it("uses reusable billboard item icons when the setting is enabled", async () => {
+    const engine = new NullEngine();
+    const assets = createAssets();
+    const state = createBattleRoyaleState("player", {
+      participantCount: 2,
+      flightSeconds: 1,
+      safeZoneStages: [{ waitSeconds: 1, shrinkSeconds: 1, radius: 100, damagePerSecond: 1 }],
+    }, () => 0.5);
+    const loot = Object.values(state.groundLoot).find((entry) => entry.itemId === "weapon.rifle");
+    if (!loot) throw new Error("rifle loot missing");
+    const bundle = await createIslandScene(engine, assets, state.actors, state.groundLoot, state.mapSeed, true);
+    const marker = bundle.lootMeshes.get(loot.id);
+    if (!marker) throw new Error("rifle marker missing");
+    const spawnMaterial = marker.material;
+
+    expect(marker.metadata).toMatchObject({
+      assetId: "ui.weapon.rifle",
+      resolvedAssetId: "ui.weapon.rifle",
+      lootIcon: true,
+    });
+    expect(marker.billboardMode).not.toBe(0);
+    expect(marker.position.y).toBeCloseTo(loot.position.y + 0.5);
+    expect(bundle.lootMeshes.size).toBe(Object.keys(state.groundLoot).length);
+    expect(bundle.scene.textures.filter((texture) => texture.name.startsWith("loot-icon-texture-"))).toHaveLength(14);
+    expect(bundle.scene.materials.filter((entry) => entry.name.startsWith("loot-icon-material-"))).toHaveLength(14);
+
+    loot.itemId = "bandage";
+    loot.generation = (loot.generation ?? 0) + 1;
+    loot.source = "death";
+    bundle.syncLootMeshes(state.groundLoot);
+
+    expect(bundle.lootMeshes.get(loot.id)).toBe(marker);
+    expect(marker.material).not.toBe(spawnMaterial);
+    expect(marker.metadata).toMatchObject({
+      assetId: "ui.item.bandage",
+      resolvedAssetId: "ui.item.bandage",
+      lootSource: "death",
+      lootIcon: true,
+    });
+    expect(bundle.scene.textures.filter((texture) => texture.name.startsWith("loot-icon-texture-"))).toHaveLength(14);
+    expect(bundle.scene.materials.filter((entry) => entry.name.startsWith("loot-icon-material-"))).toHaveLength(15);
+
+    bundle.scene.dispose();
+    engine.dispose();
+  }, 30_000);
+
   it("loads and switches all three catalog weapon models for first and third person", async () => {
     const assets = await createGlbAssets();
     const state = createBattleRoyaleState("player", {
@@ -237,13 +283,29 @@ describe("IslandScene lifecycle", () => {
 });
 
 function createAssets(): AssetCatalog {
+  const iconAssetIds = [
+    "ui.weapon.rifle",
+    "ui.weapon.smg",
+    "ui.weapon.shotgun",
+    "ui.weapon.sniper",
+    "ui.item.ammo.rifle",
+    "ui.item.ammo.light",
+    "ui.item.ammo.shell",
+    "ui.item.ammo.sniper",
+    "ui.item.armor.1",
+    "ui.item.armor.2",
+    "ui.item.helmet.1",
+    "ui.item.helmet.2",
+    "ui.item.bandage",
+    "ui.item.medkit",
+  ];
   return new AssetCatalog({
     version: 1,
     assets: [
       { id: "fallback.ui", type: "svg", url: "/fallback.svg" },
       { id: "fallback.model", type: "procedural-model", metadata: { color: "#cf4b3f" } },
       { id: "ui.crosshair", type: "svg", url: "/crosshair.svg", fallback: "fallback.ui" },
-      { id: "ui.weapon.rifle", type: "svg", url: "/rifle.svg", fallback: "fallback.ui" },
+      ...iconAssetIds.map((id) => ({ id, type: "svg" as const, url: `/${id}.svg`, fallback: "fallback.ui" })),
       { id: "model.character.player", type: "procedural-model", fallback: "fallback.model", metadata: { color: "#809d5e" } },
       { id: "model.character.enemy", type: "procedural-model", fallback: "fallback.model", metadata: { color: "#bd6357" } },
       { id: "model.weapon.rifle", type: "procedural-model", fallback: "fallback.model", metadata: { color: "#283126" } },
