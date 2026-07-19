@@ -752,7 +752,8 @@ function createVegetation(
   foliageMaterial: StandardMaterial,
   layout: MapLayout,
 ): void {
-  const treeCount = 256;
+  const treeCount = 384;
+  const mountainTreeCount = 160;
   const trunkTemplate = CreateCylinder(
     "tree-trunk-template",
     { height: 5.8, diameterTop: 0.55, diameterBottom: 1.1, tessellation: 7 },
@@ -785,7 +786,9 @@ function createVegetation(
 
   const random = createVisualRandom(layout.seed ^ 0x68bc21eb);
   for (let index = 0; index < treeCount; index += 1) {
-    const position = randomNaturalPosition(random, layout, 5);
+    const position = index < mountainTreeCount
+      ? randomMountainPosition(random, layout, 5)
+      : randomNaturalPosition(random, layout, 5);
     if (!position) continue;
     const { x, z } = position;
     const terrainY = getTerrainHeight(x, z, layout);
@@ -821,7 +824,8 @@ function createNaturalDetails(
   shrubMaterial: StandardMaterial,
   layout: MapLayout,
 ): void {
-  const rockCount = 64;
+  const rockCount = 96;
+  const mountainRockCount = 48;
   const shrubCount = 180;
   const random = createVisualRandom(layout.seed ^ 0x02e5be93);
   const rockTemplate = CreateSphere("rock-template", { diameter: 1, segments: 5 }, scene);
@@ -844,7 +848,9 @@ function createNaturalDetails(
   for (let index = 0; index < rockCount; index += 1) {
     const rock = rockTemplate.clone(`rock-${index}`);
     if (!rock) continue;
-    const position = randomNaturalPosition(random, layout, 3);
+    const position = index < mountainRockCount
+      ? randomMountainPosition(random, layout, 3)
+      : randomNaturalPosition(random, layout, 3);
     if (!position) continue;
     const { x, z } = position;
     rock.position.set(x, getTerrainHeight(x, z, layout) + 0.42 + (index % 3) * 0.12, z);
@@ -1528,11 +1534,33 @@ function randomNaturalPosition(
   for (let attempt = 0; attempt < 80; attempt += 1) {
     const x = lerp(-limit, limit, random());
     const z = lerp(-limit, limit, random());
-    const blocked = [...layout.obstacles, ...layout.rockObstacles, ...layout.coverObstacles].some((obstacle) =>
-      Math.abs(x - obstacle.center.x) <= obstacle.width / 2 + clearance &&
-      Math.abs(z - obstacle.center.z) <= obstacle.depth / 2 + clearance
-    );
-    if (!blocked) return { x, z };
+    if (!isNaturalPositionBlocked(x, z, layout, clearance)) return { x, z };
   }
   return null;
+}
+
+function randomMountainPosition(
+  random: () => number,
+  layout: MapLayout,
+  clearance: number,
+): { x: number; z: number } | null {
+  const mountains = layout.terrainHills.filter((hill) => hill.height >= 24);
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    const mountain = mountains[Math.floor(random() * mountains.length)];
+    if (!mountain) return null;
+    const angle = random() * Math.PI * 2;
+    const radius = mountain.radius * Math.sqrt(lerp(0.02, 0.5, random()));
+    const x = mountain.x + Math.cos(angle) * radius;
+    const z = mountain.z + Math.sin(angle) * radius;
+    if (Math.abs(x) > MAP_SIZE / 2 - 35 || Math.abs(z) > MAP_SIZE / 2 - 35) continue;
+    if (!isNaturalPositionBlocked(x, z, layout, clearance)) return { x, z };
+  }
+  return randomNaturalPosition(random, layout, clearance);
+}
+
+function isNaturalPositionBlocked(x: number, z: number, layout: MapLayout, clearance: number): boolean {
+  return [...layout.obstacles, ...layout.rockObstacles, ...layout.coverObstacles].some((obstacle) =>
+    Math.abs(x - obstacle.center.x) <= obstacle.width / 2 + clearance &&
+    Math.abs(z - obstacle.center.z) <= obstacle.depth / 2 + clearance
+  );
 }

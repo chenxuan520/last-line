@@ -84,8 +84,8 @@ describe("IslandScene lifecycle", () => {
       const treeFoliage = bundle.scene.meshes.filter((mesh) => /^tree-foliage-\d+$/.test(mesh.name));
       expect(Math.max(...heights) - Math.min(...heights)).toBeGreaterThan(5);
       expect(terrainColors.size).toBeGreaterThan(100);
-      expect(treeTrunks).toHaveLength(256);
-      expect(treeFoliage).toHaveLength(256);
+      expect(treeTrunks).toHaveLength(384);
+      expect(treeFoliage).toHaveLength(384);
       expect(treeFoliage.every((mesh) => mesh.getTotalVertices() < 160)).toBe(true);
       expect(treeFoliage.every((mesh) =>
         mesh.getBoundingInfo().boundingBox.maximumWorld.y - getTerrainHeight(mesh.position.x, mesh.position.z, layout) > 15
@@ -103,7 +103,16 @@ describe("IslandScene lifecycle", () => {
       expect(coverMeshes.find((mesh) => mesh.metadata?.coverKind === "fence")?.metadata?.sourceCount).toBe(96 * 5);
       expect(coverMeshes.filter((mesh) => mesh.metadata?.coverKind === "hay")).toHaveLength(1);
       expect(coverMeshes.find((mesh) => mesh.metadata?.coverKind === "hay")?.metadata?.sourceCount).toBe(72 * 3);
-      expect(bundle.scene.meshes.filter((mesh) => /^rock-\d+$/.test(mesh.name))).toHaveLength(64);
+      const decorativeRocks = bundle.scene.meshes.filter((mesh) => /^rock-\d+$/.test(mesh.name));
+      expect(decorativeRocks).toHaveLength(96);
+      const mountainTrees = treeTrunks.filter((mesh) => layout.terrainHills.some((hill) =>
+        hill.height >= 24 && Math.hypot(mesh.position.x - hill.x, mesh.position.z - hill.z) <= hill.radius * 0.72
+      ));
+      const mountainRocks = decorativeRocks.filter((mesh) => layout.terrainHills.some((hill) =>
+        hill.height >= 24 && Math.hypot(mesh.position.x - hill.x, mesh.position.z - hill.z) <= hill.radius * 0.72
+      ));
+      expect(mountainTrees.length).toBeGreaterThanOrEqual(150);
+      expect(mountainRocks.length).toBeGreaterThanOrEqual(44);
       expect(bundle.scene.meshes.filter((mesh) => /^shrub-\d+$/.test(mesh.name))).toHaveLength(180);
       expect(layeredSurfaces).toHaveLength(0);
       expect(bundle.scene.meshes.filter((mesh) => mesh.name.startsWith("ocean-"))).toHaveLength(4);

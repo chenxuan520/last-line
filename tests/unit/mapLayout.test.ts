@@ -60,8 +60,8 @@ describe("map layouts", () => {
   it("creates stable full-height rock cover clear of buildings and loot", () => {
     for (const seed of [1, 7, 19, 42, 99]) {
       const layout = createMapLayout(seed);
-      expect(layout.rockObstacles).toHaveLength(48);
-      expect(new Set(layout.rockObstacles.map((rock) => rock.id)).size).toBe(48);
+      expect(layout.rockObstacles).toHaveLength(64);
+      expect(new Set(layout.rockObstacles.map((rock) => rock.id)).size).toBe(64);
       for (const [index, rock] of layout.rockObstacles.entries()) {
         expect(rock.id).toBe(`cover-rock-${index}`);
         expect(rock.width).toBeGreaterThanOrEqual(5.5);
@@ -250,6 +250,12 @@ describe("map layouts", () => {
       } else {
         expect(obstacle.stairwell).not.toBeNull();
         expect(slabs).toHaveLength(obstacle.storyCount * 4);
+        for (const slab of slabs.filter((entry) => entry.kind === "floor")) {
+          expect(slab.center.x - slab.width / 2).toBeGreaterThanOrEqual(obstacle.center.x - obstacle.width / 2 + 0.3);
+          expect(slab.center.x + slab.width / 2).toBeLessThanOrEqual(obstacle.center.x + obstacle.width / 2 - 0.3);
+          expect(slab.center.z - slab.depth / 2).toBeGreaterThanOrEqual(obstacle.center.z - obstacle.depth / 2 + 0.3);
+          expect(slab.center.z + slab.depth / 2).toBeLessThanOrEqual(obstacle.center.z + obstacle.depth / 2 - 0.3);
+        }
         expect(layout.wallOpenings.filter((opening) => opening.obstacleId === obstacle.id)).toHaveLength(
           obstacle.storyCount * 4,
         );

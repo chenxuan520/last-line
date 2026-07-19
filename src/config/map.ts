@@ -143,7 +143,7 @@ const LANDING_ZONE_MINIMUM_DISTANCE = 300;
 const POINT_MAP_MARGIN = 210;
 const MOUNTAIN_COUNT = 16;
 const COVERAGE_COMPOUND_COUNT = 20;
-const COVER_ROCK_COUNT = 48;
+const COVER_ROCK_COUNT = 64;
 const FENCE_COVER_COUNT = 96;
 const HAY_COVER_COUNT = 72;
 const MULTI_STORY_BUILDING_RATIO = 0.2;
@@ -692,11 +692,16 @@ function createBuildingFloorSlabs(building: MapBuilding): MapFloorSlab[] {
   const openingMaximumZ = building.stairwell.centerZ + building.stairwell.depth / 2;
   return Array.from({ length: building.storyCount }, (_, index) => index + 1).flatMap((level) => {
     const kind = level === building.storyCount ? "roof" : "floor";
+    const wallInset = kind === "floor" ? BUILDING_WALL_THICKNESS : 0;
+    const levelMinimumX = minimumX + wallInset;
+    const levelMaximumX = maximumX - wallInset;
+    const levelMinimumZ = minimumZ + wallInset;
+    const levelMaximumZ = maximumZ - wallInset;
     return [
-      floorSlab(building, level, kind, "left", (minimumX + openingMinimumX) / 2, building.center.z, openingMinimumX - minimumX, building.depth),
-      floorSlab(building, level, kind, "right", (openingMaximumX + maximumX) / 2, building.center.z, maximumX - openingMaximumX, building.depth),
-      floorSlab(building, level, kind, "front", building.stairwell?.centerX ?? building.center.x, (minimumZ + openingMinimumZ) / 2, building.stairwell?.width ?? 0, openingMinimumZ - minimumZ),
-      floorSlab(building, level, kind, "back", building.stairwell?.centerX ?? building.center.x, (openingMaximumZ + maximumZ) / 2, building.stairwell?.width ?? 0, maximumZ - openingMaximumZ),
+      floorSlab(building, level, kind, "left", (levelMinimumX + openingMinimumX) / 2, building.center.z, openingMinimumX - levelMinimumX, levelMaximumZ - levelMinimumZ),
+      floorSlab(building, level, kind, "right", (openingMaximumX + levelMaximumX) / 2, building.center.z, levelMaximumX - openingMaximumX, levelMaximumZ - levelMinimumZ),
+      floorSlab(building, level, kind, "front", building.stairwell?.centerX ?? building.center.x, (levelMinimumZ + openingMinimumZ) / 2, building.stairwell?.width ?? 0, openingMinimumZ - levelMinimumZ),
+      floorSlab(building, level, kind, "back", building.stairwell?.centerX ?? building.center.x, (openingMaximumZ + levelMaximumZ) / 2, building.stairwell?.width ?? 0, levelMaximumZ - openingMaximumZ),
     ].filter((slab) => slab.width > 0.1 && slab.depth > 0.1);
   });
 }
