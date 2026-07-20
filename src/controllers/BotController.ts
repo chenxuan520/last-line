@@ -41,6 +41,7 @@ const OSCILLATION_REVERSAL_LIMIT = 6;
 const FORCED_RELOCATION_SECONDS = 20;
 const FORCED_RELOCATION_CLEAR_DISTANCE = 6;
 const FORCED_RELOCATION_PATH_CHECKS = 1;
+const ZONE_PATH_RETRY_SECONDS = 2;
 const PARACHUTE_TARGET_DEAD_ZONE = 0.75;
 const PARACHUTE_APPROACH_DISTANCE = 12;
 const ACTOR_EYE_HEIGHT = 1.76;
@@ -107,6 +108,7 @@ export class BotController {
   private forcedRelocationTarget: Vector3State | null = null;
   private forcedRelocationUntilSeconds = -1;
   private forcedRelocationSequence = 0;
+  private zonePathRetryAtSeconds = -1;
 
   public constructor(
     index = 0,
@@ -293,6 +295,11 @@ export class BotController {
     const outsideTargetZone = horizontalDistance(actor.position, state.safeZone.targetCenter) > targetZoneRadius;
     const outsideCurrentZone = horizontalDistance(actor.position, state.safeZone.center) > state.safeZone.radius;
     const shouldEnterTargetZone = outsideTargetZone && (!endgameSearch || targetZoneRadius >= 24);
+    if (outsideCurrentZone && state.elapsedSeconds <= this.forcedRelocationUntilSeconds) {
+      this.forcedRelocationOrigin = null;
+      this.forcedRelocationTarget = null;
+      this.forcedRelocationUntilSeconds = -1;
+    }
     if (state.elapsedSeconds <= this.forcedRelocationUntilSeconds) {
       return this.cache(this.forceRelocation(actor, state, command));
     }
@@ -323,7 +330,7 @@ export class BotController {
       const radius = shouldEnterTargetZone
         ? targetZoneRadius
         : Math.max(0, state.safeZone.radius - ZONE_SAFETY_MARGIN);
-      return this.cache(this.navigateIntoZone(actor, center, radius, command));
+      return this.cache(this.navigateIntoZone(actor, center, radius, command, state.elapsedSeconds));
     }
 
     const target = this.findVisibleTarget(actor, state, world);
@@ -517,7 +524,13 @@ export class BotController {
     const patrol = this.findPatrolTarget(actor, state, layout);
     if (patrol) return this.cache(this.navigate(actor, patrol.target, command, patrol.path));
     this.patrolTarget = null;
-    return this.cache(this.navigateIntoZone(actor, state.safeZone.targetCenter, state.safeZone.targetRadius, command));
+    return this.cache(this.navigateIntoZone(
+      actor,
+      state.safeZone.targetCenter,
+      state.safeZone.targetRadius,
+      command,
+      state.elapsedSeconds,
+    ));
   }
 
   private findPatrolTarget(
@@ -1083,7 +1096,20 @@ export class BotController {
     center: Vector3State,
     radius: number,
     command: ActorCommand,
+    elapsedSeconds: number,
   ): ActorCommand {
+    if (
+      this.navigationPath.length > 0 &&
+      this.navigationTarget &&
+      horizontalDistance(this.navigationTarget, center) <= Math.max(2, radius)
+    ) {
+      this.updateNavigationMovement(actor, command);
+      command.sprint = true;
+      return command;
+    }
+    if (elapsedSeconds < this.zonePathRetryAtSeconds) {
+      return this.moveDirectlyIntoZone(actor, center, command);
+    }
     const fromCenter = normalizeFlat(subtract(actor.position, center));
     const entryRadius = Math.max(0, radius * 0.72);
     const candidates: Vector3State[] = [{
@@ -1101,8 +1127,21 @@ export class BotController {
     }
     for (const candidate of candidates) {
       const path = this.navigator.findPath(actor.position, candidate);
-      if (path.length > 0) return this.navigate(actor, candidate, command, path);
+      if (path.length > 0) {
+        this.zonePathRetryAtSeconds = -1;
+        return this.navigate(actor, candidate, command, path);
+      }
     }
+    this.zonePathRetryAtSeconds = elapsedSeconds + ZONE_PATH_RETRY_SECONDS;
+    return this.moveDirectlyIntoZone(actor, center, command);
+  }
+
+  private moveDirectlyIntoZone(
+    actor: ActorState,
+    center: Vector3State,
+    command: ActorCommand,
+  ): ActorCommand {
+    this.clearNavigation();
     command.move = normalizeFlat(subtract(center, actor.position));
     command.aimDirection = { ...command.move };
     command.sprint = true;

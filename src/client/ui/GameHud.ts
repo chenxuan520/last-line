@@ -39,6 +39,7 @@ export class GameHud {
     const crosshair = assets.resolve("ui.crosshair", "svg");
     const mapLayout = createMapLayout(mapSeed);
     const mapPoints = mapLayout.mapPoints;
+    const hospitalPoint = projectToMinimap(mapLayout.hospital.position);
     const mapRoadPath = createMapRoadSegments(mapLayout.landingZones).map(([startX, startZ, endX, endZ]) => {
       const start = projectToMinimap({ x: startX, y: 0, z: startZ });
       const end = projectToMinimap({ x: endX, y: 0, z: endZ });
@@ -70,6 +71,7 @@ export class GameHud {
               const projected = projectToMinimap(point.position);
               return `<g transform="translate(${projected.x} ${projected.y})"><circle r="2" /><text y="-5">${point.name}</text></g>`;
             }).join("")}</g>
+            <g class="minimap-hospital" transform="translate(${hospitalPoint.x} ${hospitalPoint.y})"><title>医院</title><path d="M-4 -1.5H-1.5V-4H1.5V-1.5H4V1.5H1.5V4H-1.5V1.5H-4Z" /></g>
             <line class="minimap-flight" data-hud="map-flight" />
             <circle class="minimap-target-zone" data-hud="map-target-zone" />
             <circle class="minimap-current-zone" data-hud="map-current-zone" />
@@ -152,21 +154,9 @@ export class GameHud {
     this.setText("phase", player.alive ? phaseLabel(state, player) : `观战 · ${this.actorLabel(viewedActor.id, player.id)}`);
     this.setText("zone-label", zoneLabel(state));
     this.setText("zone-time", formatSeconds(state.safeZone.secondsRemaining));
-    const minimapSignature = [
-      state.phase,
-      player.deployment,
-      player.position.x.toFixed(1),
-      player.position.z.toFixed(1),
-      player.yaw.toFixed(3),
-      state.safeZone.center.x.toFixed(1),
-      state.safeZone.center.z.toFixed(1),
-      state.safeZone.radius.toFixed(1),
-      state.safeZone.targetCenter.x.toFixed(1),
-      state.safeZone.targetCenter.z.toFixed(1),
-      state.safeZone.targetRadius.toFixed(1),
-    ].join(":");
+    const minimapSignature = createMinimapSignature(state, viewedActor);
     if (minimapSignature !== this.minimapSignature) {
-      this.updateMinimap(state, player);
+      this.updateMinimap(state, viewedActor);
       this.minimapSignature = minimapSignature;
     }
     const healingSignature = viewedActor.inventory.usingItem
@@ -374,8 +364,8 @@ export class GameHud {
     backpack.replaceChildren(fragment);
   }
 
-  private updateMinimap(state: MatchState, player: ActorState): void {
-    const view = createMinimapView(state, player);
+  private updateMinimap(state: MatchState, actor: ActorState): void {
+    const view = createMinimapView(state, actor);
     setCircle(this.requireElement("map-current-zone"), view.currentZone);
     setCircle(this.requireElement("map-target-zone"), view.targetZone);
     const flight = this.requireElement("map-flight");
@@ -391,7 +381,7 @@ export class GameHud {
     );
     const mapStatus = state.phase === "flight"
       ? "航线飞行"
-      : player.deployment === "parachuting"
+      : actor.deployment === "parachuting"
         ? "空降中"
         : view.outsideZoneMeters > 0
           ? `圈外 ${Math.ceil(view.outsideZoneMeters)}m`
@@ -429,6 +419,23 @@ export function sortLeaderboardActors(actors: readonly ActorState[]): ActorState
     right.kills - left.kills ||
     left.id.localeCompare(right.id),
   );
+}
+
+export function createMinimapSignature(state: MatchState, actor: ActorState): string {
+  return [
+    state.phase,
+    actor.id,
+    actor.deployment,
+    actor.position.x.toFixed(1),
+    actor.position.z.toFixed(1),
+    actor.yaw.toFixed(3),
+    state.safeZone.center.x.toFixed(1),
+    state.safeZone.center.z.toFixed(1),
+    state.safeZone.radius.toFixed(1),
+    state.safeZone.targetCenter.x.toFixed(1),
+    state.safeZone.targetCenter.z.toFixed(1),
+    state.safeZone.targetRadius.toFixed(1),
+  ].join(":");
 }
 
 export function combatCounterLabel(state: MatchState, player: ActorState): string {

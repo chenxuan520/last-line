@@ -32,7 +32,7 @@ Each `BotController` has independent decision timers and memory. Bots use the sa
 
 ## Rendering
 
-`IslandScene` builds the 2400m island from per-match seeded map points: eight irregular named POIs, eight wilderness compounds, nearest-neighbor roads, randomly scattered enterable buildings, variable-density loot, dense natural details, procedural actors, a terrain-following safe-zone ribbon, and weapon-specific first-person/third-person models. The player camera applies scope FOV only while a sniper is active and the right mouse button is held.
+`IslandScene` builds the 2400m island from per-match seeded map points: eight irregular named POIs, eight wilderness compounds, nearest-neighbor roads, randomly scattered enterable buildings, variable-density loot, dense natural details, procedural actors, a terrain-following safe-zone ribbon, and weapon-specific first-person/third-person models. `MapLayout.hospital` deterministically reuses one existing building as a white two-story hospital, adds a visual-only medical cross and minimap marker, and relocates two existing supplemental medical records to its reachable ground floor without increasing building or loot counts. The player camera applies scope FOV only while a sniper is active and the right mouse button is held.
 
 Optional GLB models are loaded asynchronously and instantiated as non-pickable visual children. Procedural models remain the fallback. Repeated loot drops reuse inactive state IDs and marker meshes, and scene disposal clears marker references and imported containers.
 

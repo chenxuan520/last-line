@@ -352,6 +352,7 @@ describe("BotController", () => {
     internals.waypointIndex = 1;
     internals.navigationPreservesAim = true;
     player.alive = false;
+    for (const actor of Object.values(state.actors)) actor.alive = actor.id === bot.id;
     nextThreat.alive = true;
     bot.yaw = -Math.PI / 2;
     state.elapsedSeconds += 1;
@@ -576,6 +577,135 @@ describe("BotController", () => {
 
     expect(command.move.x).toBeLessThan(0);
     expect(command.sprint).toBe(true);
+  });
+
+  it("clears stale navigation when every safe-zone path fails", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    player.alive = false;
+    for (const actor of Object.values(state.actors)) actor.alive = actor.id === bot.id;
+    bot.position = { x: 200, y: 1.76, z: 0 };
+    state.safeZone.center = { x: 0, y: 0, z: 0 };
+    state.safeZone.radius = 40;
+    state.safeZone.targetCenter = { x: 0, y: 0, z: 0 };
+    state.safeZone.targetRadius = 10;
+    const controller = new BotController(1, () => 0.5);
+    let pathSearches = 0;
+    const internal = controller as unknown as {
+      navigator: { findPath(): Vector3State[] };
+      navigationPath: Vector3State[];
+      navigationTarget: Vector3State | null;
+      waypointIndex: number;
+      navigatorSeed: number;
+    };
+    internal.navigator = { findPath: () => {
+      pathSearches += 1;
+      return [];
+    } };
+    internal.navigationPath = [
+      { ...bot.position },
+      { x: 300, y: bot.position.y, z: 0 },
+    ];
+    internal.navigationTarget = { x: 300, y: bot.position.y, z: 0 };
+    internal.waypointIndex = 1;
+    internal.navigatorSeed = state.mapSeed;
+
+    const decision = controller.update(bot, state, miss, 1 / 30, player.id);
+    const cached = controller.update(bot, state, miss, 1 / 30, player.id);
+    for (let tick = 0; tick < 30; tick += 1) {
+      state.elapsedSeconds += 1 / 30;
+      state.safeZone.radius -= 0.1;
+      controller.update(bot, state, miss, 1 / 30, player.id);
+    }
+
+    expect(decision.move.x).toBeLessThan(-0.9);
+    expect(cached.move.x).toBeLessThan(-0.9);
+    expect(internal.navigationPath).toHaveLength(0);
+    expect(internal.navigationTarget).toBeNull();
+    expect(pathSearches).toBeLessThanOrEqual(10);
+  });
+
+  it("abandons forced relocation immediately after falling outside the current zone", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    player.alive = false;
+    bot.position = { x: 200, y: 1.76, z: 0 };
+    state.safeZone.center = { x: 0, y: 0, z: 0 };
+    state.safeZone.radius = 40;
+    state.safeZone.targetCenter = { x: 0, y: 0, z: 0 };
+    state.safeZone.targetRadius = 40;
+    state.elapsedSeconds = 10;
+    const controller = new BotController(1, () => 0.5);
+    const internal = controller as unknown as {
+      forcedRelocationOrigin: Vector3State | null;
+      forcedRelocationTarget: Vector3State | null;
+      forcedRelocationUntilSeconds: number;
+    };
+    internal.forcedRelocationOrigin = { ...bot.position };
+    internal.forcedRelocationTarget = { x: 300, y: bot.position.y, z: 0 };
+    internal.forcedRelocationUntilSeconds = 30;
+
+    const command = controller.update(bot, state, miss, 1 / 30, player.id);
+
+    expect(command.move.x).toBeLessThan(-0.9);
+    expect(internal.forcedRelocationTarget).toBeNull();
+    expect(internal.forcedRelocationUntilSeconds).toBe(-1);
+  });
+
+  it("leaves a building through its door when rotating into the safe zone", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    player.alive = false;
+    state.groundLoot = {};
+    state.mapSeed = 99;
+    const layout = createMapLayout(state.mapSeed);
+    const building = layout.obstacles.find((candidate) => candidate.id === layout.hospital.buildingId);
+    if (!building) throw new Error("building missing");
+    bot.position = {
+      x: building.center.x,
+      y: getTerrainHeight(building.center.x, building.center.z, layout) + 1.76,
+      z: building.center.z,
+    };
+    state.safeZone.center = { x: building.center.x, y: 0, z: building.center.z + 500 };
+    state.safeZone.radius = 40;
+    state.safeZone.targetCenter = { ...state.safeZone.center };
+    state.safeZone.targetRadius = 40;
+    const initialDistance = Math.hypot(
+      bot.position.x - state.safeZone.center.x,
+      bot.position.z - state.safeZone.center.z,
+    );
+    const controller = new BotController(1, () => 0.5);
+    const movement = new MovementSystem();
+    const navigation = controller as unknown as {
+      navigationPath: Vector3State[];
+      navigationTarget: Vector3State | null;
+      waypointIndex: number;
+    };
+    for (let tick = 0; tick < 600; tick += 1) {
+      state.elapsedSeconds += 1 / 30;
+      const command = controller.update(bot, state, miss, 1 / 30, player.id);
+      movement.processCommand(state, bot.id, command, 1 / 30);
+    }
+
+    expect(Math.hypot(
+      bot.position.x - state.safeZone.center.x,
+      bot.position.z - state.safeZone.center.z,
+    )).toBeLessThan(initialDistance - 5);
+    const stillInside = Math.abs(bot.position.x - building.center.x) < building.width / 2 &&
+      Math.abs(bot.position.z - building.center.z) < building.depth / 2;
+    expect(stillInside, JSON.stringify({
+      position: bot.position,
+      building: { center: building.center, width: building.width, depth: building.depth, baseY: building.baseY },
+      navigationPath: navigation.navigationPath,
+      navigationTarget: navigation.navigationTarget,
+      waypointIndex: navigation.waypointIndex,
+    })).toBe(false);
   });
 
   it("moves into the next target zone before the current zone starts shrinking", () => {
@@ -1263,10 +1393,10 @@ describe("BotController", () => {
     if (!bot) throw new Error("bot missing");
     for (const actor of Object.values(state.actors)) actor.alive = actor.id === bot.id;
     bot.health = 20;
-    state.safeZone.center = { x: 400, y: 0, z: 0 };
-    state.safeZone.radius = 80;
-    state.safeZone.targetCenter = { x: 400, y: 0, z: 0 };
-    state.safeZone.targetRadius = 80;
+    state.safeZone.center = { x: bot.position.x + 100, y: 0, z: bot.position.z };
+    state.safeZone.radius = 1_000;
+    state.safeZone.targetCenter = { x: bot.position.x + 100, y: 0, z: bot.position.z };
+    state.safeZone.targetRadius = 1_000;
     const controller = new BotController(1, () => 0.5);
     let command = createIdleCommand();
 

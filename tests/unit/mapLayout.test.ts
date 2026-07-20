@@ -7,6 +7,7 @@ import {
   createMapLayout,
   getRampHeight,
   getTerrainHeight,
+  HOSPITAL_WALL_COLOR,
   LANDING_ZONE_COUNT,
   MAP_POINT_COUNT,
   MAP_HALF_SIZE,
@@ -34,6 +35,48 @@ describe("map layouts", () => {
 
     expect(recreated).not.toBe(first);
     expect(recreated).toEqual(first);
+  }, 30_000);
+
+  it("creates one seeded two-story hospital with reachable ground-floor medicine", () => {
+    const hospitalPositions = new Set<string>();
+    for (const seed of [1, 7, 19, 42, 99]) {
+      const layout = createMapLayout(seed);
+      const hospital = layout.obstacles.find((building) => building.id === layout.hospital.buildingId);
+      if (!hospital) throw new Error(`hospital missing for seed ${seed}`);
+      const bandagePoint = layout.lootSpawnPoints[layout.hospital.bandageLootIndex];
+      const medkitPoint = layout.lootSpawnPoints[layout.hospital.medkitLootIndex];
+      if (!bandagePoint || !medkitPoint) throw new Error(`hospital medicine missing for seed ${seed}`);
+      hospitalPositions.add(`${hospital.center.x}:${hospital.center.z}`);
+
+      expect(layout.lootSpawnPoints).toHaveLength(TOTAL_LOOT_POINTS);
+      expect(hospital.storyCount).toBe(2);
+      expect(hospital.color).toBe(HOSPITAL_WALL_COLOR);
+      expect(layout.hospital.bandageLootIndex).toBe(TOTAL_LOOT_POINTS - 2);
+      expect(layout.hospital.medkitLootIndex).toBe(TOTAL_LOOT_POINTS - 1);
+      for (const point of [bandagePoint, medkitPoint]) {
+        expect(Math.abs(point.x - hospital.center.x)).toBeLessThan(hospital.width / 2);
+        expect(Math.abs(point.z - hospital.center.z)).toBeLessThan(hospital.depth / 2);
+        expect(point.y).toBeCloseTo(getTerrainHeight(point.x, point.z, layout) + 0.45, 2);
+      }
+      const multiStoryCount = layout.obstacles.filter((building) => building.storyCount > 1).length;
+      expect(multiStoryCount).toBe(Math.round(layout.obstacles.length * 0.2));
+      const navigator = new GridNavigator(layout);
+      const outsideDoor = {
+        x: hospital.center.x,
+        y: getTerrainHeight(hospital.center.x, hospital.center.z - hospital.depth / 2 - 2, layout) + 1.76,
+        z: hospital.center.z - hospital.depth / 2 - 2,
+      };
+      const insideDoor = {
+        x: hospital.center.x,
+        y: getTerrainHeight(hospital.center.x, hospital.center.z - hospital.depth / 2 + 1, layout) + 1.76,
+        z: hospital.center.z - hospital.depth / 2 + 1,
+      };
+      expect(navigator.findPath(outsideDoor, insideDoor).length, `${seed}:door`).toBeGreaterThan(0);
+      expect(navigator.findPath(insideDoor, bandagePoint).length, `${seed}:inside-bandage`).toBeGreaterThan(0);
+      expect(navigator.findPath(outsideDoor, bandagePoint).length, `${seed}:bandage`).toBeGreaterThan(0);
+      expect(navigator.findPath(outsideDoor, medkitPoint).length, `${seed}:medkit`).toBeGreaterThan(0);
+    }
+    expect(hospitalPositions.size).toBeGreaterThan(1);
   }, 30_000);
 
   it.each([832, 859])("generates the former coverage failure seed %i", (seed) => {
@@ -333,11 +376,17 @@ describe("map layouts", () => {
       zoneStart += zoneCount;
     });
     for (let index = 0; index < layout.lootSpawnPoints.length; index += 1) {
-      for (const other of layout.lootSpawnPoints.slice(index + 1)) {
+      for (let otherIndex = index + 1; otherIndex < layout.lootSpawnPoints.length; otherIndex += 1) {
+        const other = layout.lootSpawnPoints[otherIndex];
+        if (!other) continue;
+        const hospitalPair = index === layout.hospital.bandageLootIndex ||
+          index === layout.hospital.medkitLootIndex ||
+          otherIndex === layout.hospital.bandageLootIndex ||
+          otherIndex === layout.hospital.medkitLootIndex;
         expect(Math.hypot(
           (layout.lootSpawnPoints[index]?.x ?? 0) - other.x,
           (layout.lootSpawnPoints[index]?.z ?? 0) - other.z,
-        )).toBeGreaterThanOrEqual(11.9);
+        )).toBeGreaterThanOrEqual(hospitalPair ? 2.9 : 11.9);
       }
     }
   }, 30_000);

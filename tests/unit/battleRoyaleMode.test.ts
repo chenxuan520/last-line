@@ -5,7 +5,7 @@ import {
   type BattleRoyaleConfig,
 } from "../../src/config/battleRoyale";
 import { ITEMS } from "../../src/config/items";
-import { createMapLayout, MAP_HALF_SIZE } from "../../src/config/map";
+import { BASE_LOOT_POINTS, createMapLayout, MAP_HALF_SIZE } from "../../src/config/map";
 import { WEAPONS } from "../../src/config/weapons";
 import { BattleRoyaleMode, createBattleRoyaleState } from "../../src/game/modes/BattleRoyaleMode";
 import { createIdleCommand } from "../../src/game/commands/ActorCommand";
@@ -69,6 +69,20 @@ describe("BattleRoyaleMode", () => {
     expect(Object.values(state.groundLoot).map((loot) => loot.position)).toEqual(
       createMapLayout(state.mapSeed).lootSpawnPoints,
     );
+    const layout = createMapLayout(state.mapSeed);
+    expect(state.groundLoot[`loot-${layout.hospital.bandageLootIndex}`]).toMatchObject({
+      itemId: "bandage",
+      quantity: 2,
+      position: layout.lootSpawnPoints[layout.hospital.bandageLootIndex],
+    });
+    expect(state.groundLoot[`loot-${layout.hospital.medkitLootIndex}`]).toMatchObject({
+      itemId: "medkit",
+      quantity: 1,
+      position: layout.lootSpawnPoints[layout.hospital.medkitLootIndex],
+    });
+    const supplemental = Object.values(state.groundLoot).slice(BASE_LOOT_POINTS);
+    expect(supplemental.filter((loot) => loot.itemId === "bandage")).toHaveLength(5);
+    expect(supplemental.filter((loot) => loot.itemId === "medkit")).toHaveLength(5);
     expect(itemIds).toEqual(
       new Set([
         "weapon.rifle",

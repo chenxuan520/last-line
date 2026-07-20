@@ -66,7 +66,8 @@ export class GameApp {
     this.session?.dispose();
     this.session = null;
     this.applyQuality();
-    this.renderLoading(1);
+    this.renderLoading(0.92, "正在准备战场");
+    await waitForPaint();
     try {
       this.session = await BattleRoyaleSession.create(
         this.engine,
@@ -87,9 +88,9 @@ export class GameApp {
 
   private readonly handleResize = (): void => this.engine.resize();
 
-  private renderLoading(progress: number): void {
+  private renderLoading(progress: number, message = "正在加载资源"): void {
     this.uiRoot.className = "";
-    this.uiRoot.innerHTML = `<section class="loading-panel" aria-live="polite"><p>正在部署战区</p><strong>${Math.round(progress * 100)}%</strong><div><i style="width:${progress * 100}%"></i></div></section>`;
+    this.uiRoot.innerHTML = `<section class="loading-panel" aria-live="polite"><p><span></span>${message}</p><strong>${Math.round(progress * 100)}%</strong><small>${message === "正在准备战场" ? "正在生成地图、建筑、物资与角色，请稍候" : "正在校验并载入战区资源"}</small><div><i style="width:${progress * 100}%"></i></div></section>`;
   }
 
   private renderMenu(): void {
@@ -479,7 +480,8 @@ export class GameApp {
     this.starting = true;
     connection.setMessageHandler(null);
     this.applyQuality();
-    this.renderLoading(1);
+    this.renderLoading(0.92, "正在准备战场");
+    await waitForPaint();
     try {
       const session = await MultiplayerSession.create(
         this.engine,
@@ -541,6 +543,10 @@ export class GameApp {
 
 function escapeAttribute(value: string): string {
   return value.replace(/[&"<>]/g, (character) => ({ "&": "&amp;", "\"": "&quot;", "<": "&lt;", ">": "&gt;" })[character] ?? character);
+}
+
+function waitForPaint(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 }
 
 function loadSettings(): GameSettings {

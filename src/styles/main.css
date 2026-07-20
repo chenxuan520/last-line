@@ -659,15 +659,35 @@ h1 {
 }
 
 .loading-panel p {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin: 0 0 8px;
   color: var(--signal);
   font: 800 11px/1 var(--tactical-font);
   letter-spacing: 0.18em;
 }
 
+.loading-panel p span {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgb(183 197 139 / 24%);
+  border-top-color: var(--signal-bright);
+  border-radius: 50%;
+  animation: loading-spin 700ms linear infinite;
+}
+
 .loading-panel strong {
   font: 600 40px/1 var(--tactical-font);
   letter-spacing: 0.04em;
+}
+
+.loading-panel small {
+  display: block;
+  margin-top: 10px;
+  color: var(--ink-muted);
+  font: 600 10px/1.5 var(--tactical-font);
+  letter-spacing: 0.06em;
 }
 
 .loading-panel > div {
@@ -682,6 +702,12 @@ h1 {
   background: linear-gradient(90deg, #8f9e69, var(--signal-bright));
   box-shadow: 0 0 12px rgb(183 197 139 / 22%);
   transition: width 120ms linear;
+}
+
+@keyframes loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .hud {
@@ -1157,6 +1183,13 @@ h1 {
   paint-order: stroke;
   stroke: rgb(8 14 12 / 88%);
   stroke-width: 2px;
+}
+
+.minimap-hospital path {
+  fill: #df5549;
+  stroke: #f3f4ed;
+  stroke-width: 0.8;
+  filter: drop-shadow(0 0 2px rgb(223 85 73 / 55%));
 }
 
 .minimap-flight {

@@ -84,6 +84,7 @@ interface IslandMaterials {
   poiDark: StandardMaterial;
   roof: StandardMaterial;
   wallTrim: StandardMaterial;
+  hospitalCross: StandardMaterial;
   window: StandardMaterial;
   door: StandardMaterial;
   botBody: StandardMaterial;
@@ -340,6 +341,7 @@ function createMaterials(scene: Scene, assets: AssetCatalog): IslandMaterials {
     poiDark: material(scene, "poi-dark-material", "#434b4f"),
     roof: material(scene, "building-roof-material", "#343b3b"),
     wallTrim: material(scene, "building-trim-material", "#8a8069"),
+    hospitalCross: material(scene, "hospital-cross-material", "#d8473f"),
     window: windowMaterial,
     door: material(scene, "building-door-material", "#4c3d31"),
     botBody: material(scene, "bot-body-material", botColor),
@@ -396,6 +398,8 @@ function createIslandEnvironment(scene: Scene, materials: IslandMaterials, layou
     markEnvironment(merged, `building-walls-${color}`);
   }
 
+  createHospitalCross(scene, materials.hospitalCross, layout);
+
   createBuildingDetails(scene, materials, layout);
   createRoofRamps(scene, materials, layout);
   createCoverProps(scene, materials, layout);
@@ -433,6 +437,33 @@ function createIslandEnvironment(scene: Scene, materials: IslandMaterials, layou
     (mesh) => mesh.metadata?.decoration === "cover-prop" && mesh.metadata?.coverKind === "hay",
     { decoration: "cover-prop", coverKind: "hay" },
   );
+}
+
+function createHospitalCross(scene: Scene, crossMaterial: StandardMaterial, layout: MapLayout): void {
+  const hospital = layout.obstacles.find((building) => building.id === layout.hospital.buildingId);
+  if (!hospital) throw new Error("Hospital building missing from scene layout");
+  const x = hospital.center.x + hospital.width * 0.27;
+  const y = hospital.baseY + hospital.storyHeight * 1.5;
+  const z = hospital.center.z - hospital.depth / 2 - 0.04;
+  const vertical = CreateBox("hospital-cross-vertical", { width: 0.72, height: 2.8, depth: 0.12 }, scene);
+  const horizontal = CreateBox("hospital-cross-horizontal", { width: 2.4, height: 0.72, depth: 0.12 }, scene);
+  vertical.position.set(x, y, z);
+  horizontal.position.set(x, y, z);
+  vertical.material = crossMaterial;
+  horizontal.material = crossMaterial;
+  const cross = Mesh.MergeMeshes([vertical, horizontal], true, true);
+  if (!cross) throw new Error("Unable to merge hospital cross");
+  cross.name = "hospital-medical-cross";
+  cross.material = crossMaterial;
+  cross.checkCollisions = false;
+  cross.isPickable = false;
+  cross.metadata = {
+    decoration: "hospital-cross",
+    poiName: layout.hospital.name,
+    poiType: "hospital",
+    obstacleId: hospital.id,
+  };
+  cross.freezeWorldMatrix();
 }
 
 function mergeStaticBatch(

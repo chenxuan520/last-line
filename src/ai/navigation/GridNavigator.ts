@@ -52,7 +52,12 @@ export class GridNavigator {
     const normalizedStart = this.normalizePoint(start, startLocation);
     const normalizedTarget = this.normalizePoint(target, targetLocation);
     if (sameLocation(startLocation, targetLocation)) {
-      return this.findSurfacePath(normalizedStart, normalizedTarget, startLocation);
+      const directPath = this.findSurfacePath(normalizedStart, normalizedTarget, startLocation);
+      if (directPath.length > 0) return directPath;
+      if (startLocation.level === 0) {
+        return this.findGroundDoorPath(normalizedStart, normalizedTarget);
+      }
+      return [];
     }
 
     const startExit = this.pathToGround(normalizedStart, startLocation);
@@ -131,6 +136,43 @@ export class GridNavigator {
       }
     }
     return [];
+  }
+
+  private findGroundDoorPath(start: Vector3State, target: Vector3State): Vector3State[] {
+    if (!this.layout) return [];
+    const startBuilding = this.buildings.find((building) => pointInsideObstacle(start, building, 0));
+    const targetBuilding = this.buildings.find((building) => pointInsideObstacle(target, building, 0));
+    if ((!startBuilding && !targetBuilding) || startBuilding?.id === targetBuilding?.id) return [];
+    const building = startBuilding ?? targetBuilding;
+    if (!building) return [];
+    const door = this.layout.wallOpenings.find((opening) =>
+      opening.obstacleId === building.id && opening.storyIndex === 0 && opening.kind === "door"
+    );
+    if (!door || door.side !== "front") return [];
+    const outsidePoint = { x: door.center.x, y: start.y, z: door.center.z - 1.1 };
+    const insidePoint = { x: door.center.x, y: start.y, z: door.center.z + 1.1 };
+    const outsideLocation = this.groundLocation(outsidePoint);
+    const insideLocation = this.groundLocation(insidePoint);
+    const outside = this.normalizePoint(outsidePoint, outsideLocation);
+    const inside = this.normalizePoint(insidePoint, insideLocation);
+    const path: Vector3State[] = [];
+    if (targetBuilding) {
+      const exteriorPath = this.findSurfacePath(start, outside, outsideLocation);
+      const interiorPath = this.findSurfacePath(inside, target, insideLocation);
+      if (exteriorPath.length === 0 || interiorPath.length === 0) return [];
+      appendPath(path, exteriorPath);
+      appendPoint(path, inside);
+      appendPath(path, interiorPath);
+      return path;
+    }
+    const interiorPath = this.findSurfacePath(start, inside, insideLocation);
+    if (interiorPath.length === 0) return [];
+    appendPath(path, interiorPath);
+    appendPoint(path, outside);
+    const exteriorPath = this.findSurfacePath(outside, target, outsideLocation);
+    if (exteriorPath.length === 0) return path;
+    appendPath(path, exteriorPath);
+    return path;
   }
 
   private findLocation(point: Vector3State): SurfaceLocation {
@@ -231,6 +273,10 @@ export class GridNavigator {
 
   private groundSupport(point: Vector3State): number {
     return this.layout ? getTerrainHeight(point.x, point.z, this.layout) : point.y - ACTOR_EYE_HEIGHT;
+  }
+
+  private groundLocation(point: Vector3State): SurfaceLocation {
+    return { ...GROUND_LOCATION, supportY: this.groundSupport(point) };
   }
 
   private isBlocked(point: Vector3State, blockers: readonly MapObstacle[]): boolean {

@@ -324,7 +324,7 @@ export function createBattleRoyaleStateForHumans(
     elapsedSeconds: 0,
     mapSeed,
     actors,
-    groundLoot: createGroundLoot(layout.lootSpawnPoints, layout.lootZoneCounts, createLootRandom(mapSeed)),
+    groundLoot: createGroundLoot(layout.lootSpawnPoints, layout.lootZoneCounts, layout.hospital, createLootRandom(mapSeed)),
     safeZone: createInitialSafeZone(config, random),
     flight,
     result: null,
@@ -350,6 +350,7 @@ function createBattleRoyaleActor(
 function createGroundLoot(
   lootSpawnPoints: readonly Vector3State[],
   lootZoneCounts: readonly number[],
+  hospital: ReturnType<typeof createMapLayout>["hospital"],
   random: () => number,
 ): Record<EntityId, GroundLootState> {
   const groundLoot: Record<EntityId, GroundLootState> = {};
@@ -399,7 +400,11 @@ function createGroundLoot(
   for (let index = zoneStart; index < lootSpawnPoints.length; index += 1) {
     const position = lootSpawnPoints[index];
     if (!position) continue;
-    const itemId = (index - zoneStart) % 2 === 0 ? "bandage" : "medkit";
+    const itemId = index === hospital.bandageLootIndex
+      ? "bandage"
+      : index === hospital.medkitLootIndex
+        ? "medkit"
+        : (index - zoneStart) % 2 === 0 ? "bandage" : "medkit";
     const id = `loot-${index}`;
     groundLoot[id] = {
       id,

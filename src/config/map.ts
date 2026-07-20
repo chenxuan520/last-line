@@ -56,6 +56,12 @@ export interface MapPoint {
   position: Vector3State;
 }
 
+export interface HospitalPoi extends MapPoint {
+  buildingId: string;
+  bandageLootIndex: number;
+  medkitLootIndex: number;
+}
+
 export interface TerrainHill {
   x: number;
   z: number;
@@ -89,6 +95,7 @@ export interface MapLayout {
   readonly rockObstacles: readonly MapRockObstacle[];
   readonly coverObstacles: readonly MapCoverObstacle[];
   readonly roofRamps: readonly RoofRamp[];
+  readonly hospital: HospitalPoi;
   readonly lootSpawnPoints: readonly Vector3State[];
   readonly lootZoneCounts: readonly number[];
 }
@@ -98,6 +105,7 @@ export const MAP_HALF_SIZE = MAP_SIZE / 2;
 export const TERRAIN_GRID_SUBDIVISIONS = 200;
 export const BUILDING_ROOF_CAP_HEIGHT = 0.18;
 export const BUILDING_WINDOW_SILL_HEIGHT = 1.5;
+export const HOSPITAL_WALL_COLOR = "#eef2ef";
 export const DEFAULT_MAP_SEED = 0;
 
 export const MAP_POINT_COUNT = 8;
@@ -105,6 +113,8 @@ export const LANDING_ZONE_COUNT = 16;
 export const BASE_LOOT_POINTS = 240;
 export const ADDITIONAL_MEDICAL_LOOT_POINTS = 10;
 export const TOTAL_LOOT_POINTS = BASE_LOOT_POINTS + ADDITIONAL_MEDICAL_LOOT_POINTS;
+const HOSPITAL_MEDICAL_LOOT_POINTS = 2;
+const RANDOM_MEDICAL_LOOT_POINTS = ADDITIONAL_MEDICAL_LOOT_POINTS - HOSPITAL_MEDICAL_LOOT_POINTS;
 const POI_NAMES = ["北港", "灰脊镇", "旧仓区", "高地站", "南岸村", "雷达哨", "西风农场", "东岭营地"] as const;
 const WILDERNESS_NAMES = ["林间屋", "路边村", "山脚农舍", "旧哨所", "河谷牧场", "废弃院落", "边境仓房", "丘间小屋"] as const;
 
@@ -114,6 +124,11 @@ interface BuildingArea extends MapPoint {
   minimumRadius: number;
   maximumRadius: number;
   major: boolean;
+}
+
+interface HospitalSelection {
+  buildingId: string;
+  stairwellSide: -1 | 1;
 }
 
 const BASE_TERRAIN_HILLS: readonly TerrainHill[] = [
@@ -229,8 +244,17 @@ export function createMapLayout(seed: number): MapLayout {
     landingZones,
     createSeededRandom(normalizedSeed ^ 0xa24baed5),
   );
+  const hospitalSelection = selectHospitalBuilding(
+    baseObstacles,
+    terrainHills,
+    [...rockObstacles, ...coverObstacles],
+    createSeededRandom(normalizedSeed ^ 0x4cf5ad43),
+  );
+  const storyObstacles = baseObstacles.map((building) =>
+    building.id === hospitalSelection.buildingId ? { ...building, color: HOSPITAL_WALL_COLOR } : building
+  );
 
-  const { points: lootSpawnPoints, counts: lootZoneCounts } = createLootSpawnPoints(
+  const { points: baseLootSpawnPoints, counts: lootZoneCounts } = createLootSpawnPoints(
     landingZones,
     terrainHills,
     baseObstacles,
@@ -242,9 +266,10 @@ export function createMapLayout(seed: number): MapLayout {
     createSeededRandom(normalizedSeed ^ 0xd3a2646c),
   );
   const obstacles = assignBuildingStories(
-    baseObstacles,
+    storyObstacles,
     terrainHills,
     createSeededRandom(normalizedSeed ^ 0x7f4a7c15),
+    hospitalSelection,
   );
   const { wallSegments, wallOpenings } = createWallSegments(obstacles, terrainHills);
   const floorSlabs = obstacles.flatMap(createBuildingFloorSlabs);
@@ -254,6 +279,27 @@ export function createMapLayout(seed: number): MapLayout {
     const poi = buildingAreas[pointIndex] ?? buildingAreas[0];
     return [createRoofRamp(obstacle, poi as MapPoint, terrainHills)];
   });
+  const hospitalBuilding = obstacles.find((building) => building.id === hospitalSelection.buildingId);
+  if (!hospitalBuilding) throw new Error("Hospital building missing");
+  const hospitalMedicalPoints = createHospitalMedicalPoints(
+    hospitalBuilding,
+    terrainHills,
+    wallSegments.filter((wall) => wall.obstacleId === hospitalBuilding.id),
+    roofRamps.filter((ramp) => ramp.obstacleId === hospitalBuilding.id),
+    baseLootSpawnPoints,
+  );
+  const hospital: HospitalPoi = {
+    name: "医院",
+    buildingId: hospitalBuilding.id,
+    position: {
+      x: hospitalBuilding.center.x,
+      y: round(terrainHeightFromHills(hospitalBuilding.center.x, hospitalBuilding.center.z, terrainHills)),
+      z: hospitalBuilding.center.z,
+    },
+    bandageLootIndex: baseLootSpawnPoints.length,
+    medkitLootIndex: baseLootSpawnPoints.length + 1,
+  };
+  const lootSpawnPoints = [...baseLootSpawnPoints, ...hospitalMedicalPoints];
   const layout: MapLayout = {
     seed: normalizedSeed,
     mapPoints,
@@ -266,6 +312,7 @@ export function createMapLayout(seed: number): MapLayout {
     rockObstacles,
     coverObstacles,
     roofRamps,
+    hospital,
     lootSpawnPoints,
     lootZoneCounts,
   };
@@ -591,6 +638,7 @@ function assignBuildingStories(
   buildings: readonly MapBuilding[],
   terrainHills: readonly TerrainHill[],
   random: () => number,
+  hospital: HospitalSelection,
 ): MapBuilding[] {
   const targetCount = Math.round(buildings.length * MULTI_STORY_BUILDING_RATIO);
   const candidates = buildings
@@ -602,26 +650,74 @@ function assignBuildingStories(
     }))
     .sort((left, right) => left.score - right.score || left.building.id.localeCompare(right.building.id));
   const promoted = new Map<string, MapBuilding>();
+  const hospitalBase = buildings.find((building) => building.id === hospital.buildingId);
+  if (!hospitalBase) throw new Error("Hospital story assignment requires its building");
+  const hospitalBuilding = promoteBuilding(hospitalBase, 2, hospital.stairwellSide);
+  if (!createInternalRamps(hospitalBuilding, terrainHills).every((ramp) => rampClearsTerrain(ramp, terrainHills))) {
+    throw new Error("Hospital internal stairs do not clear terrain");
+  }
+  promoted.set(hospitalBuilding.id, hospitalBuilding);
   for (const candidate of candidates) {
     if (promoted.size >= targetCount) break;
-    const stairwell = createBuildingStairwell(candidate.building, candidate.side);
-    const height = round(candidate.building.storyHeight * candidate.storyCount);
-    const building: MapBuilding = {
-      ...candidate.building,
-      center: {
-        ...candidate.building.center,
-        y: round(candidate.building.baseY + height / 2),
-      },
-      height,
-      storyCount: candidate.storyCount,
-      stairwell,
-    };
+    if (candidate.building.id === hospital.buildingId) continue;
+    const building = promoteBuilding(candidate.building, candidate.storyCount, candidate.side);
     if (createInternalRamps(building, terrainHills).every((ramp) => rampClearsTerrain(ramp, terrainHills))) {
       promoted.set(building.id, building);
     }
   }
   if (promoted.size !== targetCount) throw new Error("Not enough buildings support internal stairs");
   return buildings.map((building) => promoted.get(building.id) ?? building);
+}
+
+function selectHospitalBuilding(
+  buildings: readonly MapBuilding[],
+  terrainHills: readonly TerrainHill[],
+  entranceBlockers: readonly MapObstacle[],
+  random: () => number,
+): HospitalSelection {
+  const preferred = buildings
+    .filter((building) => Number(building.id.split("-")[1]) < LANDING_ZONE_COUNT)
+    .sort((left, right) => left.width * left.depth - right.width * right.depth || left.id.localeCompare(right.id));
+  const pool = preferred.slice(0, Math.max(1, Math.ceil(preferred.length * 0.45)));
+  const startIndex = Math.floor(random() * pool.length);
+  const firstSide = (random() < 0.5 ? -1 : 1) as -1 | 1;
+  const secondSide = (firstSide === -1 ? 1 : -1) as -1 | 1;
+  for (let offset = 0; offset < pool.length; offset += 1) {
+    const building = pool[(startIndex + offset) % pool.length];
+    if (!building) continue;
+    if (!hospitalEntranceClear(building, entranceBlockers)) continue;
+    for (const side of [firstSide, secondSide]) {
+      const candidate = promoteBuilding({ ...building, color: HOSPITAL_WALL_COLOR }, 2, side);
+      if (createInternalRamps(candidate, terrainHills).every((ramp) => rampClearsTerrain(ramp, terrainHills))) {
+        return { buildingId: building.id, stairwellSide: side };
+      }
+    }
+  }
+  throw new Error("Not enough buildings support a hospital");
+}
+
+function hospitalEntranceClear(building: MapBuilding, blockers: readonly MapObstacle[]): boolean {
+  const doorWidth = Math.min(4.2, building.width * 0.34);
+  const entranceCenterZ = building.center.z - building.depth / 2 - 2;
+  return blockers.every((blocker) =>
+    Math.abs(blocker.center.x - building.center.x) >= blocker.width / 2 + doorWidth / 2 + 0.8 ||
+    Math.abs(blocker.center.z - entranceCenterZ) >= blocker.depth / 2 + 2.8
+  );
+}
+
+function promoteBuilding(
+  building: MapBuilding,
+  storyCount: 2 | 3,
+  side: -1 | 1,
+): MapBuilding {
+  const height = round(building.storyHeight * storyCount);
+  return {
+    ...building,
+    center: { ...building.center, y: round(building.baseY + height / 2) },
+    height,
+    storyCount,
+    stairwell: createBuildingStairwell(building, side),
+  };
 }
 
 function createBuildingStairwell(building: MapBuilding, side: -1 | 1): BuildingStairwell {
@@ -1165,7 +1261,7 @@ function createLootSpawnPoints(
     return selected;
   });
   const medicalPoints: Vector3State[] = [];
-  for (let slot = 0; slot < ADDITIONAL_MEDICAL_LOOT_POINTS; slot += 1) {
+  for (let slot = 0; slot < RANDOM_MEDICAL_LOOT_POINTS; slot += 1) {
     const landingZone = landingZones[slot % landingZones.length] ?? landingZones[0];
     if (!landingZone) throw new Error("Medical loot requires a landing zone");
     let placed = false;
@@ -1184,6 +1280,39 @@ function createLootSpawnPoints(
     if (!placed) throw new Error(`Not enough open medical loot points for slot ${slot}`);
   }
   return { points: [...points, ...medicalPoints], counts };
+}
+
+function createHospitalMedicalPoints(
+  hospital: MapBuilding,
+  terrainHills: readonly TerrainHill[],
+  wallSegments: readonly MapWallSegment[],
+  roofRamps: readonly RoofRamp[],
+  existingLoot: readonly Vector3State[],
+): [Vector3State, Vector3State] {
+  const xOffsets = [-1, 0, 1];
+  const zOffsets = [-0.3, -0.15, 0, 0.15, 0.3].map((fraction) => hospital.depth * fraction);
+  const candidates = xOffsets.flatMap((xOffset) => zOffsets.map((zOffset) => {
+    const x = round(hospital.center.x + xOffset);
+    const z = round(hospital.center.z + zOffset);
+    return { x, y: round(terrainHeightFromHills(x, z, terrainHills) + 0.45), z };
+  })).filter((candidate) =>
+    isClearLootPoint(candidate, wallSegments, roofRamps, existingLoot, [], 3)
+  );
+  let selected: [Vector3State, Vector3State] | null = null;
+  let maximumDistance = 0;
+  for (let leftIndex = 0; leftIndex < candidates.length; leftIndex += 1) {
+    const left = candidates[leftIndex];
+    if (!left) continue;
+    for (const right of candidates.slice(leftIndex + 1)) {
+      const distance = Math.hypot(left.x - right.x, left.z - right.z);
+      if (distance >= 6 && distance > maximumDistance) {
+        selected = [left, right];
+        maximumDistance = distance;
+      }
+    }
+  }
+  if (!selected) throw new Error(`Hospital ${hospital.id} has no clear ground-floor medical points`);
+  return selected;
 }
 
 function hasGlobalLootClearance(candidate: Vector3State, selected: readonly Vector3State[]): boolean {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createMinimapView, projectToMinimap } from "../../src/client/ui/minimap";
 import {
   combatCounterLabel,
+  createMinimapSignature,
   pickupPromptSignature,
   pickupPromptText,
   sortLeaderboardActors,
@@ -53,6 +54,25 @@ describe("minimap projection", () => {
     expect(view.player.x).toBe(5);
     expect(view.flight.start.x).toBeLessThan(0);
     expect(view.flight.end.x).toBeGreaterThan(200);
+  });
+
+  it("uses the viewed spectator actor for the minimap marker and cache signature", () => {
+    const state = createBattleRoyaleState("player", undefined, () => 0.5);
+    const player = state.actors.player;
+    const spectator = state.actors["bot-1"];
+    if (!player || !spectator) throw new Error("actors missing");
+    player.alive = false;
+    player.position = { x: -500, y: 1.76, z: -500 };
+    spectator.position = { x: 300, y: 1.76, z: 400 };
+    spectator.yaw = Math.PI;
+
+    const spectatorView = createMinimapView(state, spectator);
+
+    expect(spectatorView.player).toMatchObject({
+      ...projectToMinimap(spectator.position, true),
+      rotationDegrees: 180,
+    });
+    expect(createMinimapSignature(state, spectator)).not.toBe(createMinimapSignature(state, player));
   });
 
   it("sorts the leaderboard by survival, kills, and stable id", () => {

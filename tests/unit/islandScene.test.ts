@@ -69,6 +69,7 @@ describe("IslandScene lifecycle", () => {
 
       const layeredSurfaces = bundle.scene.meshes.filter((mesh) => mesh.metadata?.surfaceType);
       const decorations = bundle.scene.meshes.filter((mesh) => mesh.metadata?.decoration);
+      const hospitalCrosses = decorations.filter((mesh) => mesh.metadata?.decoration === "hospital-cross");
       const collisionMeshes = bundle.scene.meshes.filter((mesh) => mesh.metadata?.collision);
       const ground = bundle.scene.getMeshByName("island-ground");
       const positions = ground?.getVerticesData("position") ?? [];
@@ -87,6 +88,10 @@ describe("IslandScene lifecycle", () => {
       expect(treeTrunks).toHaveLength(384);
       expect(treeFoliage).toHaveLength(384);
       expect(treeFoliage.every((mesh) => mesh.getTotalVertices() < 160)).toBe(true);
+      expect(hospitalCrosses).toHaveLength(1);
+      expect(hospitalCrosses[0]).toMatchObject({ isPickable: false, checkCollisions: false });
+      expect(hospitalCrosses[0]?.metadata).toMatchObject({ poiName: "医院", poiType: "hospital" });
+      expect(bundle.scene.getMeshByName("building-walls-eef2ef")).toBeDefined();
       expect(treeFoliage.every((mesh) =>
         mesh.getBoundingInfo().boundingBox.maximumWorld.y - getTerrainHeight(mesh.position.x, mesh.position.z, layout) > 15
       )).toBe(true);

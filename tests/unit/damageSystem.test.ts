@@ -102,4 +102,5 @@ describe("DamageSystem", () => {
     expect(new DamageSystem().applyDamage(state, target.id, 20, source.id, [])).toBeGreaterThan(0);
     expect(target.health).toBeLessThan(100);
   });
+
 });
