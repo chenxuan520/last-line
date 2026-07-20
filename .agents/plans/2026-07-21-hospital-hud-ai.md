@@ -34,6 +34,7 @@
 - 2026-07-21 02:31：reviewer 提出两个 blocker，均确认真实并已修复：高地建筑正门 waypoint 不再使用海平面高度，而读取门内外本地 terrain support；zone path 会复用现有有效路径，失败后 2 秒内只保持向圈内移动，避免单 Bot 最高约 80 次/秒重复寻路。新增 seed 99 高地医院建筑退出测试和失败路径寻路次数上限测试，类型检查与相关回归通过，准备再次 reviewer。
 - 2026-07-21 02:50：第二轮 reviewer 指出分段路径碰撞过滤仍使用 supportY=0、缩圈连续 radius 会重置 retry 两个 blocker，均确认并修复。门内外分段现在分别使用本地 ground support；重试改为绝对时间节流，不受 center/radius 连续变化影响；若门外到远端圈目标搜索失败，先返回“室内到门外”的部分路径，出门后再规划。seed 99 高地医院向背门方向目标的 20 秒退出测试及动态缩圈寻路次数上限测试通过，准备第三轮 reviewer。
 - 2026-07-21 02:59：第三轮 reviewer 无 findings，审查闭环完成。最终门禁通过：应用 25 files / 246 tests、Worker 26 tests、`npm run typecheck`、`npm run build`、`npm run build:worker`、`git diff --check` 全部成功；医院、观战小地图、AI 建筑逃生/跑毒、加载提示与性能要求均覆盖。等待生产无活动房间确认、提交推送和线上验收。
+- 2026-07-21 03:10：部署前确认生产无活动房间，Worker 已部署 `c3b425f7-d955-46f4-bdfe-37d232384de0`，实现提交 `41983ad` 已推送。GitHub Actions `29770422565`、GitHub Pages 和 Cloudflare Pages production deployment `58ba537a-1c93-490b-b204-6425a439498f` 均成功。生产静态包 `index-p7FG0_iV.js`，静音浏览器确认加载提示可见约 2.24 秒、医院小地图 marker 存在、控制台无错误；Git 工作区与 `origin/main` 对齐。
 
 ## Review
 
