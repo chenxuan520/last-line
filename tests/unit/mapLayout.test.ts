@@ -121,8 +121,8 @@ describe("map layouts", () => {
       expect(obstacle.width).toBeLessThanOrEqual(34);
       expect(obstacle.depth).toBeGreaterThanOrEqual(16);
       expect(obstacle.depth).toBeLessThanOrEqual(33);
-      expect(obstacle.storyHeight).toBeGreaterThanOrEqual(3.2);
-      expect(obstacle.storyHeight).toBeLessThanOrEqual(4.4);
+      expect(obstacle.storyHeight).toBeGreaterThanOrEqual(4.28);
+      expect(obstacle.storyHeight).toBeLessThanOrEqual(5.48);
       expect([1, 2, 3]).toContain(obstacle.storyCount);
       expect(obstacle.height).toBeCloseTo(obstacle.storyHeight * obstacle.storyCount, 3);
 
@@ -250,6 +250,14 @@ describe("map layouts", () => {
       expect(layout.wallOpenings
         .filter((opening) => opening.obstacleId === obstacle.id && opening.kind === "window")
         .every((opening) => opening.height >= 1.8)).toBe(true);
+      for (const opening of layout.wallOpenings.filter((entry) =>
+        entry.obstacleId === obstacle.id && entry.kind === "window"
+      )) {
+        const supportY = opening.storyIndex === 0
+          ? getTerrainHeight(opening.center.x, opening.center.z, layout)
+          : obstacle.baseY + opening.storyIndex * obstacle.storyHeight + BUILDING_ROOF_CAP_HEIGHT;
+        expect(Math.abs(opening.center.y - opening.height / 2 - supportY - 1.5)).toBeLessThanOrEqual(0.001);
+      }
       if (obstacle.storyCount === 1) {
         expect(ramps[0]?.id).toBe(`ramp-${obstacle.id}`);
         expect(slabs).toHaveLength(1);

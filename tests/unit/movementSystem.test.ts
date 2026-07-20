@@ -251,12 +251,52 @@ describe("MovementSystem", () => {
       z: outsideZ,
     };
     actor.velocity = { x: 0, y: 0, z: 0 };
-    advance(state, { ...movingCommand(0, -1), jump: true }, 60, 1 / 60);
+    advance(state, { ...movingCommand(0, -1), jump: true }, 30, 1 / 30);
     expect(actor.position.z).toBeLessThan(building.center.z + building.depth / 2 - 0.5);
 
-    advance(state, createIdleCommand(), 120, 1 / 60);
-    advance(state, { ...movingCommand(0, 1), jump: true }, 60, 1 / 60);
+    const insideZ = building.center.z + building.depth / 2 - ACTOR_RADIUS - 0.8;
+    actor.position = {
+      x: window.center.x,
+      y: getTerrainHeight(window.center.x, insideZ, layout) + GROUND_HEIGHT,
+      z: insideZ,
+    };
+    actor.velocity = { x: 0, y: 0, z: 0 };
+    advance(state, { ...movingCommand(0, 1), jump: true }, 30, 1 / 30);
     expect(actor.position.z).toBeGreaterThan(building.center.z + building.depth / 2 + 0.3);
+  });
+
+  it.each([
+    { seed: 60, openingId: "building-34-0-opening-left-0", ticks: 45 },
+    { seed: 246, openingId: "building-2-12-opening-right-0", ticks: 30 },
+  ])("traverses raised window $openingId from both sides", ({ seed, openingId, ticks }) => {
+    const layout = createMapLayout(seed);
+    const opening = layout.wallOpenings.find((entry) => entry.id === openingId);
+    const building = layout.obstacles.find((entry) => entry.id === opening?.obstacleId);
+    if (!opening || !building || (opening.side !== "left" && opening.side !== "right")) {
+      throw new Error("test side window missing");
+    }
+    const side = opening.side === "left" ? -1 : 1;
+    const boundaryX = building.center.x + side * building.width / 2;
+
+    for (const fromOutside of [true, false]) {
+      const startX = boundaryX + side * (fromOutside ? 1 : -1) * (ACTOR_RADIUS + 0.8);
+      const state = createState(startX, opening.center.z);
+      state.mapSeed = seed;
+      const actor = state.actors.actor;
+      if (!actor) throw new Error("test actor missing");
+      actor.position.y = getTerrainHeight(startX, opening.center.z, layout) + GROUND_HEIGHT;
+      const directionX = -side * (fromOutside ? 1 : -1);
+
+      new MovementSystem().processCommand(
+        state,
+        actor.id,
+        { ...movingCommand(directionX, 0), jump: true },
+        1 / 30,
+      );
+      advance(state, movingCommand(directionX, 0), ticks - 1, 1 / 30);
+
+      expect(side * (actor.position.x - boundaryX) * (fromOutside ? -1 : 1)).toBeGreaterThan(0.3);
+    }
   });
 
   it("walks through every internal ramp onto a multi-story roof", () => {

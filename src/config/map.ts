@@ -97,6 +97,7 @@ export const MAP_SIZE = 2_400;
 export const MAP_HALF_SIZE = MAP_SIZE / 2;
 export const TERRAIN_GRID_SUBDIVISIONS = 200;
 export const BUILDING_ROOF_CAP_HEIGHT = 0.18;
+export const BUILDING_WINDOW_SILL_HEIGHT = 1.5;
 export const DEFAULT_MAP_SEED = 0;
 
 export const MAP_POINT_COUNT = 8;
@@ -135,7 +136,7 @@ const LOOT_OBSTACLE_CLEARANCE = 0.75;
 const BUILDING_WALL_THICKNESS = 0.35;
 const MAP_GEOMETRY_MARGIN = 1;
 const BUILDING_GROUND_EMBED = 0.1;
-const MINIMUM_INTERIOR_CLEARANCE = 2.4;
+const MINIMUM_INTERIOR_CLEARANCE = 3.48;
 const RAMP_TERRAIN_EPSILON = 0.08;
 const MINIMUM_BUILDING_DISTANCE_FROM_POI = 58;
 const MAJOR_POINT_MINIMUM_DISTANCE = 420;
@@ -150,6 +151,7 @@ const MULTI_STORY_BUILDING_RATIO = 0.2;
 const STAIR_RAMP_WIDTH = 3.6;
 const STAIRWELL_WIDTH = 4.8;
 const STAIRWELL_LANDING_DEPTH = 1.2;
+const STAIRWELL_FLOOR_BORDER = 0.3;
 const MAP_LAYOUT_CACHE_LIMIT = 8;
 const mapLayoutCache = new Map<number, MapLayout>();
 const terrainGridCache = new WeakMap<readonly TerrainHill[], Float32Array>();
@@ -540,7 +542,7 @@ function createSeededBuildings(
     for (let attempt = 0; attempt < targetCount * 500 && selected.length < targetCount; attempt += 1) {
       const width = round(randomBetween(random, 18, 34));
       const depth = round(randomBetween(random, 16, 33));
-      const height = round(randomBetween(random, 3.2, 4.4));
+      const height = round(randomBetween(random, 4.28, 5.48));
       const angle = random() * Math.PI * 2;
       const minimumRadius = point.minimumRadius;
       const maximumRadius = point.maximumRadius;
@@ -626,7 +628,7 @@ function createBuildingStairwell(building: MapBuilding, side: -1 | 1): BuildingS
   const width = Math.min(STAIRWELL_WIDTH, building.width - BUILDING_WALL_THICKNESS * 2 - 2);
   const runLength = Math.min(
     Math.max(8, building.storyHeight * 2.8),
-    building.depth - BUILDING_WALL_THICKNESS * 2 - STAIRWELL_LANDING_DEPTH * 2,
+    building.depth - BUILDING_WALL_THICKNESS * 2 - STAIRWELL_LANDING_DEPTH * 2 - STAIRWELL_FLOOR_BORDER * 2,
   );
   const depth = runLength + STAIRWELL_LANDING_DEPTH * 2;
   const xOffset = Math.max(
@@ -1005,7 +1007,7 @@ function createFacadeGeometry(
   const localSupport = storyIndex === 0
     ? Math.max(storyBottom, terrainHeightFromHills(position.x, position.z, terrainHills))
     : storyBottom + BUILDING_ROOF_CAP_HEIGHT;
-  const openingBottom = kind === "door" ? localSupport : localSupport + 0.42;
+  const openingBottom = kind === "door" ? localSupport : localSupport + BUILDING_WINDOW_SILL_HEIGHT;
   const openingTop = kind === "door"
     ? Math.min(storyTop - 0.08, openingBottom + 3)
     : storyTop - 0.08;

@@ -1,4 +1,5 @@
 import {
+  BUILDING_ROOF_CAP_HEIGHT,
   createMapLayout,
   getTerrainHeight,
   MAP_COVER_OBSTACLES,
@@ -136,7 +137,7 @@ export class GridNavigator {
     for (const building of this.buildings) {
       if (!pointInsideObstacle(point, building, 0)) continue;
       for (let level = building.storyCount; level >= 1; level -= 1) {
-        const supportY = building.baseY + level * building.storyHeight + 0.18;
+        const supportY = building.baseY + level * building.storyHeight + BUILDING_ROOF_CAP_HEIGHT;
         if (point.y >= supportY + 0.15) return { building, level, supportY };
       }
     }
@@ -202,7 +203,7 @@ export class GridNavigator {
       x: stairwell.centerX - stairwell.side * (
         stairwell.width / 2 + Math.max(this.clearance, PATH_CLEARANCE) + WAYPOINT_PADDING + 0.1
       ),
-      y: building.baseY + level * building.storyHeight + 0.18 + ACTOR_EYE_HEIGHT,
+      y: building.baseY + level * building.storyHeight + BUILDING_ROOF_CAP_HEIGHT + ACTOR_EYE_HEIGHT,
       z: ramp.endZ,
     };
   }
