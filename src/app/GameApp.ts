@@ -5,6 +5,7 @@ import { BATTLE_ROYALE_CONFIG } from "../config/battleRoyale";
 import { DEFAULT_SETTINGS, type GameSettings, type QualityLevel } from "../config/settings";
 import {
   getDefaultMultiplayerApiUrl,
+  MultiplayerAuthClient,
   MultiplayerClient,
   type MultiplayerConnection,
 } from "../network/MultiplayerClient";
@@ -60,6 +61,8 @@ export class GameApp {
   private startMatch = async (): Promise<void> => {
     if (!this.assets || this.starting) return;
     this.starting = true;
+    this.multiplayerConnection?.close();
+    this.multiplayerConnection = null;
     this.session?.dispose();
     this.session = null;
     this.applyQuality();
@@ -172,31 +175,63 @@ export class GameApp {
         <p class="eyebrow">2–10 人真人联机 · AI 补满 50 人</p>
         <h1 id="multiplayer-title">联机大厅</h1>
         <p class="menu-description">快速匹配公开战局，或创建房间并邀请其他玩家。单机模式不会连接服务器。</p>
-        <label class="multiplayer-field">玩家代号<input data-multiplayer="name" maxlength="20" value="${escapeAttribute(savedName)}" /></label>
+        <section class="multiplayer-auth hidden" data-multiplayer="auth">
+          <div class="multiplayer-auth-head"><b>ACCOUNT GATE</b><span data-multiplayer="auth-state">需要账号验证</span></div>
+          <div class="multiplayer-auth-form" data-multiplayer="auth-form">
+            <label class="multiplayer-field">账号<input data-multiplayer="auth-username" minlength="3" maxlength="20" autocomplete="username" /></label>
+            <label class="multiplayer-field">注册昵称<input data-multiplayer="auth-display-name" maxlength="20" value="${escapeAttribute(savedName)}" /></label>
+            <label class="multiplayer-field">密码<input data-multiplayer="auth-password" type="password" minlength="12" maxlength="128" autocomplete="current-password" /></label>
+            <div class="multiplayer-actions compact-actions">
+              <button class="secondary-button compact" data-action="account-login">登录</button>
+              <button class="secondary-button compact" data-action="account-register">注册</button>
+            </div>
+          </div>
+          <button class="text-button hidden" data-action="account-logout">退出账号</button>
+        </section>
+        <label class="multiplayer-field" data-multiplayer="name-field">玩家代号<input data-multiplayer="name" maxlength="20" value="${escapeAttribute(savedName)}" /></label>
         <div class="multiplayer-actions">
-          <button class="primary-button" data-action="quick" ${apiUrl ? "" : "disabled"}><span>快速匹配</span><b>MATCH</b></button>
-          <button class="secondary-button" data-action="create-public" ${apiUrl ? "" : "disabled"}><span>创建公开房间</span><b>PUBLIC</b></button>
-          <button class="secondary-button" data-action="create-private" ${apiUrl ? "" : "disabled"}><span>创建私人房间</span><b>PRIVATE</b></button>
+          <button class="primary-button" data-action="quick" disabled><span>快速匹配</span><b>MATCH</b></button>
+          <button class="secondary-button" data-action="create-public" disabled><span>创建公开房间</span><b>PUBLIC</b></button>
+          <button class="secondary-button" data-action="create-private" disabled><span>创建私人房间</span><b>PRIVATE</b></button>
         </div>
         <div class="room-code-row">
           <input data-multiplayer="code" maxlength="6" placeholder="输入 6 位房间码" />
-          <button class="secondary-button compact" data-action="join" ${apiUrl ? "" : "disabled"}>加入</button>
+          <button class="secondary-button compact" data-action="join" disabled>加入</button>
         </div>
-        <div class="public-room-list" data-multiplayer="rooms"><span>${apiUrl ? "正在读取公开房间…" : "尚未配置联机服务器地址"}</span></div>
-        <p class="multiplayer-status" data-multiplayer="status">${apiUrl ? "服务器待命" : "请设置 VITE_MULTIPLAYER_URL"}</p>
+        <div class="public-room-list" data-multiplayer="rooms"><span>${apiUrl ? "正在读取联机规则…" : "尚未配置联机服务器地址"}</span></div>
+        <p class="multiplayer-status" data-multiplayer="status">${apiUrl ? "正在连接身份服务…" : "请设置 VITE_MULTIPLAYER_URL"}</p>
         <button class="text-button" data-action="back">返回单机菜单</button>
       </section>
     `;
     this.uiRoot.querySelector<HTMLButtonElement>("[data-action='back']")?.addEventListener("click", () => this.renderMenu());
     if (!apiUrl) return;
+    const panel = this.uiRoot.querySelector<HTMLElement>("[data-multiplayer='auth']")?.closest(".multiplayer-panel");
     const status = this.uiRoot.querySelector<HTMLElement>("[data-multiplayer='status']");
+    const auth = new MultiplayerAuthClient(apiUrl);
+    let accountDisplayName: string | null = null;
+    let ready = false;
+    const setActionsEnabled = (enabled: boolean): void => {
+      for (const action of ["quick", "create-public", "create-private", "join"]) {
+        const button = this.uiRoot.querySelector<HTMLButtonElement>(`[data-action='${action}']`);
+        if (button) button.disabled = !enabled;
+      }
+    };
     const createClient = (): MultiplayerClient => {
       const nameInput = this.uiRoot.querySelector<HTMLInputElement>("[data-multiplayer='name']");
-      const displayName = nameInput?.value.trim() || savedName;
+      const displayName = (accountDisplayName ?? nameInput?.value.trim()) || savedName;
       localStorage.setItem(MULTIPLAYER_NAME_KEY, displayName);
-      return new MultiplayerClient(apiUrl, displayName, this.settings);
+      return new MultiplayerClient(
+        apiUrl,
+        displayName,
+        this.settings,
+        accountDisplayName ? () => auth.ensureAccessToken() : null,
+      );
     };
     const run = async (action: (client: MultiplayerClient) => Promise<RoomAdmission>): Promise<void> => {
+      if (!ready) {
+        if (status) status.textContent = "请先完成账号验证";
+        return;
+      }
       try {
         if (status) status.textContent = "正在建立联机身份…";
         const client = createClient();
@@ -219,7 +254,88 @@ export class GameApp {
       const code = this.uiRoot.querySelector<HTMLInputElement>("[data-multiplayer='code']")?.value ?? "";
       void run((client) => client.joinRoom(code));
     });
-    void this.refreshPublicRooms(createClient(), status);
+    const completeAccount = async (account: { username: string; displayName: string }): Promise<void> => {
+      if (!panel?.isConnected) return;
+      accountDisplayName = account.displayName;
+      const nameInput = this.uiRoot.querySelector<HTMLInputElement>("[data-multiplayer='name']");
+      if (nameInput) nameInput.value = account.displayName;
+      const authState = this.uiRoot.querySelector<HTMLElement>("[data-multiplayer='auth-state']");
+      if (authState) authState.textContent = `${account.username} / ${account.displayName}`;
+      this.uiRoot.querySelector<HTMLElement>("[data-multiplayer='auth-form']")?.classList.add("hidden");
+      this.uiRoot.querySelector<HTMLElement>("[data-action='account-logout']")?.classList.remove("hidden");
+      ready = true;
+      setActionsEnabled(true);
+      if (status) status.textContent = "账号已验证，服务器待命";
+      await this.refreshPublicRooms(createClient(), status);
+    };
+    this.uiRoot.querySelector<HTMLButtonElement>("[data-action='account-login']")?.addEventListener("click", () => {
+      const username = this.uiRoot.querySelector<HTMLInputElement>("[data-multiplayer='auth-username']")?.value ?? "";
+      const password = this.uiRoot.querySelector<HTMLInputElement>("[data-multiplayer='auth-password']")?.value ?? "";
+      if (status) status.textContent = "正在登录…";
+      void auth.login(username, password).then(completeAccount).catch((error: unknown) => {
+        if (status) status.textContent = error instanceof Error ? error.message : "登录失败";
+      });
+    });
+    this.uiRoot.querySelector<HTMLButtonElement>("[data-action='account-register']")?.addEventListener("click", () => {
+      const username = this.uiRoot.querySelector<HTMLInputElement>("[data-multiplayer='auth-username']")?.value ?? "";
+      const password = this.uiRoot.querySelector<HTMLInputElement>("[data-multiplayer='auth-password']")?.value ?? "";
+      const displayName = this.uiRoot.querySelector<HTMLInputElement>("[data-multiplayer='auth-display-name']")?.value ?? "";
+      if (status) status.textContent = "正在注册…";
+      void auth.register(username, password, displayName).then(completeAccount).catch((error: unknown) => {
+        if (status) status.textContent = error instanceof Error ? error.message : "注册失败";
+      });
+    });
+    this.uiRoot.querySelector<HTMLButtonElement>("[data-action='account-logout']")?.addEventListener("click", () => {
+      void auth.logout().then(() => {
+        if (!panel?.isConnected) return;
+        accountDisplayName = null;
+        ready = false;
+        setActionsEnabled(false);
+        this.uiRoot.querySelector<HTMLElement>("[data-multiplayer='auth-form']")?.classList.remove("hidden");
+        this.uiRoot.querySelector<HTMLElement>("[data-action='account-logout']")?.classList.add("hidden");
+        const rooms = this.uiRoot.querySelector<HTMLElement>("[data-multiplayer='rooms']");
+        if (rooms) rooms.textContent = "登录后读取公开房间";
+        if (status) status.textContent = "已退出账号";
+      }).catch((error: unknown) => {
+        if (status) status.textContent = error instanceof Error ? error.message : "退出失败";
+      });
+    });
+    const monitorPolicy = (expected: boolean): void => {
+      setTimeout(() => {
+        if (!panel?.isConnected) return;
+        void auth.getConfiguration().then((configuration) => {
+          if (!panel.isConnected) return;
+          if (configuration.registrationLoginRequired !== expected) this.renderMultiplayerMenu();
+          else monitorPolicy(expected);
+        }).catch(() => monitorPolicy(expected));
+      }, 5_000);
+    };
+    void (async () => {
+      try {
+        const configuration = await auth.getConfiguration();
+        if (!panel?.isConnected) return;
+        monitorPolicy(configuration.registrationLoginRequired);
+        if (!configuration.registrationLoginRequired) {
+          ready = true;
+          setActionsEnabled(true);
+          if (status) status.textContent = "游客模式，服务器待命";
+          await this.refreshPublicRooms(createClient(), status);
+          return;
+        }
+        this.uiRoot.querySelector<HTMLElement>("[data-multiplayer='auth']")?.classList.remove("hidden");
+        const nameInput = this.uiRoot.querySelector<HTMLInputElement>("[data-multiplayer='name']");
+        if (nameInput) nameInput.disabled = true;
+        const restored = await auth.restore();
+        if (restored) await completeAccount(restored);
+        else {
+          const rooms = this.uiRoot.querySelector<HTMLElement>("[data-multiplayer='rooms']");
+          if (rooms) rooms.textContent = "登录后读取公开房间";
+          if (status) status.textContent = "请注册或登录后进入联机大厅";
+        }
+      } catch (error) {
+        if (status) status.textContent = error instanceof Error ? error.message : "身份服务不可用";
+      }
+    })();
   }
 
   private async refreshPublicRooms(client: MultiplayerClient, status: HTMLElement | null): Promise<void> {
@@ -266,7 +382,13 @@ export class GameApp {
     this.renderLobbyShell(admission.code);
     connection.setStatusHandler((connectionStatus) => {
       const status = this.uiRoot.querySelector<HTMLElement>("[data-lobby='status']");
-      if (status) status.textContent = connectionStatus === "connected" ? "已连接" : connectionStatus === "reconnecting" ? "正在重连…" : "正在连接…";
+      if (status) status.textContent = connectionStatus === "connected"
+        ? "已连接"
+        : connectionStatus === "reconnecting"
+          ? "正在重连…"
+          : connectionStatus === "closed"
+            ? "房间连接已关闭"
+            : "正在连接…";
     });
     connection.setMessageHandler((message) => {
       if (message.type === "lobby.state") this.renderLobby(client, connection, message.lobby);
@@ -274,6 +396,11 @@ export class GameApp {
       if (message.type === "error") {
         const status = this.uiRoot.querySelector<HTMLElement>("[data-lobby='status']");
         if (status) status.textContent = message.message;
+        if (message.code === "account-disabled" || message.code === "room-closed") {
+          connection.close();
+          if (this.multiplayerConnection === connection) this.multiplayerConnection = null;
+          this.renderMultiplayerMenu();
+        }
       }
     });
     await connection.open();

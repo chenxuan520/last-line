@@ -42,6 +42,12 @@ Optional GLB models are loaded asynchronously and instantiated as non-pickable v
 
 `LobbyDirectory` is a singleton Durable Object that owns temporary guest sessions, public room summaries, quick matching, and private room-code lookup. Every room has a separate `GameRoom` Durable Object that owns lobby readiness, WebSockets, actor assignment, checkpoints, and one `MatchRuntime`.
 
+`AccountDirectory` is a SQLite-backed Durable Object for persistent player accounts. It implements case-insensitive unique usernames, native WebCrypto PBKDF2-SHA-256 password records at Cloudflare's supported 100,000-iteration ceiling, opaque access/refresh sessions, refresh rotation, logout, account lookup, password changes, disabling, and session revocation. Public auth routes expose only short-lived access tokens; refresh tokens remain in `Secure`, `HttpOnly`, `SameSite=Strict`, host-only cookies.
+
+`AdminDirectory` owns one administrator identity, eight-hour opaque Cookie sessions, and the global multiplayer admission policy. The Worker serves a same-origin `/admin` terminal with a strict CSP. Bootstrap and forgotten-password recovery use separate one-time Worker Secrets; every mutation requires same-origin requests, and internal account/room operations require a separate capability secret. Optional Turnstile validation becomes fail-closed only when both the site and secret keys are configured.
+
+When registration/login is required, the gateway validates the player access token before creating a guest-compatible room identity. That identity retains the account ID and session revision; Lobby and GameRoom revalidate linked accounts so disabling or revoking an account invalidates matchmaking, admissions, reconnects, and active sockets. Toggling the global policy does not interrupt pre-existing unlinked guest rooms.
+
 `MatchRuntime` reuses `GameSimulation`, `BattleRoyaleMode`, `SimulationCombatWorld`, and `BotController`. Matches contain 2–10 stable human actors and enough bots to total 50. AI decisions are distributed across three deterministic cohorts while movement and all authoritative systems remain 30 Hz. Disconnected humans receive idle input, then server-side bot takeover without changing actor identity.
 
 `CommandInbox` rejects stale sequences, expires continuous input, and consumes jump, interact, reload, switching, item use, and drops only once. The client predicts only local movement and replays unacknowledged inputs after each server correction; combat, inventory, healing, damage, loot, safe zones, and results are never predicted.
@@ -60,4 +66,4 @@ Optional GLB models are loaded asynchronously and instantiated as non-pickable v
 
 ## Boundaries
 
-Single-player never opens a network connection and retains its existing pause semantics. Multiplayer is server-authoritative and supports guest matchmaking, but does not yet provide persistent accounts, social features, rankings, server-side lag-compensated hit rewind, or speculative future 5v5 rules.
+Single-player never opens a network connection and retains its existing pause semantics. Multiplayer is server-authoritative and can run in guest or account-required mode. There are no social features, rankings, server-side lag-compensated hit rewind, or speculative future 5v5 rules.

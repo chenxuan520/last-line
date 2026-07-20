@@ -68,7 +68,7 @@ describe("multiplayer worker", () => {
     socket.accept();
     await welcome;
     socket.send(JSON.stringify({ type: "connection.ack" }));
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await waitForAdmissionConsumption(String(admission.roomId), String(admission.playerId));
     const replay = await worker.fetch(request(), env);
     expect(replay.status).toBe(401);
     socket.close(1000, "done");
@@ -134,4 +134,19 @@ async function connectAdmission(admission: Record<string, unknown>): Promise<Web
   if (!response.webSocket) throw new Error(`WebSocket upgrade failed: ${response.status}`);
   response.webSocket.accept();
   return response.webSocket;
+}
+
+async function waitForAdmissionConsumption(roomId: string, playerId: string): Promise<void> {
+  const stub = env.GAME_ROOMS.getByName(roomId);
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const consumed = await runInDurableObject(stub, async (_instance, state) => {
+      const room = await state.storage.get<{
+        members?: Record<string, { admissionConsumed?: boolean }>;
+      }>("room-v1");
+      return room?.members?.[playerId]?.admissionConsumed === true;
+    });
+    if (consumed) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error("Admission acknowledgement was not persisted");
 }

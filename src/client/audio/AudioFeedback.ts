@@ -134,6 +134,10 @@ export class AudioFeedback {
     envelope.gain.exponentialRampToValueAtTime(0.001, context.currentTime + duration);
     oscillator.connect(envelope);
     envelope.connect(gain);
+    oscillator.onended = () => {
+      oscillator.disconnect();
+      envelope.disconnect();
+    };
     oscillator.start();
     oscillator.stop(context.currentTime + duration);
   }

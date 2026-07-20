@@ -4,12 +4,16 @@ export interface GuestRecord {
   playerId: string;
   sessionToken: string;
   displayName: string;
+  accountId: string | null;
+  accountSessionRevision: number | null;
   createdAt: number;
 }
 
 export interface RoomMemberRecord {
   playerId: string;
   displayName: string;
+  accountId: string | null;
+  accountSessionRevision: number | null;
   admissionToken: string;
   admissionExpiresAt: number;
   admissionConsumed: boolean;

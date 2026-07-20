@@ -20,6 +20,14 @@
       {
         "name": "GAME_ROOMS",
         "class_name": "GameRoom"
+      },
+      {
+        "name": "ACCOUNTS",
+        "class_name": "AccountDirectory"
+      },
+      {
+        "name": "ADMIN",
+        "class_name": "AdminDirectory"
       }
     ]
   },
@@ -27,6 +35,10 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["LobbyDirectory", "GameRoom"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["AccountDirectory", "AdminDirectory"]
     }
   ]
 }

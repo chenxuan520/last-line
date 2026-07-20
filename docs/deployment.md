@@ -75,7 +75,7 @@ Cloudflare Git integration does not require `CLOUDFLARE_API_TOKEN` or `CLOUDFLAR
 
 ## Cloudflare lastlinep2p Worker
 
-The multiplayer backend is separate from Pages. `wrangler.worker.jsonc` defines the `LobbyDirectory` and `GameRoom` SQLite-backed Durable Object classes; it must not replace the Pages project configuration.
+The multiplayer backend is separate from Pages. `wrangler.worker.jsonc` defines the production `LobbyDirectory`, `GameRoom`, `AccountDirectory`, and `AdminDirectory` SQLite-backed Durable Object classes; it must not replace the Pages project configuration. Player account registration/login is exposed by the Worker and controlled by the administrator's global admission switch. The same-origin management terminal is available at `/admin`.
 
 Local development:
 
@@ -106,8 +106,58 @@ The deployed Worker uses `https://lastlinep2p.011203.xyz`; do not reuse the exis
 
 Workers Builds manages deployment access, so no long-lived Cloudflare token is added to the repository or GitHub Actions.
 
+### Management terminal secrets
+
+Before deploying the management terminal, generate two independent random values and store them as Worker secrets. Never commit either value:
+
+```bash
+openssl rand -base64 32
+npx wrangler secret put INTERNAL_ADMIN_TOKEN --config wrangler.worker.jsonc
+
+openssl rand -base64 32
+npx wrangler secret put ADMIN_BOOTSTRAP_TOKEN --config wrangler.worker.jsonc
+```
+
+`INTERNAL_ADMIN_TOKEN` is a permanent capability between the admin, account, lobby, and room Durable Objects. `ADMIN_BOOTSTRAP_TOKEN` is temporary. After deployment:
+
+1. Open `https://lastlinep2p.011203.xyz/admin`.
+2. Enter the Bootstrap Token and choose the first administrator username and password.
+3. Confirm that administrator login succeeds.
+4. Immediately remove the bootstrap secret:
+
+```bash
+npx wrangler secret delete ADMIN_BOOTSTRAP_TOKEN --config wrangler.worker.jsonc
+```
+
+Removing the bootstrap secret does not remove administrators. The bootstrap endpoint also permanently rejects initialization after the first administrator exists.
+
+Only one administrator is supported. Normal password changes are available in the terminal. If the password is forgotten, create a temporary recovery secret:
+
+```bash
+openssl rand -base64 32
+npx wrangler secret put ADMIN_RESET_TOKEN --config wrangler.worker.jsonc
+```
+
+Reload `/admin`, select **忘记密码**, enter that token and a new password, verify login, then immediately delete the secret:
+
+```bash
+npx wrangler secret delete ADMIN_RESET_TOKEN --config wrangler.worker.jsonc
+```
+
+Each reset-token value is accepted only once by `AdminDirectory`, even if secret deletion is delayed. Setting a new random secret creates a new one-time recovery credential.
+
+Cloudflare Turnstile is optional. Leave both values absent to disable it. To enable it later, create a widget restricted to `lastlinep2p.011203.xyz`, then configure both values; configuring only one makes the admin page fail closed:
+
+```bash
+npx wrangler secret put TURNSTILE_SITE_KEY --config wrangler.worker.jsonc
+npx wrangler secret put TURNSTILE_SECRET_KEY --config wrangler.worker.jsonc
+```
+
+Turnstile is supplemental to password hashing, persistent rate limits, same-origin mutation checks, HttpOnly cookies, and the internal capability secret.
+
 ## Deployment Verification
 
 - Keep the game volume at `0` during browser checks.
 - Verify single-player independently, then open two local Chrome/Edge pages and verify quick matching, the 50-player HUD, remote-human presentation, and reconnect behavior.
+- Verify both admission settings: guest mode must preserve the original flow; account-required mode must block anonymous guest creation, allow registration/login, restore the HttpOnly refresh session after reload, and reject disabled/revoked accounts.
 - Do not install Playwright or download a CI browser for this project.

@@ -176,6 +176,8 @@ export class BattleRoyaleSession {
 
   public dispose(): void {
     this.active = false;
+    this.hud?.dispose();
+    this.hud = null;
     this.humanController.dispose();
     this.effects.dispose();
     this.scene.dispose();

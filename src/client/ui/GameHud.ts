@@ -29,7 +29,7 @@ export class GameHud {
   private promptSignature = "";
 
   public constructor(
-    root: HTMLDivElement,
+    private readonly root: HTMLDivElement,
     private readonly assets: AssetCatalog,
     mapSeed: number,
     onResume: () => void,
@@ -125,6 +125,11 @@ export class GameHud {
     this.damageFlash = this.requireElement("damage-flash");
     this.killFeed = this.requireElement("kill-feed");
     root.querySelector<HTMLButtonElement>("[data-action='resume']")?.addEventListener("click", onResume);
+  }
+
+  public dispose(): void {
+    this.elements.clear();
+    if (this.root.classList.contains("is-playing")) this.root.replaceChildren();
   }
 
   public update(

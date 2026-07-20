@@ -37,8 +37,17 @@ export class LobbyDirectory extends DurableObject<WorkerEnv> {
   }
 
   public async fetch(request: Request): Promise<Response> {
-    this.removeExpiredRecords();
+    if (this.removeExpiredRecords()) await this.persist();
     const url = new URL(request.url);
+    if (request.method === "GET" && url.pathname === "/internal/admin/rooms") {
+      return this.adminCapabilityAllowed(request) ? this.listAdminRooms() : json({ error: "forbidden" }, 403);
+    }
+    const closeMatch = /^\/internal\/admin\/rooms\/(room-[a-f0-9-]+)\/close$/.exec(url.pathname);
+    if (request.method === "POST" && closeMatch?.[1]) {
+      return this.adminCapabilityAllowed(request)
+        ? this.closeRoom(closeMatch[1])
+        : json({ error: "forbidden" }, 403);
+    }
     if (url.pathname.startsWith("/v1/") && !this.allowRequest(request)) {
       return json({ error: "rate-limited" }, 429);
     }
@@ -58,11 +67,19 @@ export class LobbyDirectory extends DurableObject<WorkerEnv> {
     const body = await readJson(request);
     const displayName = sanitizeDisplayName(body?.displayName);
     if (!displayName) return json({ error: "invalid-display-name" }, 400);
+    const trustedAccount = this.adminCapabilityAllowed(request)
+      && typeof body?.accountId === "string"
+      && /^account-[a-f0-9-]+$/.test(body.accountId)
+      && typeof body.accountSessionRevision === "number"
+      && Number.isSafeInteger(body.accountSessionRevision)
+      && body.accountSessionRevision >= 0;
     const playerId = `guest-${crypto.randomUUID()}`;
     const record: GuestRecord = {
       playerId,
       sessionToken: crypto.randomUUID(),
       displayName,
+      accountId: trustedAccount ? body.accountId as string : null,
+      accountSessionRevision: trustedAccount ? body.accountSessionRevision as number : null,
       createdAt: Date.now(),
     };
     this.data.guests[playerId] = record;
@@ -82,10 +99,29 @@ export class LobbyDirectory extends DurableObject<WorkerEnv> {
     return json({ rooms });
   }
 
+  private listAdminRooms(): Response {
+    const rooms = Object.values(this.data.rooms)
+      .sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0) || left.roomId.localeCompare(right.roomId));
+    return json({ rooms });
+  }
+
+  private async closeRoom(roomId: string): Promise<Response> {
+    const summary = this.data.rooms[roomId];
+    if (!summary) return json({ error: "room-not-found" }, 404);
+    const response = await this.env.GAME_ROOMS.getByName(roomId).fetch(new Request(
+      "https://room/internal/admin/close",
+      { method: "POST", headers: this.adminCapabilityHeaders() },
+    ));
+    if (!response.ok && response.status !== 404 && response.status !== 410) return response;
+    delete this.data.rooms[roomId];
+    await this.persist();
+    return json({ ok: true, roomId, previousStatus: summary.status });
+  }
+
   private async createRoom(request: Request): Promise<Response> {
     if (Object.keys(this.data.rooms).length >= MAX_ROOM_RECORDS) return json({ error: "lobby-capacity" }, 503);
     const body = await readJson(request);
-    const guest = this.authenticate(body);
+    const guest = await this.authenticate(body);
     if (!guest) return json({ error: "unauthorized" }, 401);
     const visibility = body?.visibility === "private" ? "private" : body?.visibility === "public" ? "public" : null;
     if (!visibility) return json({ error: "invalid-visibility" }, 400);
@@ -95,7 +131,7 @@ export class LobbyDirectory extends DurableObject<WorkerEnv> {
 
   private async quickMatch(request: Request): Promise<Response> {
     const body = await readJson(request);
-    const guest = this.authenticate(body);
+    const guest = await this.authenticate(body);
     if (!guest) return json({ error: "unauthorized" }, 401);
     const available = Object.values(this.data.rooms)
       .filter((room) =>
@@ -113,7 +149,7 @@ export class LobbyDirectory extends DurableObject<WorkerEnv> {
 
   private async joinRoom(code: string, request: Request): Promise<Response> {
     const body = await readJson(request);
-    const guest = this.authenticate(body);
+    const guest = await this.authenticate(body);
     if (!guest) return json({ error: "unauthorized" }, 401);
     return this.joinExistingRoom(code, guest);
   }
@@ -164,11 +200,34 @@ export class LobbyDirectory extends DurableObject<WorkerEnv> {
     return json({ ok: true });
   }
 
-  private authenticate(body: Record<string, unknown> | null): GuestRecord | null {
+  private async authenticate(body: Record<string, unknown> | null): Promise<GuestRecord | null> {
     const playerId = typeof body?.playerId === "string" ? body.playerId : "";
     const sessionToken = typeof body?.sessionToken === "string" ? body.sessionToken : "";
     const guest = this.data.guests[playerId];
-    return guest?.sessionToken === sessionToken ? guest : null;
+    if (!guest || guest.sessionToken !== sessionToken) return null;
+    if (!guest.accountId) return guest;
+    const headers = this.adminCapabilityHeaders();
+    const response = await this.env.ACCOUNTS.getByName("global").fetch(new Request(
+      `https://accounts/internal/account-status/${encodeURIComponent(guest.accountId)}`,
+      { headers },
+    ));
+    if (!response.ok) return null;
+    const status = await response.json<{
+      enabled?: unknown;
+      sessionRevision?: unknown;
+    }>();
+    return status.enabled === true && status.sessionRevision === guest.accountSessionRevision ? guest : null;
+  }
+
+  private adminCapabilityAllowed(request: Request): boolean {
+    const expected = this.env.INTERNAL_ADMIN_TOKEN;
+    return Boolean(expected && request.headers.get("X-Admin-Capability") === expected);
+  }
+
+  private adminCapabilityHeaders(): Headers {
+    const headers = new Headers();
+    if (this.env.INTERNAL_ADMIN_TOKEN) headers.set("X-Admin-Capability", this.env.INTERNAL_ADMIN_TOKEN);
+    return headers;
   }
 
   private createRoomCode(): string {
@@ -184,14 +243,22 @@ export class LobbyDirectory extends DurableObject<WorkerEnv> {
     return this.ctx.storage.put(STORAGE_KEY, this.data);
   }
 
-  private removeExpiredRecords(): void {
+  private removeExpiredRecords(): boolean {
     const now = Date.now();
+    let changed = false;
     for (const [playerId, guest] of Object.entries(this.data.guests)) {
-      if (now - guest.createdAt > GUEST_TTL_MS) delete this.data.guests[playerId];
+      if (now - guest.createdAt > GUEST_TTL_MS) {
+        delete this.data.guests[playerId];
+        changed = true;
+      }
     }
     for (const [roomId, room] of Object.entries(this.data.rooms)) {
-      if (room.status === "finished" || now - (room.updatedAt ?? 0) > ROOM_TTL_MS) delete this.data.rooms[roomId];
+      if (room.status === "finished" || now - (room.updatedAt ?? 0) > ROOM_TTL_MS) {
+        delete this.data.rooms[roomId];
+        changed = true;
+      }
     }
+    return changed;
   }
 
   private allowRequest(request: Request): boolean {

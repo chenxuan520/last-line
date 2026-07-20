@@ -12,6 +12,22 @@ import {
 type MessageHandler = (message: ServerMessage) => void;
 type StatusHandler = (status: "connecting" | "connected" | "reconnecting" | "closed") => void;
 
+export interface MultiplayerAccount {
+  id: string;
+  username: string;
+  displayName: string;
+  createdAt: number;
+}
+
+interface AccountAuthResponse {
+  user: MultiplayerAccount;
+  session: {
+    tokenType: "Bearer";
+    accessToken: string;
+    accessExpiresAt: number;
+  };
+}
+
 export class MultiplayerClient {
   private guest: GuestSession | null = null;
 
@@ -19,6 +35,7 @@ export class MultiplayerClient {
     private readonly apiUrl: string,
     private readonly displayName: string,
     private readonly settings: GameSettings,
+    private readonly accessToken: string | null | (() => Promise<string | null>) = null,
   ) {}
 
   public async createRoom(visibility: RoomVisibility): Promise<RoomAdmission> {
@@ -67,14 +84,130 @@ export class MultiplayerClient {
   }
 
   private async post<T>(path: string, body: unknown): Promise<T> {
+    const headers = new Headers({ "Content-Type": "application/json" });
+    const accessToken = typeof this.accessToken === "function" ? await this.accessToken() : this.accessToken;
+    if (typeof this.accessToken === "function" && !accessToken) throw new Error("账号登录已失效");
+    if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
     const response = await fetch(new URL(path, this.apiUrl), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
+      credentials: "include",
       body: JSON.stringify(body),
     });
     if (!response.ok) throw await responseError(response);
     return response.json() as Promise<T>;
   }
+}
+
+export class MultiplayerAuthClient {
+  private account: MultiplayerAccount | null = null;
+  private accessToken: string | null = null;
+  private accessExpiresAt = 0;
+  private restorePromise: Promise<MultiplayerAccount | null> | null = null;
+
+  public constructor(private readonly apiUrl: string) {}
+
+  public async getConfiguration(): Promise<{ registrationLoginRequired: boolean }> {
+    return this.get("/v1/auth/config");
+  }
+
+  public async restore(): Promise<MultiplayerAccount | null> {
+    if (this.restorePromise) return this.restorePromise;
+    this.restorePromise = this.restoreWithLock().finally(() => {
+      this.restorePromise = null;
+    });
+    return this.restorePromise;
+  }
+
+  public async register(username: string, password: string, displayName: string): Promise<MultiplayerAccount> {
+    return this.authenticate("/v1/auth/register", { username, password, displayName });
+  }
+
+  public async login(username: string, password: string): Promise<MultiplayerAccount> {
+    return this.authenticate("/v1/auth/login", { username, password });
+  }
+
+  public async logout(): Promise<void> {
+    const response = await this.request("/v1/auth/logout", {});
+    if (!response.ok) throw await responseError(response);
+    this.account = null;
+    this.accessToken = null;
+    this.accessExpiresAt = 0;
+  }
+
+  public get currentAccount(): MultiplayerAccount | null {
+    return this.account;
+  }
+
+  public get currentAccessToken(): string | null {
+    return this.accessToken;
+  }
+
+  public async ensureAccessToken(): Promise<string | null> {
+    if (this.accessToken && Date.now() + 30_000 < this.accessExpiresAt) return this.accessToken;
+    return await this.restore() ? this.accessToken : null;
+  }
+
+  private async authenticate(path: string, body: unknown): Promise<MultiplayerAccount> {
+    const response = await this.request(path, body);
+    if (!response.ok) throw await responseError(response);
+    return this.applyAuth(await response.json() as AccountAuthResponse);
+  }
+
+  private applyAuth(value: AccountAuthResponse): MultiplayerAccount {
+    this.account = value.user;
+    this.accessToken = value.session.accessToken;
+    this.accessExpiresAt = value.session.accessExpiresAt;
+    return value.user;
+  }
+
+  private restoreWithLock(): Promise<MultiplayerAccount | null> {
+    if (typeof navigator !== "undefined" && navigator.locks) {
+      return navigator.locks.request("last-line-player-session-refresh", () => this.restoreRequest());
+    }
+    return this.restoreRequest();
+  }
+
+  private async restoreRequest(): Promise<MultiplayerAccount | null> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const response = await this.request("/v1/auth/session", {});
+      if (response.status === 409) {
+        await delay(attempt === 0 ? 150 : 5_000);
+        continue;
+      }
+      if (!response.ok) throw await responseError(response);
+      const value = await response.json() as AccountAuthResponse | { authenticated: false };
+      if ("authenticated" in value) {
+        this.account = null;
+        this.accessToken = null;
+        this.accessExpiresAt = 0;
+        return null;
+      }
+      return this.applyAuth(value);
+    }
+    return null;
+  }
+
+  private async get<T>(path: string): Promise<T> {
+    const response = await fetch(new URL(path, this.apiUrl), { credentials: "include" });
+    if (!response.ok) throw await responseError(response);
+    return response.json() as Promise<T>;
+  }
+
+  private request(path: string, body: unknown): Promise<Response> {
+    const headers = new Headers({ "Content-Type": "application/json" });
+    if (this.accessToken) headers.set("Authorization", `Bearer ${this.accessToken}`);
+    return fetch(new URL(path, this.apiUrl), {
+      method: "POST",
+      headers,
+      credentials: "include",
+      body: JSON.stringify(body),
+    });
+  }
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 export class MultiplayerConnection {
@@ -84,12 +217,15 @@ export class MultiplayerConnection {
   private readonly queuedMessages: ServerMessage[] = [];
   private reconnectToken: string | null = null;
   private reconnectAttempt = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private socketListeners: AbortController | null = null;
   private closed = false;
   private opened = false;
 
   public constructor(
     private readonly apiUrl: string,
     private readonly admission: RoomAdmission,
+    private readonly socketFactory: (url: URL) => WebSocket = (url) => new WebSocket(url),
   ) {}
 
   public open(): Promise<void> {
@@ -113,10 +249,10 @@ export class MultiplayerConnection {
   }
 
   public close(): void {
-    this.closed = true;
-    this.statusHandler?.("closed");
-    this.socket?.close(1000, "client closed");
-    this.socket = null;
+    if (this.closed) return;
+    const socket = this.socket;
+    this.finishClosed();
+    socket?.close(1000, "client closed");
   }
 
   private openSocket(resolve?: () => void, reject?: (error: Error) => void): void {
@@ -126,22 +262,38 @@ export class MultiplayerConnection {
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     url.searchParams.set("playerId", this.admission.playerId);
     url.searchParams.set("token", this.reconnectToken ?? this.admission.admissionToken);
-    const socket = new WebSocket(url);
+    this.socketListeners?.abort();
+    const listeners = new AbortController();
+    this.socketListeners = listeners;
+    const socket = this.socketFactory(url);
     this.socket = socket;
     socket.addEventListener("open", () => {
+      if (this.socket !== socket || this.closed) return;
       this.opened = true;
       this.reconnectAttempt = 0;
       this.statusHandler?.("connected");
       resolve?.();
-    }, { once: true });
-    socket.addEventListener("message", (event) => this.receive(event));
+    }, { once: true, signal: listeners.signal });
+    socket.addEventListener("message", (event) => {
+      if (this.socket === socket && !this.closed) this.receive(event);
+    }, { signal: listeners.signal });
     socket.addEventListener("error", () => {
+      if (this.socket !== socket || this.closed) return;
       if (!this.opened) reject?.(new Error("无法连接联机服务器"));
-    }, { once: true });
+    }, { once: true, signal: listeners.signal });
     socket.addEventListener("close", (event) => {
-      if (this.closed || event.code === 1000) return;
+      if (this.socket !== socket) return;
+      if (event.code === 4010 || event.code === 4011) {
+        this.finishClosed();
+        return;
+      }
+      if (this.closed) return;
+      if (event.code === 1000) {
+        this.finishClosed();
+        return;
+      }
       this.scheduleReconnect();
-    });
+    }, { signal: listeners.signal });
   }
 
   private receive(event: MessageEvent): void {
@@ -158,8 +310,9 @@ export class MultiplayerConnection {
         const error: ServerMessage = { type: "error", code: "protocol-mismatch", message: "联机协议版本不兼容，请刷新页面" };
         if (this.handler) this.handler(error);
         else this.queuedMessages.push(error);
-        this.closed = true;
-        this.socket?.close(4002, "protocol mismatch");
+        const socket = this.socket;
+        this.finishClosed();
+        socket?.close(4002, "protocol mismatch");
         return;
       }
       this.reconnectToken = value.reconnectToken;
@@ -174,10 +327,29 @@ export class MultiplayerConnection {
 
   private scheduleReconnect(): void {
     if (this.closed) return;
+    if (this.reconnectTimer !== null) clearTimeout(this.reconnectTimer);
     this.statusHandler?.("reconnecting");
     const delay = Math.min(5_000, 250 * 2 ** this.reconnectAttempt);
     this.reconnectAttempt += 1;
-    setTimeout(() => this.openSocket(), delay);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.openSocket();
+    }, delay);
+  }
+
+  private finishClosed(): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.statusHandler?.("closed");
+    if (this.reconnectTimer !== null) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    this.socketListeners?.abort();
+    this.socketListeners = null;
+    this.socket = null;
+    this.handler = null;
+    this.statusHandler = null;
+    this.queuedMessages.length = 0;
+    this.reconnectToken = null;
   }
 }
 
@@ -218,5 +390,12 @@ function errorLabel(code: string | undefined): string {
   if (code === "room-full") return "房间已满";
   if (code === "room-started") return "房间已经开局";
   if (code === "unauthorized") return "联机身份已失效";
+  if (code === "account-required") return "请先注册或登录";
+  if (code === "invalid-credentials") return "账号或密码错误";
+  if (code === "invalid-registration") return "账号需为 3–20 位字母、数字或下划线，密码至少 12 位";
+  if (code === "registration-unavailable") return "该账号已被使用";
+  if (code === "invalid-session") return "账号登录已失效";
+  if (code === "auth-service-unavailable") return "账号服务暂不可用";
+  if (code === "rate-limited") return "请求过于频繁，请稍后再试";
   return code ? `联机服务错误: ${code}` : "联机请求失败";
 }

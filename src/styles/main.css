@@ -24,6 +24,10 @@
   box-sizing: border-box;
 }
 
+.hidden {
+  display: none !important;
+}
+
 html,
 body,
 #app {
@@ -444,6 +448,44 @@ h1 {
 
 .multiplayer-panel .menu-description {
   margin-bottom: 20px;
+}
+
+.multiplayer-auth {
+  margin-bottom: 14px;
+  padding: 14px;
+  border: 1px solid var(--line-strong);
+  background: linear-gradient(135deg, rgb(17 27 21 / 94%), rgb(8 13 10 / 94%));
+}
+
+.multiplayer-auth-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  color: var(--ink-muted);
+  font: 700 10px/1.3 var(--tactical-font);
+  letter-spacing: 0.08em;
+}
+
+.multiplayer-auth-head b {
+  color: var(--signal);
+  letter-spacing: 0.16em;
+}
+
+.multiplayer-auth-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 10px;
+}
+
+.multiplayer-auth-form .multiplayer-field:last-of-type {
+  grid-column: 1 / -1;
+}
+
+.compact-actions {
+  grid-column: 1 / -1;
+  grid-template-columns: 1fr 1fr;
 }
 
 .multiplayer-field {

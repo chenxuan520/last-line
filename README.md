@@ -19,6 +19,8 @@
 - 49 名 AI 自主跳伞、搜集、进圈、战斗、换弹和治疗
 - 独立联机入口支持快速匹配、公开房间列表、公开建房、私人房间码、准备/倒计时和断线重连；现有单机入口不连接服务器
 - 联机比赛由 Cloudflare Durable Object 以 30 Hz 运行权威规则、40–48 个 AI 和 10 Hz 状态快照，浏览器只发送 `ActorCommand` 并进行本地移动预测与远端插值
+- 管理员可切换游客准入或强制注册登录；账号模式使用 HttpOnly Refresh Cookie，并在 Access Token 到期前自动续期
+- Worker 同源管理终端使用唯一管理员账号，可查看玩家账号和在线房间、禁用/恢复账号、撤销会话及强制关闭异常房间
 - AI 在无可见敌人和有效物资时会持续选择圈内可达巡逻点；3 人及以下进入主动终局搜索，受击后立即转向攻击来源，楼上目标会沿坡道追击
 - AI 使用常数开销的活性监控；原地小范围停留达到 45 秒或 8 秒内连续左右反向 6 次时，清理旧路径并强制选择新的圈内可达目标
 - AI 生命值不高于 25 时优先利用权威墙体或岩石脱离交火，切断视线后按玩家相同规则治疗；无药时主动寻找可达医疗物，空弹时优先切换有弹副武器，否则撤退、换弹或搜索兼容弹药
@@ -126,6 +128,7 @@ worker/           # Cloudflare 大厅与比赛 Durable Objects
 - Cloudflare Pages：<https://last-line.pages.dev/>
 - 正式域名：<https://lastline.011203.xyz/>
 - 联机服务：<https://lastlinep2p.011203.xyz/health>
+- 管理终端：<https://lastlinep2p.011203.xyz/admin>
 
 GitHub Actions 在每次 PR 和 `main` 推送时执行应用/Worker 类型检查、Vitest、静态生产构建和 Worker dry-run；`main` 通过后自动部署 GitHub Pages。Cloudflare Pages 和 `lastlinep2p` Worker 分别使用 Git 集成部署，配置见 [`docs/deployment.md`](docs/deployment.md)。
 
@@ -138,6 +141,6 @@ GitHub Actions 在每次 PR 和 `main` 推送时执行应用/Worker 类型检查
 ## 当前边界
 
 - 仅支持桌面键鼠，不支持移动端和触屏
-- 联机身份目前为临时访客，不包含长期账号、好友、排行榜和赛季数据
+- 联机支持游客和持久玩家账号两种准入模式，由管理员全局开关控制；暂不提供好友、排行榜或赛季数据
 - 不包含载具、投掷物、枪械配件、复杂弹道和可破坏场景
 - 生产构建中的 Babylon/GLTF 按需 chunk 仍较大，但占位素材对局不会加载 GLTF chunk

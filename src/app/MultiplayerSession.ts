@@ -71,6 +71,7 @@ export class MultiplayerSession implements GameSession {
   private displayNames: Record<EntityId, string>;
   private hud: GameHud | null = null;
   private active = false;
+  private disposed = false;
   private inputSequence = 0;
   private lastSnapshotSequence = -1;
   private lastEventSequence = -1;
@@ -167,7 +168,7 @@ export class MultiplayerSession implements GameSession {
 
   public update(frameSeconds: number, fps: number): void {
     if (!this.active) return;
-    this.processMessages();
+    if (!this.processMessages()) return;
     const player = this.getActor(this.localActorId);
     this.humanController.rememberActor(player);
     const spectatorSwitch = this.humanController.consumeSpectatorSwitchRequest();
@@ -199,18 +200,38 @@ export class MultiplayerSession implements GameSession {
   }
 
   public dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
     this.active = false;
+    this.connection.setMessageHandler(null);
+    this.connection.setStatusHandler(null);
     this.connection.close();
+    this.hud?.dispose();
+    this.hud = null;
     this.humanController.dispose();
     this.effects.dispose();
     this.scene.dispose();
+    this.queuedMessages.length = 0;
+    this.pendingInputs.length = 0;
+    this.actorRoots.clear();
+    this.actorVisualRoots.clear();
+    this.lootMeshes.clear();
+    this.actorVisualSignatures.clear();
+    this.jumpVisualStates.clear();
+    this.remotePoses.clear();
+    this.visibleActorIds.clear();
   }
 
-  private processMessages(): void {
+  private processMessages(): boolean {
     for (const message of this.queuedMessages.splice(0)) {
+      if (message.type === "error" && (message.code === "room-closed" || message.code === "account-disabled")) {
+        this.onExit();
+        return false;
+      }
       if (message.type === "match.full") this.applyFull(message);
       if (message.type === "match.snapshot") this.applySnapshot(message);
     }
+    return true;
   }
 
   private applyFull(message: FullMessage): void {

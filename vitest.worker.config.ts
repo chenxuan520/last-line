@@ -5,6 +5,13 @@ export default defineConfig({
   plugins: [
     cloudflareTest({
       wrangler: { configPath: "./wrangler.worker.jsonc" },
+      miniflare: {
+        bindings: {
+          ADMIN_BOOTSTRAP_TOKEN: "test-bootstrap-token",
+          ADMIN_RESET_TOKEN: "test-reset-token",
+          INTERNAL_ADMIN_TOKEN: "test-internal-admin-token",
+        },
+      },
     }),
   ],
   test: {

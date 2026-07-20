@@ -36,6 +36,22 @@ describe("AudioFeedback", () => {
     }], listener);
     expect(context.oscillators).toHaveLength(7);
   });
+
+  it("disconnects completed UI tone nodes", () => {
+    const context = new FakeAudioContext();
+    vi.stubGlobal("AudioContext", function AudioContext() {
+      return context;
+    });
+    const audio = new AudioFeedback(1);
+    audio.preview();
+
+    const oscillator = context.oscillators[0];
+    const envelope = context.gains[1];
+    oscillator?.onended?.();
+
+    expect(oscillator?.disconnected).toBe(true);
+    expect(envelope?.disconnected).toBe(true);
+  });
 });
 
 class FakeAudioParam {
@@ -49,10 +65,13 @@ class FakeAudioParam {
 }
 
 class FakeAudioNode {
+  public disconnected = false;
   public connect(): this {
     return this;
   }
-  public disconnect(): void {}
+  public disconnect(): void {
+    this.disconnected = true;
+  }
 }
 
 class FakeGainNode extends FakeAudioNode {
@@ -71,8 +90,11 @@ class FakeAudioContext {
   public readonly currentTime = 0;
   public readonly destination = new FakeAudioNode();
   public readonly oscillators: FakeOscillatorNode[] = [];
+  public readonly gains: FakeGainNode[] = [];
   public createGain(): FakeGainNode {
-    return new FakeGainNode();
+    const gain = new FakeGainNode();
+    this.gains.push(gain);
+    return gain;
   }
   public createOscillator(): FakeOscillatorNode {
     const oscillator = new FakeOscillatorNode();

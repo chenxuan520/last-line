@@ -15,6 +15,7 @@ import {
 import { MatchRuntime, type MatchCheckpoint } from "../src/server/MatchRuntime";
 import type { WorkerEnv } from "./env";
 import type {
+  GuestRecord,
   RoomInitialization,
   RoomJoinRequest,
   RoomMemberRecord,
@@ -43,6 +44,7 @@ interface SocketAttachment {
 }
 
 const STORAGE_KEY = "room-v1";
+const CHECKPOINT_KEY = "checkpoint-v1";
 const TICK_MS = 1_000 / 30;
 const COUNTDOWN_MS = 3_000;
 const WAITING_TTL_MS = 60 * 60 * 1_000;
@@ -56,11 +58,21 @@ export class GameRoom extends DurableObject<WorkerEnv> {
   private lastTickAt = 0;
   private readonly visibleLootByPlayer = new Map<string, Set<EntityId>>();
   private readonly messageRates = new Map<string, { startedAt: number; count: number }>();
+  private readonly accountStatusCache = new Map<string, { checkedAt: number; status: "active" | "revoked" }>();
 
   public constructor(ctx: DurableObjectState, env: WorkerEnv) {
     super(ctx, env);
     this.ctx.blockConcurrencyWhile(async () => {
-      this.data = await this.ctx.storage.get<PersistedRoom>(STORAGE_KEY) ?? null;
+      const [room, checkpoint] = await Promise.all([
+        this.ctx.storage.get<PersistedRoom>(STORAGE_KEY),
+        this.ctx.storage.get<MatchCheckpoint>(CHECKPOINT_KEY),
+      ]);
+      this.data = room ?? null;
+      if (
+        this.data
+        && checkpoint
+        && (!this.data.checkpoint || checkpoint.tick > this.data.checkpoint.tick)
+      ) this.data.checkpoint = checkpoint;
       if (this.data) {
         const connectedPlayerIds = new Set(this.ctx.getWebSockets().flatMap((socket) => {
           const attachment = socket.deserializeAttachment() as SocketAttachment | null;
@@ -113,6 +125,11 @@ export class GameRoom extends DurableObject<WorkerEnv> {
     const url = new URL(request.url);
     if (request.method === "POST" && url.pathname === "/internal/initialize") return this.initialize(request);
     if (request.method === "POST" && url.pathname === "/internal/join") return this.join(request);
+    if (request.method === "POST" && url.pathname === "/internal/admin/close") {
+      return this.adminCapabilityAllowed(request)
+        ? this.forceClose()
+        : Response.json({ error: "forbidden" }, { status: 403 });
+    }
     if (request.headers.get("Upgrade") === "websocket") return this.connectWebSocket(url);
     return Response.json({ error: "not-found" }, { status: 404 });
   }
@@ -123,6 +140,10 @@ export class GameRoom extends DurableObject<WorkerEnv> {
     const data = this.data;
     const member = attachment ? data?.members[attachment.playerId] : null;
     if (!attachment || !data || !member || attachment.connectionEpoch !== member.connectionEpoch) return;
+    if (await this.memberAccountStatus(member) === "revoked") {
+      await this.rejectAccountSocket(socket, member);
+      return;
+    }
     if (!this.allowMessage(member.playerId)) {
       this.send(socket, { type: "error", code: "rate-limited", message: "消息发送过于频繁" });
       socket.close(4008, "rate limited");
@@ -147,7 +168,7 @@ export class GameRoom extends DurableObject<WorkerEnv> {
     if (command.type === "connection.ack") {
       if (attachment.usedAdmission && !member.admissionConsumed) {
         member.admissionConsumed = true;
-        this.ctx.waitUntil(this.persist());
+        await this.persist();
       }
       return;
     }
@@ -201,7 +222,7 @@ export class GameRoom extends DurableObject<WorkerEnv> {
   private async initialize(request: Request): Promise<Response> {
     if (this.data) return Response.json({ error: "already-initialized" }, { status: 409 });
     const input = await request.json<RoomInitialization>();
-    const member = createMember(input.host.playerId, input.host.displayName, true, input.visibility === "public");
+    const member = createMember(input.host, true, input.visibility === "public");
     this.data = {
       roomId: input.roomId,
       code: input.code,
@@ -230,7 +251,7 @@ export class GameRoom extends DurableObject<WorkerEnv> {
     if (!member && Object.keys(data.members).length >= MAX_HUMAN_PLAYERS) {
       return Response.json({ error: "room-full" }, { status: 409 });
     }
-    member ??= createMember(input.guest.playerId, input.guest.displayName, false, data.visibility === "public");
+    member ??= createMember(input.guest, Object.keys(data.members).length === 0, data.visibility === "public");
     member.displayName = input.guest.displayName;
     member.admissionToken = crypto.randomUUID();
     member.admissionExpiresAt = Date.now() + 60_000;
@@ -245,7 +266,8 @@ export class GameRoom extends DurableObject<WorkerEnv> {
   }
 
   private async connectWebSocket(url: URL): Promise<Response> {
-    const data = this.requireData();
+    const data = this.data;
+    if (!data) return this.closedWebSocket();
     const playerId = url.searchParams.get("playerId") ?? "";
     const token = url.searchParams.get("token") ?? "";
     const member = data.members[playerId];
@@ -255,6 +277,12 @@ export class GameRoom extends DurableObject<WorkerEnv> {
     if (!member || (!admissionValid && token !== member.reconnectToken)) {
       return new Response("unauthorized", { status: 401 });
     }
+    const accountStatus = await this.memberAccountStatus(member, true);
+    if (accountStatus === "unknown") return new Response("account service unavailable", { status: 503 });
+    if (accountStatus === "revoked") {
+      await this.removeWaitingMember(member.playerId);
+      return this.terminalWebSocket(4011, "账号已被禁用或会话已撤销", "account disabled");
+    }
     for (const socket of this.ctx.getWebSockets()) {
       const existing = socket.deserializeAttachment() as SocketAttachment | null;
       if (existing?.playerId === playerId) socket.close(4001, "reconnected");
@@ -263,6 +291,7 @@ export class GameRoom extends DurableObject<WorkerEnv> {
     member.connectionEpoch += 1;
     member.reconnectToken = crypto.randomUUID();
     if (member.actorId) this.ensureRuntime()?.setConnected(member.actorId, true);
+    await this.persist();
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     const attachment: SocketAttachment = {
@@ -283,7 +312,6 @@ export class GameRoom extends DurableObject<WorkerEnv> {
     });
     if (data.status === "running" || data.status === "finished") this.sendFull(server, member);
     else this.send(server, { type: "lobby.state", lobby: this.lobbyView() });
-    this.ctx.waitUntil(this.persist());
     this.ctx.waitUntil(this.updateDirectory());
     if (data.visibility === "public" && this.canStart()) await this.startCountdown();
     if (data.status === "running") this.startLoop();
@@ -317,6 +345,7 @@ export class GameRoom extends DurableObject<WorkerEnv> {
 
   private async startMatch(): Promise<void> {
     const data = this.requireData();
+    await this.validateConnectedAccounts();
     const members = Object.values(data.members)
       .filter((member) => member.connected)
       .sort((left, right) => left.joinedAt - right.joinedAt || left.playerId.localeCompare(right.playerId));
@@ -342,7 +371,7 @@ export class GameRoom extends DurableObject<WorkerEnv> {
       disableAiSnipers: data.options.disableAiSnipers,
     });
     data.checkpoint = this.runtime.checkpoint();
-    await this.persist();
+    await Promise.all([this.persist(), this.persistCheckpoint()]);
     await this.ctx.storage.setAlarm(Date.now() + WATCHDOG_MS);
     await this.updateDirectory();
     for (const socket of this.ctx.getWebSockets()) {
@@ -397,15 +426,16 @@ export class GameRoom extends DurableObject<WorkerEnv> {
     if (runtime.tick % 3 === 0) this.broadcastFrame();
     if (runtime.tick % 30 === 0) {
       data.checkpoint = runtime.checkpoint();
-      this.ctx.waitUntil(this.persist());
+      this.ctx.waitUntil(this.persistCheckpoint());
       this.ctx.waitUntil(this.ctx.storage.setAlarm(Date.now() + WATCHDOG_MS));
     }
+    if (runtime.tick % 150 === 0) this.ctx.waitUntil(this.validateConnectedAccounts());
     if (runtime.state.phase === "finished") {
       if (runtime.tick % 3 !== 0) this.broadcastFrame();
       data.status = "finished";
       data.checkpoint = runtime.checkpoint();
       this.loopRunning = false;
-      this.ctx.waitUntil(this.persist());
+      this.ctx.waitUntil(Promise.all([this.persist(), this.persistCheckpoint()]).then(() => undefined));
       this.ctx.waitUntil(this.updateDirectory());
       this.ctx.waitUntil(this.ctx.storage.setAlarm(Date.now() + 60 * 60 * 1_000));
       return;
@@ -490,6 +520,96 @@ export class GameRoom extends DurableObject<WorkerEnv> {
     await this.updateDirectory();
   }
 
+  private async forceClose(): Promise<Response> {
+    const data = this.data;
+    if (!data) return Response.json({ error: "room-not-found" }, { status: 404 });
+    const result = { ok: true, roomId: data.roomId, previousStatus: data.status };
+    this.loopRunning = false;
+    this.runtime = null;
+    this.visibleLootByPlayer.clear();
+    this.messageRates.clear();
+    await this.ctx.storage.deleteAlarm();
+    for (const socket of this.ctx.getWebSockets()) {
+      this.send(socket, { type: "error", code: "room-closed", message: "房间已由管理员关闭" });
+      socket.close(4010, "room closed by administrator");
+    }
+    this.data = null;
+    await this.ctx.storage.deleteAll();
+    return Response.json(result);
+  }
+
+  private closedWebSocket(): Response {
+    return this.terminalWebSocket(4010, "房间已关闭", "room closed");
+  }
+
+  private terminalWebSocket(code: number, message: string, reason: string): Response {
+    const pair = new WebSocketPair();
+    const [client, server] = Object.values(pair);
+    this.ctx.acceptWebSocket(server);
+    this.send(server, { type: "error", code: code === 4010 ? "room-closed" : "account-disabled", message });
+    server.close(code, reason);
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  private async memberAccountStatus(
+    member: RoomMemberRecord,
+    force = false,
+  ): Promise<"active" | "revoked" | "unknown"> {
+    if (!member.accountId) return "active";
+    const cached = this.accountStatusCache.get(member.accountId);
+    if (!force && cached && Date.now() - cached.checkedAt < 5_000) return cached.status;
+    const headers = new Headers();
+    if (this.env.INTERNAL_ADMIN_TOKEN) headers.set("X-Admin-Capability", this.env.INTERNAL_ADMIN_TOKEN);
+    const response = await this.env.ACCOUNTS.getByName("global").fetch(new Request(
+      `https://accounts/internal/account-status/${encodeURIComponent(member.accountId)}`,
+      { headers },
+    ));
+    if (response.status === 404) {
+      this.accountStatusCache.set(member.accountId, { checkedAt: Date.now(), status: "revoked" });
+      return "revoked";
+    }
+    if (!response.ok) return "unknown";
+    const value = await response.json<{
+      enabled?: unknown;
+      sessionRevision?: unknown;
+    }>();
+    const status = value.enabled === true && value.sessionRevision === member.accountSessionRevision
+      ? "active"
+      : "revoked";
+    this.accountStatusCache.set(member.accountId, { checkedAt: Date.now(), status });
+    return status;
+  }
+
+  private async rejectAccountSocket(socket: WebSocket, member: RoomMemberRecord): Promise<void> {
+    this.send(socket, { type: "error", code: "account-disabled", message: "账号已被禁用或会话已撤销" });
+    socket.close(4011, "account disabled");
+    if (this.data?.status === "waiting" || this.data?.status === "countdown") {
+      await this.removeWaitingMember(member.playerId);
+      return;
+    }
+    member.connected = false;
+    if (member.actorId) this.runtime?.setConnected(member.actorId, false);
+  }
+
+  private async validateConnectedAccounts(): Promise<void> {
+    const data = this.data;
+    if (!data) return;
+    for (const member of Object.values(data.members)) {
+      if (!member.connected || await this.memberAccountStatus(member, true) !== "revoked") continue;
+      const socket = this.ctx.getWebSockets().find((candidate) => {
+        const attachment = candidate.deserializeAttachment() as SocketAttachment | null;
+        return attachment?.playerId === member.playerId;
+      });
+      if (socket) await this.rejectAccountSocket(socket, member);
+      else member.connected = false;
+    }
+  }
+
+  private adminCapabilityAllowed(request: Request): boolean {
+    const expected = this.env.INTERNAL_ADMIN_TOKEN;
+    return Boolean(expected && request.headers.get("X-Admin-Capability") === expected);
+  }
+
   private async persistAndBroadcastLobby(): Promise<void> {
     await this.persist();
     const message: ServerMessage = { type: "lobby.state", lobby: this.lobbyView() };
@@ -561,6 +681,11 @@ export class GameRoom extends DurableObject<WorkerEnv> {
     return this.ctx.storage.put(STORAGE_KEY, this.requireData());
   }
 
+  private persistCheckpoint(): Promise<void> {
+    const checkpoint = this.data?.checkpoint;
+    return checkpoint ? this.ctx.storage.put(CHECKPOINT_KEY, checkpoint) : Promise.resolve();
+  }
+
   private send(socket: WebSocket, message: ServerMessage): void {
     try {
       socket.send(JSON.stringify(message));
@@ -586,10 +711,12 @@ export class GameRoom extends DurableObject<WorkerEnv> {
   }
 }
 
-function createMember(playerId: string, displayName: string, host: boolean, ready: boolean): RoomMemberRecord {
+function createMember(guest: GuestRecord, host: boolean, ready: boolean): RoomMemberRecord {
   return {
-    playerId,
-    displayName,
+    playerId: guest.playerId,
+    displayName: guest.displayName,
+    accountId: guest.accountId ?? null,
+    accountSessionRevision: guest.accountSessionRevision ?? null,
     admissionToken: crypto.randomUUID(),
     admissionExpiresAt: Date.now() + 60_000,
     admissionConsumed: false,
