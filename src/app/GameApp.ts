@@ -91,6 +91,7 @@ export class GameApp {
 
   private renderMenu(): void {
     if (!this.assets) return;
+    const multiplayerEnabled = getDefaultMultiplayerApiUrl() !== null;
     const logo = this.assets.resolve("ui.logo", "svg");
     const backdrop = this.assets.resolve("ui.menu.backdrop", "image");
     this.uiRoot.className = "";
@@ -111,7 +112,7 @@ export class GameApp {
         </div>
         <div class="menu-actions">
           <button class="primary-button" data-action="start"><span>开始游戏</span><b>DEPLOY</b></button>
-          <button class="secondary-button" data-action="multiplayer"><span>联机模式</span><b>ONLINE</b></button>
+          ${multiplayerEnabled ? '<button class="secondary-button" data-action="multiplayer"><span>联机模式</span><b>ONLINE</b></button>' : ""}
         </div>
         <footer class="menu-footer">
           <p class="build-label">PRE-ALPHA 0.2 <span></span> SINGLE PLAYER / ${BATTLE_ROYALE_CONFIG.participantCount - 1} AI</p>

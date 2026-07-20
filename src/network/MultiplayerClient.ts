@@ -182,6 +182,7 @@ export class MultiplayerConnection {
 }
 
 export function getDefaultMultiplayerApiUrl(): string | null {
+  if (import.meta.env.VITE_MULTIPLAYER_ENABLED === "false") return null;
   const configured = import.meta.env.VITE_MULTIPLAYER_URL?.trim();
   if (configured) return normalizeApiUrl(configured);
   if (typeof location !== "undefined" && (location.hostname === "127.0.0.1" || location.hostname === "localhost")) {

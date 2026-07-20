@@ -102,7 +102,7 @@ Create a separate Cloudflare Workers Builds project from the same repository:
 | Deploy command | `npx wrangler deploy --config wrangler.worker.jsonc` |
 | Node version | `24` |
 
-The deployed Worker uses `https://lastlinep2p.011203.xyz`; do not reuse the existing Pages CNAME. The public, non-secret endpoint is committed in `.env.production`, while GitHub Actions also reads the `VITE_MULTIPLAYER_URL` repository variable. The local browser falls back to `http://127.0.0.1:8787` only on localhost.
+The deployed Worker uses `https://lastlinep2p.011203.xyz`; do not reuse the existing Pages CNAME. The public, non-secret endpoint and `VITE_MULTIPLAYER_ENABLED=true` are committed in `.env.production`. GitHub Actions overrides the flag to `false`, so GitHub Pages remains a single-player static demo with no multiplayer button. The local browser falls back to `http://127.0.0.1:8787` only on localhost.
 
 Workers Builds manages deployment access, so no long-lived Cloudflare token is added to the repository or GitHub Actions.
 

@@ -59,7 +59,7 @@ npm run dev
 npm run dev:worker
 ```
 
-本地主机自动连接 `http://127.0.0.1:8787`；非本地静态部署通过 `VITE_MULTIPLAYER_URL` 指定 Worker 地址。
+本地主机自动连接 `http://127.0.0.1:8787`；正式联机站通过 `VITE_MULTIPLAYER_ENABLED=true` 和 `VITE_MULTIPLAYER_URL` 指定 Worker。GitHub Pages 构建固定关闭该开关并隐藏联机入口。
 
 ## 操作
 

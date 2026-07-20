@@ -39,6 +39,7 @@ jobs:
 
       - name: Build
         env:
+          VITE_MULTIPLAYER_ENABLED: "false"
           VITE_MULTIPLAYER_URL: ${{ vars.VITE_MULTIPLAYER_URL }}
         run: npm run build
 
