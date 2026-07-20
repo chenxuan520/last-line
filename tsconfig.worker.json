@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": ["./worker-configuration.d.ts"],
+    "noEmit": true
+  },
+  "include": ["worker/**/*.ts", "src/config/**/*.ts", "src/ai/**/*.ts", "src/controllers/BotController.ts", "src/game/**/*.ts", "src/network/protocol.ts", "src/server/**/*.ts", "worker-configuration.d.ts"]
+}

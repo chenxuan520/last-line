@@ -7,7 +7,7 @@ import {
   setActorWeaponVisual,
 } from "../../src/client/render/scenes/IslandScene";
 import { createMapLayout, getTerrainHeight } from "../../src/config/map";
-import { createBattleRoyaleState } from "../../src/game/modes/BattleRoyaleMode";
+import { createBattleRoyaleState, createBattleRoyaleStateForHumans } from "../../src/game/modes/BattleRoyaleMode";
 import { createWeaponState } from "../../src/game/state/types";
 
 describe("IslandScene lifecycle", () => {
@@ -258,6 +258,35 @@ describe("IslandScene lifecycle", () => {
     });
     expect(bundle.scene.textures.filter((texture) => texture.name.startsWith("loot-icon-texture-"))).toHaveLength(14);
     expect(bundle.scene.materials.filter((entry) => entry.name.startsWith("loot-icon-material-"))).toHaveLength(15);
+
+    bundle.scene.dispose();
+    engine.dispose();
+  }, 30_000);
+
+  it("renders remote human actors while keeping the explicit local actor first-person", async () => {
+    const engine = new NullEngine();
+    const assets = createAssets();
+    const config = {
+      participantCount: 2,
+      flightSeconds: 1,
+      safeZoneStages: [{ waitSeconds: 1, shrinkSeconds: 1, radius: 100, damagePerSecond: 1 }],
+    };
+    const state = createBattleRoyaleStateForHumans(["human-1", "human-2"], config, () => 0.5);
+
+    const bundle = await createIslandScene(
+      engine,
+      assets,
+      state.actors,
+      state.groundLoot,
+      state.mapSeed,
+      false,
+      "human-1",
+    );
+
+    expect(bundle.scene.getMeshByName("body-human-1")).toBeNull();
+    expect(bundle.scene.getMeshByName("body-human-2")).not.toBeNull();
+    expect(bundle.actorRoots.get("human-2")?.getChildMeshes(false)
+      .some((mesh) => mesh.metadata?.actorVisual === "parachute")).toBe(true);
 
     bundle.scene.dispose();
     engine.dispose();

@@ -121,8 +121,10 @@ export async function createIslandScene(
   groundLoot: Readonly<Record<EntityId, GroundLootState>>,
   mapSeed = 0,
   showGroundLootIcons = false,
+  localActorId?: EntityId,
 ): Promise<IslandSceneBundle> {
-  const player = Object.values(actors).find((actor) => actor.kind === "player");
+  const player = (localActorId ? actors[localActorId] : undefined) ??
+    Object.values(actors).find((actor) => actor.kind === "player");
   if (!player) {
     throw new Error("Island scene requires one player actor");
   }
@@ -152,7 +154,7 @@ export async function createIslandScene(
   createIslandEnvironment(scene, materials, layout);
   createPois(scene, materials, layout);
 
-  const { actorRoots, actorVisualRoots } = createActors(scene, actors, materials);
+  const { actorRoots, actorVisualRoots } = createActors(scene, actors, materials, player.id);
   const camera = createCamera(scene, player);
   const aircraftInteriorRoot = createAircraftInterior(scene, camera, materials);
   aircraftInteriorRoot.setEnabled(player.deployment === "aircraft");
@@ -171,7 +173,7 @@ export async function createIslandScene(
   const viewWeaponRoot = createViewWeapon(scene, camera, materials);
   setActorWeaponVisual(viewWeaponRoot, getActiveWeapon(player)?.weaponId ?? null);
   viewWeaponRoot.setEnabled(Boolean(getActiveWeapon(player)));
-  await replaceCatalogModels(scene, assets, actors, actorRoots, actorVisualRoots, viewWeaponRoot);
+  await replaceCatalogModels(scene, assets, actors, actorRoots, actorVisualRoots, viewWeaponRoot, player.id);
 
   const { lootMeshes, syncLootMeshes } = createLootMeshes(
     scene,
@@ -206,6 +208,7 @@ async function replaceCatalogModels(
   actorRoots: Map<EntityId, TransformNode>,
   actorVisualRoots: Map<EntityId, TransformNode>,
   viewWeaponRoot: TransformNode,
+  localActorId: EntityId,
 ): Promise<void> {
   const weaponIds = ["rifle", "smg", "shotgun", "sniper"] as const;
   const [character, ...weapons] = await Promise.all([
@@ -215,7 +218,7 @@ async function replaceCatalogModels(
 
   if (character) {
     for (const actor of Object.values(actors)) {
-      if (actor.kind !== "bot") continue;
+      if (actor.id === localActorId) continue;
       const root = actorRoots.get(actor.id);
       const visualRoot = actorVisualRoots.get(actor.id);
       if (!root || !visualRoot) continue;
@@ -924,6 +927,7 @@ function createActors(
   scene: Scene,
   actors: Readonly<Record<EntityId, ActorState>>,
   materials: IslandMaterials,
+  localActorId: EntityId,
 ): { actorRoots: Map<EntityId, TransformNode>; actorVisualRoots: Map<EntityId, TransformNode> } {
   const actorRoots = new Map<EntityId, TransformNode>();
   const actorVisualRoots = new Map<EntityId, TransformNode>();
@@ -937,7 +941,7 @@ function createActors(
     const visualRoot = new TransformNode(`actor-visual-${actor.id}`, scene);
     visualRoot.parent = root;
 
-    if (actor.kind === "player") {
+    if (actor.id === localActorId) {
       createPlayerHitbox(scene, root, actor.id, materials.playerHitbox);
     } else {
       createBot(scene, visualRoot, actor.id, materials);

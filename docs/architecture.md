@@ -2,7 +2,7 @@
 
 ## Runtime Flow
 
-`GameApp` loads the asset catalog, restores settings, renders the menu, and creates a `BattleRoyaleSession`. The session owns the Babylon scene, HUD, controllers, fixed-step clock, and `GameSimulation`.
+`GameApp` loads the asset catalog, restores settings, and exposes two isolated session paths. `BattleRoyaleSession` remains the local single-player authority. `MultiplayerSession` owns only input, prediction, interpolation, Babylon presentation, HUD, and a WebSocket connection; it never creates a `GameSimulation`.
 
 Each fixed step follows this order:
 
@@ -13,6 +13,8 @@ Each fixed step follows this order:
 5. `BattleRoyaleMode` advances flight, safe zones, zone damage, and results.
 6. Dead inventories become reusable ground-loot records.
 7. Rendering synchronizes from the resulting state.
+
+In multiplayer, the same steps run inside one `GameRoom` Durable Object at 30 Hz. Browsers send validated `ActorCommand` values and receive a full initial state followed by 10 Hz actor frames, loot changes, sequenced events, and input acknowledgements.
 
 ## Authoritative Rules
 
@@ -34,6 +36,16 @@ Each `BotController` has independent decision timers and memory. Bots use the sa
 
 Optional GLB models are loaded asynchronously and instantiated as non-pickable visual children. Procedural models remain the fallback. Repeated loot drops reuse inactive state IDs and marker meshes, and scene disposal clears marker references and imported containers.
 
+`IslandScene` receives an explicit local actor ID for multiplayer. Only that actor uses the first-person hitbox representation; remote human actors use the same third-person presentation contract as AI while retaining `kind: "player"` in authoritative state.
+
+## Multiplayer Services
+
+`LobbyDirectory` is a singleton Durable Object that owns temporary guest sessions, public room summaries, quick matching, and private room-code lookup. Every room has a separate `GameRoom` Durable Object that owns lobby readiness, WebSockets, actor assignment, checkpoints, and one `MatchRuntime`.
+
+`MatchRuntime` reuses `GameSimulation`, `BattleRoyaleMode`, `SimulationCombatWorld`, and `BotController`. Matches contain 2–10 stable human actors and enough bots to total 50. AI decisions are distributed across three deterministic cohorts while movement and all authoritative systems remain 30 Hz. Disconnected humans receive idle input, then server-side bot takeover without changing actor identity.
+
+`CommandInbox` rejects stale sequences, expires continuous input, and consumes jump, interact, reload, switching, item use, and drops only once. The client predicts only local movement and replays unacknowledged inputs after each server correction; combat, inventory, healing, damage, loot, safe zones, and results are never predicted.
+
 ## Performance Strategy
 
 - Fixed 30 Hz rules with decoupled rendering
@@ -43,7 +55,9 @@ Optional GLB models are loaded asynchronously and instantiated as non-pickable v
 - Quality-dependent hardware scaling
 - No dynamic shadows or full rigid-body simulation
 - Dynamic GLTF loader chunk only when a manifest entry uses GLB
+- Active multiplayer rooms use one single-threaded Durable Object, 30 Hz rules, 10 Hz snapshots, and one-second checkpoints
+- Lobby sockets use the Durable Object WebSocket API and may hibernate while no match timer is active
 
-## Future Boundaries
+## Boundaries
 
-The current state and command contracts can be moved toward an authoritative server, but networking, prediction, reconciliation, anti-cheat, matchmaking, and 5v5 rules are intentionally not implemented.
+Single-player never opens a network connection and retains its existing pause semantics. Multiplayer is server-authoritative and supports guest matchmaking, but does not yet provide persistent accounts, social features, rankings, server-side lag-compensated hit rewind, or speculative future 5v5 rules.

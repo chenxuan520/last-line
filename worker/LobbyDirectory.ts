@@ -1,0 +1,236 @@
+import { DurableObject } from "cloudflare:workers";
+import {
+  MAX_HUMAN_PLAYERS,
+  type GuestSession,
+  type PublicRoomSummary,
+  type RoomVisibility,
+} from "../src/network/protocol";
+import type { WorkerEnv } from "./env";
+import type {
+  GuestRecord,
+  RoomInitialization,
+  RoomMutationResult,
+  RoomOptions,
+} from "./shared";
+
+interface LobbyData {
+  guests: Record<string, GuestRecord>;
+  rooms: Record<string, PublicRoomSummary>;
+}
+
+const STORAGE_KEY = "lobby-data-v1";
+const ROOM_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const GUEST_TTL_MS = 24 * 60 * 60 * 1_000;
+const ROOM_TTL_MS = 60 * 60 * 1_000;
+const MAX_GUEST_RECORDS = 5_000;
+const MAX_ROOM_RECORDS = 1_000;
+
+export class LobbyDirectory extends DurableObject<WorkerEnv> {
+  private data: LobbyData = { guests: {}, rooms: {} };
+  private readonly rateLimits = new Map<string, { startedAt: number; count: number }>();
+
+  public constructor(ctx: DurableObjectState, env: WorkerEnv) {
+    super(ctx, env);
+    this.ctx.blockConcurrencyWhile(async () => {
+      this.data = await this.ctx.storage.get<LobbyData>(STORAGE_KEY) ?? this.data;
+    });
+  }
+
+  public async fetch(request: Request): Promise<Response> {
+    this.removeExpiredRecords();
+    const url = new URL(request.url);
+    if (url.pathname.startsWith("/v1/") && !this.allowRequest(request)) {
+      return json({ error: "rate-limited" }, 429);
+    }
+    if (request.method === "POST" && url.pathname === "/v1/guests") return this.createGuest(request);
+    if (request.method === "GET" && url.pathname === "/v1/rooms") return this.listRooms();
+    if (request.method === "POST" && url.pathname === "/v1/rooms") return this.createRoom(request);
+    if (request.method === "POST" && url.pathname === "/v1/matchmaking/quick") return this.quickMatch(request);
+    const joinMatch = /^\/v1\/rooms\/([A-Z0-9]+)\/join$/.exec(url.pathname);
+    if (request.method === "POST" && joinMatch?.[1]) return this.joinRoom(joinMatch[1], request);
+    const updateMatch = /^\/internal\/rooms\/(.+)$/.exec(url.pathname);
+    if (request.method === "PUT" && updateMatch?.[1]) return this.updateRoom(decodeURIComponent(updateMatch[1]), request);
+    return json({ error: "not-found" }, 404);
+  }
+
+  private async createGuest(request: Request): Promise<Response> {
+    if (Object.keys(this.data.guests).length >= MAX_GUEST_RECORDS) return json({ error: "lobby-capacity" }, 503);
+    const body = await readJson(request);
+    const displayName = sanitizeDisplayName(body?.displayName);
+    if (!displayName) return json({ error: "invalid-display-name" }, 400);
+    const playerId = `guest-${crypto.randomUUID()}`;
+    const record: GuestRecord = {
+      playerId,
+      sessionToken: crypto.randomUUID(),
+      displayName,
+      createdAt: Date.now(),
+    };
+    this.data.guests[playerId] = record;
+    await this.persist();
+    const response: GuestSession = {
+      playerId,
+      sessionToken: record.sessionToken,
+      displayName,
+    };
+    return json(response, 201);
+  }
+
+  private listRooms(): Response {
+    const rooms = Object.values(this.data.rooms)
+      .filter((room) => room.visibility === "public" && room.status === "waiting" && room.playerCount < room.capacity)
+      .sort((left, right) => left.code.localeCompare(right.code));
+    return json({ rooms });
+  }
+
+  private async createRoom(request: Request): Promise<Response> {
+    if (Object.keys(this.data.rooms).length >= MAX_ROOM_RECORDS) return json({ error: "lobby-capacity" }, 503);
+    const body = await readJson(request);
+    const guest = this.authenticate(body);
+    if (!guest) return json({ error: "unauthorized" }, 401);
+    const visibility = body?.visibility === "private" ? "private" : body?.visibility === "public" ? "public" : null;
+    if (!visibility) return json({ error: "invalid-visibility" }, 400);
+    const options = roomOptions(body);
+    return this.createAndJoinRoom(guest, visibility, options);
+  }
+
+  private async quickMatch(request: Request): Promise<Response> {
+    const body = await readJson(request);
+    const guest = this.authenticate(body);
+    if (!guest) return json({ error: "unauthorized" }, 401);
+    const available = Object.values(this.data.rooms)
+      .filter((room) =>
+        room.visibility === "public" && room.status === "waiting" && room.playerCount < MAX_HUMAN_PLAYERS
+      )
+      .sort((left, right) => right.playerCount - left.playerCount || left.code.localeCompare(right.code))[0];
+    if (available) {
+      const response = await this.joinExistingRoom(available.code, guest);
+      if (response.status < 400) return response;
+      delete this.data.rooms[available.roomId];
+    }
+    if (Object.keys(this.data.rooms).length >= MAX_ROOM_RECORDS) return json({ error: "lobby-capacity" }, 503);
+    return this.createAndJoinRoom(guest, "public", roomOptions(body));
+  }
+
+  private async joinRoom(code: string, request: Request): Promise<Response> {
+    const body = await readJson(request);
+    const guest = this.authenticate(body);
+    if (!guest) return json({ error: "unauthorized" }, 401);
+    return this.joinExistingRoom(code, guest);
+  }
+
+  private async joinExistingRoom(code: string, guest: GuestRecord): Promise<Response> {
+    const summary = Object.values(this.data.rooms).find((room) => room.code === code);
+    if (!summary) return json({ error: "room-not-found" }, 404);
+    const stub = this.env.GAME_ROOMS.getByName(summary.roomId);
+    const response = await stub.fetch(new Request("https://room/internal/join", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ guest }),
+    }));
+    if (!response.ok) return response;
+    const result = await response.json<RoomMutationResult>();
+    this.data.rooms[summary.roomId] = result.summary;
+    await this.persist();
+    return json(result.admission, 200);
+  }
+
+  private async createAndJoinRoom(
+    guest: GuestRecord,
+    visibility: RoomVisibility,
+    options: RoomOptions,
+  ): Promise<Response> {
+    const roomId = `room-${crypto.randomUUID()}`;
+    const code = this.createRoomCode();
+    const initialization: RoomInitialization = { roomId, code, visibility, host: guest, options };
+    const stub = this.env.GAME_ROOMS.getByName(roomId);
+    const response = await stub.fetch(new Request("https://room/internal/initialize", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(initialization),
+    }));
+    if (!response.ok) return response;
+    const result = await response.json<RoomMutationResult>();
+    this.data.rooms[roomId] = result.summary;
+    await this.persist();
+    return json(result.admission, 201);
+  }
+
+  private async updateRoom(roomId: string, request: Request): Promise<Response> {
+    const summary = await request.json<PublicRoomSummary>();
+    if (summary.roomId !== roomId) return json({ error: "room-mismatch" }, 400);
+    if (summary.status === "finished") delete this.data.rooms[roomId];
+    else this.data.rooms[roomId] = summary;
+    await this.persist();
+    return json({ ok: true });
+  }
+
+  private authenticate(body: Record<string, unknown> | null): GuestRecord | null {
+    const playerId = typeof body?.playerId === "string" ? body.playerId : "";
+    const sessionToken = typeof body?.sessionToken === "string" ? body.sessionToken : "";
+    const guest = this.data.guests[playerId];
+    return guest?.sessionToken === sessionToken ? guest : null;
+  }
+
+  private createRoomCode(): string {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const bytes = crypto.getRandomValues(new Uint8Array(6));
+      const code = [...bytes].map((value) => ROOM_CODE_ALPHABET[value % ROOM_CODE_ALPHABET.length]).join("");
+      if (!Object.values(this.data.rooms).some((room) => room.code === code)) return code;
+    }
+    throw new Error("room code allocation failed");
+  }
+
+  private persist(): Promise<void> {
+    return this.ctx.storage.put(STORAGE_KEY, this.data);
+  }
+
+  private removeExpiredRecords(): void {
+    const now = Date.now();
+    for (const [playerId, guest] of Object.entries(this.data.guests)) {
+      if (now - guest.createdAt > GUEST_TTL_MS) delete this.data.guests[playerId];
+    }
+    for (const [roomId, room] of Object.entries(this.data.rooms)) {
+      if (room.status === "finished" || now - (room.updatedAt ?? 0) > ROOM_TTL_MS) delete this.data.rooms[roomId];
+    }
+  }
+
+  private allowRequest(request: Request): boolean {
+    const now = Date.now();
+    const key = request.headers.get("CF-Connecting-IP") ?? "local";
+    const current = this.rateLimits.get(key);
+    if (!current || now - current.startedAt >= 60_000) {
+      this.rateLimits.set(key, { startedAt: now, count: 1 });
+      return true;
+    }
+    current.count += 1;
+    return current.count <= 60;
+  }
+}
+
+function roomOptions(body: Record<string, unknown> | null): RoomOptions {
+  return {
+    startWithBandage: body?.startWithBandage !== false,
+    disableAiSnipers: body?.disableAiSnipers !== false,
+  };
+}
+
+function sanitizeDisplayName(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().replace(/\s+/g, " ");
+  return normalized.length >= 1 && normalized.length <= 20 ? normalized : null;
+}
+
+async function readJson(request: Request): Promise<Record<string, unknown> | null> {
+  try {
+    const value: unknown = await request.json();
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function json(value: unknown, status = 200): Response {
+  return Response.json(value, { status });
+}

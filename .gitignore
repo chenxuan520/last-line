@@ -1,5 +1,9 @@
 node_modules/
 dist/
+dist-worker/
 test-results/
+.wrangler/
+.dev.vars*
+.env.local
 .DS_Store
 *.tsbuildinfo

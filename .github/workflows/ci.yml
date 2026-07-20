@@ -38,7 +38,12 @@ jobs:
         run: npm run test
 
       - name: Build
+        env:
+          VITE_MULTIPLAYER_URL: ${{ vars.VITE_MULTIPLAYER_URL }}
         run: npm run build
+
+      - name: Build Worker
+        run: npm run build:worker
 
       - name: Upload GitHub Pages artifact
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'

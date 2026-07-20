@@ -3,14 +3,24 @@ import { AssetCatalog } from "../assets/AssetCatalog";
 import { AudioFeedback } from "../client/audio/AudioFeedback";
 import { BATTLE_ROYALE_CONFIG } from "../config/battleRoyale";
 import { DEFAULT_SETTINGS, type GameSettings, type QualityLevel } from "../config/settings";
+import {
+  getDefaultMultiplayerApiUrl,
+  MultiplayerClient,
+  type MultiplayerConnection,
+} from "../network/MultiplayerClient";
+import type { LobbyView, RoomAdmission, ServerMessage } from "../network/protocol";
 import { BattleRoyaleSession } from "./BattleRoyaleSession";
+import type { GameSession } from "./GameSession";
+import { MultiplayerSession } from "./MultiplayerSession";
 
 const SETTINGS_KEY = "last-line.settings.v1";
+const MULTIPLAYER_NAME_KEY = "last-line.multiplayer-name.v1";
 
 export class GameApp {
   private readonly engine: Engine;
   private assets: AssetCatalog | null = null;
-  private session: BattleRoyaleSession | null = null;
+  private session: GameSession | null = null;
+  private multiplayerConnection: MultiplayerConnection | null = null;
   private settings = loadSettings();
   private readonly menuAudio = new AudioFeedback(0);
   private starting = false;
@@ -42,6 +52,7 @@ export class GameApp {
     window.removeEventListener("resize", this.handleResize);
     this.engine.stopRenderLoop();
     this.session?.dispose();
+    this.multiplayerConnection?.close();
     this.menuAudio.dispose();
     this.engine.dispose();
   }
@@ -98,7 +109,10 @@ export class GameApp {
           <label class="starter-setting"><span>初始补给</span><span class="starter-option"><input data-setting="start-with-bandage" type="checkbox" ${this.settings.startWithBandage ? "checked" : ""} /><i></i><b>携带 1 条绷带</b></span></label>
           <label class="starter-setting ai-sniper-setting"><span>AI 规则</span><span class="starter-option"><input data-setting="disable-ai-snipers" type="checkbox" ${this.settings.disableAiSnipers ? "checked" : ""} /><i></i><b>禁用狙击枪与狙击弹</b></span></label>
         </div>
-        <button class="primary-button" data-action="start"><span>开始游戏</span><b>DEPLOY</b></button>
+        <div class="menu-actions">
+          <button class="primary-button" data-action="start"><span>开始游戏</span><b>DEPLOY</b></button>
+          <button class="secondary-button" data-action="multiplayer"><span>联机模式</span><b>ONLINE</b></button>
+        </div>
         <footer class="menu-footer">
           <p class="build-label">PRE-ALPHA 0.2 <span></span> SINGLE PLAYER / ${BATTLE_ROYALE_CONFIG.participantCount - 1} AI</p>
           <a class="github-link" href="https://github.com/chenxuan520/last-line" target="_blank" rel="noreferrer" aria-label="在 GitHub 上查看最后防线源码">
@@ -141,6 +155,233 @@ export class GameApp {
       this.menuAudio.start();
       void this.startMatch();
     });
+    this.uiRoot.querySelector<HTMLButtonElement>("[data-action='multiplayer']")?.addEventListener("click", () => {
+      this.readSettings();
+      this.renderMultiplayerMenu();
+    });
+  }
+
+  private renderMultiplayerMenu(): void {
+    const apiUrl = getDefaultMultiplayerApiUrl();
+    const savedName = localStorage.getItem(MULTIPLAYER_NAME_KEY) ?? `幸存者-${Math.floor(Math.random() * 9_000 + 1_000)}`;
+    this.uiRoot.className = "";
+    this.uiRoot.innerHTML = `
+      <section class="menu-panel multiplayer-panel" aria-labelledby="multiplayer-title">
+        <div class="menu-index"><span>NETWORK</span><b>BR-ONLINE</b></div>
+        <p class="eyebrow">2–10 人真人联机 · AI 补满 50 人</p>
+        <h1 id="multiplayer-title">联机大厅</h1>
+        <p class="menu-description">快速匹配公开战局，或创建房间并邀请其他玩家。单机模式不会连接服务器。</p>
+        <label class="multiplayer-field">玩家代号<input data-multiplayer="name" maxlength="20" value="${escapeAttribute(savedName)}" /></label>
+        <div class="multiplayer-actions">
+          <button class="primary-button" data-action="quick" ${apiUrl ? "" : "disabled"}><span>快速匹配</span><b>MATCH</b></button>
+          <button class="secondary-button" data-action="create-public" ${apiUrl ? "" : "disabled"}><span>创建公开房间</span><b>PUBLIC</b></button>
+          <button class="secondary-button" data-action="create-private" ${apiUrl ? "" : "disabled"}><span>创建私人房间</span><b>PRIVATE</b></button>
+        </div>
+        <div class="room-code-row">
+          <input data-multiplayer="code" maxlength="6" placeholder="输入 6 位房间码" />
+          <button class="secondary-button compact" data-action="join" ${apiUrl ? "" : "disabled"}>加入</button>
+        </div>
+        <div class="public-room-list" data-multiplayer="rooms"><span>${apiUrl ? "正在读取公开房间…" : "尚未配置联机服务器地址"}</span></div>
+        <p class="multiplayer-status" data-multiplayer="status">${apiUrl ? "服务器待命" : "请设置 VITE_MULTIPLAYER_URL"}</p>
+        <button class="text-button" data-action="back">返回单机菜单</button>
+      </section>
+    `;
+    this.uiRoot.querySelector<HTMLButtonElement>("[data-action='back']")?.addEventListener("click", () => this.renderMenu());
+    if (!apiUrl) return;
+    const status = this.uiRoot.querySelector<HTMLElement>("[data-multiplayer='status']");
+    const createClient = (): MultiplayerClient => {
+      const nameInput = this.uiRoot.querySelector<HTMLInputElement>("[data-multiplayer='name']");
+      const displayName = nameInput?.value.trim() || savedName;
+      localStorage.setItem(MULTIPLAYER_NAME_KEY, displayName);
+      return new MultiplayerClient(apiUrl, displayName, this.settings);
+    };
+    const run = async (action: (client: MultiplayerClient) => Promise<RoomAdmission>): Promise<void> => {
+      try {
+        if (status) status.textContent = "正在建立联机身份…";
+        const client = createClient();
+        const admission = await action(client);
+        await this.enterLobby(client, admission);
+      } catch (error) {
+        if (status) status.textContent = error instanceof Error ? error.message : "联机请求失败";
+      }
+    };
+    this.uiRoot.querySelector<HTMLButtonElement>("[data-action='quick']")?.addEventListener("click", () => {
+      void run((client) => client.quickMatch());
+    });
+    this.uiRoot.querySelector<HTMLButtonElement>("[data-action='create-public']")?.addEventListener("click", () => {
+      void run((client) => client.createRoom("public"));
+    });
+    this.uiRoot.querySelector<HTMLButtonElement>("[data-action='create-private']")?.addEventListener("click", () => {
+      void run((client) => client.createRoom("private"));
+    });
+    this.uiRoot.querySelector<HTMLButtonElement>("[data-action='join']")?.addEventListener("click", () => {
+      const code = this.uiRoot.querySelector<HTMLInputElement>("[data-multiplayer='code']")?.value ?? "";
+      void run((client) => client.joinRoom(code));
+    });
+    void this.refreshPublicRooms(createClient(), status);
+  }
+
+  private async refreshPublicRooms(client: MultiplayerClient, status: HTMLElement | null): Promise<void> {
+    const root = this.uiRoot.querySelector<HTMLElement>("[data-multiplayer='rooms']");
+    if (!root) return;
+    try {
+      const rooms = await client.listRooms();
+      root.replaceChildren();
+      if (rooms.length === 0) {
+        const empty = document.createElement("span");
+        empty.textContent = "当前没有等待中的公开房间";
+        root.append(empty);
+        return;
+      }
+      for (const room of rooms) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "room-list-entry";
+        const label = document.createElement("span");
+        label.textContent = `${room.hostName} · ${room.code}`;
+        const count = document.createElement("b");
+        count.textContent = `${room.playerCount}/${room.capacity}`;
+        button.append(label, count);
+        button.addEventListener("click", async () => {
+          try {
+            if (status) status.textContent = "正在加入房间…";
+            const admission = await client.joinRoom(room.code);
+            await this.enterLobby(client, admission);
+          } catch (error) {
+            if (status) status.textContent = error instanceof Error ? error.message : "加入失败";
+          }
+        });
+        root.append(button);
+      }
+    } catch (error) {
+      root.textContent = error instanceof Error ? error.message : "无法读取房间列表";
+    }
+  }
+
+  private async enterLobby(client: MultiplayerClient, admission: RoomAdmission): Promise<void> {
+    this.multiplayerConnection?.close();
+    const connection = client.connect(admission);
+    this.multiplayerConnection = connection;
+    this.renderLobbyShell(admission.code);
+    connection.setStatusHandler((connectionStatus) => {
+      const status = this.uiRoot.querySelector<HTMLElement>("[data-lobby='status']");
+      if (status) status.textContent = connectionStatus === "connected" ? "已连接" : connectionStatus === "reconnecting" ? "正在重连…" : "正在连接…";
+    });
+    connection.setMessageHandler((message) => {
+      if (message.type === "lobby.state") this.renderLobby(client, connection, message.lobby);
+      if (message.type === "match.full") void this.startMultiplayerSession(connection, message);
+      if (message.type === "error") {
+        const status = this.uiRoot.querySelector<HTMLElement>("[data-lobby='status']");
+        if (status) status.textContent = message.message;
+      }
+    });
+    await connection.open();
+  }
+
+  private renderLobbyShell(code: string): void {
+    this.uiRoot.className = "";
+    this.uiRoot.innerHTML = `
+      <section class="menu-panel multiplayer-panel lobby-panel">
+        <div class="menu-index"><span>ROOM</span><b>${code}</b></div>
+        <p class="eyebrow">联机房间</p>
+        <h1>等待部署</h1>
+        <p class="menu-description" data-lobby="summary">正在同步房间状态…</p>
+        <div class="lobby-members" data-lobby="members"></div>
+        <div class="multiplayer-actions" data-lobby="actions"></div>
+        <p class="multiplayer-status" data-lobby="status">正在连接…</p>
+      </section>
+    `;
+  }
+
+  private renderLobby(client: MultiplayerClient, connection: MultiplayerConnection, lobby: LobbyView): void {
+    const summary = this.uiRoot.querySelector<HTMLElement>("[data-lobby='summary']");
+    if (!summary) return;
+    const local = lobby.members.find((member) => member.playerId === client.playerId);
+    summary.textContent = lobby.status === "countdown"
+      ? "部署倒计时已启动"
+      : `${lobby.visibility === "private" ? "私人" : "公开"}房间 · ${lobby.members.length}/${lobby.maximumPlayers} 真人 · AI 将补满 50 人`;
+    const members = this.uiRoot.querySelector<HTMLElement>("[data-lobby='members']");
+    members?.replaceChildren(...lobby.members.map((member) => {
+      const row = document.createElement("div");
+      const name = document.createElement("span");
+      name.textContent = member.displayName;
+      const state = document.createElement("b");
+      state.textContent = member.host ? "房主" : member.ready ? "已准备" : "未准备";
+      row.className = member.connected ? "is-connected" : "";
+      row.append(name, state);
+      return row;
+    }));
+    const actions = this.uiRoot.querySelector<HTMLElement>("[data-lobby='actions']");
+    if (!actions) return;
+    actions.replaceChildren();
+    if (lobby.visibility === "private" && local && !local.host) {
+      actions.append(this.actionButton(local.ready ? "取消准备" : "准备", "READY", () => {
+        connection.send({ type: "lobby.ready", ready: !local.ready });
+      }));
+    }
+    if (lobby.visibility === "private" && local?.host) {
+      actions.append(this.actionButton("开始对局", "DEPLOY", () => connection.send({ type: "lobby.start" })));
+    }
+    actions.append(this.actionButton("退出房间", "LEAVE", () => {
+      connection.send({ type: "lobby.leave" });
+      connection.close();
+      this.multiplayerConnection = null;
+      this.renderMultiplayerMenu();
+    }, true));
+  }
+
+  private actionButton(label: string, tag: string, action: () => void, secondary = false): HTMLButtonElement {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = secondary ? "secondary-button" : "primary-button";
+    const span = document.createElement("span");
+    span.textContent = label;
+    const badge = document.createElement("b");
+    badge.textContent = tag;
+    button.append(span, badge);
+    button.addEventListener("click", action);
+    return button;
+  }
+
+  private async startMultiplayerSession(
+    connection: MultiplayerConnection,
+    initial: Extract<ServerMessage, { type: "match.full" }>,
+  ): Promise<void> {
+    if (!this.assets || this.starting) return;
+    this.starting = true;
+    connection.setMessageHandler(null);
+    this.applyQuality();
+    this.renderLoading(1);
+    try {
+      const session = await MultiplayerSession.create(
+        this.engine,
+        this.canvas,
+        this.uiRoot,
+        this.assets,
+        this.settings,
+        this.menuAudio,
+        connection,
+        initial,
+        () => this.returnToMenu(),
+      );
+      this.session?.dispose();
+      this.session = session;
+      this.multiplayerConnection = null;
+      session.start();
+    } catch (error) {
+      connection.close();
+      this.renderError(error);
+    } finally {
+      this.starting = false;
+    }
+  }
+
+  private returnToMenu(): void {
+    this.session?.dispose();
+    this.session = null;
+    this.multiplayerConnection?.close();
+    this.multiplayerConnection = null;
+    this.renderMenu();
   }
 
   private readSettings(): void {
@@ -168,6 +409,10 @@ export class GameApp {
     const message = error instanceof Error ? error.message : "未知错误";
     this.uiRoot.innerHTML = `<section class="menu-panel"><p class="eyebrow">LOAD FAILED</p><h1>无法加载游戏</h1><p class="menu-description">${message}</p></section>`;
   }
+}
+
+function escapeAttribute(value: string): string {
+  return value.replace(/[&"<>]/g, (character) => ({ "&": "&amp;", "\"": "&quot;", "<": "&lt;", ">": "&gt;" })[character] ?? character);
 }
 
 function loadSettings(): GameSettings {

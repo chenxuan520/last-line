@@ -34,6 +34,7 @@ export class GameHud {
     mapSeed: number,
     onResume: () => void,
     private readonly onRestart: () => void,
+    private readonly options: { online?: boolean; actorLabels?: Readonly<Record<string, string>> } = {},
   ) {
     const crosshair = assets.resolve("ui.crosshair", "svg");
     const mapLayout = createMapLayout(mapSeed);
@@ -105,8 +106,8 @@ export class GameHud {
           </div>
         </footer>
         <div class="pause-card" data-hud="pause">
-          <strong>对局已暂停</strong>
-          <span>点击继续并锁定鼠标</span>
+          <strong>${options.online ? "联机对局进行中" : "对局已暂停"}</strong>
+          <span>${options.online ? "点击返回战斗；服务器不会暂停" : "点击继续并锁定鼠标"}</span>
           <button type="button" data-action="resume">继续游戏</button>
         </div>
         <div class="result-card" data-hud="result" hidden></div>
@@ -143,7 +144,7 @@ export class GameHud {
     this.setText("alive", Object.values(state.actors).filter((actor) => actor.alive).length.toString());
     this.setText("kills", combatCounterLabel(state, player));
     this.setText("performance", `${Math.round(fps)} FPS`);
-    this.setText("phase", player.alive ? phaseLabel(state, player) : `观战 · ${actorLabel(viewedActor.id, player.id)}`);
+    this.setText("phase", player.alive ? phaseLabel(state, player) : `观战 · ${this.actorLabel(viewedActor.id, player.id)}`);
     this.setText("zone-label", zoneLabel(state));
     this.setText("zone-time", formatSeconds(state.safeZone.secondsRemaining));
     const minimapSignature = [
@@ -219,7 +220,7 @@ export class GameHud {
       if (actor.id === playerId) row.classList.add("is-player");
       for (const [tagName, text] of [
         ["b", `${index + 1}`],
-        ["span", actorLabel(actor.id, playerId)],
+        ["span", this.actorLabel(actor.id, playerId)],
         ["em", actor.alive ? "存活" : "淘汰"],
         ["strong", `${actor.kills} 击杀`],
       ] as const) {
@@ -244,8 +245,8 @@ export class GameHud {
         const weaponLabel = event.weaponId ? WEAPONS[event.weaponId]?.label ?? event.weaponId : null;
         this.appendFeed(
           event.sourceId
-            ? `${actorLabel(event.sourceId, playerId)} 使用 ${weaponLabel ?? "武器"} 淘汰 ${actorLabel(event.actorId, playerId)}`
-            : `${actorLabel(event.actorId, playerId)} 倒在安全区外`,
+            ? `${this.actorLabel(event.sourceId, playerId)} 使用 ${weaponLabel ?? "武器"} 淘汰 ${this.actorLabel(event.actorId, playerId)}`
+            : `${this.actorLabel(event.actorId, playerId)} 倒在安全区外`,
         );
       }
       if (event.type === "item-picked" && event.actorId === playerId) {
@@ -278,6 +279,14 @@ export class GameHud {
     this.showResultCard(victory ? "最后防线" : "对局结束", victory ? `成功存活 · ${kills} 次淘汰` : `胜者 ${result.winnerId ?? "无"}`, "再来一局");
   }
 
+  public clearResult(): void {
+    this.resultVisible = false;
+    const result = this.requireElement("result");
+    result.hidden = true;
+    result.classList.remove("is-eliminated");
+    result.replaceChildren();
+  }
+
   private showResultCard(title: string, detail: string, buttonLabel: string, hint?: string): void {
     if (this.resultVisible) return;
     this.resultVisible = true;
@@ -302,6 +311,11 @@ export class GameHud {
     entry.textContent = text;
     this.killFeed.prepend(entry);
     while (this.killFeed.childElementCount > 5) this.killFeed.lastElementChild?.remove();
+  }
+
+  private actorLabel(actorId: string, playerId: string): string {
+    if (actorId === playerId) return "你";
+    return this.options.actorLabels?.[actorId] ?? defaultActorLabel(actorId);
   }
 
   private setText(name: string, value: string): void {
@@ -475,8 +489,7 @@ function assetUrl(url: string | undefined): string {
   return url ? new URL(url, document.baseURI).href : "";
 }
 
-function actorLabel(actorId: string, playerId: string): string {
-  if (actorId === playerId) return "你";
+function defaultActorLabel(actorId: string): string {
   const number = /\d+$/.exec(actorId)?.[0];
   return number ? `AI-${number.padStart(2, "0")}` : actorId;
 }

@@ -1,0 +1,32 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "lastlinep2p",
+  "main": "./worker/index.ts",
+  "tsconfig": "./tsconfig.worker.json",
+  "compatibility_date": "2026-07-20",
+  "workers_dev": true,
+  "routes": [
+    {
+      "pattern": "lastlinep2p.011203.xyz",
+      "custom_domain": true
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "LOBBY",
+        "class_name": "LobbyDirectory"
+      },
+      {
+        "name": "GAME_ROOMS",
+        "class_name": "GameRoom"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["LobbyDirectory", "GameRoom"]
+    }
+  ]
+}

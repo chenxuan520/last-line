@@ -283,8 +283,23 @@ export function createBattleRoyaleState(
   random: () => number = Math.random,
   options: { startWithBandage?: boolean } = {},
 ): MatchState {
+  return createBattleRoyaleStateForHumans([playerId], config, random, options);
+}
+
+export function createBattleRoyaleStateForHumans(
+  humanIds: readonly EntityId[],
+  config: BattleRoyaleConfig = BATTLE_ROYALE_CONFIG,
+  random: () => number = Math.random,
+  options: { startWithBandage?: boolean } = {},
+): MatchState {
   if (config.participantCount < 1) {
     throw new Error("大逃杀至少需要一名参与者");
+  }
+  if (humanIds.length < 1 || humanIds.length > config.participantCount) {
+    throw new Error("真人参与者数量无效");
+  }
+  if (new Set(humanIds).size !== humanIds.length || humanIds.some((id) => !id || id.startsWith("bot-"))) {
+    throw new Error("真人参与者 ID 无效");
   }
 
   const mapSeed = Math.floor(random() * 4_294_967_296) >>> 0;
@@ -292,12 +307,14 @@ export function createBattleRoyaleState(
   const flight = createFlight(config.flightSeconds, random);
   const startWithBandage = options.startWithBandage ?? true;
   const actors: Record<EntityId, ActorState> = {};
-  actors[playerId] = createBattleRoyaleActor(playerId, "player", flight.start, startWithBandage);
+  for (const humanId of humanIds) {
+    actors[humanId] = createBattleRoyaleActor(humanId, "player", flight.start, startWithBandage);
+  }
   let botNumber = 1;
   while (Object.keys(actors).length < config.participantCount) {
     const botId = `bot-${botNumber}`;
     botNumber += 1;
-    if (botId !== playerId) {
+    if (!actors[botId]) {
       actors[botId] = createBattleRoyaleActor(botId, "bot", flight.start, startWithBandage);
     }
   }
