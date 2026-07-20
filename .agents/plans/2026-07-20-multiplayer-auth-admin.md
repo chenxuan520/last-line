@@ -41,6 +41,7 @@
 - 2026-07-21 00:39：完成最终实现与上线准备。应用 25 files / 240 tests、Worker 26 tests 全部通过，`npm run typecheck`、`npm run build`、`npm run build:worker`、`git diff --check` 通过；安全审查无剩余 blocker/high。部署前管理接口确认生产无活动房间，随后部署 Worker 并将唯一管理员用户名按用户要求改为 `chenxuan`，一次性 `ADMIN_RESET_TOKEN` 使用后已删除；旧管理员凭据失效，准入开关当前保持游客模式，Turnstile 因无密钥保持关闭。当前生产 Worker deployment 为 `59e62938-fc85-4677-af05-e1583960e9c1`，健康、管理员登录、Auth 配置均验证通过，等待 Git 提交推送和静态站自动部署。
 - 2026-07-21 00:46：首轮账号/管理/生命周期改动已提交并推送 `0cd1ecd`。随后修复 AI 跳伞接近落点时满速过冲造成的左右振荡：新增 12m 比例减速区和 0.75m 水平死区，180 tick 轨迹回归确认方向反转不超过 1 次、落点误差不超过 0.8m。等待最终全量验证和第二次提交推送。
 - 2026-07-21 00:51：AI 跳伞修复完成最终全量验证：应用 25 files / 241 tests、Worker 26 tests、`npm run typecheck`、`npm run build`、`npm run build:worker`、`git diff --check` 全部通过。部署前再次确认生产无活动房间，Worker 已部署版本 `71396a8a-33e1-427c-b45e-9edf19fd4017`；等待第二次 Git 提交推送和静态站部署完成。
+- 2026-07-21 01:03：AI 跳伞修复已提交并推送 `e9df68d`；GitHub Actions `29761398512` 成功，GitHub Pages 发布成功，Cloudflare Pages production deployment `544e333d-4170-4424-bd0e-dd22dd4afda7` 已上线。生产管理终端确认唯一管理员可登录；强制账号开关打开后静态站显示注册/登录并禁止匿名匹配，关闭后 5 秒内恢复游客模式，最终保持游客模式。生产浏览器静音、控制台无错误；Git 工作区与 `origin/main` 对齐。
 
 ## Review
 
