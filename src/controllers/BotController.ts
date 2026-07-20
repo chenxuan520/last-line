@@ -41,6 +41,8 @@ const OSCILLATION_REVERSAL_LIMIT = 6;
 const FORCED_RELOCATION_SECONDS = 20;
 const FORCED_RELOCATION_CLEAR_DISTANCE = 6;
 const FORCED_RELOCATION_PATH_CHECKS = 1;
+const PARACHUTE_TARGET_DEAD_ZONE = 0.75;
+const PARACHUTE_APPROACH_DISTANCE = 12;
 const ACTOR_EYE_HEIGHT = 1.76;
 const ACTOR_HEIGHT = 1.8;
 const SNIPER_WEAPON_ITEM_ID = "weapon.sniper";
@@ -151,7 +153,7 @@ export class BotController {
       return { ...createIdleCommand(), jump: state.flight.progress >= this.dropProgress };
     }
     if (actor.deployment === "parachuting") {
-      return this.moveToward(actor, this.findLandingTarget(state), false);
+      return this.glideToward(actor, this.findLandingTarget(state));
     }
     const livenessTriggered = this.updateLiveness(actor, state);
 
@@ -1057,11 +1059,22 @@ export class BotController {
     return command;
   }
 
-  private moveToward(actor: ActorState, target: Vector3State, sprint: boolean): ActorCommand {
+  private glideToward(actor: ActorState, target: Vector3State): ActorCommand {
     const command = createIdleCommand();
-    command.move = normalizeFlat(subtract(target, actor.position));
-    command.aimDirection = { ...command.move };
-    command.sprint = sprint;
+    const offset = subtract(target, actor.position);
+    const distance = Math.hypot(offset.x, offset.z);
+    if (distance <= PARACHUTE_TARGET_DEAD_ZONE) {
+      command.aimDirection = { x: Math.sin(actor.yaw), y: 0, z: Math.cos(actor.yaw) };
+      return command;
+    }
+    const direction = normalizeFlat(offset);
+    const inputScale = clamp(
+      (distance - PARACHUTE_TARGET_DEAD_ZONE) / PARACHUTE_APPROACH_DISTANCE,
+      0,
+      1,
+    );
+    command.move = { x: direction.x * inputScale, y: 0, z: direction.z * inputScale };
+    command.aimDirection = { ...direction };
     return command;
   }
 

@@ -43,6 +43,40 @@ describe("BotController", () => {
     expect(new Set(headings)).toHaveLength(49);
   });
 
+  it("settles over its parachute target without repeated steering reversals", () => {
+    const state = createBattleRoyaleState("player", undefined, seededRandom(77));
+    const bot = state.actors["bot-1"];
+    if (!bot) throw new Error("bot missing");
+    const controller = new BotController(1, seededRandom(901));
+    const target = (controller as unknown as {
+      findLandingTarget(matchState: typeof state): Vector3State;
+    }).findLandingTarget(state);
+    bot.deployment = "parachuting";
+    bot.position = {
+      x: target.x + 8,
+      y: getTerrainHeight(target.x + 8, target.z, state.mapSeed) + 120,
+      z: target.z,
+    };
+    const movement = new MovementSystem();
+    let previousDirection: Vector3State | null = null;
+    let reversals = 0;
+    for (let tick = 0; tick < 180; tick += 1) {
+      const command = controller.update(bot, state, miss, 1 / 30, "player");
+      const magnitude = Math.hypot(command.move.x, command.move.z);
+      if (magnitude > 0.05) {
+        const direction = { x: command.move.x / magnitude, y: 0, z: command.move.z / magnitude };
+        if (previousDirection && direction.x * previousDirection.x + direction.z * previousDirection.z < -0.5) {
+          reversals += 1;
+        }
+        previousDirection = direction;
+      }
+      movement.processCommand(state, bot.id, command, 1 / 30);
+    }
+
+    expect(reversals).toBeLessThanOrEqual(1);
+    expect(Math.hypot(bot.position.x - target.x, bot.position.z - target.z)).toBeLessThanOrEqual(0.8);
+  });
+
   it("uses independent non-uniform parachute timings", () => {
     const state = createBattleRoyaleState("player", undefined, () => 0.5);
     const bots = Object.values(state.actors).filter((actor) => actor.kind === "bot").slice(0, 16);
