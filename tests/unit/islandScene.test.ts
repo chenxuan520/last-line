@@ -1,4 +1,5 @@
 import { NullEngine } from "@babylonjs/core/Engines/nullEngine";
+import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AssetCatalog } from "../../src/assets/AssetCatalog";
 import {
@@ -6,7 +7,7 @@ import {
   createIslandScene,
   setActorWeaponVisual,
 } from "../../src/client/render/scenes/IslandScene";
-import { createMapLayout, getTerrainHeight } from "../../src/config/map";
+import { createMapLayout, getTerrainHeight, HOSPITAL_WALL_COLOR } from "../../src/config/map";
 import { createBattleRoyaleState, createBattleRoyaleStateForHumans } from "../../src/game/modes/BattleRoyaleMode";
 import { createWeaponState } from "../../src/game/state/types";
 
@@ -91,7 +92,19 @@ describe("IslandScene lifecycle", () => {
       expect(hospitalCrosses).toHaveLength(1);
       expect(hospitalCrosses[0]).toMatchObject({ isPickable: false, checkCollisions: false });
       expect(hospitalCrosses[0]?.metadata).toMatchObject({ poiName: "医院", poiType: "hospital" });
-      expect(bundle.scene.getMeshByName("building-walls-eef2ef")).toBeDefined();
+      const hospitalWalls = layout.wallSegments.filter((wall) => wall.obstacleId === layout.hospital.buildingId);
+      const hospitalDoorSills = new Set(
+        layout.wallOpenings
+          .filter((opening) => opening.obstacleId === layout.hospital.buildingId && opening.kind === "door")
+          .map((opening) => `${opening.obstacleId}-wall-${opening.side}-${opening.storyIndex}-sill`),
+      );
+      const hospitalWallBatch = bundle.scene.getMeshByName("building-walls-eef2ef");
+      expect(hospitalWallBatch?.metadata?.sourceCount).toBe(
+        hospitalWalls.filter((wall) => !hospitalDoorSills.has(wall.id)).length,
+      );
+      expect(hospitalWallBatch?.getTotalVertices()).toBe(
+        hospitalWalls.filter((wall) => !hospitalDoorSills.has(wall.id)).length * 24,
+      );
       expect(treeFoliage.every((mesh) =>
         mesh.getBoundingInfo().boundingBox.maximumWorld.y - getTerrainHeight(mesh.position.x, mesh.position.z, layout) > 15
       )).toBe(true);
@@ -150,9 +163,18 @@ describe("IslandScene lifecycle", () => {
       expect(decorations.every((mesh) => !mesh.isPickable && !mesh.checkCollisions)).toBe(true);
       expect(collisionMeshes).toHaveLength(new Set(layout.wallSegments.map((wall) => wall.color)).size + 1);
       expect(bundle.scene.meshes.length).toBeLessThan(4_000);
+      const hospitalSlabs = layout.floorSlabs.filter((slab) => slab.obstacleId === layout.hospital.buildingId);
+      const regularSlabs = layout.floorSlabs.filter((slab) => slab.obstacleId !== layout.hospital.buildingId);
       const slabBatch = bundle.scene.getMeshByName("building-slabs-batch");
-      expect(slabBatch?.metadata?.sourceCount).toBe(layout.floorSlabs.length);
-      expect(slabBatch?.getTotalVertices()).toBe(layout.floorSlabs.length * 24);
+      const hospitalSlabBatch = bundle.scene.getMeshByName("hospital-slabs-batch");
+      expect(slabBatch?.metadata?.sourceCount).toBe(regularSlabs.length);
+      expect(slabBatch?.getTotalVertices()).toBe(regularSlabs.length * 24);
+      expect(hospitalSlabBatch?.metadata?.sourceCount).toBe(hospitalSlabs.length);
+      expect(hospitalSlabBatch?.getTotalVertices()).toBe(hospitalSlabs.length * 24);
+      expect(hospitalSlabBatch?.material).toBeInstanceOf(StandardMaterial);
+      expect((hospitalSlabBatch?.material as StandardMaterial).diffuseColor.toHexString().toLowerCase()).toBe(
+        HOSPITAL_WALL_COLOR,
+      );
       const openingPieceCount =
         layout.wallOpenings.filter((opening) => opening.kind === "window").length * 4 +
         layout.wallOpenings.filter((opening) => opening.kind === "door").length * 3;

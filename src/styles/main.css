@@ -1167,13 +1167,15 @@ h1 {
   stroke-width: 1.15;
 }
 
-.minimap-pois circle {
+.minimap-pois circle,
+.minimap-hospital circle {
   fill: #c3b678;
   stroke: rgb(18 24 18 / 70%);
   stroke-width: 0.75;
 }
 
-.minimap-pois text {
+.minimap-pois text,
+.minimap-hospital text {
   fill: #dce2d7;
   font-family: var(--tactical-font);
   font-size: 6.5px;
@@ -1183,13 +1185,6 @@ h1 {
   paint-order: stroke;
   stroke: rgb(8 14 12 / 88%);
   stroke-width: 2px;
-}
-
-.minimap-hospital path {
-  fill: #df5549;
-  stroke: #f3f4ed;
-  stroke-width: 0.8;
-  filter: drop-shadow(0 0 2px rgb(223 85 73 / 55%));
 }
 
 .minimap-flight {

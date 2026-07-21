@@ -71,7 +71,7 @@ export class GameHud {
               const projected = projectToMinimap(point.position);
               return `<g transform="translate(${projected.x} ${projected.y})"><circle r="2" /><text y="-5">${point.name}</text></g>`;
             }).join("")}</g>
-            <g class="minimap-hospital" transform="translate(${hospitalPoint.x} ${hospitalPoint.y})"><title>医院</title><path d="M-4 -1.5H-1.5V-4H1.5V-1.5H4V1.5H1.5V4H-1.5V1.5H-4Z" /></g>
+            <g class="minimap-hospital" transform="translate(${hospitalPoint.x} ${hospitalPoint.y})"><title>医院</title><circle r="2" /><text y="-5">医院</text></g>
             <line class="minimap-flight" data-hud="map-flight" />
             <circle class="minimap-target-zone" data-hud="map-target-zone" />
             <circle class="minimap-current-zone" data-hud="map-current-zone" />

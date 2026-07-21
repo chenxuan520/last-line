@@ -25,6 +25,7 @@ import {
   createMapRoadSegments,
   createMapLayout,
   getTerrainHeight,
+  HOSPITAL_WALL_COLOR,
   MAP_SIZE,
   TERRAIN_GRID_SUBDIVISIONS,
   type MapLayout,
@@ -83,6 +84,7 @@ interface IslandMaterials {
   poiAccent: StandardMaterial;
   poiDark: StandardMaterial;
   roof: StandardMaterial;
+  hospitalCeiling: StandardMaterial;
   wallTrim: StandardMaterial;
   hospitalCross: StandardMaterial;
   window: StandardMaterial;
@@ -340,6 +342,7 @@ function createMaterials(scene: Scene, assets: AssetCatalog): IslandMaterials {
     poiAccent: material(scene, "poi-accent-material", "#a37848"),
     poiDark: material(scene, "poi-dark-material", "#434b4f"),
     roof: material(scene, "building-roof-material", "#343b3b"),
+    hospitalCeiling: material(scene, "hospital-ceiling-material", HOSPITAL_WALL_COLOR),
     wallTrim: material(scene, "building-trim-material", "#8a8069"),
     hospitalCross: material(scene, "hospital-cross-material", "#d8473f"),
     window: windowMaterial,
@@ -372,7 +375,13 @@ function createIslandEnvironment(scene: Scene, materials: IslandMaterials, layou
 
   const buildingMaterials = new Map<string, StandardMaterial>();
   const buildingWallMeshes = new Map<string, Mesh[]>();
+  const doorSillIds = new Set(
+    layout.wallOpenings
+      .filter((opening) => opening.kind === "door")
+      .map((opening) => `${opening.obstacleId}-wall-${opening.side}-${opening.storyIndex}-sill`),
+  );
   for (const wall of layout.wallSegments) {
+    if (doorSillIds.has(wall.id)) continue;
     let buildingMaterial = buildingMaterials.get(wall.color);
     if (!buildingMaterial) {
       buildingMaterial = material(scene, `building-material-${buildingMaterials.size}`, wall.color);
@@ -396,6 +405,7 @@ function createIslandEnvironment(scene: Scene, materials: IslandMaterials, layou
     merged.name = `building-walls-${color.replace("#", "")}`;
     merged.material = buildingMaterials.get(color) ?? null;
     markEnvironment(merged, `building-walls-${color}`);
+    merged.metadata = { ...merged.metadata, sourceCount: meshes.length };
   }
 
   createHospitalCross(scene, materials.hospitalCross, layout);
@@ -409,8 +419,21 @@ function createIslandEnvironment(scene: Scene, materials: IslandMaterials, layou
     scene,
     "building-slabs-batch",
     (mesh) => mesh.metadata?.decoration === "building-detail" &&
-      (mesh.metadata?.detailType === "floor" || mesh.metadata?.detailType === "roof"),
+      (mesh.metadata?.detailType === "floor" || mesh.metadata?.detailType === "roof") &&
+      mesh.metadata?.obstacleId !== layout.hospital.buildingId,
     { decoration: "building-detail", detailType: "floor-slabs" },
+  );
+  mergeStaticBatch(
+    scene,
+    "hospital-slabs-batch",
+    (mesh) => mesh.metadata?.decoration === "building-detail" &&
+      (mesh.metadata?.detailType === "floor" || mesh.metadata?.detailType === "roof") &&
+      mesh.metadata?.obstacleId === layout.hospital.buildingId,
+    {
+      decoration: "building-detail",
+      detailType: "hospital-slabs",
+      obstacleId: layout.hospital.buildingId,
+    },
   );
   mergeStaticBatch(
     scene,
@@ -627,6 +650,7 @@ function createBuildingDetails(scene: Scene, materials: IslandMaterials, layout:
     if (!mesh) continue;
     mesh.position.set(slab.center.x, slab.center.y, slab.center.z);
     mesh.scaling.set(slab.width, slab.height, slab.depth);
+    mesh.material = slab.obstacleId === layout.hospital.buildingId ? materials.hospitalCeiling : materials.roof;
     mesh.isVisible = true;
     markBuildingDetail(mesh, slab.obstacleId, slab.kind);
   }
