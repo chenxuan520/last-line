@@ -11,6 +11,7 @@ import {
 import { createMapLayout, getTerrainHeight, HOSPITAL_WALL_COLOR } from "../../src/config/map";
 import { createBattleRoyaleState, createBattleRoyaleStateForHumans } from "../../src/game/modes/BattleRoyaleMode";
 import { createWeaponState } from "../../src/game/state/types";
+import { getSupportHeight } from "../../src/game/systems/MovementSystem";
 
 describe("IslandScene lifecycle", () => {
   afterEach(() => {
@@ -34,10 +35,14 @@ describe("IslandScene lifecycle", () => {
         showGroundLootModels,
       );
       const layout = createMapLayout(state.mapSeed);
+      const expectedLootScale = showGroundLootModels ? 1.45 : 1;
       expect(engine.scenes).toHaveLength(1);
       expect(bundle.lootMeshes.size).toBe(Object.keys(state.groundLoot).length);
       expect([...bundle.lootMeshes.values()].every((mesh) =>
-        mesh.isPickable && mesh.scaling.x === 1 && mesh.scaling.y === 1 && mesh.scaling.z === 1
+        mesh.isPickable
+        && mesh.scaling.x === expectedLootScale
+        && mesh.scaling.y === expectedLootScale
+        && mesh.scaling.z === expectedLootScale
       )).toBe(true);
       expect([...bundle.lootMeshes.values()].every((mesh) => mesh.metadata?.lootModel === showGroundLootModels)).toBe(true);
       if (!showGroundLootModels) {
@@ -285,16 +290,17 @@ describe("IslandScene lifecycle", () => {
     if (!marker) throw new Error("rifle marker missing");
     const rifleGeometry = marker.geometry;
     const spawnMaterial = marker.material;
+    const layout = createMapLayout(state.mapSeed);
 
     expect(marker.metadata).toMatchObject({
       itemId: "weapon.rifle",
       lootModel: true,
+      lootModelScale: 1.45,
       modelId: "weapon.rifle",
     });
     expect(marker.billboardMode).toBe(0);
     expect(marker.getTotalVertices()).toBeGreaterThan(24);
     expect(marker.getChildMeshes()).toHaveLength(0);
-    expect(marker.position.y).toBeCloseTo(loot.position.y);
     expect(bundle.lootMeshes.size).toBe(Object.keys(state.groundLoot).length);
     expect(bundle.scene.meshes.filter((mesh) => mesh.name.startsWith("loot-model-template-"))).toHaveLength(15);
     expect(bundle.scene.materials.filter((entry) => entry.name.startsWith("loot-model-material-"))).toHaveLength(14);
@@ -302,6 +308,21 @@ describe("IslandScene lifecycle", () => {
       candidate !== marker && candidate.metadata?.itemId === "weapon.rifle"
     );
     expect(secondRifle?.geometry).toBe(rifleGeometry);
+    const classicMarkerDiagonal = 0.62 * Math.sqrt(3);
+    for (const modelMarker of bundle.lootMeshes.values()) {
+      const modelLoot = state.groundLoot[String(modelMarker.metadata?.lootId)];
+      if (!modelLoot) throw new Error("model loot missing");
+      modelMarker.computeWorldMatrix(true);
+      const bounds = modelMarker.getBoundingInfo().boundingBox;
+      const support = getSupportHeight(
+        modelLoot.position.x,
+        modelLoot.position.z,
+        modelLoot.position.y,
+        layout,
+      );
+      expect(bounds.maximumWorld.subtract(bounds.minimumWorld).length()).toBeGreaterThanOrEqual(classicMarkerDiagonal);
+      expect(bounds.minimumWorld.y).toBeCloseTo(support + 0.04, 2);
+    }
 
     loot.itemId = "bandage";
     loot.generation = (loot.generation ?? 0) + 1;
@@ -315,11 +336,37 @@ describe("IslandScene lifecycle", () => {
       itemId: "bandage",
       lootSource: "death",
       lootModel: true,
+      lootModelScale: 1.45,
       modelId: "bandage",
     });
     expect(marker.getTotalVertices()).toBeGreaterThan(24);
     expect(bundle.scene.meshes.filter((mesh) => mesh.name.startsWith("loot-model-template-"))).toHaveLength(15);
     expect(bundle.scene.materials.filter((entry) => entry.name.startsWith("loot-model-material-"))).toHaveLength(14);
+
+    const roof = layout.floorSlabs.find((slab) => slab.kind === "roof");
+    if (!roof) throw new Error("roof slab missing");
+    expect(roof.kind).toBe("roof");
+    const roofY = roof.center.y + roof.height / 2;
+    const roofSupport = getSupportHeight(roof.center.x, roof.center.z, roofY + 0.45, layout);
+    expect(roofSupport).toBeCloseTo(roofY);
+    loot.position = { x: roof.center.x, y: roofY + 0.45, z: roof.center.z };
+    loot.itemId = "future.unknown-item";
+    loot.generation = (loot.generation ?? 0) + 1;
+    bundle.syncLootMeshes(state.groundLoot);
+    marker.computeWorldMatrix(true);
+    expect(marker.metadata?.modelId).toBe("fallback");
+    expect(marker.rotation.y).toBeCloseTo(Math.PI / 4);
+    expect(marker.rotation.z).toBeCloseTo(Math.PI / 4);
+    expect(marker.getBoundingInfo().boundingBox.minimumWorld.y).toBeCloseTo(roofSupport + 0.04, 2);
+
+    loot.itemId = "weapon.sniper";
+    loot.generation = (loot.generation ?? 0) + 1;
+    bundle.syncLootMeshes(state.groundLoot);
+    marker.computeWorldMatrix(true);
+    expect(marker.metadata?.modelId).toBe("weapon.sniper");
+    expect(marker.rotation.y).toBeCloseTo(0);
+    expect(marker.rotation.z).toBeCloseTo(0);
+    expect(marker.getBoundingInfo().boundingBox.minimumWorld.y).toBeCloseTo(roofSupport + 0.04, 2);
 
     bundle.scene.dispose();
     engine.dispose();

@@ -1356,6 +1356,10 @@ const LOOT_MODEL_COLORS: Readonly<Record<string, string>> = {
   bandage: "#d7d0b9",
   medkit: "#68745f",
 };
+const CLASSIC_LOOT_MARKER_SIZE = 0.62;
+const GROUND_LOOT_POSITION_HEIGHT = 0.45;
+const GROUND_LOOT_MODEL_SCALE = 1.45;
+const GROUND_LOOT_MODEL_CLEARANCE = 0.04;
 
 function createLootModelMaterial(scene: Scene, itemId: string, death = false): StandardMaterial {
   const color = Color3.FromHexString(death ? "#c85e50" : (LOOT_MODEL_COLORS[itemId] ?? "#c3b678"));
@@ -1374,7 +1378,7 @@ function createLootModelTemplates(scene: Scene, fallbackMaterial: StandardMateri
   for (const itemId of Object.keys(ITEMS)) {
     templates.set(itemId, createLootModelTemplate(scene, itemId, createLootModelMaterial(scene, itemId)));
   }
-  const fallback = CreateBox("loot-model-template-fallback", { size: 0.62 }, scene);
+  const fallback = CreateBox("loot-model-template-fallback", { size: CLASSIC_LOOT_MARKER_SIZE }, scene);
   fallback.rotation.set(0, Math.PI / 4, Math.PI / 4);
   fallback.material = fallbackMaterial;
   fallback.isVisible = false;
@@ -1486,7 +1490,7 @@ function createLootModelTemplate(scene: Scene, itemId: string, modelMaterial: St
     addBox("cross-vertical", 0.14, 0.38, 0.08, 0, 0.02, -0.22);
     addBox("cross-horizontal", 0.38, 0.14, 0.08, 0, 0.02, -0.22);
   } else {
-    addBox("fallback", 0.62, 0.62, 0.62);
+    addBox("fallback", CLASSIC_LOOT_MARKER_SIZE, CLASSIC_LOOT_MARKER_SIZE, CLASSIC_LOOT_MARKER_SIZE);
   }
 
   const merged = Mesh.MergeMeshes(parts, true, true);
@@ -1508,12 +1512,21 @@ function createLootMeshes(
   lootMeshes: Map<EntityId, Mesh>;
   syncLootMeshes: (groundLoot: Readonly<Record<EntityId, GroundLootState>>) => void;
 } {
-  const boxTemplate = CreateBox("loot-marker-template", { size: 0.62 }, scene);
+  const boxTemplate = CreateBox("loot-marker-template", { size: CLASSIC_LOOT_MARKER_SIZE }, scene);
   boxTemplate.rotation.set(0, Math.PI / 4, Math.PI / 4);
   boxTemplate.material = lootMaterial;
   boxTemplate.isVisible = false;
   boxTemplate.isPickable = false;
   const modelTemplates = showGroundLootModels ? createLootModelTemplates(scene, lootMaterial) : new Map<string, Mesh>();
+  const modelGroundOffsets = new Map<string, number>();
+  for (const [modelId, template] of modelTemplates) {
+    template.computeWorldMatrix(true);
+    const minimumY = template.getBoundingInfo().boundingBox.minimumWorld.y;
+    modelGroundOffsets.set(
+      modelId,
+      -minimumY * GROUND_LOOT_MODEL_SCALE + GROUND_LOOT_MODEL_CLEARANCE,
+    );
+  }
   const deathMaterials = new Map<string, StandardMaterial>();
   const getModelId = (itemId: string): string => modelTemplates.has(itemId) ? itemId : "fallback";
   const getModelMaterial = (modelId: string, death: boolean): StandardMaterial => {
@@ -1544,16 +1557,28 @@ function createLootMeshes(
       const modelTemplate = modelTemplates.get(modelId);
       if (showGroundLootModels && marker.metadata?.modelId !== modelId) {
         modelTemplate?.geometry?.applyToMesh(marker);
+        if (modelTemplate) {
+          marker.rotation.copyFrom(modelTemplate.rotation);
+          marker.rotationQuaternion = modelTemplate.rotationQuaternion?.clone() ?? null;
+        }
       }
       marker.material = showGroundLootModels
         ? getModelMaterial(modelId, loot.source === "death")
         : (loot.source === "death" ? deathLootMaterial : lootMaterial);
-      marker.position.set(loot.position.x, loot.position.y, loot.position.z);
+      marker.scaling.setAll(showGroundLootModels ? GROUND_LOOT_MODEL_SCALE : 1);
+      marker.position.set(
+        loot.position.x,
+        loot.position.y + (showGroundLootModels
+          ? (modelGroundOffsets.get(modelId) ?? 0) - GROUND_LOOT_POSITION_HEIGHT
+          : 0),
+        loot.position.z,
+      );
       marker.metadata = {
         lootId: loot.id,
         itemId: loot.itemId,
         lootSource: loot.source ?? "spawn",
         lootModel: showGroundLootModels,
+        lootModelScale: showGroundLootModels ? GROUND_LOOT_MODEL_SCALE : 1,
         modelId,
       };
       marker.setEnabled(loot.available);
@@ -1567,6 +1592,7 @@ function createLootMeshes(
   scene.onDisposeObservable.addOnce(() => {
     lootMeshes.clear();
     modelTemplates.clear();
+    modelGroundOffsets.clear();
     deathMaterials.clear();
   });
 

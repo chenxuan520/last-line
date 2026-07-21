@@ -594,7 +594,59 @@
 - 2026-07-21 20:12：最终联机平滑实现（含动态 parachuting snap 边界、README、architecture 和 reviewer 闭环）已随 `0e3597a fix: smooth multiplayer movement` 推送；CI `29828821107` 与 GitHub Pages 成功。随后 `89423e5` 仅补充本 plan 的提交状态记录。最终 reviewer 为 `No findings`、完整门禁为 269/26 tests 全绿；生产 Worker 尚未更新，避免在未确认活动房间状态时擅自重启在线房间。
 - 2026-07-21 20:17：用户明确确认生产当前无活动房间后部署 Worker，production version 为 `551bad64-6740-4d60-a101-491f248e09d0`；`https://lastlinep2p.011203.xyz/health` 返回 `{"ok":true,"service":"lastlinep2p"}`，认证策略接口返回 `registrationLoginRequired=false`，保持既有游客模式。提交 `89423e5` 的 CI `29829200958` 与 GitHub Pages 成功，Cloudflare Pages production deployment `540da630-3f22-44c2-9cd0-5dd6cea24479` 已发布；实现提交 `0e3597a` 对应 deployment 为 `1ae4b36c-fd42-4479-99b0-015f7fc7a5c4`。生产验证使用只读 HTTP/Wrangler 查询，没有重新打开 Chrome；Chrome 仍只保留 `about:blank`。
 
+#### 2026-07-21 23:54 +0800：地面三维物资可见尺寸放大
+
+- 用户反馈低模三维地面物资贴地时过小、难以看清，要求至少达到原经典旋转方块的可见体量。展示层现统一使用 `1.45` 倍模型缩放，并按每个共享 template 的实际最低点计算独立 Y offset，使模型底部保持在权威支撑面上方 `0.04m`，不再有部分几何沉入地面；经典方块关闭模型路径继续保持原 `0.62m`、原位置和原缩放。
+- 改动只作用于 Babylon marker 的 scaling/position；`GroundLootState.position`、拾取距离、AI、掉落支撑、权威碰撞和网络协议均未修改。每条 loot record 仍只有一个 Mesh，14 类共享 geometry/material、死亡材质和 record 原地切换逻辑保持有界。
+- `islandScene.test.ts` 新增全部三维 marker 的世界包围盒回归：每个模型包围盒对角线均不小于经典 `0.62m` 方块的空间对角线，底部均至少高于物资权威地面 `0.039m`；同时覆盖 `1.45` 缩放、经典方块仍为 `1`、步枪切换死亡绷带后原 Mesh/共享资源语义不变。首次定向运行暴露生命周期旧断言仍固定要求 scaling=1，已按模型/经典两条路径分别断言后重跑；`typecheck:app` 与 IslandScene 4 项测试通过，等待完整门禁、静音浏览器视觉验收和 reviewer。
+- 2026-07-22 00:10：最终自动门禁通过：应用 **30 files / 271 tests**、Worker **3 files / 27 tests**、standalone **2 files / 15 tests**、`npm run typecheck`、生产 build 和 `git diff --check` 全绿。静音 production preview 中确认菜单主音量为 `0`、三维模型开关启用；浏览器实际枚举 14 类可用 marker 均为 `1.45` scale，最小模型世界包围盒对角线约 `1.430m`，高于经典方块约 `1.074m`。将 14 类模型与原 `0.62m` 方块并排生成只读视觉 gallery，放大后的枪械、弹药箱、护甲、头盔和医疗物轮廓均清晰，console 无 error/warn；截图 `loot-scale-gallery-close.png` 保存于临时目录。验收后已关闭本轮独立 Chrome context、停止 4173 preview，并确认浏览器只剩 `about:blank`、端口无残留服务。等待 reviewer 终审。
+- 2026-07-22 00:23：逐条确认 reviewer 的 1 项 High、1 项 Medium 和 1 项 Low 均成立并完成修正。High：`GroundLootState.position.y` 是经典 marker 中心、已固定高于真实 support `0.45m`，展示定位现先减去该中心高度，再加模板最低点补偿与 `0.04m` clearance；全部静态物资测试改为通过真实 `getSupportHeight()` 断言底部贴合 terrain/楼板支撑面，而非相对 marker 中心。Medium：型号变化时除原地应用共享 geometry 外，同步恢复目标模板 Euler/quaternion，新增屋顶位置上的已知→fallback→sniper 双向切换，分别验证 fallback `π/4` 旋转、sniper 零旋转及切换后底部始终为 roof support `+0.04m`。Low：浏览器量测记录已改为 reviewer 复核的实际最小约 `1.430m`。定向 IslandScene 4 项、`typecheck:app` 与 diff check 重跑通过，等待 reviewer 复审。
+- 2026-07-22 00:32：采纳 reviewer 复审的 1 项 Medium 测试缺口。确认固定 seed 下 `floorSlabs[0]` 是 `kind="floor"` 的室内楼板，虽然运行时修复在 reviewer 只读真实屋顶复验中正确，但原测试和 00:23 记录将其误称为 roof。测试现显式 `find(slab.kind === "roof")` 并断言 kind，使用 `getSupportHeight()` 证明该点真实 support 等于 roof top，再对 fallback/sniper 切换后的最低点分别断言 roof support `+0.04m`。定向 IslandScene 4 项、`typecheck:app` 和 diff check 通过，等待 reviewer 最终复审。
+- 2026-07-22 00:41：reviewer 最终复审 `No findings`，前述 High/Medium/Low 全部闭环。按用户补充口径再次用静音 production preview 直接核验两条路径：250 个三维 marker 覆盖 14 类，全部 scale=`1.45`；经典黄色旋转方块 template 的 geometry 仍精确为 `0.62×0.62×0.62m`、scaling=`1`、rotation=`(0,π/4,π/4)`，颜色/材质链路未改。控制台无 error/warn；验收后关闭独立 context、停止 4173 服务并确认只剩 `about:blank`。最终完整门禁仍为 271/27/15 tests、typecheck、build 和 diff check 全绿，准备提交推送。
+
 ## 审查
+
+### 2026-07-22 00:34 +0800：真实屋顶回归最终复审（通过）
+
+- 审查范围：继续以 `main@97a411643fa0964424c20df0ee5d517413969f9a` 为基线，重读本 plan 597–604 行 Build 和最新两轮 Review；复核上一轮唯一 Medium 对应的 `islandScene.test.ts` 增量，并快速复查 `IslandScene.ts`、README、资源有界性和权威边界。`.gitignore` 的 `.opencode` 外部并发改动继续完全忽略且未触碰。
+- 审查结论：**通过。No findings。** 上一轮唯一 Medium 已闭环，前序 High/Medium/Low 继续闭环；未发现新的 blocker/high/medium 问题。
+- Medium disposition：`tests/unit/islandScene.test.ts:346-351` 现通过 `find(slab => slab.kind === "roof")` 显式选择真实 roof slab，并再次断言 `roof.kind === "roof"`；随后用 `getSupportHeight` 证明该点 support 等于 roof top。`:352-369` 在同一既有 marker 引用上完成 known→fallback→sniper，fallback 恢复 `(0,π/4,π/4)`、sniper 恢复零 Euler，两个阶段的 world minimum Y 均为真实 roof support `+0.04m`。旧 marker 的 metadata/geometry 连续原地更新，结合既有 `bundle.lootMeshes.get(loot.id) === marker` 和共享 geometry 断言，单 Mesh/共享资源语义保持。
+- 文档 disposition：Build 第 604 行已如实说明此前 `floorSlabs[0]` 实为室内 floor、00:23 记录误称 roof，并记录改为显式 roof、`getSupportHeight` 和最低点回归；第 602 行继续使用正确的最小 world bounds 约 `1.430m`。README 的放大、贴合支撑面、有界复用和经典方块开关描述与实现一致。
+- 前序闭环复核：模型路径继续把权威 `support+0.45m` marker 中心换算为最低点 `support+0.04m`，经典方块仍保持原位置/scale；geometry 切换同步目标 Euler/quaternion，known↔fallback offset 与实际姿态一致；14 类共享 geometry/material、每 record 单 Mesh、死亡材质和 offset map 均有界。`GroundLootState`、拾取距离、AI、掉落、网络及权威规则相对基线无 diff。
+- Reviewer 实际执行定向 IslandScene **4 tests**、`npm run typecheck:app` 和 scoped `git diff --check 97a4116`，全部通过。上一轮已通过的完整 **271/27/15 tests**、全量 typecheck 和生产 build 所覆盖业务实现未再变化；本轮只补测试与 plan 记录。Reviewer 未启动浏览器、未修改业务代码，scoped 业务文件未出现 `context.Background()`。
+
+### 2026-07-22 00:30 +0800：地面三维物资放大 findings 复审（不通过）
+
+- 审查范围：继续以 `main@97a411643fa0964424c20df0ee5d517413969f9a` 为基线，重读本 plan 597–603 行 Build 和 607–622 行上一轮 Review；复核 `IslandScene.ts`、`islandScene.test.ts`、README 与 plan 当前增量。`.gitignore` 的 `.opencode` 外部并发改动继续完全忽略且未触碰。
+- 审查结论：**不通过。** 上轮 High 的运行时定位错误、Medium 的 stale rotation 行为和 Low 的 `1.430m` 文档数值均已实质修正；但 Build 声称的“屋顶 known→fallback→sniper 回归”实际使用的是室内楼板，仍有 1 项中风险必要验证缺口。当前不能记录 `No findings`。
+
+#### Finding 与 disposition
+
+1. **[中][待 writer/builder 补测试] 所谓屋顶切换回归实际固定取到室内楼板，没有覆盖用户明确要求的真实 roof slab。** `tests/unit/islandScene.test.ts:346-349` 直接使用 `layout.floorSlabs[0]`；当前确定性测试 seed `2147483648` 下该对象为 `building-0-0-floor-1-left`、`kind="floor"`，不是 `kind="roof"`。因此 `:350-366` 的 known→fallback→sniper、Euler 恢复和最低点断言只证明 raised interior floor，plan 第 603 行“新增屋顶位置”记录不准确。Reviewer 只读改用 `layout.floorSlabs.find(slab => slab.kind === "roof")` 复现后，fallback/sniper 保持同一 Mesh，旋转分别为 `(0,π/4,π/4)` / `(0,0,0)`，最低点分别为真实 roof `+0.03999993m` / `+0.04000018m`，当前实现没有发现屋顶运行时 bug；但应将持久回归明确选取并断言 `kind="roof"`（建议同时以 `getSupportHeight` 复核该点）后再复审。
+
+#### 上轮 findings 复核与验证
+
+- **High 已闭环：** `IslandScene.ts:1359-1362,1568-1575` 只在模型展示路径从权威 marker 中心减去 `0.45m`，再应用按目标模板姿态计算的最低点补偿和 `0.04m` clearance；经典方块仍使用原权威位置。全部现有 marker 的 NullEngine 循环通过真实 `getSupportHeight` 比较最低点，terrain/室内 spawn 均为 support 约 `+0.04m`；`GroundLootState`、拾取、AI、掉落和网络无 diff。
+- **Medium 行为已闭环：** `IslandScene.ts:1555-1564` 在共享 geometry 原地切换时同步目标模板 Euler，并 clone quaternion 或显式清空为 `null`；offset 仍来自同一目标模板的实际 world bounds。known↔fallback 保持原 Mesh/共享 geometry，未新增子 Mesh 或无界资源。
+- **Low 已闭环：** plan 第 602 行已改为实际最小 world bounds 对角线约 `1.430m`；README 的“清晰放大、贴合支撑面、有界复用”与当前实现一致。
+- Reviewer 实际执行定向 IslandScene **4 tests**、`npm run typecheck`、完整 `npm run test`（应用 **30 files / 271 tests**、Worker **3 files / 27 tests**、standalone **2 files / 15 tests**）、`npm run build` 和 scoped `git diff --check 97a4116`，全部通过；构建仅有既有 >500kB chunk warning。Reviewer 未启动浏览器、未修改业务代码，scoped 业务文件未出现 `context.Background()`。
+
+### 2026-07-22 00:20 +0800：地面三维物资可见尺寸放大终审（不通过）
+
+- 审查范围：基于用户指定的 `main@97a411643fa0964424c20df0ee5d517413969f9a`，确认当前分支/`HEAD`/`origin/main` 均为该提交且 merge-base 相同；重读本 plan 597–602 行及 426–459、536–563 行三维物资历史，对照 `AGENTS.md`、`README.md`，审查 `IslandScene.ts`、`islandScene.test.ts`、`README.md` 和本 plan 当前增量（4 files / 48 additions / 7 deletions）。工作区 `.gitignore` 的 `.opencode` 外部并发改动按要求完全忽略，未修改、未纳入结论。
+- 审查结论：**不通过。** `1.45` scaling、14 类当前模板的共享 geometry/material、每 record 单 Mesh、死亡材质有界缓存、已知类型间原地 geometry 切换和经典方块关闭路径未见权威规则或资源有界性回归；但支撑面 Y 基准使用错误会让全部正常三维物资悬空，fallback 切换还会保留旧旋转并可能重新沉入地面。当前有 1 项高风险、1 项中风险 finding；不得记录通过。
+
+#### Findings 与 disposition
+
+1. **[高][待 builder 处理] Y offset 把权威 marker 中心误当成支撑面，全部 14 类模型底部实际悬空约 0.49m。** `src/client/render/scenes/IslandScene.ts:1520-1527,1564-1567` 将模板最低点补偿后再整体加到 `loot.position.y`，所以最终最低点恒为 `loot.position.y + 0.04m`。但静态 loot 点和动态掉落都把 `GroundLootState.position.y` 定义为实际 terrain/屋顶/坡道 support `+0.45m`（`src/config/map.ts:1212-1215`、`src/game/systems/InventorySystem.ts:608-614`），最终模型底部因而位于 support 约 `+0.49m`，不是 plan/README 宣称的 `+0.04m` 贴合。Reviewer 只读 NullEngine 复现中，步枪点 support=`20.70447`、loot Y=`21.154`、模型最低点=`21.19400`，离支撑面 `0.48953m`；该关系同样作用于 terrain、屋顶和死亡/手动掉落。`tests/unit/islandScene.test.ts:302,310-318` 只相对 `loot.position.y` 断言，反而固化了错误基准；README 第 19 行“贴合支撑面”和 plan 第 599/601 行因此不准确。Builder 需只修 Babylon 展示位置、不得改 `GroundLootState` 或拾取规则，并补相对真实 support 的平地与屋顶/动态掉落最低点回归；writer 待实现闭环后同步修正文档。
+2. **[中][待 builder/writer 处理] fallback 与已知型号原地切换时只换 geometry，不同步模板旋转，offset 所依据的包围盒与实际姿态失配。** fallback 模板在 `src/client/render/scenes/IslandScene.ts:1380-1382` 带 `(0, π/4, π/4)` 旋转，而 `:1555-1559` 的 `geometry.applyToMesh` 不复制 transform。已知型号 record 切到 fallback 会保留零旋转；fallback record 再切到已知型号会保留 fallback 旋转。Reviewer 只读复现中，fallback→sniper 后最低点落到实际 support 下约 `0.258m`；fallback→bandage 也不再满足新增的 `loot Y +0.039m` 断言。Babylon 9.16.2 的 `applyToMesh` 会重建 bounding info，本问题是 stale rotation 而非 stale bounds。当前测试 `tests/unit/islandScene.test.ts:320-337` 只覆盖两个零根旋转模板的 rifle→bandage，未覆盖 fallback 双向切换或切换后的世界 bounds。当前权威表只生成 14 个已知 ID，因此该路径日常触发概率低，但它是本轮明确要求检查的 fallback/未来型号兼容契约；builder 需在复用更新时恢复目标模板 transform，writer 补 fallback↔已知类型及切换后最低点回归。
+3. **[低][待 writer 修正] plan 的视觉量测记录与当前实际 world bounding-box 结果不一致。** 第 602 行写“最小模型世界包围盒对角线约 `1.648m`”；Reviewer 按测试相同的 `maximumWorld-minimumWorld` 算法枚举当前 14 类时最小为 SMG 约 `1.430m`，bandage 约 `1.470m`。二者仍明显高于测试采用的经典几何对角线 `0.62×√3≈1.074m`，不形成尺寸 blocker，但记录应改成实际指标/数值，避免把 gallery 的其他量测口径写成生产 marker world bounds。
+
+#### 验证与待处理
+
+- Reviewer 实际执行 `npm run typecheck`、`npm run test`、`npm run build`、定向 `npx vitest run tests/unit/islandScene.test.ts` 和 scoped `git diff --check 97a4116`，全部通过：应用 **30 files / 271 tests**、Worker **3 files / 27 tests**、standalone **2 files / 15 tests**，构建仅有既有 >500kB chunk warning。通过结果不能覆盖上述错误的支撑面基准与缺失 fallback 切换场景。
+- 只读调用链确认本次 tracked 业务改动只在 Babylon 展示文件及测试/文档；`src/game/`、AI、掉落、拾取距离、网络和服务端相对基线无 diff，经典方块仍为原 `0.62m`、原旋转、scale `1` 和原 `loot.position`。每 record 单 Mesh、15 个模板（14 类 + fallback）、14 个常规材质及按型号至多一个死亡材质的有界关系保持。
+- Builder 必须先处理 findings 1–2；writer 修正 README/plan 和量测记录并补对应测试后再发起复审。Finding 3 只要求文档证据收敛。Reviewer 未启动浏览器、未修改业务代码，且 scoped 业务文件未出现 `context.Background()`。
 
 ### 2026-07-16 14:27 +0800：当前未提交实现审查（不通过）
 
