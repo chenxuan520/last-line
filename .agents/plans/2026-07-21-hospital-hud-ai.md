@@ -39,6 +39,7 @@
 - 2026-07-21 10:39：完整测试发现直接删除权威 door sill 会改变 AI 建筑导航，确认属于范围外规则回归后撤回；最终方案保留 `wallSegments` 和历史导航语义，仅在 Babylon 展示层不创建门洞 sill mesh。医院白色天花板和普通地图点方案保持不变。新增渲染批次断言确认白色门槛不再进入医院墙 mesh；AI seed 99 高地医院出门、医院物资/几何及场景生命周期 3 项定向回归全部通过。
 - 2026-07-21 10:49：最终门禁通过：应用 25 files / 246 tests、Worker 3 files / 26 tests、`npm run typecheck`、`npm run build`、`npm run build:worker`、`git diff --check` 全部成功，构建仅保留既有大 chunk warning。静音 production preview 确认医院标记不再包含十字 path，改为半径 2 的普通圆点和“医院”文字，颜色与其他 POI 完全一致；控制台无 error/warn，截图保存为 `hospital-map-marker-fix.png`（临时目录，不提交）。医院白色天花板和门底 sill 渲染修复由 NullEngine 回归覆盖，权威门体与 AI 导航保持不变，等待提交推送。
 - 2026-07-21 10:50：医院视觉修复已提交并推送 `main`，实现提交为 `52ddebb fix: refine hospital visuals`；未跟踪参考文件 `session-ses_082c.md` 保持本地且未提交。等待主分支 CI 与自动部署完成。
+- 2026-07-21 10:57：记录提交 `9670033 docs: record hospital visual fix` 后，主分支 CI `29796911283`、GitHub Pages 和 Cloudflare Pages production deployment `cf769b48-8212-442c-aca9-8302b38c184c` 均成功。正式域名已加载新静态包 `index-DJ8ssN9F.js`；静音实测医院 marker 为普通圆点加文字、无十字 path，样式与其他 POI 一致，约 119 FPS，控制台无 error/warn。
 
 ## Review
 
