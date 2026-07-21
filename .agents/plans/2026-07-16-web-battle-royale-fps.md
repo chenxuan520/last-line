@@ -623,6 +623,7 @@
 - 2026-07-22 02:18：最终自动门禁通过：应用 **30 files / 271 tests**、Worker **3 files / 27 tests**、standalone **2 files / 15 tests**、`npm run typecheck`、生产 build 和 diff check 全绿；构建仅保留既有大 chunk warning。动态枪没有可证实的来源差异，因此本轮业务实现只新增独立 favicon，枪械部分仅增加真实 drop/death 规则链回归，不做猜测性修复。等待 reviewer 终审。
 - 2026-07-22 02:26：确认 reviewer 的唯一 Medium 为真实测试证据缺口，不是业务错误。动态回归现显式保存 inactive ammo/SMG 的原 ID、generation 和 marker 引用，分别断言真实 drop/death 后 ID 不变、generation 严格 `+1`、旧 marker 原地复用；死亡 SMG 另选未被复用的第二个自然 SMG marker 作为独立对照，并断言两者不是同一 Mesh、但共享 geometry 和顶点数，消除对象自比。无需修改枪械业务实现，等待定向验证与复审。
 - 2026-07-22 02:27：修正后定向 IslandScene 4 项、`typecheck:app` 和 diff check 通过；reviewer 复审 `No findings`，唯一 Medium 已闭环，favicon 路径/fallback 和“不强改无法复现的动态枪”结论继续成立。准备提交并推送。
+- 2026-07-22 02:32：主题 favicon、动态 drop/death 真实链路回归及完整 review 记录已随 `24d2974 fix: refresh site favicon` 提交并推送。GitHub Actions run `29857337386`、GitHub Pages 和 Cloudflare Pages production deployment `76e82504-07b5-46a9-973c-57b7e4983a38` 均成功；本次无 Worker/服务端改动，不需部署 Worker。favicon 已上线，动态枪因三类来源共享同一 geometry 且无法复现来源差异而未做猜测性业务修改。
 
 ## 审查
 
