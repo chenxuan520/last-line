@@ -563,6 +563,7 @@
 - 2026-07-21 14:20：主分支 CI `29806350457`、GitHub Pages 和 Cloudflare Pages production deployment `9adfd4d4-42ca-4aef-9222-293b37648ad9` 均成功。正式域名已加载新静态包 `index-eNISTJ-b.js`；844×390 手机横屏静音实测完整触控 HUD 可见、250/250 三维物资生效、默认 0 个前胸板/49 个背包、约 120 FPS，控制台无 error/warn。真实手机多指手感仍按前述风险建议补一次人工复核，但不阻塞当前功能与自动门禁。
 - 2026-07-21 15:02：补做 reviewer 后确认其唯一中风险 finding 真实：短横屏同时继承 `top` 并设置 `bottom`，会压缩治疗卡并与武器区重叠。已改为单一 `top` 定位，治疗卡位于准星上方、拾取提示位于准星下方。production build 与 `git diff --check` 通过；静音 preview 在 844×390 和 667×375 强制显示真实治疗 DOM/拾取提示测量，治疗卡 client/scroll 分别为 `57/57px`、拾取提示 `28/28px`，与右下武器区重叠面积均为 0；667×375 截图保存于临时目录，等待 reviewer 复审。
 - 2026-07-21 15:10：reviewer 复审无 findings，确认原中风险布局问题闭环，且原 `5ddf86d..bf4682d` 范围不存在剩余 blocker/high/medium 问题；修复未引入与顶部 HUD、准星、小地图或触控按钮的新重叠。准备提交并推送 CSS 修复及完整 review 记录。
+- 2026-07-21 15:15：review 闭环修复已提交并推送 `main`，提交为 `3b1bfaf fix: stabilize short mobile HUD`；最终 CI `29809517369`、GitHub Pages 和 Cloudflare Pages deployment `e7aa788b-4305-4772-8279-a6307b8c29eb` 均成功。工作区仅保留未跟踪参考文件 `session-ses_082c.md`，未提交。
 
 ## 审查
 
