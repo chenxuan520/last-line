@@ -68,6 +68,15 @@ npm run preview
 - Do not play audio during automated or manual verification.
 - Run both Worker and standalone contract suites after changing shared multiplayer classes. Standalone regressions must cover real HTTP/WebSocket behavior, persistence/restart, process locking, alarm generations, reconnect grace, room eviction, and bounded shutdown; use deterministic barriers for races instead of timing-only assertions.
 
+## Review and Delivery Rules
+
+- Every non-trivial code change must pass a final code review after implementation and required tests are complete. Do not treat passing tests as a substitute for review.
+- Re-read the current plan before evaluating findings. Treat reviewer feedback as input to verify against requirements, compatibility, existing semantics, and code; do not apply it mechanically.
+- Resolve every blocker, high, and medium finding, then request re-review. Do not commit, push, deploy, or report completion while any such finding remains, unless the plan records a specific, evidence-backed reason that no code change is required.
+- Record each review round and the disposition of every finding in the current plan's `## Review`; record implementation, validation, commit, and deployment results incrementally under `## Build`.
+- Keep engineering documentation current in the same change. Update `AGENTS.md`, README, and relevant `docs/` whenever architecture, contracts, security, persistence, deployment, commands, or long-term validation rules change.
+- After any Chrome/Edge verification, close every page/context opened for the task, stop its local servers, and confirm only the unavoidable blank page remains. Keep volume at `0` throughout.
+
 ## Completion Checklist
 
 1. Run `npm run typecheck`.
@@ -75,7 +84,8 @@ npm run preview
 3. Run `npm run build`.
 4. Run `npm run build:worker` and `npm run build:server` when multiplayer/shared server code changed; run `npm run build:standalone` when the self-hosted artifact or same-origin client selection changed.
 5. If presentation changed, open the production build in local Chrome/Edge with volume `0` and check the console.
-6. Update `AGENTS.md`, README, and `docs/` when contracts, controls, commands, architecture, persistence, security, or deployment behavior change.
+6. Complete the review/re-review loop with no unresolved blocker, high, or medium findings.
+7. Update `AGENTS.md`, README, and `docs/` when contracts, controls, commands, architecture, persistence, security, or deployment behavior change.
 
 ## Deployment Rules
 

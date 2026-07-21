@@ -248,6 +248,7 @@ The standalone integration suite verifies static serving, native SQLite account/
 
 ## Deployment Verification
 
+- Complete the plan-linked code review and re-review loop before any production push. Do not deploy with unresolved blocker, high, or medium findings.
 - Keep the game volume at `0` during browser checks.
 - Verify single-player independently, then open two local Chrome/Edge pages and verify quick matching, the 50-player HUD, remote-human presentation, and reconnect behavior.
 - Verify both admission settings: guest mode must preserve the original flow; account-required mode must block anonymous guest creation, allow registration/login, restore the HttpOnly refresh session after reload, and reject disabled/revoked accounts.
