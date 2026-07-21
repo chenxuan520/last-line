@@ -354,10 +354,23 @@ export class MultiplayerConnection {
 }
 
 export function getDefaultMultiplayerApiUrl(): string | null {
-  if (import.meta.env.VITE_MULTIPLAYER_ENABLED === "false") return null;
-  const configured = import.meta.env.VITE_MULTIPLAYER_URL?.trim();
+  return resolveMultiplayerApiUrl(
+    import.meta.env.VITE_MULTIPLAYER_ENABLED,
+    import.meta.env.VITE_MULTIPLAYER_URL,
+    typeof location === "undefined" ? null : location,
+  );
+}
+
+export function resolveMultiplayerApiUrl(
+  enabled: string | undefined,
+  configuredValue: string | undefined,
+  currentLocation: Pick<Location, "origin" | "hostname"> | null,
+): string | null {
+  if (enabled === "false") return null;
+  const configured = configuredValue?.trim();
+  if (configured === "same-origin") return currentLocation ? normalizeApiUrl(currentLocation.origin) : null;
   if (configured) return normalizeApiUrl(configured);
-  if (typeof location !== "undefined" && (location.hostname === "127.0.0.1" || location.hostname === "localhost")) {
+  if (currentLocation && (currentLocation.hostname === "127.0.0.1" || currentLocation.hostname === "localhost")) {
     return "http://127.0.0.1:8787";
   }
   return null;

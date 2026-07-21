@@ -1,8 +1,11 @@
+import type { PlatformDurableObjectNamespace } from "../src/server/platform/DurableService";
+
 export interface WorkerEnv {
-  LOBBY: DurableObjectNamespace;
-  GAME_ROOMS: DurableObjectNamespace;
-  ACCOUNTS: DurableObjectNamespace;
-  ADMIN: DurableObjectNamespace;
+  SERVER_PLATFORM?: "cloudflare" | "standalone";
+  LOBBY: PlatformDurableObjectNamespace;
+  GAME_ROOMS: PlatformDurableObjectNamespace;
+  ACCOUNTS: PlatformDurableObjectNamespace;
+  ADMIN: PlatformDurableObjectNamespace;
   ALLOWED_ORIGINS?: string;
   ADMIN_BOOTSTRAP_TOKEN?: string;
   ADMIN_RESET_TOKEN?: string;

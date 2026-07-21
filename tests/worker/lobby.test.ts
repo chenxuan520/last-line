@@ -74,6 +74,26 @@ describe("multiplayer worker", () => {
     socket.close(1000, "done");
   });
 
+  it("keeps the previous reconnect token valid until the replacement welcome is acknowledged", async () => {
+    const guest = await createGuest("Reconnect Owner");
+    const admission = await post("/v1/rooms", { ...guest, visibility: "private" });
+    const first = await connectWithToken(admission, String(admission.admissionToken));
+    first.socket.send(JSON.stringify({ type: "connection.ack" }));
+    await waitForAdmissionConsumption(String(admission.roomId), String(admission.playerId));
+
+    const second = await connectWithToken(admission, first.reconnectToken);
+    second.socket.close(1000, "welcome not acknowledged");
+    const recoveredOld = await connectWithToken(admission, first.reconnectToken);
+    recoveredOld.socket.close(1000, "replacement welcome not acknowledged");
+    const recoveredPending = await connectWithToken(admission, recoveredOld.reconnectToken);
+    recoveredPending.socket.close(1000, "pending token presented but next welcome lost");
+    const recoveredAgain = await connectWithToken(admission, recoveredOld.reconnectToken);
+    expect(recoveredAgain.reconnectToken).not.toBe(recoveredOld.reconnectToken);
+
+    first.socket.close(1000, "done");
+    recoveredAgain.socket.close(1000, "done");
+  });
+
   it("recovers a public countdown through a Durable Object eviction and alarm", async () => {
     const firstGuest = await createGuest("Alarm Alpha");
     const secondGuest = await createGuest("Alarm Bravo");
@@ -134,6 +154,31 @@ async function connectAdmission(admission: Record<string, unknown>): Promise<Web
   if (!response.webSocket) throw new Error(`WebSocket upgrade failed: ${response.status}`);
   response.webSocket.accept();
   return response.webSocket;
+}
+
+async function connectWithToken(
+  admission: Record<string, unknown>,
+  token: string,
+): Promise<{ socket: WebSocket; reconnectToken: string }> {
+  const socketUrl = new URL(String(admission.socketPath), "https://test");
+  socketUrl.searchParams.set("playerId", String(admission.playerId));
+  socketUrl.searchParams.set("token", token);
+  const response = await worker.fetch(new Request(socketUrl, {
+    headers: { Upgrade: "websocket", Origin: "http://localhost" },
+  }), env);
+  if (!response.webSocket) throw new Error(`WebSocket upgrade failed: ${response.status}`);
+  const socket = response.webSocket;
+  const welcome = new Promise<string>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("welcome timed out")), 1_000);
+    socket.addEventListener("message", (event) => {
+      const message = JSON.parse(String(event.data)) as { type?: string; reconnectToken?: string };
+      if (message.type !== "welcome" || !message.reconnectToken) return;
+      clearTimeout(timer);
+      resolve(message.reconnectToken);
+    });
+  });
+  socket.accept();
+  return { socket, reconnectToken: await welcome };
 }
 
 async function waitForAdmissionConsumption(roomId: string, playerId: string): Promise<void> {

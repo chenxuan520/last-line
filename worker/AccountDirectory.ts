@@ -1,7 +1,12 @@
-import { DurableObject } from "cloudflare:workers";
+import {
+  DurableService,
+  type PlatformDurableObjectState,
+  type PlatformSqlCursor,
+  type PlatformSqlValue,
+} from "../src/server/platform/DurableService";
 import type { WorkerEnv } from "./env";
 
-interface AccountRow extends Record<string, SqlStorageValue> {
+interface AccountRow extends Record<string, PlatformSqlValue> {
   id: string;
   username: string;
   username_key: string;
@@ -17,7 +22,7 @@ interface AccountRow extends Record<string, SqlStorageValue> {
   updated_at: number;
 }
 
-interface SessionRow extends Record<string, SqlStorageValue> {
+interface SessionRow extends Record<string, PlatformSqlValue> {
   id: string;
   account_id: string;
   access_hash: string;
@@ -30,7 +35,7 @@ interface SessionRow extends Record<string, SqlStorageValue> {
   updated_at: number;
 }
 
-interface UsedRefreshRow extends Record<string, SqlStorageValue> {
+interface UsedRefreshRow extends Record<string, PlatformSqlValue> {
   session_id: string;
   used_at: number;
 }
@@ -63,8 +68,8 @@ const DUMMY_PASSWORD_SALT = new Uint8Array(PASSWORD_SALT_BYTES);
 const DUMMY_PASSWORD_HASH = new Uint8Array(PASSWORD_HASH_BYTES);
 const textEncoder = new TextEncoder();
 
-export class AccountDirectory extends DurableObject<WorkerEnv> {
-  public constructor(ctx: DurableObjectState, env: WorkerEnv) {
+export class AccountDirectory extends DurableService<WorkerEnv> {
+  public constructor(ctx: PlatformDurableObjectState, env: WorkerEnv) {
     super(ctx, env);
     const sql = this.ctx.storage.sql;
     sql.exec(`CREATE TABLE IF NOT EXISTS accounts (
@@ -84,7 +89,7 @@ export class AccountDirectory extends DurableObject<WorkerEnv> {
     )`);
     const accountColumns = sql.exec<{
       name: string;
-    } & Record<string, SqlStorageValue>>("PRAGMA table_info(accounts)").toArray();
+    } & Record<string, PlatformSqlValue>>("PRAGMA table_info(accounts)").toArray();
     if (!accountColumns.some((column) => column.name === "session_revision")) {
       sql.exec("ALTER TABLE accounts ADD COLUMN session_revision INTEGER NOT NULL DEFAULT 0");
     }
@@ -451,7 +456,7 @@ export class AccountDirectory extends DurableObject<WorkerEnv> {
       updated_at: number;
       disabled_at: number | null;
       active_sessions: number;
-    } & Record<string, SqlStorageValue>>(
+    } & Record<string, PlatformSqlValue>>(
       `SELECT a.id, a.username, a.display_name, a.created_at, a.updated_at, a.disabled_at,
         COUNT(s.id) AS active_sessions
       FROM accounts a LEFT JOIN sessions s ON s.account_id = a.id
@@ -465,7 +470,7 @@ export class AccountDirectory extends DurableObject<WorkerEnv> {
     ).toArray();
     const total = this.ctx.storage.sql.exec<{
       total: number;
-    } & Record<string, SqlStorageValue>>(
+    } & Record<string, PlatformSqlValue>>(
       `SELECT COUNT(*) AS total FROM accounts a ${where}`,
       ...bindings,
     ).one().total;
@@ -525,7 +530,7 @@ export class AccountDirectory extends DurableObject<WorkerEnv> {
   private deleteAccountSessions(accountId: string): void {
     const sessions = this.ctx.storage.sql.exec<{
       id: string;
-    } & Record<string, SqlStorageValue>>("SELECT id FROM sessions WHERE account_id = ?", accountId).toArray();
+    } & Record<string, PlatformSqlValue>>("SELECT id FROM sessions WHERE account_id = ?", accountId).toArray();
     for (const session of sessions) this.deleteSession(session.id);
   }
 
@@ -569,7 +574,7 @@ export class AccountDirectory extends DurableObject<WorkerEnv> {
   private getUsedAccessSessionId(accessHash: string): string | null {
     const row = first(this.ctx.storage.sql.exec<{
       session_id: string;
-    } & Record<string, SqlStorageValue>>(
+    } & Record<string, PlatformSqlValue>>(
       "SELECT session_id FROM used_access_tokens WHERE token_hash = ?",
       accessHash,
     ));
@@ -577,7 +582,7 @@ export class AccountDirectory extends DurableObject<WorkerEnv> {
   }
 
   private insertSession(accountId: string, material: SessionMaterial, now: number): void {
-    const sessions = this.ctx.storage.sql.exec<{ id: string } & Record<string, SqlStorageValue>>(
+    const sessions = this.ctx.storage.sql.exec<{ id: string } & Record<string, PlatformSqlValue>>(
       "SELECT id FROM sessions WHERE account_id = ? ORDER BY created_at ASC",
       accountId,
     ).toArray();
@@ -648,7 +653,7 @@ export class AccountDirectory extends DurableObject<WorkerEnv> {
         attempts: number;
         window_started_at: number;
         blocked_until: number;
-      } & Record<string, SqlStorageValue>>(
+    } & Record<string, PlatformSqlValue>>(
         "SELECT attempts, window_started_at, blocked_until FROM auth_limits WHERE key = ?",
         key,
       ));
@@ -684,7 +689,7 @@ export class AccountDirectory extends DurableObject<WorkerEnv> {
   }
 }
 
-function first<T extends Record<string, SqlStorageValue>>(cursor: SqlStorageCursor<T>): T | null {
+function first<T extends Record<string, PlatformSqlValue>>(cursor: PlatformSqlCursor<T>): T | null {
   return cursor.toArray()[0] ?? null;
 }
 
@@ -782,7 +787,7 @@ async function verifyDummyPassword(password: string): Promise<boolean> {
 async function derivePassword(password: string, salt: Uint8Array, iterations: number): Promise<Uint8Array> {
   const key = await crypto.subtle.importKey("raw", textEncoder.encode(password), "PBKDF2", false, ["deriveBits"]);
   const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", hash: "SHA-256", salt, iterations },
+    { name: "PBKDF2", hash: "SHA-256", salt: salt as unknown as BufferSource, iterations },
     key,
     PASSWORD_HASH_BYTES * 8,
   );

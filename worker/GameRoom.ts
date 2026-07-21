@@ -1,4 +1,3 @@
-import { DurableObject } from "cloudflare:workers";
 import type { EntityId } from "../src/game/state/types";
 import {
   MAX_HUMAN_PLAYERS,
@@ -14,6 +13,11 @@ import {
 } from "../src/network/protocol";
 import { MatchRuntime, type MatchCheckpoint } from "../src/server/MatchRuntime";
 import { SnapshotThrottle } from "../src/server/SnapshotThrottle";
+import {
+  DurableService,
+  type PlatformDurableObjectState,
+  type PlatformSocket,
+} from "../src/server/platform/DurableService";
 import type { WorkerEnv } from "./env";
 import type {
   GuestRecord,
@@ -42,7 +46,28 @@ interface SocketAttachment {
   playerId: string;
   connectionEpoch: number;
   usedAdmission: boolean;
+  issuedReconnectToken?: string;
 }
+
+export type RoomSocketPreflight =
+  | {
+      kind: "accept";
+      playerId: string;
+      token: string;
+      usedAdmission: boolean;
+    }
+  | {
+      kind: "http-error";
+      response: Response;
+    }
+  | {
+      kind: "terminal";
+      code: 4010 | 4011;
+      errorCode: "room-closed" | "account-disabled";
+      message: string;
+      reason: string;
+      playerId: string | null;
+    };
 
 const STORAGE_KEY = "room-v1";
 const CHECKPOINT_KEY = "checkpoint-v1";
@@ -52,7 +77,7 @@ const WAITING_TTL_MS = 60 * 60 * 1_000;
 const WATCHDOG_MS = 15_000;
 const SNAPSHOT_MINIMUM_INTERVAL_MS = 80;
 
-export class GameRoom extends DurableObject<WorkerEnv> {
+export class GameRoom extends DurableService<WorkerEnv> {
   private data: PersistedRoom | null = null;
   private runtime: MatchRuntime | null = null;
   private loopRunning = false;
@@ -63,7 +88,7 @@ export class GameRoom extends DurableObject<WorkerEnv> {
   private readonly messageRates = new Map<string, { startedAt: number; count: number }>();
   private readonly accountStatusCache = new Map<string, { checkedAt: number; status: "active" | "revoked" }>();
 
-  public constructor(ctx: DurableObjectState, env: WorkerEnv) {
+  public constructor(ctx: PlatformDurableObjectState, env: WorkerEnv) {
     super(ctx, env);
     this.ctx.blockConcurrencyWhile(async () => {
       const [room, checkpoint] = await Promise.all([
@@ -91,6 +116,8 @@ export class GameRoom extends DurableObject<WorkerEnv> {
     const data = this.data;
     if (!data) return;
     if (data.status === "finished") {
+      this.releaseRuntime();
+      for (const socket of this.ctx.getWebSockets()) socket.close(4010, "room expired");
       await this.ctx.storage.deleteAll();
       this.data = null;
       return;
@@ -103,6 +130,11 @@ export class GameRoom extends DurableObject<WorkerEnv> {
     if (data.status === "waiting") {
       if (data.expiresAt <= Date.now()) {
         data.status = "finished";
+        this.releaseRuntime();
+        for (const socket of this.ctx.getWebSockets()) {
+          this.send(socket, { type: "error", code: "room-closed", message: "房间已过期" });
+          socket.close(4010, "room expired");
+        }
         await this.updateDirectory();
         await this.ctx.storage.deleteAll();
         this.data = null;
@@ -133,11 +165,138 @@ export class GameRoom extends DurableObject<WorkerEnv> {
         ? this.forceClose()
         : Response.json({ error: "forbidden" }, { status: 403 });
     }
-    if (request.headers.get("Upgrade") === "websocket") return this.connectWebSocket(url);
+    if (request.headers.get("Upgrade") === "websocket") return this.connectCloudflareWebSocket(url);
     return Response.json({ error: "not-found" }, { status: 404 });
   }
 
-  public async webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> {
+  public async preflightWebSocket(url: URL): Promise<RoomSocketPreflight> {
+    const data = this.data;
+    if (!data) {
+      return {
+        kind: "terminal",
+        code: 4010,
+        errorCode: "room-closed",
+        message: "房间已关闭",
+        reason: "room closed",
+        playerId: null,
+      };
+    }
+    const playerId = url.searchParams.get("playerId") ?? "";
+    const token = url.searchParams.get("token") ?? "";
+    const member = data.members[playerId];
+    const admissionValid = Boolean(
+      member && token === member.admissionToken && !member.admissionConsumed && member.admissionExpiresAt >= Date.now()
+    );
+    if (
+      !member
+      || (!admissionValid && token !== member.reconnectToken && token !== member.pendingReconnectToken)
+    ) {
+      return { kind: "http-error", response: new Response("unauthorized", { status: 401 }) };
+    }
+    const accountStatus = await this.memberAccountStatus(member, true);
+    if (accountStatus === "unknown") {
+      return { kind: "http-error", response: new Response("account service unavailable", { status: 503 }) };
+    }
+    if (accountStatus === "revoked") {
+      return {
+        kind: "terminal",
+        code: 4011,
+        errorCode: "account-disabled",
+        message: "账号已被禁用或会话已撤销",
+        reason: "account disabled",
+        playerId,
+      };
+    }
+    return { kind: "accept", playerId, token, usedAdmission: admissionValid };
+  }
+
+  public async acceptPlatformWebSocket(
+    socket: PlatformSocket,
+    preflight: RoomSocketPreflight,
+  ): Promise<void> {
+    if (preflight.kind === "http-error") {
+      socket.close(1008, preflight.response.status === 401 ? "unauthorized" : "service unavailable");
+      return;
+    }
+    if (preflight.kind === "terminal") {
+      this.ctx.acceptWebSocket(socket);
+      this.send(socket, { type: "error", code: preflight.errorCode, message: preflight.message });
+      socket.close(preflight.code, preflight.reason);
+      if (preflight.code === 4011 && preflight.playerId) await this.removeWaitingMember(preflight.playerId);
+      return;
+    }
+
+    const data = this.data;
+    const member = data?.members[preflight.playerId];
+    const admissionValid = Boolean(
+      member
+      && preflight.token === member.admissionToken
+      && !member.admissionConsumed
+      && member.admissionExpiresAt >= Date.now()
+    );
+    if (
+      !data
+      || !member
+      || (
+        !admissionValid
+        && preflight.token !== member.reconnectToken
+        && preflight.token !== member.pendingReconnectToken
+      )
+    ) {
+      socket.close(1008, "unauthorized");
+      return;
+    }
+    for (const existingSocket of this.ctx.getWebSockets()) {
+      const existing = existingSocket.deserializeAttachment() as SocketAttachment | null;
+      if (existing?.playerId === preflight.playerId) existingSocket.close(4001, "reconnected");
+    }
+    member.connected = true;
+    member.connectionEpoch += 1;
+    if (preflight.token === member.pendingReconnectToken) {
+      member.reconnectToken = preflight.token;
+      member.pendingReconnectToken = null;
+    }
+    const issuedReconnectToken = crypto.randomUUID();
+    member.pendingReconnectToken = issuedReconnectToken;
+    if (member.actorId) this.ensureRuntime()?.setConnected(member.actorId, true);
+    await this.persist();
+    const attachment: SocketAttachment = {
+      playerId: preflight.playerId,
+      connectionEpoch: member.connectionEpoch,
+      usedAdmission: preflight.usedAdmission && admissionValid,
+      issuedReconnectToken,
+    };
+    socket.serializeAttachment(attachment);
+    this.ctx.acceptWebSocket(socket);
+    this.send(socket, {
+      type: "welcome",
+      protocolVersion: MULTIPLAYER_PROTOCOL_VERSION,
+      roomId: data.roomId,
+      playerId: preflight.playerId,
+      actorId: member.actorId,
+      reconnectToken: issuedReconnectToken,
+      serverTimeMs: Date.now(),
+    });
+    if (data.status === "running" || data.status === "finished") this.sendFull(socket, member);
+    else this.send(socket, { type: "lobby.state", lobby: this.lobbyView() });
+    this.ctx.waitUntil(this.updateDirectory());
+    if (data.visibility === "public" && this.canStart()) await this.startCountdown();
+    if (data.status === "running") this.startLoop();
+  }
+
+  public async prepareForShutdown(): Promise<void> {
+    const data = this.data;
+    this.loopRunning = false;
+    if (!data || data.status !== "running" || !this.runtime) return;
+    data.checkpoint = this.runtime.checkpoint();
+    await Promise.all([
+      this.persist(),
+      this.persistCheckpoint(),
+      this.ctx.storage.setAlarm(Date.now() + WATCHDOG_MS),
+    ]);
+  }
+
+  public async webSocketMessage(socket: PlatformSocket, message: string | ArrayBuffer): Promise<void> {
     if (typeof message !== "string" || message.length > 16_384) return;
     const attachment = socket.deserializeAttachment() as SocketAttachment | null;
     const data = this.data;
@@ -169,10 +328,20 @@ export class GameRoom extends DurableObject<WorkerEnv> {
       return;
     }
     if (command.type === "connection.ack") {
+      let changed = false;
       if (attachment.usedAdmission && !member.admissionConsumed) {
         member.admissionConsumed = true;
-        await this.persist();
+        changed = true;
       }
+      if (
+        attachment.issuedReconnectToken
+        && member.pendingReconnectToken === attachment.issuedReconnectToken
+      ) {
+        member.reconnectToken = attachment.issuedReconnectToken;
+        member.pendingReconnectToken = null;
+        changed = true;
+      }
+      if (changed) await this.persist();
       return;
     }
     if (command.type === "match.resync") {
@@ -208,7 +377,7 @@ export class GameRoom extends DurableObject<WorkerEnv> {
     }
   }
 
-  public async webSocketClose(socket: WebSocket): Promise<void> {
+  public async webSocketClose(socket: PlatformSocket): Promise<void> {
     const attachment = socket.deserializeAttachment() as SocketAttachment | null;
     const member = attachment ? this.data?.members[attachment.playerId] : null;
     if (!attachment || !member || attachment.connectionEpoch !== member.connectionEpoch) return;
@@ -218,7 +387,7 @@ export class GameRoom extends DurableObject<WorkerEnv> {
     await this.persistAndBroadcastLobby();
   }
 
-  public webSocketError(socket: WebSocket): void {
+  public webSocketError(socket: PlatformSocket): void {
     socket.close(1011, "socket error");
   }
 
@@ -239,8 +408,8 @@ export class GameRoom extends DurableObject<WorkerEnv> {
       members: { [member.playerId]: member },
       checkpoint: null,
     };
-    await this.persist();
     await this.ctx.storage.setAlarm(this.data.expiresAt);
+    await this.persist();
     return Response.json(this.mutationResult(member), { status: 201 });
   }
 
@@ -268,57 +437,19 @@ export class GameRoom extends DurableObject<WorkerEnv> {
     return Response.json(this.mutationResult(member));
   }
 
-  private async connectWebSocket(url: URL): Promise<Response> {
-    const data = this.data;
-    if (!data) return this.closedWebSocket();
-    const playerId = url.searchParams.get("playerId") ?? "";
-    const token = url.searchParams.get("token") ?? "";
-    const member = data.members[playerId];
-    const admissionValid = Boolean(
-      member && token === member.admissionToken && !member.admissionConsumed && member.admissionExpiresAt >= Date.now()
-    );
-    if (!member || (!admissionValid && token !== member.reconnectToken)) {
-      return new Response("unauthorized", { status: 401 });
-    }
-    const accountStatus = await this.memberAccountStatus(member, true);
-    if (accountStatus === "unknown") return new Response("account service unavailable", { status: 503 });
-    if (accountStatus === "revoked") {
-      await this.removeWaitingMember(member.playerId);
-      return this.terminalWebSocket(4011, "账号已被禁用或会话已撤销", "account disabled");
-    }
-    for (const socket of this.ctx.getWebSockets()) {
-      const existing = socket.deserializeAttachment() as SocketAttachment | null;
-      if (existing?.playerId === playerId) socket.close(4001, "reconnected");
-    }
-    member.connected = true;
-    member.connectionEpoch += 1;
-    member.reconnectToken = crypto.randomUUID();
-    if (member.actorId) this.ensureRuntime()?.setConnected(member.actorId, true);
-    await this.persist();
-    const pair = new WebSocketPair();
-    const [client, server] = Object.values(pair);
-    const attachment: SocketAttachment = {
-      playerId,
-      connectionEpoch: member.connectionEpoch,
-      usedAdmission: admissionValid,
-    };
-    server.serializeAttachment(attachment);
-    this.ctx.acceptWebSocket(server);
-    this.send(server, {
-      type: "welcome",
-      protocolVersion: MULTIPLAYER_PROTOCOL_VERSION,
-      roomId: data.roomId,
-      playerId,
-      actorId: member.actorId,
-      reconnectToken: member.reconnectToken,
-      serverTimeMs: Date.now(),
-    });
-    if (data.status === "running" || data.status === "finished") this.sendFull(server, member);
-    else this.send(server, { type: "lobby.state", lobby: this.lobbyView() });
-    this.ctx.waitUntil(this.updateDirectory());
-    if (data.visibility === "public" && this.canStart()) await this.startCountdown();
-    if (data.status === "running") this.startLoop();
-    return new Response(null, { status: 101, webSocket: client });
+  private async connectCloudflareWebSocket(url: URL): Promise<Response> {
+    const preflight = await this.preflightWebSocket(url);
+    if (preflight.kind === "http-error") return preflight.response;
+    const Pair = (globalThis as unknown as {
+      WebSocketPair: new () => Record<string, PlatformSocket>;
+    }).WebSocketPair;
+    const [client, server] = Object.values(new Pair());
+    if (!client || !server) return Response.json({ error: "websocket-unavailable" }, { status: 503 });
+    await this.acceptPlatformWebSocket(server, preflight);
+    return new Response(null, {
+      status: 101,
+      webSocket: client,
+    } as ResponseInit);
   }
 
   private canStart(): boolean {
@@ -342,7 +473,7 @@ export class GameRoom extends DurableObject<WorkerEnv> {
     data.status = "waiting";
     data.countdownEndsAt = null;
     data.revision += 1;
-    await this.ctx.storage.deleteAlarm();
+    await this.persist();
     await this.ctx.storage.setAlarm(data.expiresAt);
   }
 
@@ -366,7 +497,6 @@ export class GameRoom extends DurableObject<WorkerEnv> {
     data.status = "running";
     data.countdownEndsAt = null;
     data.revision += 1;
-    await this.ctx.storage.deleteAlarm();
     this.runtime = new MatchRuntime({
       humanActorIds: members.map((member) => member.actorId as EntityId),
       seed: data.seed,
@@ -440,9 +570,7 @@ export class GameRoom extends DurableObject<WorkerEnv> {
       data.status = "finished";
       data.checkpoint = runtime.checkpoint();
       this.loopRunning = false;
-      this.ctx.waitUntil(Promise.all([this.persist(), this.persistCheckpoint()]).then(() => undefined));
-      this.ctx.waitUntil(this.updateDirectory());
-      this.ctx.waitUntil(this.ctx.storage.setAlarm(Date.now() + 60 * 60 * 1_000));
+      this.ctx.waitUntil(this.persistFinishedState(Date.now() + 60 * 60 * 1_000));
       return;
     }
     this.nextTickAt += TICK_MS;
@@ -492,7 +620,7 @@ export class GameRoom extends DurableObject<WorkerEnv> {
     return this.runtime;
   }
 
-  private sendFull(socket: WebSocket, member: RoomMemberRecord): void {
+  private sendFull(socket: PlatformSocket, member: RoomMemberRecord): void {
     const runtime = this.ensureRuntime();
     if (!runtime || !member.actorId) return;
     this.send(socket, {
@@ -529,11 +657,7 @@ export class GameRoom extends DurableObject<WorkerEnv> {
     const data = this.data;
     if (!data) return Response.json({ error: "room-not-found" }, { status: 404 });
     const result = { ok: true, roomId: data.roomId, previousStatus: data.status };
-    this.loopRunning = false;
-    this.runtime = null;
-    this.visibleLootByPlayer.clear();
-    this.messageRates.clear();
-    await this.ctx.storage.deleteAlarm();
+    this.releaseRuntime();
     for (const socket of this.ctx.getWebSockets()) {
       this.send(socket, { type: "error", code: "room-closed", message: "房间已由管理员关闭" });
       socket.close(4010, "room closed by administrator");
@@ -541,19 +665,6 @@ export class GameRoom extends DurableObject<WorkerEnv> {
     this.data = null;
     await this.ctx.storage.deleteAll();
     return Response.json(result);
-  }
-
-  private closedWebSocket(): Response {
-    return this.terminalWebSocket(4010, "房间已关闭", "room closed");
-  }
-
-  private terminalWebSocket(code: number, message: string, reason: string): Response {
-    const pair = new WebSocketPair();
-    const [client, server] = Object.values(pair);
-    this.ctx.acceptWebSocket(server);
-    this.send(server, { type: "error", code: code === 4010 ? "room-closed" : "account-disabled", message });
-    server.close(code, reason);
-    return new Response(null, { status: 101, webSocket: client });
   }
 
   private async memberAccountStatus(
@@ -585,7 +696,7 @@ export class GameRoom extends DurableObject<WorkerEnv> {
     return status;
   }
 
-  private async rejectAccountSocket(socket: WebSocket, member: RoomMemberRecord): Promise<void> {
+  private async rejectAccountSocket(socket: PlatformSocket, member: RoomMemberRecord): Promise<void> {
     this.send(socket, { type: "error", code: "account-disabled", message: "账号已被禁用或会话已撤销" });
     socket.close(4011, "account disabled");
     if (this.data?.status === "waiting" || this.data?.status === "countdown") {
@@ -691,7 +802,20 @@ export class GameRoom extends DurableObject<WorkerEnv> {
     return checkpoint ? this.ctx.storage.put(CHECKPOINT_KEY, checkpoint) : Promise.resolve();
   }
 
-  private send(socket: WebSocket, message: ServerMessage): void {
+  private async persistFinishedState(deleteAt: number): Promise<void> {
+    await this.ctx.storage.setAlarm(deleteAt);
+    await Promise.all([this.persist(), this.persistCheckpoint(), this.updateDirectory()]);
+  }
+
+  private releaseRuntime(): void {
+    this.loopRunning = false;
+    this.runtime = null;
+    this.visibleLootByPlayer.clear();
+    this.messageRates.clear();
+    this.accountStatusCache.clear();
+  }
+
+  private send(socket: PlatformSocket, message: ServerMessage): void {
     try {
       socket.send(JSON.stringify(message));
     } catch {
@@ -726,6 +850,7 @@ function createMember(guest: GuestRecord, host: boolean, ready: boolean): RoomMe
     admissionExpiresAt: Date.now() + 60_000,
     admissionConsumed: false,
     reconnectToken: crypto.randomUUID(),
+    pendingReconnectToken: null,
     ready: host || ready,
     connected: false,
     host,

@@ -1,7 +1,12 @@
-import { DurableObject } from "cloudflare:workers";
+import {
+  DurableService,
+  type PlatformDurableObjectState,
+  type PlatformSqlCursor,
+  type PlatformSqlValue,
+} from "../src/server/platform/DurableService";
 import type { WorkerEnv } from "./env";
 
-interface AdminRow extends Record<string, SqlStorageValue> {
+interface AdminRow extends Record<string, PlatformSqlValue> {
   id: string;
   username: string;
   username_key: string;
@@ -12,7 +17,7 @@ interface AdminRow extends Record<string, SqlStorageValue> {
   updated_at: number;
 }
 
-interface AdminSessionRow extends Record<string, SqlStorageValue> {
+interface AdminSessionRow extends Record<string, PlatformSqlValue> {
   id: string;
   admin_id: string;
   token_hash: string;
@@ -39,8 +44,8 @@ const textEncoder = new TextEncoder();
 const DUMMY_SALT = new Uint8Array(PASSWORD_SALT_BYTES);
 const DUMMY_HASH = new Uint8Array(PASSWORD_HASH_BYTES);
 
-export class AdminDirectory extends DurableObject<WorkerEnv> {
-  public constructor(ctx: DurableObjectState, env: WorkerEnv) {
+export class AdminDirectory extends DurableService<WorkerEnv> {
+  public constructor(ctx: PlatformDurableObjectState, env: WorkerEnv) {
     super(ctx, env);
     const sql = this.ctx.storage.sql;
     sql.exec(`CREATE TABLE IF NOT EXISTS administrators (
@@ -249,7 +254,7 @@ export class AdminDirectory extends DurableObject<WorkerEnv> {
       return json({ error: "invalid-reset" }, 401);
     }
     const resetHash = await hashText(resetToken);
-    if (first(this.ctx.storage.sql.exec<Record<string, SqlStorageValue>>(
+    if (first(this.ctx.storage.sql.exec<Record<string, PlatformSqlValue>>(
       "SELECT token_hash FROM administrator_reset_uses WHERE token_hash = ?",
       resetHash,
     ))) return json({ error: "invalid-reset" }, 401);
@@ -267,7 +272,7 @@ export class AdminDirectory extends DurableObject<WorkerEnv> {
         || current.password_revision !== administrator.password_revision
         || current.password_hash !== administrator.password_hash
       ) return false;
-      if (first(this.ctx.storage.sql.exec<Record<string, SqlStorageValue>>(
+      if (first(this.ctx.storage.sql.exec<Record<string, PlatformSqlValue>>(
         "SELECT token_hash FROM administrator_reset_uses WHERE token_hash = ?",
         resetHash,
       ))) return false;
@@ -403,7 +408,7 @@ export class AdminDirectory extends DurableObject<WorkerEnv> {
   private registrationLoginRequired(): boolean {
     const row = first(this.ctx.storage.sql.exec<{
       value: string;
-    } & Record<string, SqlStorageValue>>(
+    } & Record<string, PlatformSqlValue>>(
       "SELECT value FROM administrator_settings WHERE key = 'registration-login-required'",
     ));
     return row?.value === "1";
@@ -450,7 +455,7 @@ export class AdminDirectory extends DurableObject<WorkerEnv> {
   private administratorCount(): number {
     return this.ctx.storage.sql.exec<{
       count: number;
-    } & Record<string, SqlStorageValue>>("SELECT COUNT(*) AS count FROM administrators").one().count;
+    } & Record<string, PlatformSqlValue>>("SELECT COUNT(*) AS count FROM administrators").one().count;
   }
 
   private onlyAdministrator(): AdminRow | null {
@@ -465,7 +470,7 @@ export class AdminDirectory extends DurableObject<WorkerEnv> {
   private insertSession(adminId: string, tokenHash: string, expiresAt: number, now: number): void {
     const sessions = this.ctx.storage.sql.exec<{
       id: string;
-    } & Record<string, SqlStorageValue>>(
+    } & Record<string, PlatformSqlValue>>(
       "SELECT id FROM administrator_sessions WHERE admin_id = ? ORDER BY created_at",
       adminId,
     ).toArray();
@@ -554,7 +559,7 @@ export class AdminDirectory extends DurableObject<WorkerEnv> {
         attempts: number;
         window_started_at: number;
         blocked_until: number;
-      } & Record<string, SqlStorageValue>>(
+      } & Record<string, PlatformSqlValue>>(
         "SELECT attempts, window_started_at, blocked_until FROM administrator_limits WHERE key = ?",
         key,
       ));
@@ -589,7 +594,7 @@ export class AdminDirectory extends DurableObject<WorkerEnv> {
   }
 }
 
-function first<T extends Record<string, SqlStorageValue>>(cursor: SqlStorageCursor<T>): T | null {
+function first<T extends Record<string, PlatformSqlValue>>(cursor: PlatformSqlCursor<T>): T | null {
   return cursor.toArray()[0] ?? null;
 }
 
@@ -667,7 +672,12 @@ async function verifyDummyPassword(password: string): Promise<boolean> {
 async function derivePassword(password: string, salt: Uint8Array): Promise<Uint8Array> {
   const key = await crypto.subtle.importKey("raw", textEncoder.encode(password), "PBKDF2", false, ["deriveBits"]);
   return new Uint8Array(await crypto.subtle.deriveBits(
-    { name: "PBKDF2", hash: "SHA-256", salt, iterations: PASSWORD_ITERATIONS },
+    {
+      name: "PBKDF2",
+      hash: "SHA-256",
+      salt: salt as unknown as BufferSource,
+      iterations: PASSWORD_ITERATIONS,
+    },
     key,
     PASSWORD_HASH_BYTES * 8,
   ));

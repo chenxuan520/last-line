@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "noEmit": true
+  },
+  "include": [
+    "standalone/**/*.ts",
+    "worker/**/*.ts",
+    "src/config/**/*.ts",
+    "src/ai/**/*.ts",
+    "src/controllers/BotController.ts",
+    "src/game/**/*.ts",
+    "src/network/protocol.ts",
+    "src/server/**/*.ts",
+    "tests/standalone/**/*.ts",
+    "vitest.standalone.config.ts"
+  ]
+}

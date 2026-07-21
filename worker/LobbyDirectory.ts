@@ -1,10 +1,10 @@
-import { DurableObject } from "cloudflare:workers";
 import {
   MAX_HUMAN_PLAYERS,
   type GuestSession,
   type PublicRoomSummary,
   type RoomVisibility,
 } from "../src/network/protocol";
+import { DurableService, type PlatformDurableObjectState } from "../src/server/platform/DurableService";
 import type { WorkerEnv } from "./env";
 import type {
   GuestRecord,
@@ -25,11 +25,11 @@ const ROOM_TTL_MS = 60 * 60 * 1_000;
 const MAX_GUEST_RECORDS = 5_000;
 const MAX_ROOM_RECORDS = 1_000;
 
-export class LobbyDirectory extends DurableObject<WorkerEnv> {
+export class LobbyDirectory extends DurableService<WorkerEnv> {
   private data: LobbyData = { guests: {}, rooms: {} };
   private readonly rateLimits = new Map<string, { startedAt: number; count: number }>();
 
-  public constructor(ctx: DurableObjectState, env: WorkerEnv) {
+  public constructor(ctx: PlatformDurableObjectState, env: WorkerEnv) {
     super(ctx, env);
     this.ctx.blockConcurrencyWhile(async () => {
       this.data = await this.ctx.storage.get<LobbyData>(STORAGE_KEY) ?? this.data;

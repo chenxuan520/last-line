@@ -20,7 +20,7 @@
 - 死亡与手动丢弃物会在角色周围分散落到权威地面/屋顶支撑面；HUD 提示与实际可拾取物保持一致
 - 49 名 AI 自主跳伞、搜集、进圈、战斗、换弹和治疗
 - 独立联机入口支持快速匹配、公开房间列表、公开建房、私人房间码、准备/倒计时和断线重连；现有单机入口不连接服务器
-- 联机比赛由 Cloudflare Durable Object 以 30 Hz 运行权威规则、40–48 个 AI 和 10 Hz 状态快照，浏览器只发送 `ActorCommand` 并进行本地移动预测与远端插值
+- 联机后端可选择 Cloudflare Durable Objects 或单机自托管 Node.js + SQLite；两种模式复用同一协议、账号/房间逻辑和 30 Hz 权威规则，浏览器只发送 `ActorCommand` 并进行本地移动预测与远端插值
 - 联机客户端按快照 tick gap 对远端位置做 120–250ms 展示层平滑，本地预测校正只衰减视觉 offset；重新可见、生死/部署切换及超出当前移动预算的权威传送立即对齐。服务端追 tick 时抑制短时间 snapshot 连发，避免客户端合并后出现大跨度瞬移
 - 管理员可切换游客准入或强制注册登录；账号模式使用 HttpOnly Refresh Cookie，并在 Access Token 到期前自动续期
 - Worker 同源管理终端使用唯一管理员账号，可查看玩家账号和在线房间、禁用/恢复账号、撤销会话及强制关闭异常房间
@@ -43,7 +43,7 @@
 - Babylon.js、WebGL2
 - 原生 HTML/CSS HUD
 - Vitest
-- Cloudflare Workers、Durable Objects、WebSocket
+- Cloudflare Workers / Durable Objects，或 Node.js / SQLite；两种后端共用 WebSocket 协议
 
 ## 环境
 
@@ -66,6 +66,19 @@ npm run dev:worker
 ```
 
 本地主机自动连接 `http://127.0.0.1:8787`；正式联机站通过 `VITE_MULTIPLAYER_ENABLED=true` 和 `VITE_MULTIPLAYER_URL` 指定 Worker。GitHub Pages 构建固定关闭该开关并隐藏联机入口。
+
+也可以运行完全本地的全栈自托管后端。它同时提供静态页面、API、WebSocket 和管理端，数据只写入本地 SQLite：
+
+```bash
+cp .env.standalone.example .env.standalone
+# 修改 SERVER_PUBLIC_ORIGIN 和 ADMIN_BOOTSTRAP_TOKEN
+npm run build:standalone
+npm run start:server
+```
+
+自托管静态构建使用 `VITE_MULTIPLAYER_URL=same-origin`，不需要把服务器域名编译进前端。生产环境应把 Node 服务放在支持 WebSocket 的 HTTPS 反向代理后；Docker Compose、备份和变量说明见 [`docs/deployment.md`](docs/deployment.md)。
+
+`npm run dev:worker` 与 `npm run dev:server` 是两种后端实现，默认都监听 8787，不应同时启动。Cloudflare 与 standalone 数据彼此独立，切换服务地址不会自动迁移账号或活动房间。
 
 ## 操作
 
@@ -117,6 +130,7 @@ src/
 ├── server/       # 无 Cloudflare 依赖的联机权威房间运行时
 └── game/         # 无 DOM/Babylon 依赖的权威规则状态与系统
 worker/           # Cloudflare 大厅与比赛 Durable Objects
+standalone/       # Node HTTP/WebSocket、本地 SQLite、alarm 与静态站适配
 ```
 
 `src/game/` 是权威规则层，只保存可序列化状态并消费统一角色指令。命中、视野、移动、物资和胜负均不依赖 Babylon mesh，素材替换不会改变玩法结果。
@@ -136,7 +150,7 @@ worker/           # Cloudflare 大厅与比赛 Durable Objects
 - 联机服务：<https://lastlinep2p.011203.xyz/health>
 - 管理终端：<https://lastlinep2p.011203.xyz/admin>
 
-GitHub Actions 在每次 PR 和 `main` 推送时执行应用/Worker 类型检查、Vitest、静态生产构建和 Worker dry-run；`main` 通过后自动部署 GitHub Pages。Cloudflare Pages 和 `lastlinep2p` Worker 分别使用 Git 集成部署，配置见 [`docs/deployment.md`](docs/deployment.md)。
+GitHub Actions 在每次 PR 和 `main` 推送时执行应用、Worker、standalone 类型检查与 Vitest，以及静态生产构建、Worker dry-run 和 Node server bundle；`main` 通过后自动部署 GitHub Pages。Cloudflare Pages 和 `lastlinep2p` Worker 分别使用 Git 集成部署；自托管版独立使用本地数据，不与 Cloudflare 同步，配置见 [`docs/deployment.md`](docs/deployment.md)。
 
 ## 素材替换
 
@@ -148,5 +162,6 @@ GitHub Actions 在每次 PR 和 `main` 推送时执行应用/Worker 类型检查
 
 - 手机对局仅支持横屏；竖屏会暂停单机输入，联机服务器仍继续推进
 - 联机支持游客和持久玩家账号两种准入模式，由管理员全局开关控制；暂不提供好友、排行榜或赛季数据
+- 自托管第一版只支持单服务器、单 Node.js 进程；不支持多进程集群或与 Cloudflare 双向同步数据
 - 不包含载具、投掷物、枪械配件、复杂弹道和可破坏场景
 - 生产构建中的 Babylon/GLTF 按需 chunk 仍较大，但占位素材对局不会加载 GLTF chunk

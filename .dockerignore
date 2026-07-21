@@ -1,0 +1,13 @@
+.git
+.github
+.wrangler
+.dev.vars*
+.env.local
+.env.standalone
+data
+dist
+dist-server
+dist-worker
+node_modules
+session-*.md
+test-results

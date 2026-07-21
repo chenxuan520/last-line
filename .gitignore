@@ -1,9 +1,12 @@
 node_modules/
 dist/
 dist-worker/
+dist-server/
+data/
 test-results/
 .wrangler/
 .dev.vars*
 .env.local
+.env.standalone
 .DS_Store
 *.tsbuildinfo

@@ -14,7 +14,7 @@ Each fixed step follows this order:
 6. Dead inventories become reusable ground-loot records.
 7. Rendering synchronizes from the resulting state.
 
-In multiplayer, the same steps run inside one `GameRoom` Durable Object at 30 Hz. Browsers send validated `ActorCommand` values and receive a full initial state followed by 10 Hz actor frames, loot changes, sequenced events, and input acknowledgements.
+In multiplayer, the same steps run inside one platform-hosted `GameRoom` at 30 Hz. Cloudflare assigns one Durable Object per room; standalone assigns one in-process room service backed by local SQLite. Browsers use the same protocol in both modes and receive a full initial state followed by 10 Hz actor frames, loot changes, sequenced events, and input acknowledgements.
 
 ## Authoritative Rules
 
@@ -40,11 +40,13 @@ Optional GLB models are loaded asynchronously and instantiated as non-pickable v
 
 ## Multiplayer Services
 
-`LobbyDirectory` is a singleton Durable Object that owns temporary guest sessions, public room summaries, quick matching, and private room-code lookup. Every room has a separate `GameRoom` Durable Object that owns lobby readiness, WebSockets, actor assignment, checkpoints, and one `MatchRuntime`.
+`LobbyDirectory` owns temporary guest sessions, public room summaries, quick matching, and private room-code lookup. Every room has a separate `GameRoom` service that owns lobby readiness, WebSockets, actor assignment, checkpoints, and one `MatchRuntime`.
 
-`AccountDirectory` is a SQLite-backed Durable Object for persistent player accounts. It implements case-insensitive unique usernames, native WebCrypto PBKDF2-SHA-256 password records at Cloudflare's supported 100,000-iteration ceiling, opaque access/refresh sessions, refresh rotation, logout, account lookup, password changes, disabling, and session revocation. Public auth routes expose only short-lived access tokens; refresh tokens remain in `Secure`, `HttpOnly`, `SameSite=Strict`, host-only cookies.
+The directory classes extend the platform-neutral `DurableService` base and consume narrow storage, namespace, alarm, task, and socket interfaces. Cloudflare supplies those capabilities through Durable Object state. `standalone/LocalDurableObjectRuntime.ts` supplies the same contracts with one Node.js process, local SQLite key/value and SQL tables, local timers, and `ws` sockets. The gateway, room transitions, admission/reconnect rotation, account rules, administrator rules, protocol parsing, and authoritative match runtime are therefore shared rather than copied. `SERVER_PLATFORM` only selects platform-specific origin defaults; clients do not branch on the backend type.
 
-`AdminDirectory` owns one administrator identity, eight-hour opaque Cookie sessions, and the global multiplayer admission policy. The Worker serves a same-origin `/admin` terminal with a strict CSP. Bootstrap and forgotten-password recovery use separate one-time Worker Secrets; every mutation requires same-origin requests, and internal account/room operations require a separate capability secret. Optional Turnstile validation becomes fail-closed only when both the site and secret keys are configured.
+`AccountDirectory` uses the platform SQL store for persistent player accounts: Durable Object SQLite on Cloudflare and the standalone database on Node. It implements case-insensitive unique usernames, native WebCrypto PBKDF2-SHA-256 password records at 100,000 iterations, opaque access/refresh sessions, refresh rotation, logout, account lookup, password changes, disabling, and session revocation. Public auth routes expose only short-lived access tokens; refresh tokens remain in `Secure`, `HttpOnly`, `SameSite=Strict`, host-only cookies.
+
+`AdminDirectory` owns one administrator identity, eight-hour opaque Cookie sessions, and the global multiplayer admission policy. The shared gateway serves a same-origin `/admin` terminal. Bootstrap and forgotten-password recovery use separate deployment secrets; every mutation requires same-origin requests, and internal account/room operations require a separate in-process/generated or Worker capability. Optional Turnstile validation becomes fail-closed only when both the site and secret keys are configured.
 
 When registration/login is required, the gateway validates the player access token before creating a guest-compatible room identity. That identity retains the account ID and session revision; Lobby and GameRoom revalidate linked accounts so disabling or revoking an account invalidates matchmaking, admissions, reconnects, and active sockets. Toggling the global policy does not interrupt pre-existing unlinked guest rooms.
 
@@ -58,6 +60,10 @@ Remote positions use per-actor transitions starting from the position that was a
 
 `GameRoom` still advances rules at 30 Hz and considers a snapshot every third tick. An 80ms monotonic minimum interval suppresses back-to-back frames while the scheduler catches up after a stall; normal cadence remains approximately 10 Hz. `MatchRuntime.takeFrame()` is called only for frames that are actually sent, so sequenced events and dirty loot accumulate until the next frame. Match completion always forces a final frame even when the throttle suppressed that tick's regular candidate.
 
+Standalone stores guests, room metadata, admissions, reconnect credentials, account/admin data, deadlines, and checkpoints in one WAL-mode SQLite database. A separate SQLite exclusive lock automatically releases its OS lock on process death and prevents two live Node processes from advancing the same data directory. Alarm rows remain durable until their handler completes and use generations so a reschedule cannot be deleted by the preceding invocation. On startup, persisted alarm records instantiate their services; running rooms rebuild `MatchRuntime` from the newest checkpoint and immediately resume. Dormant room services are evicted after their persistent state, alarm, and sockets are gone, so completed matches do not accumulate in memory.
+
+Reconnect rotation is two-phase: the previous token remains valid while a replacement is pending, and `connection.ack` promotes only the token issued to that connection. Losing the socket before `welcome` or its acknowledgement therefore cannot strand a client. Graceful SIGINT/SIGTERM stops room loops and writes an early checkpoint before bounded network draining, then writes again after sockets settle; the current checkpoint contract can still lose at most the interval since the last crash-safe write after an ungraceful kill and does not promise bit-for-bit restoration of transient Bot/controller memory.
+
 ## Performance Strategy
 
 - Fixed 30 Hz rules with decoupled rendering
@@ -67,10 +73,10 @@ Remote positions use per-actor transitions starting from the position that was a
 - Quality-dependent hardware scaling
 - No dynamic shadows or full rigid-body simulation
 - Dynamic GLTF loader chunk only when a manifest entry uses GLB
-- Active multiplayer rooms use one single-threaded Durable Object, 30 Hz rules, 10 Hz snapshots, and one-second checkpoints
+- Active multiplayer rooms use one single-threaded room authority—one Durable Object or one standalone in-process service—with 30 Hz rules, 10 Hz snapshots, and one-second checkpoints
 - Multiplayer snapshot smoothing is presentation-only; authoritative movement, combat, inventory, safe-zone, and result state are never interpolated or rewound
-- Lobby sockets use the Durable Object WebSocket API and may hibernate while no match timer is active
+- Cloudflare sockets may hibernate through the Durable Object API; standalone sockets remain in the single Node process and recover through reconnect after a restart
 
 ## Boundaries
 
-Single-player never opens a network connection and pauses when desktop pointer lock or touch input is inactive. Multiplayer is server-authoritative and continues while a touch client is paused, hidden, or portrait-oriented; that client settles to idle input. Mobile gameplay requires landscape orientation. There are no social features, rankings, server-side lag-compensated hit rewind, or speculative future 5v5 rules.
+Single-player never opens a network connection and pauses when desktop pointer lock or touch input is inactive. Multiplayer is server-authoritative and continues while a touch client is paused, hidden, or portrait-oriented; that client settles to idle input. Mobile gameplay requires landscape orientation. Standalone deployment is intentionally limited to one server and one Node process; running several processes against one database is rejected rather than risking duplicate room authorities. There are no social features, rankings, server-side lag-compensated hit rewind, or speculative future 5v5 rules.

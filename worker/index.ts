@@ -31,7 +31,7 @@ export default {
     }
     if (request.method === "OPTIONS") return cors(new Response(null, { status: 204 }), request, env);
     if (url.pathname.startsWith("/v1/auth/")) {
-      if (!originAllowed(request.headers.get("Origin"), env)) return new Response("forbidden", { status: 403 });
+      if (!isOriginAllowed(request.headers.get("Origin"), env)) return new Response("forbidden", { status: 403 });
       if (request.method !== "GET" && !request.headers.get("Origin")) return new Response("forbidden", { status: 403 });
       return cors(await handlePlayerAuth(request, env), request, env);
     }
@@ -43,7 +43,7 @@ export default {
       if (request.headers.get("Upgrade") !== "websocket") {
         return cors(Response.json({ error: "upgrade-required" }, { status: 426 }), request, env);
       }
-      if (!originAllowed(request.headers.get("Origin"), env)) return new Response("forbidden", { status: 403 });
+      if (!isOriginAllowed(request.headers.get("Origin"), env)) return new Response("forbidden", { status: 403 });
       return env.GAME_ROOMS.getByName(roomSocket[1]).fetch(request);
     }
     if (url.pathname.startsWith("/v1/")) {
@@ -74,7 +74,7 @@ export default {
     }
     return cors(Response.json({ error: "not-found" }, { status: 404 }), request, env);
   },
-} satisfies ExportedHandler<WorkerEnv>;
+} satisfies { fetch(request: Request, env: WorkerEnv): Promise<Response> };
 
 async function handlePlayerAuth(request: Request, env: WorkerEnv): Promise<Response> {
   const url = new URL(request.url);
@@ -237,7 +237,7 @@ function adminHeaders(response: Response): Response {
 function cors(response: Response, request: Request, env: WorkerEnv): Response {
   const origin = request.headers.get("Origin");
   const headers = new Headers(response.headers);
-  if (origin && originAllowed(origin, env)) {
+  if (origin && isOriginAllowed(origin, env)) {
     headers.set("Access-Control-Allow-Origin", origin);
     headers.set("Access-Control-Allow-Credentials", "true");
     headers.set("Vary", "Origin");
@@ -247,9 +247,10 @@ function cors(response: Response, request: Request, env: WorkerEnv): Response {
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
-function originAllowed(origin: string | null, env: WorkerEnv): boolean {
+export function isOriginAllowed(origin: string | null, env: WorkerEnv): boolean {
   if (!origin) return true;
   if (/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin)) return true;
   const configured = env.ALLOWED_ORIGINS?.split(",").map((value) => value.trim()).filter(Boolean) ?? [];
-  return [...DEFAULT_ALLOWED_ORIGINS, ...configured].includes(origin);
+  const defaults = env.SERVER_PLATFORM === "standalone" ? [] : DEFAULT_ALLOWED_ORIGINS;
+  return [...defaults, ...configured].includes(origin);
 }

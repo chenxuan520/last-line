@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MultiplayerConnection } from "../../src/network/MultiplayerClient";
+import { MultiplayerConnection, resolveMultiplayerApiUrl } from "../../src/network/MultiplayerClient";
 import type { RoomAdmission } from "../../src/network/protocol";
 
 describe("MultiplayerConnection lifecycle", () => {
@@ -38,6 +38,24 @@ describe("MultiplayerConnection lifecycle", () => {
     expect(sockets[0]?.closeCalls).toBe(1);
     connection.close();
     expect(sockets[0]?.closeCalls).toBe(1);
+  });
+});
+
+describe("multiplayer API selection", () => {
+  it("uses the page origin for a standalone full-stack build", () => {
+    expect(resolveMultiplayerApiUrl("true", "same-origin", {
+      origin: "https://self-hosted.example.test",
+      hostname: "self-hosted.example.test",
+    })).toBe("https://self-hosted.example.test/");
+  });
+
+  it("keeps explicit Cloudflare URLs and the disabled switch", () => {
+    expect(resolveMultiplayerApiUrl("true", "https://api.example.test/path", null))
+      .toBe("https://api.example.test/");
+    expect(resolveMultiplayerApiUrl("false", "same-origin", {
+      origin: "https://self-hosted.example.test",
+      hostname: "self-hosted.example.test",
+    })).toBeNull();
   });
 });
 

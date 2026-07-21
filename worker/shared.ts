@@ -18,6 +18,7 @@ export interface RoomMemberRecord {
   admissionExpiresAt: number;
   admissionConsumed: boolean;
   reconnectToken: string;
+  pendingReconnectToken?: string | null;
   ready: boolean;
   connected: boolean;
   host: boolean;
