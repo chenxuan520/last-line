@@ -52,6 +52,12 @@ When registration/login is required, the gateway validates the player access tok
 
 `CommandInbox` rejects stale sequences, expires continuous input, and consumes jump, interact, reload, switching, item use, and drops only once. The client predicts only local movement and replays unacknowledged inputs after each server correction; combat, inventory, healing, damage, loot, safe zones, and results are never predicted.
 
+`MultiplayerSession` keeps authoritative and presentation state separate during reconciliation. A snapshot replaces the authoritative state, then unacknowledged local movement inputs are replayed. Corrections up to 6m are hidden only by a temporary camera/visual offset that decays to zero; the offset never mutates `MatchState`, commands, hit tests, pickup distance, or server acknowledgement state. Full resync, death, deployment changes, and larger grounded corrections snap immediately.
+
+Remote positions use per-actor transitions starting from the position that was actually rendered before the snapshot. Old transitions advance before queued messages are consumed, so a long render frame that occurred before snapshot receipt cannot instantly complete the new transition. Duration follows the authoritative tick gap and is clamped to 120–250ms. Newly visible actors, alive/deployment changes, missing previous state, and impossible authoritative movement snap immediately. Grounded actors have a 6m smoothing ceiling. Parachuting actors use a dynamic ceiling derived from the real tick gap and the authoritative maximum glide/descent speed, with an 18m hard cap, so valid high-speed gliding stays smooth without disguising teleports.
+
+`GameRoom` still advances rules at 30 Hz and considers a snapshot every third tick. An 80ms monotonic minimum interval suppresses back-to-back frames while the scheduler catches up after a stall; normal cadence remains approximately 10 Hz. `MatchRuntime.takeFrame()` is called only for frames that are actually sent, so sequenced events and dirty loot accumulate until the next frame. Match completion always forces a final frame even when the throttle suppressed that tick's regular candidate.
+
 ## Performance Strategy
 
 - Fixed 30 Hz rules with decoupled rendering
@@ -62,6 +68,7 @@ When registration/login is required, the gateway validates the player access tok
 - No dynamic shadows or full rigid-body simulation
 - Dynamic GLTF loader chunk only when a manifest entry uses GLB
 - Active multiplayer rooms use one single-threaded Durable Object, 30 Hz rules, 10 Hz snapshots, and one-second checkpoints
+- Multiplayer snapshot smoothing is presentation-only; authoritative movement, combat, inventory, safe-zone, and result state are never interpolated or rewound
 - Lobby sockets use the Durable Object WebSocket API and may hibernate while no match timer is active
 
 ## Boundaries

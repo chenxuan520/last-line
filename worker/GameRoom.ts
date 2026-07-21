@@ -13,6 +13,7 @@ import {
   type ServerMessage,
 } from "../src/network/protocol";
 import { MatchRuntime, type MatchCheckpoint } from "../src/server/MatchRuntime";
+import { SnapshotThrottle } from "../src/server/SnapshotThrottle";
 import type { WorkerEnv } from "./env";
 import type {
   GuestRecord,
@@ -49,6 +50,7 @@ const TICK_MS = 1_000 / 30;
 const COUNTDOWN_MS = 3_000;
 const WAITING_TTL_MS = 60 * 60 * 1_000;
 const WATCHDOG_MS = 15_000;
+const SNAPSHOT_MINIMUM_INTERVAL_MS = 80;
 
 export class GameRoom extends DurableObject<WorkerEnv> {
   private data: PersistedRoom | null = null;
@@ -56,6 +58,7 @@ export class GameRoom extends DurableObject<WorkerEnv> {
   private loopRunning = false;
   private nextTickAt = 0;
   private lastTickAt = 0;
+  private readonly snapshotThrottle = new SnapshotThrottle(SNAPSHOT_MINIMUM_INTERVAL_MS);
   private readonly visibleLootByPlayer = new Map<string, Set<EntityId>>();
   private readonly messageRates = new Map<string, { startedAt: number; count: number }>();
   private readonly accountStatusCache = new Map<string, { checkedAt: number; status: "active" | "revoked" }>();
@@ -402,6 +405,7 @@ export class GameRoom extends DurableObject<WorkerEnv> {
     this.loopRunning = true;
     this.lastTickAt = Date.now();
     this.nextTickAt = performance.now();
+    this.snapshotThrottle.reset(this.nextTickAt);
     this.scheduleTick();
   }
 
@@ -423,7 +427,8 @@ export class GameRoom extends DurableObject<WorkerEnv> {
       this.ctx.waitUntil(this.ctx.storage.setAlarm(Date.now() + 1_000));
       return;
     }
-    if (runtime.tick % 3 === 0) this.broadcastFrame();
+    const frameBroadcast = runtime.tick % 3 === 0 && this.snapshotThrottle.consume(performance.now());
+    if (frameBroadcast) this.broadcastFrame();
     if (runtime.tick % 30 === 0) {
       data.checkpoint = runtime.checkpoint();
       this.ctx.waitUntil(this.persistCheckpoint());
@@ -431,7 +436,7 @@ export class GameRoom extends DurableObject<WorkerEnv> {
     }
     if (runtime.tick % 150 === 0) this.ctx.waitUntil(this.validateConnectedAccounts());
     if (runtime.state.phase === "finished") {
-      if (runtime.tick % 3 !== 0) this.broadcastFrame();
+      if (!frameBroadcast) this.broadcastFrame();
       data.status = "finished";
       data.checkpoint = runtime.checkpoint();
       this.loopRunning = false;

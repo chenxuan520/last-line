@@ -579,6 +579,19 @@
 - 2026-07-21 18:31：第二轮性能余量优化及 reviewer 闭环已提交并推送 `main`，实现提交为 `0a40305 perf: improve simulation headroom`；`origin/main` 已对齐。未跟踪参考文件 `session-ses_082c.md` 未加入提交，等待主分支 CI 与自动部署完成。
 - 2026-07-21 18:36：记录提交 `758c2fc docs: record performance optimization` 后，覆盖完整实现的主分支 CI `29822566601` 与 GitHub Pages 均成功；实现提交对应的前一 run 因后续文档 push 被 concurrency 正常取消，不代表校验失败。Cloudflare Pages production deployment `bcab4c96-1b02-4153-8d76-b42b5633affd` 已发布 `758c2fc`，实现提交 `0a40305` 亦有成功 deployment `392673a2-25f5-4ca5-a046-116b0b7884f1`。等待提交本条最终部署记录。
 
+#### 2026-07-21 19:08 +0800：联机移动平滑与快照突发抑制
+
+- 用户反馈在线多人场景偶发卡顿和瞬移。定位到两个确定性原因：客户端在处理新 snapshot 后立刻把“snapshot 到达前”的整段 `frameSeconds` 计入刚重置的 100ms 插值，约 100ms 的渲染卡顿会让远端角色同帧直接跳到新位置；服务端落后追 tick 时仍按每 3 个模拟 tick 广播，可能在极短墙钟时间内连续发送多个 snapshot，客户端合并后形成更大的位置跨度。
+- 客户端改为在消费消息前推进旧 transition，新 snapshot 从当前实际渲染位置开始；插值时长按 server tick gap 动态取 `120–250ms`，丢失/合并 snapshot 时自动拉长。远端角色继续只做展示层插值；本地玩家权威快照和未确认输入重放仍写预测状态，但 6m 内的普通 reconciliation 通过独立视觉 offset 在同一时长内归零，真正传送、部署切换和生死切换继续立即对齐，不把平滑状态写回权威规则。
+- 服务端保持 30Hz 权威 tick 与正常每 3 tick 的 10Hz 目标，仅增加 80ms 墙钟最小广播间隔；追帧时抑制 snapshot burst，事件和 loot change 继续累积到下一帧，终局仍强制发送最终 frame。`MultiplayerSession` 同时从初始 full state 固定本局 `MapLayout`，避免首次本地预测时生成地图造成卡顿。
+- 新增纯函数回归覆盖 tick-gap 插值、snapshot 后零进度起步、普通预测校正/真实传送边界，以及 snapshot throttle 的正常节奏、追帧 burst 和时钟重置。`npm run typecheck` 与多人平滑/节流/连接/运行时 **4 files / 9 tests** 通过，等待完整门禁、双客户端静音浏览器验收和 reviewer 闭环。
+- 2026-07-21 19:29：完成本地真实 WebSocket 双客户端验收。两个独立浏览器 context 以 2 名真人加入同一私人房间，服务端 AI 补满 50 人；主音量均为 0，对局持续推进，HUD 约 110–120 FPS，两端控制台均无 error/warn。在观察端对真实远端 `actor-bot-7` 连续采样 240 个 RAF，并主动制造两次约 120ms 主线程停顿：普通帧最大位移约 `0.194m`；两个长帧位移分别约 `1.207m` / `0.354m`，最大折算速度约 `9.84m/s`，处于角色正常移动速度范围，没有快照同帧跳终点或异常大跨度瞬移；包含人工停顿的平均 RAF 仍约 `108.3 FPS`。本轮尚未部署生产，以上为本地 Worker/浏览器证据。
+- 2026-07-21 19:42：首次完整套件中两个既有 100/401-seed 地图枚举仅因并发 CPU 负载超出各自 120/240 秒预算，未出现断言失败；确认 Chrome 仍有多张历史 Babylon 场景标签持续渲染后，按用户新增要求关闭全部本轮及历史验收页、停止 5173/8787 服务，并确认 Chrome 只剩无法关闭的 `about:blank`。清理后原命令无需修改 timeout 即稳定通过：应用 **30 files / 267 tests**、Worker **3 files / 26 tests**、`npm run build`、`npm run build:worker` 全部成功，构建仅保留既有大 chunk warning。今后每次 Chrome 验收结束均执行同样的页面/context、本地服务和最终空白页检查；准备进入 reviewer 闭环。
+- 2026-07-21 19:52：采纳 reviewer 唯一高风险 finding：远端 actor 原先只有重新可见时立即对齐，真实传送及 alive/deployment 变化仍会被 transition 平滑。现统一通过 transition-selection helper 比较旧/新权威 actor；重新可见、alive/deployment 变化、缺少旧状态或 grounded 权威跨度 `>6m` 均零时长立即对齐。为避免机械阈值破坏既有最高约 64m/s 的高空滑翔，parachuting 同状态允许最高 18m 的合法 snapshot 跨度继续平滑；grounded 10m 传送、deployment/alive、重新可见、普通 2m 移动和 parachuting 10m 合法移动均新增回归。`npm run typecheck` 与 smoothing/throttle/runtime **3 files / 10 tests** 通过，等待 reviewer 复审。
+- 2026-07-21 20:00：采纳 reviewer 复审的新 finding：固定 18m parachuting 上限会在正常 3-tick snapshot 下错误平滑 6–18m 的不可能位移。现显式传入真实 server tick gap，并按 `hypot(64m/s 水平滑翔, 5m/s 垂直下降) × gap + 0.35m` 计算本次动态上限，同时保留 18m 硬上限；因此 10m/0.2s 和约 16m/0.25s 合法高速移动继续平滑，17m/0.1s 与 >18m 跳变立即对齐。`MAX_GLIDE_SPEED` / `PARACHUTE_DESCENT_SPEED` 从权威 Movement 导出，避免网络层复制玩法数值。`npm run typecheck` 与 smoothing/throttle/Movement/Runtime **4 files / 29 tests** 通过。
+- 2026-07-21 20:00：按用户要求补齐长期文档。README 新增联机本地预测、远端 120–250ms 插值、传送 snap 和追 tick burst 抑制说明；`docs/architecture.md` 详细记录 snapshot→authoritative replace→pending input replay→visual correction 流程、远端 transition 选择、动态 parachuting 位移预算、80ms snapshot throttle、event/loot 累积和 finished 尾帧契约，并明确所有平滑只属于展示层，不改变命中、拾取、库存、安全区或结果状态。等待 reviewer 第三轮复审。
+- 2026-07-21 20:06：reviewer 第三轮复审为 `No findings`，确认动态 parachuting 预算、18m hard cap、异常 tick、deployment snap、权威常量依赖和 README/architecture 均与实现一致；前两轮其余 smoothing/throttle/reconciliation 范围继续无剩余 blocker/high/medium。Reviewer 再次执行应用 **30 files / 269 tests**、Worker **3 files / 26 tests**、typecheck、应用/Worker build 和 diff check，全部通过。Chrome 保持清理后的仅 `about:blank` 状态，等待提交推送和生产部署。
+
 ## 审查
 
 ### 2026-07-16 14:27 +0800：当前未提交实现审查（不通过）
@@ -1455,3 +1468,43 @@
 - 构造与对象复用复核：新增参数均有默认值，既有测试/独立调用方兼容；`SimulationCombatWorld(state, false)` 的完整扫描参数语义未改变。复用的 continuous command 没有被规则系统原地修改；living actor 集、命令排序和共享 GridNavigator query buffer 的同步消费关系也未因本轮修复变化。未发现业务源码中的 `context.Background()`。
 - 验证：本机实际执行 `npm run test`，应用 **28 files / 262 tests**、Worker **3 files / 26 tests** 全通过；五 seed 继续全部 `>=42/49` 武装，49 Bot 完整局产生唯一胜者。`npm run typecheck`、`npm run build`、`npm run build:worker`、`git diff --check f470f9d` 均通过，构建仅保留既有 >500kB chunk warning。另以运行时对象身份检查确认新局、checkpoint restore、普通 Bot 和 takeover Bot 与 Simulation/Inventory/Movement/World 共享预期 layout。
 - 残余风险（非阻塞）：Proxy 驱逐测试各自需要生成 9 张完整地图，在并发较慢环境中约 9–10 秒，但已有 30 秒测试余量且没有使用时间阈值；本轮无展示层改动，因此未做浏览器视觉验收。
+
+### 2026-07-21 19:49 +0800：联机移动平滑与 snapshot burst 完整审查（不通过）
+
+- 审查范围：以本 plan 2026-07-21 19:08–19:42 Build 记录、`AGENTS.md`、`README.md` 和用户给定网络语义边界为基线；确认当前分支为 `main`，`HEAD=origin/main=merge-base=a62899158ab64a4d4cf25757415042dd7e4a3c53`。完整审查工作区相对 `a628991` 的 `MultiplayerSession`、`GameRoom`、两个新增 smoothing/throttle 模块、两个新增测试及 plan 增量，并检查 `MatchRuntime.takeFrame/projectFrame`、`CommandInbox`、重连/full/resync、Movement/layout 和可见性调用链。未跟踪参考文件 `session-ses_082c.md` 按要求忽略且未触碰。
+- 审查结论：**不通过。** snapshot 前先推进旧 transition、本地 snapshot + pending input replay 后仅叠加视觉 correction、full/resync/重新可见清理、初始 layout pin，以及 30 Hz / `tick % 3` / 80ms throttle 与 finished 强制尾帧的主链未见权威语义回归；但远端 actor 的真实传送和 deployment 边界没有执行约定的立即对齐，存在 1 项高风险功能缺口。
+
+#### Finding
+
+1. **[高] 远端 actor 的大于 6m 传送和 deployment 切换仍被普通 position transition 平滑，违反必须立即对齐的边界。** `src/app/MultiplayerSession.ts:315-323` 为每个远端 actor 无条件从旧 rendered position 创建 `120–250ms` transition，唯一的零时长条件只有“本帧重新进入可见集合”；这里没有比较前后 `alive/deployment`，也没有距离阈值。相应判断只存在于本地 `beginLocalCorrection`（`:521-536`），因此不能保护远端。复现：让一个前后都可见的远端 grounded actor 从 `(0,1.76,0)` 在下一 snapshot 权威移动到 `(10,1.76,0)`；应用 snapshot 后首帧仍采样旧位置，随后 120ms 内经过中间坐标，而不是立即到 10m。远端 `aircraft→parachuting` 或 `parachuting→grounded` 同样会沿旧 transition 起步（死亡虽会被 root 立即隐藏，但不是通用边界处理）。影响是服务端真实传送会被伪装成高速穿墙/穿地移动，部署视觉也可能短暂脱离权威位置，直接偏离本轮明确需求。Builder 需在创建远端 transition 前比较旧/新 actor：重新可见、alive/deployment 变化或前后权威位置距离大于 6m 时使用零时长并丢弃旧 transition；writer 需补能击穿当前实现的会话级或 transition-selection 回归，至少覆盖 >6m、deployment/alive、普通 10Hz 移动和重新可见。
+
+#### 验证与待处理
+
+- Reviewer 本机实际执行 `npm run typecheck && npm run test && npm run build && npm run build:worker && git diff --check a628991`，全部通过：应用 **30 files / 267 tests**、Worker **3 files / 26 tests**；构建仅保留既有 >500kB chunk warning。未发现业务源码中的 `context.Background()`。
+- 已复核 writer 的双浏览器静音 WebSocket 证据，其正常移动与 120ms stall 样本支持普通平滑链有效，但样本没有覆盖上述远端传送/deployment 边界，不能抵消 finding。Builder 必须先修复该项；writer 补边界回归后再发起复审。
+- 残余验证风险：当前新增测试只直接测试纯 smoothing/throttle helper，没有 `MultiplayerSession` 消息队列/full/coalescing/reconciliation 集成测试，也没有 GameRoom cadence/finished 尾帧 Worker 测试。`GameRoom` 静态调用链显示 `takeFrame` 仅在实际发送时清 events/dirty loot，正常候选仍为每 3 tick，当前未发现第二项明确错误；但 watchdog force restart、runtime restore 和最终帧仍主要依赖代码审查及既有真实浏览器证据。
+
+### 2026-07-21 19:56 +0800：远端传送边界 finding 复审（不通过）
+
+- 审查范围：对照本 plan 2026-07-21 19:49 的唯一高风险 finding，并继续复核当前 `main` 工作区相对指定基线 `a62899158ab64a4d4cf25757415042dd7e4a3c53` 的完整改动；`HEAD=origin/main=merge-base=a628991`。重点复核 `createRemotePositionTransition`、snapshot state 替换前后的引用生命周期、本地 prediction correction 与远端 pose map、Movement 的 64m/s 高空滑翔语义，以及上轮 smoothing/throttle/full/resync/visibility/layout 调用链。未跟踪 `session-ses_082c.md` 继续忽略且未触碰。
+- 审查结论：**不通过。** 上轮 0→10m grounded 传送、重新可见、缺少旧 actor、alive/deployment 边界均已正确改为零时长；旧 `actors` map 在替换 state 前保存，pending input replay 只修改新 frame 的本地 actor，权威距离与 rendered transition 起点分工正确，local correction 也不会读取 remote pose。原 finding 已大部分闭环，但 parachuting 的固定 18m 上限没有结合当前 snapshot tick gap，仍会平滑本次间隔内不可能由规则移动产生的真实大位移。
+
+#### Finding
+
+1. **[高] parachuting 的固定 18m 阈值会在正常 10Hz snapshot 下掩盖不可能的 6–18m 权威跳变。** `src/network/PositionSmoothing.ts:83-97` 只按 deployment 选择固定 `18m`，虽然已收到由 tick gap 得出的 `durationSeconds`，却没有用它约束本次合法位移。`MovementSystem` 的高空极限是水平 `64m/s`、垂直 `5m/s`；正常 3 tick/0.1s 快照间最多约 `6.42m`，即使用当前 120ms 最小插值窗口作宽松预算也仅约 `7.7m`。复现：前后均为 parachuting，旧位置 `(0,120,0)`、下一正常快照位置 `(17,119.5,0)`、duration `0.12s`；当前 helper 会创建 120ms transition，虽然该位移不可能由 3 个权威 tick 产生，应视为传送并立即对齐。现有 `tests/unit/positionSmoothing.test.ts:78-85` 只证明 `10m/0.2s` 在高空是合理样本，没有覆盖相同距离在正常 tick gap 下应 snap。影响是在高空或近地阶段把真实权威跳变表现为最高约 142m/s 的高速滑行，近地时仍可能穿过建筑/地形，未完全满足“真实传送不能被平滑掩盖”。Builder 不应退回机械 6m：建议保留 18m 硬上限，同时按实际 tick gap（最好显式传入；或用 interpolation duration 作保守近似）和 `sqrt(64²+5²)m/s` 计算本次动态合法上限并留少量容差。Writer 至少补 `10m/0.2s smooth`、`10–17m/0.12s snap`、接近 250ms 的合法高速 smooth 和 `>18m snap` 回归。
+
+#### 验证与待处理
+
+- Reviewer 本机实际执行 `npm run typecheck && npm run test && npm run build && npm run build:worker && git diff --check a628991`，全部通过：应用 **30 files / 269 tests**、Worker **3 files / 26 tests**；构建仅保留既有 >500kB chunk warning。未发现业务源码中的 `context.Background()`。
+- 上轮其余检查项继续未发现明确问题：旧 authoritative actor 引用未被新 state/replay 污染；普通 grounded、lifecycle、重新可见和 full/resync snap 正确；snapshot throttle 的候选频率、event/loot 累积和 finished 尾帧静态语义未变化。Builder 需处理上述动态 parachuting 上限，writer 补边界回归后再复审。
+- 残余验证风险：仍没有 `MultiplayerSession` 消息队列/reconciliation 集成测试或 GameRoom cadence Worker 测试；本轮新增 transition-selection 纯函数测试提高了边界覆盖，但不能替代完整会话链验证。
+
+### 2026-07-21 20:05 +0800：动态 parachuting 位移预算第三轮复审（通过）
+
+- 审查范围：对照本 plan 2026-07-21 19:49、19:56 两轮唯一高风险 finding，并继续复核当前 `main` 工作区相对指定基线 `a62899158ab64a4d4cf25757415042dd7e4a3c53` 的完整源码、测试和文档改动；`HEAD=origin/main=merge-base=a628991`。重点检查真实 tick gap、动态滑翔预算、0.35m 容差、18m hard cap、异常/倒退/长 tick gap、deployment 边界、Movement 常量依赖，以及 README/architecture 与实现的一致性。未跟踪 `session-ses_082c.md` 按要求忽略且未触碰。
+- 审查结论：**通过。本次审查未发现明确问题（No findings）。** 上轮 parachuting 固定 18m finding 已闭环；前两轮其余已确认安全的 smoothing、prediction、full/resync、visibility、layout pin、snapshot throttle、event/loot 和 finished 尾帧范围继续未发现回归。
+- 动态预算复核：`snapshotElapsedSeconds` 使用未 clamp 的 server tick 差；生产 3/6 tick gap 分别得到 0.1/0.2 秒，而 interpolation 仍独立 clamp 到 120–250ms。parachuting 上限为 `min(18, hypot(64,5)×gap+0.35)`：正常 0.1 秒约 6.77m，0.2 秒约 13.19m，0.25 秒约 16.40m，数学上覆盖 Movement 每 tick 可同时发生的最大水平滑翔与垂直下降。0.35m 小于 actor radius，足以容纳边界/浮点余量而不会重新放大到上一轮 18m 固定预算。长 gap 始终被 18m 截断；相同/倒退 tick 被收紧为单 tick 预算，不会扩大平滑范围，正常协议下 stale sequence 又会先被拒绝。高空最大速度可平滑，近地使用同一绝对上界虽较保守，但 hard cap、tick 动态预算及 deployment→grounded 立即 snap 仍保证边界有界。
+- lifecycle 与依赖复核：重新可见、缺少旧 actor、alive/deployment 变化均先于距离判断 snap；旧 authoritative actor map 仍在 state 替换前保存，pending input replay 只影响新本地 actor，remote rendered start 与 authoritative distance 分工不变。`MultiplayerSession` 原本已依赖 `MovementSystem`，新增两个常量导出没有新增依赖方向或循环，也没有改变 Movement 行为；网络 helper 只接收速度参数，没有复制玩法值。
+- 测试与文档复核：新增回归覆盖 `10m/0.2s smooth`、`17m/0.1s snap`、`16m/0.25s smooth`、`19m/0.3s hard-cap snap`，并保留 grounded、alive/deployment、重新可见和新 transition 零进度断言。README 与 `docs/architecture.md` 对 authoritative replace、pending replay、local visual offset、remote tick-gap transition、80ms throttle、event/loot 累积及 finished 尾帧的描述与当前实现一致。
+- Reviewer 本机实际执行 `npm run typecheck && npm run test && npm run build && npm run build:worker && git diff --check a628991`，全部通过：应用 **30 files / 269 tests**、Worker **3 files / 26 tests**；构建仅保留既有 >500kB chunk warning。未发现业务源码中的 `context.Background()`。
+- 残余风险（非阻塞）：仍无 `MultiplayerSession` 队列/reconciliation 集成测试和 GameRoom cadence Worker 测试；本轮纯函数边界及既有真实双浏览器证据能够覆盖当前修复目标，但不能替代后续对 watchdog restore、消息乱序协议违例和完整会话生命周期的专项自动化。

@@ -16,10 +16,10 @@ import type { ActorState, EntityId, MatchState, Vector3State } from "../state/ty
 const WALK_SPEED = 8.7;
 export const SPRINT_SPEED = 11.5;
 const MIN_GLIDE_SPEED = 8;
-const MAX_GLIDE_SPEED = 64;
+export const MAX_GLIDE_SPEED = 64;
 const GLIDE_ACCELERATION_ALTITUDE = 20;
 const GLIDE_SPEED_PER_METER = 0.4;
-const PARACHUTE_DESCENT_SPEED = 5;
+export const PARACHUTE_DESCENT_SPEED = 5;
 const GRAVITY = 18;
 const JUMP_APEX_HEIGHT = 1.7;
 const JUMP_SPEED = Math.sqrt(2 * GRAVITY * JUMP_APEX_HEIGHT);

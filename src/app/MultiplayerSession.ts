@@ -11,6 +11,7 @@ import {
   setActorWeaponVisual,
 } from "../client/render/scenes/IslandScene";
 import { GameHud } from "../client/ui/GameHud";
+import { createMapLayout } from "../config/map";
 import type { GameSettings } from "../config/settings";
 import { WEAPONS } from "../config/weapons";
 import { HumanController } from "../controllers/HumanController";
@@ -23,8 +24,19 @@ import {
   type MatchState,
   type Vector3State,
 } from "../game/state/types";
-import { MovementSystem } from "../game/systems/MovementSystem";
+import { MAX_GLIDE_SPEED, MovementSystem, PARACHUTE_DESCENT_SPEED } from "../game/systems/MovementSystem";
 import { MultiplayerConnection } from "../network/MultiplayerClient";
+import {
+  advancePositionTransition,
+  createCorrectionTransition,
+  createPositionTransition,
+  createRemotePositionTransition,
+  positionTransitionComplete,
+  samplePositionTransition,
+  snapshotElapsedSeconds,
+  snapshotInterpolationSeconds,
+  type PositionTransition,
+} from "../network/PositionSmoothing";
 import type { ClientMessage, SequencedGameEvent, ServerMessage } from "../network/protocol";
 import {
   cycleSpectatorActorId,
@@ -43,11 +55,6 @@ interface PendingInput {
   command: Extract<ClientMessage, { type: "match.input" }>["command"];
 }
 
-interface RemotePose {
-  from: Vector3State;
-  to: Vector3State;
-}
-
 export class MultiplayerSession implements GameSession {
   public readonly scene;
   private readonly camera;
@@ -62,12 +69,12 @@ export class MultiplayerSession implements GameSession {
   private readonly humanController: HumanController;
   private readonly effects: CombatEffects;
   private readonly clock = new FixedStepClock();
-  private readonly movement = new MovementSystem();
+  private readonly movement: MovementSystem;
   private readonly queuedMessages: ServerMessage[] = [];
   private readonly pendingInputs: PendingInput[] = [];
   private readonly actorVisualSignatures = new Map<EntityId, string>();
   private readonly jumpVisualStates = new Map<EntityId, JumpVisualState>();
-  private readonly remotePoses = new Map<EntityId, RemotePose>();
+  private readonly remotePoses = new Map<EntityId, PositionTransition>();
   private state: MatchState;
   private displayNames: Record<EntityId, string>;
   private hud: GameHud | null = null;
@@ -75,8 +82,9 @@ export class MultiplayerSession implements GameSession {
   private disposed = false;
   private inputSequence = 0;
   private lastSnapshotSequence = -1;
+  private lastSnapshotTick = -1;
   private lastEventSequence = -1;
-  private interpolationProgress = 1;
+  private localCorrection: PositionTransition | null = null;
   private playerEliminated = false;
   private spectatorActorId: EntityId | null = null;
   private visibleActorIds = new Set<EntityId>();
@@ -105,12 +113,14 @@ export class MultiplayerSession implements GameSession {
     this.aircraftInteriorRoot = bundle.aircraftInteriorRoot;
     this.syncAircraftVisual = bundle.syncAircraftVisual;
     this.syncSafeZoneRing = bundle.syncSafeZoneRing;
+    this.movement = new MovementSystem(createMapLayout(initial.state.mapSeed));
     this.humanController = new HumanController(canvas, settings.sensitivity, { touchRoot: uiRoot });
     this.effects = new CombatEffects(this.scene);
     this.lastSnapshotSequence = initial.snapshotSequence;
+    this.lastSnapshotTick = initial.tick;
     this.processSequencedEvents(initial.events);
     for (const actor of Object.values(this.state.actors)) {
-      this.remotePoses.set(actor.id, { from: { ...actor.position }, to: { ...actor.position } });
+      this.remotePoses.set(actor.id, createPositionTransition(actor.position, actor.position, 0));
       if (actor.position.y > -5_000) this.visibleActorIds.add(actor.id);
     }
     this.connection.setMessageHandler((message) => this.enqueueMessage(message));
@@ -169,6 +179,7 @@ export class MultiplayerSession implements GameSession {
 
   public update(frameSeconds: number, fps: number): void {
     if (!this.active) return;
+    this.advanceVisualSmoothing(frameSeconds);
     if (!this.processMessages()) return;
     const player = this.getActor(this.localActorId);
     this.humanController.rememberActor(player);
@@ -184,7 +195,6 @@ export class MultiplayerSession implements GameSession {
     if (this.state.phase !== "finished") {
       this.clock.advance(frameSeconds, (deltaSeconds) => this.sendInput(deltaSeconds));
     }
-    this.interpolationProgress = Math.min(1, this.interpolationProgress + frameSeconds * 10);
     this.effects.update(frameSeconds);
     this.syncVisuals();
     const viewedActor = this.spectatorActorId ? this.state.actors[this.spectatorActorId] ?? player : player;
@@ -247,11 +257,13 @@ export class MultiplayerSession implements GameSession {
       this.hud?.clearResult();
     }
     this.lastSnapshotSequence = message.snapshotSequence;
+    this.lastSnapshotTick = message.tick;
     this.lastEventSequence = -1;
     this.pendingInputs.length = 0;
+    this.localCorrection = null;
     this.remotePoses.clear();
     for (const actor of Object.values(this.state.actors)) {
-      this.remotePoses.set(actor.id, { from: { ...actor.position }, to: { ...actor.position } });
+      this.remotePoses.set(actor.id, createPositionTransition(actor.position, actor.position, 0));
     }
     this.visibleActorIds = new Set(Object.values(this.state.actors)
       .filter((actor) => actor.position.y > -5_000)
@@ -265,8 +277,13 @@ export class MultiplayerSession implements GameSession {
     const frame = message.frame;
     if (frame.snapshotSequence <= this.lastSnapshotSequence) return;
     this.lastSnapshotSequence = frame.snapshotSequence;
+    const snapshotSeconds = snapshotElapsedSeconds(this.lastSnapshotTick, frame.tick);
+    const interpolationSeconds = snapshotInterpolationSeconds(this.lastSnapshotTick, frame.tick);
+    this.lastSnapshotTick = frame.tick;
     const renderedPositions = new Map<EntityId, Vector3State>();
     const previouslyVisibleActorIds = this.visibleActorIds;
+    const previousActors = this.state.actors;
+    const previousLocalActor = previousActors[this.localActorId];
     for (const [actorId, actor] of Object.entries(this.state.actors)) {
       renderedPositions.set(actorId, this.visualPosition(actorId, actor.position));
     }
@@ -290,15 +307,28 @@ export class MultiplayerSession implements GameSession {
       for (const input of this.pendingInputs) {
         this.movement.processCommand(this.state, this.localActorId, input.command, 1 / 30);
       }
+      this.beginLocalCorrection(
+        renderedPositions.get(this.localActorId) ?? player.position,
+        previousLocalActor,
+        player,
+        interpolationSeconds,
+      );
+    } else {
+      this.localCorrection = null;
     }
     this.remotePoses.clear();
     for (const actor of Object.values(this.state.actors)) {
-      const from = this.visibleActorIds.has(actor.id) && !previouslyVisibleActorIds.has(actor.id)
-        ? actor.position
-        : renderedPositions.get(actor.id) ?? actor.position;
-      this.remotePoses.set(actor.id, { from: { ...from }, to: { ...actor.position } });
+      const newlyVisible = this.visibleActorIds.has(actor.id) && !previouslyVisibleActorIds.has(actor.id);
+      this.remotePoses.set(actor.id, createRemotePositionTransition(
+        renderedPositions.get(actor.id) ?? actor.position,
+        previousActors[actor.id],
+        actor,
+        interpolationSeconds,
+        snapshotSeconds,
+        Math.hypot(MAX_GLIDE_SPEED, PARACHUTE_DESCENT_SPEED),
+        newlyVisible,
+      ));
     }
-    this.interpolationProgress = 0;
     this.syncLootMeshes(this.state.groundLoot);
     this.processSequencedEvents(frame.events);
     this.synchronizeOutcome();
@@ -478,15 +508,39 @@ export class MultiplayerSession implements GameSession {
   }
 
   private visualPosition(actorId: EntityId, fallback: Vector3State): Vector3State {
-    if (actorId === this.localActorId) return fallback;
+    if (actorId === this.localActorId) {
+      if (!this.localCorrection) return fallback;
+      const offset = samplePositionTransition(this.localCorrection);
+      return { x: fallback.x + offset.x, y: fallback.y + offset.y, z: fallback.z + offset.z };
+    }
     const pose = this.remotePoses.get(actorId);
     if (!pose) return fallback;
-    const amount = this.interpolationProgress;
-    return {
-      x: pose.from.x + (pose.to.x - pose.from.x) * amount,
-      y: pose.from.y + (pose.to.y - pose.from.y) * amount,
-      z: pose.from.z + (pose.to.z - pose.from.z) * amount,
-    };
+    return samplePositionTransition(pose);
+  }
+
+  private advanceVisualSmoothing(frameSeconds: number): void {
+    for (const pose of this.remotePoses.values()) advancePositionTransition(pose, frameSeconds);
+    if (!this.localCorrection) return;
+    advancePositionTransition(this.localCorrection, frameSeconds);
+    if (positionTransitionComplete(this.localCorrection)) this.localCorrection = null;
+  }
+
+  private beginLocalCorrection(
+    previousVisualPosition: Vector3State,
+    previousActor: ActorState | undefined,
+    player: ActorState,
+    durationSeconds: number,
+  ): void {
+    if (!previousActor || previousActor.alive !== player.alive || previousActor.deployment !== player.deployment) {
+      this.localCorrection = null;
+      return;
+    }
+    this.localCorrection = createCorrectionTransition(
+      previousVisualPosition,
+      player.position,
+      durationSeconds,
+      6,
+    );
   }
 
   private syncViewWeaponVisual(
