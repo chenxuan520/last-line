@@ -612,8 +612,18 @@
 - 所有非死亡三维物资材质统一为黄色 `#e2c66d`，包括自然生成和手动丢弃；死亡掉落继续使用红色 `#c85e50`。未修改 `GroundLootState`、物资来源、拾取距离、AI、掉落、网络或权威规则。
 - 先补回归并确认旧实现失败，再完成实现：生命周期逐 marker 检查枪械 `2` / 其他 `1.45`；14 类自然物资材质全部为黄色、死亡材质保持红色；四类枪械在原 receiver/barrel 间隙中心执行垂直射线并确认均命中连接几何；全部 marker 继续验证世界最低点贴合真实 support。定向 IslandScene **4 tests**、`npm run typecheck:app` 和 `git diff --check` 已通过，等待完整门禁、静音浏览器视觉验收和用户指定的“先推送、再 reviewer”流程。
 - 2026-07-22 01:28：最终自动门禁通过：应用 **30 files / 271 tests**、Worker **3 files / 27 tests**、standalone **2 files / 15 tests**、`npm run typecheck`、生产 build 和 diff check 全绿。静音 production preview 确认 250 个三维 marker 中四类枪械全部 scale=`2`、其余物资全部 scale=`1.45`、非死亡材质全部为 `#E2C66D`；对局中实际产生的一件死亡霰弹枪保持 `#C85E50`。只读四枪 gallery 可见 receiver、补充连接体和主枪管连续接合，枪械轮廓清楚，console 无 error/warn；截图 `loot-gun-scale-connectivity.png` 存于临时目录。验收后关闭独立 Chrome context、停止 4173 preview，并确认只剩 `about:blank`。下一步按用户明确指定顺序先提交推送，再启动 reviewer。
+- 2026-07-22 01:36：实现、测试、README 和当时 Build 记录已按用户指定顺序先随 `1d65983 fix: refine ground loot models` 提交并推送，随后启动 reviewer。Reviewer 对 `0055e21..1d65983` 完整范围复核为 `No findings`，并再次通过 271/27/15 tests、全量 typecheck、build 和 diff check；详细证据已写入下方 Review。GitHub Actions run `29853134306` 与 GitHub Pages 成功，Cloudflare Pages production deployment `2982e8bd-24af-41c0-9e50-b569aa4c4c5c` 已发布 `1d65983`。本次无 Worker、权威规则或服务端改动，不需部署 Worker；工作区仍只剩外部 `.gitignore` 改动，未纳入提交。
 
 ## 审查
+
+### 2026-07-22 01:35 +0800：1d65983 三维枪械与物资颜色完整审查（通过）
+
+- 审查范围：基于本 plan 最新 Build 608–614 行及既有三维物资 Review，按用户指定基线完整审查 `0055e21..1d65983` 的 4 个文件（plan、README、`IslandScene.ts`、`islandScene.test.ts`）。确认 `0055e21` 是 `1d65983` 唯一父提交及 merge-base，当前 `HEAD/main/origin/main=1d65983f9cd54a4072972e871661d0833f2f439b`；工作区 `.gitignore` 的 `.opencode` 外部并发改动完全忽略、未触碰且未纳入结论。
+- 审查结论：**通过。No findings。** 四类三维枪械均为 `2` 倍，其他 10 类已知物资及 fallback 保持 `1.45`；未发现连接断口、transform/世界包围盒、support 高度、颜色来源、known↔unknown 原地切换、资源有界性或经典方块路径回归。README 与 Build 记录和实际实现一致。
+- 几何与测试证据：四个硬编码射线点分别位于旧 receiver 前缘与主枪管后缘之间的真实空区：rifle `(0.2945, 0.589)` 中点 `0.44175`、smg `(0.2185, 0.247)` 中点 `0.23275`、shotgun `(0.2945, 0.3515)` 中点 `0.323`、sniper `(0.3515, 0.6365)` 中点 `0.494`；这些位置不落在旧 receiver、主枪管或同型号其他零件上，且 pick predicate 限定为对应 marker，因此不是误命中。连接体宽度为 gap 加两侧各 `0.04×0.95m` 重叠，横截面按 receiver/barrel 尺寸取足以相交的上界，随后与原零件一次性 `MergeMeshes`，不会新增 record 子 Mesh；合并后的实际最低点再按型号 scale 计算 offset。
+- 缩放/贴地与切换：`groundLootModelScale` 读取 `ITEMS[modelId].kind`，当前恰好覆盖 rifle/smg/shotgun/sniper 四种 weapon，ammo/armor/helmet/medical 与 fallback 均返回 `1.45`。offset 与 marker update 使用同一 scale；全部当前 marker 的 world minimum Y 回归继续对真实 `getSupportHeight` 断言 `support+0.04m`。既有真实 roof 上的 rifle→unknown fallback→sniper 测试现在同时跨越 `2→1.45→2`，仍保持同一 Mesh、恢复 fallback/known 各自旋转并在两次切换后贴合 `support+0.04m`。
+- 颜色、经典路径与边界：14 个常规模板材质统一为 `#E2C66D`；marker 每次 sync 都以 `loot.source === "death"` 选择红色死亡材质，其余 `spawn`、`drop` 或缺省 source 均走黄色材质，Inventory 动态非死亡掉落默认 source 为 `drop`。经典关闭模型路径的 `0.62m` box、scale `1`、`(0,π/4,π/4)` 旋转、原 `loot.position` 和原材质创建/选择相对基线均无改动。仍为 15 个模板（14 类 + fallback）、每型号共享 geometry/material、每 record 单 Mesh及至多每型号一个死亡材质；`src/game/`、AI、拾取、掉落、网络和服务端相对基线无 diff，改动范围未出现 `context.Background()`。
+- 验证：Reviewer 实际执行定向 IslandScene **4/4 tests**、`npm run typecheck`、完整 `npm run test`（应用 **30 files / 271 tests**、Worker **3 files / 27 tests**、standalone **2 files / 15 tests**）、`npm run build` 和 `git diff --check 0055e21..1d65983`，全部通过；构建仅保留既有 >500kB chunk warning。GitHub Actions run `29853134306` 的 typecheck、全部测试、应用/Worker/standalone build 与 GitHub Pages deployment 也已成功。本轮 reviewer 未另开浏览器，视觉结论同时参考 Build 01:28 已记录的音量 0 production preview、四枪 gallery、死亡霰弹枪和清理证据；残余风险仅为该视觉证据未由本轮独立重复，不构成代码 finding。
 
 ### 2026-07-22 00:34 +0800：真实屋顶回归最终复审（通过）
 
