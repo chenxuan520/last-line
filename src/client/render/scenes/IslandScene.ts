@@ -1340,29 +1340,19 @@ function weaponMaterial(materials: IslandMaterials, weaponId: WeaponVisualId): S
   return materials.weaponRifle;
 }
 
-const LOOT_MODEL_COLORS: Readonly<Record<string, string>> = {
-  "weapon.rifle": "#596552",
-  "weapon.smg": "#4f6762",
-  "weapon.shotgun": "#765d43",
-  "weapon.sniper": "#515961",
-  "ammo.rifle": "#877447",
-  "ammo.light": "#637763",
-  "ammo.shell": "#9a5542",
-  "ammo.sniper": "#68617d",
-  "armor.1": "#5e6a57",
-  "armor.2": "#3f514d",
-  "helmet.1": "#667059",
-  "helmet.2": "#3d4b48",
-  bandage: "#d7d0b9",
-  medkit: "#68745f",
-};
 const CLASSIC_LOOT_MARKER_SIZE = 0.62;
 const GROUND_LOOT_POSITION_HEIGHT = 0.45;
 const GROUND_LOOT_MODEL_SCALE = 1.45;
+const GROUND_LOOT_WEAPON_MODEL_SCALE = 2;
 const GROUND_LOOT_MODEL_CLEARANCE = 0.04;
+const GROUND_LOOT_SPAWN_COLOR = "#e2c66d";
+
+function groundLootModelScale(modelId: string): number {
+  return ITEMS[modelId]?.kind === "weapon" ? GROUND_LOOT_WEAPON_MODEL_SCALE : GROUND_LOOT_MODEL_SCALE;
+}
 
 function createLootModelMaterial(scene: Scene, itemId: string, death = false): StandardMaterial {
-  const color = Color3.FromHexString(death ? "#c85e50" : (LOOT_MODEL_COLORS[itemId] ?? "#c3b678"));
+  const color = Color3.FromHexString(death ? "#c85e50" : GROUND_LOOT_SPAWN_COLOR);
   const material = new StandardMaterial(
     `${death ? "loot-model-death-material" : "loot-model-material"}-${itemId.replaceAll(".", "-")}`,
     scene,
@@ -1429,13 +1419,34 @@ function createLootModelTemplate(scene: Scene, itemId: string, modelMaterial: St
   if (item?.kind === "weapon" && item.weaponId) {
     const weaponId = item.weaponId as WeaponVisualId;
     const scale = 0.95;
-    for (const [name, kind, x, y, z, width, height, depth, rotationX = 0] of weaponPieces(weaponId, false)) {
+    const pieces = weaponPieces(weaponId, false);
+    for (const [name, kind, x, y, z, width, height, depth, rotationX = 0] of pieces) {
       const mesh = kind === "barrel"
         ? addCylinder(name, depth * scale, width * scale, width * scale)
         : addBox(name, width * scale, height * scale, depth * scale);
       mesh.position.set(z * scale, 0.12 + y * scale, -x * scale);
       if (kind === "barrel") mesh.rotation.z = Math.PI / 2 + rotationX;
       else mesh.rotation.set(rotationX, Math.PI / 2, 0);
+    }
+    const receiver = pieces.find(([name]) => name === "receiver");
+    const barrel = pieces.find(([name, kind]) => kind === "barrel" && name.includes("barrel"));
+    if (receiver && barrel) {
+      const [, , receiverX, receiverY, receiverZ, receiverWidth, receiverHeight, receiverDepth] = receiver;
+      const [, , barrelX, barrelY, barrelZ, barrelWidth, , barrelDepth] = barrel;
+      const receiverFront = (receiverZ + receiverDepth / 2) * scale;
+      const barrelBack = (barrelZ - barrelDepth / 2) * scale;
+      if (barrelBack > receiverFront) {
+        const overlap = 0.04 * scale;
+        addBox(
+          "receiver-barrel-bridge",
+          barrelBack - receiverFront + overlap * 2,
+          Math.max(barrelWidth * 1.1, receiverHeight * 0.55) * scale,
+          Math.max(barrelWidth * 1.35, receiverWidth * 0.58) * scale,
+          (receiverFront + barrelBack) / 2,
+          0.12 + (receiverY + barrelY) / 2 * scale,
+          -(receiverX + barrelX) / 2 * scale,
+        );
+      }
     }
   } else if (item?.kind === "ammo") {
     const isShell = itemId === "ammo.shell";
@@ -1524,7 +1535,7 @@ function createLootMeshes(
     const minimumY = template.getBoundingInfo().boundingBox.minimumWorld.y;
     modelGroundOffsets.set(
       modelId,
-      -minimumY * GROUND_LOOT_MODEL_SCALE + GROUND_LOOT_MODEL_CLEARANCE,
+      -minimumY * groundLootModelScale(modelId) + GROUND_LOOT_MODEL_CLEARANCE,
     );
   }
   const deathMaterials = new Map<string, StandardMaterial>();
@@ -1565,7 +1576,8 @@ function createLootMeshes(
       marker.material = showGroundLootModels
         ? getModelMaterial(modelId, loot.source === "death")
         : (loot.source === "death" ? deathLootMaterial : lootMaterial);
-      marker.scaling.setAll(showGroundLootModels ? GROUND_LOOT_MODEL_SCALE : 1);
+      const modelScale = showGroundLootModels ? groundLootModelScale(modelId) : 1;
+      marker.scaling.setAll(modelScale);
       marker.position.set(
         loot.position.x,
         loot.position.y + (showGroundLootModels
@@ -1578,7 +1590,7 @@ function createLootMeshes(
         itemId: loot.itemId,
         lootSource: loot.source ?? "spawn",
         lootModel: showGroundLootModels,
-        lootModelScale: showGroundLootModels ? GROUND_LOOT_MODEL_SCALE : 1,
+        lootModelScale: modelScale,
         modelId,
       };
       marker.setEnabled(loot.available);

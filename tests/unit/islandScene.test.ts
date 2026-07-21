@@ -1,5 +1,7 @@
 import { NullEngine } from "@babylonjs/core/Engines/nullEngine";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
+import { Ray } from "@babylonjs/core/Culling/ray";
+import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AssetCatalog } from "../../src/assets/AssetCatalog";
 import {
@@ -35,15 +37,17 @@ describe("IslandScene lifecycle", () => {
         showGroundLootModels,
       );
       const layout = createMapLayout(state.mapSeed);
-      const expectedLootScale = showGroundLootModels ? 1.45 : 1;
       expect(engine.scenes).toHaveLength(1);
       expect(bundle.lootMeshes.size).toBe(Object.keys(state.groundLoot).length);
-      expect([...bundle.lootMeshes.values()].every((mesh) =>
-        mesh.isPickable
-        && mesh.scaling.x === expectedLootScale
-        && mesh.scaling.y === expectedLootScale
-        && mesh.scaling.z === expectedLootScale
-      )).toBe(true);
+      expect([...bundle.lootMeshes.values()].every((mesh) => {
+        const expectedLootScale = showGroundLootModels
+          ? String(mesh.metadata?.itemId).startsWith("weapon.") ? 2 : 1.45
+          : 1;
+        return mesh.isPickable
+          && mesh.scaling.x === expectedLootScale
+          && mesh.scaling.y === expectedLootScale
+          && mesh.scaling.z === expectedLootScale;
+      })).toBe(true);
       expect([...bundle.lootMeshes.values()].every((mesh) => mesh.metadata?.lootModel === showGroundLootModels)).toBe(true);
       if (!showGroundLootModels) {
         expect([...bundle.lootMeshes.values()].every((mesh) => mesh.getTotalVertices() === 24)).toBe(true);
@@ -295,7 +299,7 @@ describe("IslandScene lifecycle", () => {
     expect(marker.metadata).toMatchObject({
       itemId: "weapon.rifle",
       lootModel: true,
-      lootModelScale: 1.45,
+      lootModelScale: 2,
       modelId: "weapon.rifle",
     });
     expect(marker.billboardMode).toBe(0);
@@ -304,10 +308,39 @@ describe("IslandScene lifecycle", () => {
     expect(bundle.lootMeshes.size).toBe(Object.keys(state.groundLoot).length);
     expect(bundle.scene.meshes.filter((mesh) => mesh.name.startsWith("loot-model-template-"))).toHaveLength(15);
     expect(bundle.scene.materials.filter((entry) => entry.name.startsWith("loot-model-material-"))).toHaveLength(14);
+    expect(bundle.scene.materials
+      .filter((entry) => entry.name.startsWith("loot-model-material-"))
+      .every((entry) => (entry as StandardMaterial).diffuseColor.toHexString() === "#E2C66D")).toBe(true);
     const secondRifle = [...bundle.lootMeshes.values()].find((candidate) =>
       candidate !== marker && candidate.metadata?.itemId === "weapon.rifle"
     );
     expect(secondRifle?.geometry).toBe(rifleGeometry);
+    expect([...bundle.lootMeshes.values()].every((modelMarker) => {
+      const expectedScale = String(modelMarker.metadata?.itemId).startsWith("weapon.") ? 2 : 1.45;
+      return modelMarker.scaling.equals(new Vector3(expectedScale, expectedScale, expectedScale));
+    })).toBe(true);
+    const weaponGapProbes: Readonly<Record<string, number>> = {
+      "weapon.rifle": 0.44175,
+      "weapon.smg": 0.23275,
+      "weapon.shotgun": 0.323,
+      "weapon.sniper": 0.494,
+    };
+    for (const [itemId, localX] of Object.entries(weaponGapProbes)) {
+      const weaponMarker = [...bundle.lootMeshes.values()].find((candidate) => candidate.metadata?.itemId === itemId);
+      if (!weaponMarker) throw new Error(`${itemId} marker missing`);
+      weaponMarker.computeWorldMatrix(true);
+      const bounds = weaponMarker.getBoundingInfo().boundingBox;
+      const ray = new Ray(
+        new Vector3(
+          weaponMarker.position.x + localX * weaponMarker.scaling.x,
+          bounds.maximumWorld.y + 0.5,
+          weaponMarker.position.z,
+        ),
+        Vector3.Down(),
+        bounds.maximumWorld.y - bounds.minimumWorld.y + 1,
+      );
+      expect(bundle.scene.pickWithRay(ray, (candidate) => candidate === weaponMarker)?.hit).toBe(true);
+    }
     const classicMarkerDiagonal = 0.62 * Math.sqrt(3);
     for (const modelMarker of bundle.lootMeshes.values()) {
       const modelLoot = state.groundLoot[String(modelMarker.metadata?.lootId)];
@@ -332,6 +365,7 @@ describe("IslandScene lifecycle", () => {
     expect(bundle.lootMeshes.get(loot.id)).toBe(marker);
     expect(marker.geometry).not.toBe(rifleGeometry);
     expect(marker.material).not.toBe(spawnMaterial);
+    expect((marker.material as StandardMaterial).diffuseColor.toHexString()).toBe("#C85E50");
     expect(marker.metadata).toMatchObject({
       itemId: "bandage",
       lootSource: "death",

@@ -605,6 +605,14 @@
 - 2026-07-22 00:41：reviewer 最终复审 `No findings`，前述 High/Medium/Low 全部闭环。按用户补充口径再次用静音 production preview 直接核验两条路径：250 个三维 marker 覆盖 14 类，全部 scale=`1.45`；经典黄色旋转方块 template 的 geometry 仍精确为 `0.62×0.62×0.62m`、scaling=`1`、rotation=`(0,π/4,π/4)`，颜色/材质链路未改。控制台无 error/warn；验收后关闭独立 context、停止 4173 服务并确认只剩 `about:blank`。最终完整门禁仍为 271/27/15 tests、typecheck、build 和 diff check 全绿，准备提交推送。
 - 2026-07-22 00:47：地面三维物资放大和贴地修复已提交推送 `eb522f9 fix: enlarge ground loot models`。主分支 CI `29849831739` 成功，包含应用 271、Worker 27、standalone 15 项测试、三套 typecheck、应用/Worker/standalone build 和 GitHub Pages 发布；Cloudflare Pages production deployment `2ad615ae-723a-45c9-9b2c-edf367237f35` 已上线该提交，正式域名加载新包 `index-BqJafjOd.js`。本次无 Worker/权威服务改动，不需部署 Worker。工作区只剩外部并发添加的 `.gitignore` 中 `.opencode` 规则，未纳入本任务提交。
 
+#### 2026-07-22 01:19 +0800：三维枪械辨识度与自然物资颜色调整
+
+- 用户要求仅将四类三维地面枪械由 `1.45` 倍提高到 `2` 倍，弹药、护甲、头盔和医疗物继续保持 `1.45` 倍；同时修复枪管与枪体之间的可见断口。枪械模板现根据 receiver 前缘和主枪管后缘补一段有重叠的低模连接体，仍在初始化时合并成每型号一份共享 geometry，每条物资记录继续只使用一个 Mesh。
+- 模型缩放改为按 item kind 选择，枪械为 `2`、其余已知物资和 fallback 为 `1.45`；贴地 offset 使用对应型号的实际缩放重新计算，全部类型仍保持最低点为真实 support `+0.04m`。经典黄色旋转方块路径继续保持原 `0.62m`、scale `1`、旋转、位置和材质，不受本次调整影响。
+- 所有非死亡三维物资材质统一为黄色 `#e2c66d`，包括自然生成和手动丢弃；死亡掉落继续使用红色 `#c85e50`。未修改 `GroundLootState`、物资来源、拾取距离、AI、掉落、网络或权威规则。
+- 先补回归并确认旧实现失败，再完成实现：生命周期逐 marker 检查枪械 `2` / 其他 `1.45`；14 类自然物资材质全部为黄色、死亡材质保持红色；四类枪械在原 receiver/barrel 间隙中心执行垂直射线并确认均命中连接几何；全部 marker 继续验证世界最低点贴合真实 support。定向 IslandScene **4 tests**、`npm run typecheck:app` 和 `git diff --check` 已通过，等待完整门禁、静音浏览器视觉验收和用户指定的“先推送、再 reviewer”流程。
+- 2026-07-22 01:28：最终自动门禁通过：应用 **30 files / 271 tests**、Worker **3 files / 27 tests**、standalone **2 files / 15 tests**、`npm run typecheck`、生产 build 和 diff check 全绿。静音 production preview 确认 250 个三维 marker 中四类枪械全部 scale=`2`、其余物资全部 scale=`1.45`、非死亡材质全部为 `#E2C66D`；对局中实际产生的一件死亡霰弹枪保持 `#C85E50`。只读四枪 gallery 可见 receiver、补充连接体和主枪管连续接合，枪械轮廓清楚，console 无 error/warn；截图 `loot-gun-scale-connectivity.png` 存于临时目录。验收后关闭独立 Chrome context、停止 4173 preview，并确认只剩 `about:blank`。下一步按用户明确指定顺序先提交推送，再启动 reviewer。
+
 ## 审查
 
 ### 2026-07-22 00:34 +0800：真实屋顶回归最终复审（通过）
