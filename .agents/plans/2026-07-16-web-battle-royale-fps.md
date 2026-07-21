@@ -559,6 +559,8 @@
 - production preview 静音场景检查：250/250 地面物资均为单 Mesh 三维模型，15 个模板（14 类物资 + fallback）、14 个常规共享材质、0 张地面物资纹理、0 个 marker 子 mesh，最高单模型 293 顶点；桌面仍使用 Pointer Lock 且无触控 HUD。
 - 角色方向 gallery 确认 49 个默认角色前胸板 enabled 数为 0、头盔 enabled 数为 0、背包 enabled 数为 49；无甲背面显示深灰背包 `#252d2b`，无甲正面没有板，穿甲正面显示军绿板 `#465248`，前后轮廓和色差符合用户口径。截图均保存于临时目录，不提交。
 - 2026-07-21 14:12 补充收尾：触摸模式只按 primary coarse pointer 启用，避免带触屏的桌面笔记本失去鼠标 Pointer Lock；GLB 角色替换时继续保留程序化背包/护甲板/头盔叠层，使装备可见性契约不因素材替换失效。相关 `typecheck:app` 与场景/触控 19 项定向回归通过。残余验证风险仅为 DevTools 可验证多 Pointer 事件链但不能替代真实手机多指手感，部署后建议在一台实际横屏手机上复核按钮尺寸与三指操作。
+- 2026-07-21 14:13：三维物资、手机横屏完整触控、按装备显示角色护甲/头盔及密集交火 AI 性能优化已提交并推送 `main`，实现提交为 `bf4682d feat: enhance mobile gameplay and combat performance`；未跟踪参考文件 `session-ses_082c.md` 保持本地且未提交，等待主分支 CI 和自动部署完成。
+- 2026-07-21 14:20：主分支 CI `29806350457`、GitHub Pages 和 Cloudflare Pages production deployment `9adfd4d4-42ca-4aef-9222-293b37648ad9` 均成功。正式域名已加载新静态包 `index-eNISTJ-b.js`；844×390 手机横屏静音实测完整触控 HUD 可见、250/250 三维物资生效、默认 0 个前胸板/49 个背包、约 120 FPS，控制台无 error/warn。真实手机多指手感仍按前述风险建议补一次人工复核，但不阻塞当前功能与自动门禁。
 
 ## 审查
 
