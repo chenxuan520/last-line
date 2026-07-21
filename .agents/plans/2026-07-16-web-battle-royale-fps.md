@@ -561,6 +561,8 @@
 - 2026-07-21 14:12 补充收尾：触摸模式只按 primary coarse pointer 启用，避免带触屏的桌面笔记本失去鼠标 Pointer Lock；GLB 角色替换时继续保留程序化背包/护甲板/头盔叠层，使装备可见性契约不因素材替换失效。相关 `typecheck:app` 与场景/触控 19 项定向回归通过。残余验证风险仅为 DevTools 可验证多 Pointer 事件链但不能替代真实手机多指手感，部署后建议在一台实际横屏手机上复核按钮尺寸与三指操作。
 - 2026-07-21 14:13：三维物资、手机横屏完整触控、按装备显示角色护甲/头盔及密集交火 AI 性能优化已提交并推送 `main`，实现提交为 `bf4682d feat: enhance mobile gameplay and combat performance`；未跟踪参考文件 `session-ses_082c.md` 保持本地且未提交，等待主分支 CI 和自动部署完成。
 - 2026-07-21 14:20：主分支 CI `29806350457`、GitHub Pages 和 Cloudflare Pages production deployment `9adfd4d4-42ca-4aef-9222-293b37648ad9` 均成功。正式域名已加载新静态包 `index-eNISTJ-b.js`；844×390 手机横屏静音实测完整触控 HUD 可见、250/250 三维物资生效、默认 0 个前胸板/49 个背包、约 120 FPS，控制台无 error/warn。真实手机多指手感仍按前述风险建议补一次人工复核，但不阻塞当前功能与自动门禁。
+- 2026-07-21 15:02：补做 reviewer 后确认其唯一中风险 finding 真实：短横屏同时继承 `top` 并设置 `bottom`，会压缩治疗卡并与武器区重叠。已改为单一 `top` 定位，治疗卡位于准星上方、拾取提示位于准星下方。production build 与 `git diff --check` 通过；静音 preview 在 844×390 和 667×375 强制显示真实治疗 DOM/拾取提示测量，治疗卡 client/scroll 分别为 `57/57px`、拾取提示 `28/28px`，与右下武器区重叠面积均为 0；667×375 截图保存于临时目录，等待 reviewer 复审。
+- 2026-07-21 15:10：reviewer 复审无 findings，确认原中风险布局问题闭环，且原 `5ddf86d..bf4682d` 范围不存在剩余 blocker/high/medium 问题；修复未引入与顶部 HUD、准星、小地图或触控按钮的新重叠。准备提交并推送 CSS 修复及完整 review 记录。
 
 ## 审查
 
@@ -1389,3 +1391,25 @@
 - 回归复核：25 HP 撤退中射击、断 LOS 后治疗/寻医或恢复巡逻、圈外优先、49 Bot 五 seed武装率和完整局均由全量测试继续覆盖；本提交未改动这些优先级分支。物资配图入口仍从菜单移除，`DEFAULT_SETTINGS`、`readSettings`、`loadSettings` 均固定为 false，生产 session 继续接收 false；内部 dormant 渲染能力不构成生产入口。未发现业务源码中的 `context.Background()`。
 - 验证：本机实际执行 `npm run typecheck && npm run test && npm run build && git diff --check 21cc420 ec0499a` 全通过；Vitest **20 files / 211 tests**，82.38 秒；生产构建通过，仅保留既有 >500kB chunk warning。工作区除本 review plan 追加外仅有按要求忽略的两个未跟踪 session 文件。
 - 残余验证缺口（非阻塞）：按用户约束未尝试浏览器、浏览器 MCP 或 Playwright；本轮结论基于规则/NullEngine 自动测试、实际 diff 与调用链。
+
+### 2026-07-21 14:55 +0800：bf4682d 三维物资、手机触控、装备视觉与 AI 性能完整审查（不通过）
+
+- 审查范围：以本 plan（重点对照 Build 2026-07-21 13:02–14:20）、`AGENTS.md` 和 `README.md` 为基线，完整审查实现提交 `bf4682dc5c90bd37c361d67258165ca224eb3dd9` 相对指定 base `5ddf86df5ce158ee69c9db3d487783605c545953` 的 25 个文件、1746 additions / 278 deletions；merge-base 即指定 base。后续 `7eadf84` 仅为 plan 文档，不计入实现范围；按要求忽略未跟踪 `session-ses_082c.md`。
+- 审查结论：**不通过。** 未发现 blocker/high；三维物资的 14 类共享模板与有界 mesh/material 复用、默认开关/经典方块回退、HUD 图片隔离、装备状态及 GLB 叠层、空间射线索引保守遍历与原顺序、目标 tie、导航/AI 门槛、单机/联机命令边界和桌面 Pointer Lock 未见明确高风险回归，但短横屏下治疗/拾取反馈布局存在 1 项中风险问题。
+
+#### Finding
+
+1. **[中] 短横屏规则同时保留 `top` 和新增 `bottom`，把治疗卡压缩到仅有 padding 的高度，常见手机横屏无法完整显示治疗反馈。** `src/styles/main.css:1282-1317` 给拾取提示和治疗卡设置了 `top: calc(50% + 43px/76px)`；`src/styles/main.css:2274-2283` 在 `(orientation: landscape) and (max-height: 700px)` 下又设置 `bottom: 126px/106px`，却没有将 `top` 复位为 `auto`。本机 Chrome、音量 0、移动设备模拟中，844×390 时 `.healing-progress` 的实际 border-box 仅 `23px`、内容 `scrollHeight=48px`；667×375 仍只有 `23px`，并与后绘制的武器状态区大面积重叠。拾取提示在 667×375 也只有 `18.5px` 高而内容需要 `20px`。实际使用绷带/急救包时，进度条和“移动或开火会中断”会溢出无背景区域或被 HUD 覆盖，违背横屏完整可玩及 CSS 层级要求。Builder 需在短横屏定位中明确只使用一组纵向约束（例如复位 `top`），并用至少 844×390 与 667×375 的真实非隐藏治疗卡/拾取提示验证不裁切、不重叠；writer 需补该浏览器证据后再发起复审。
+
+#### 验证与残余风险
+
+- 本机实际执行 `npm run typecheck`、`npm run test`、`npm run build`、`npm run build:worker` 和 `git diff --check 5ddf86d bf4682d` 均通过；应用 **26 files / 254 tests**、Worker **3 files / 26 tests**，五 seed `>=42/49` 武装率及 49 Bot 完整局唯一胜者未降低；构建仅有既有 >500kB chunk warning。未发现业务源码中的 `context.Background()`。
+- Chrome 本地 production preview、音量 0：844×390 横屏触控 HUD、暂停/恢复、390×844 竖屏阻塞与单机冻结、桌面 `is-playing` + Pointer Lock 均复核；上述 CSS 尺寸问题可稳定复现。真实设备多 Pointer 手感仍为非阻塞残余风险，不能由 DevTools 合成 Pointer 完全替代。
+
+### 2026-07-21 15:08 +0800：短横屏 HUD finding 复审（通过）
+
+- 审查范围：对照本 plan 的 Build 2026-07-21 15:02、14:55 Review finding，并复核原实现范围 `5ddf86d..bf4682d`；当前工作区相对 `7eadf84` 仅有本 plan 增量和 `src/styles/main.css` 6 行相关修改，未跟踪 `session-ses_082c.md` 按要求忽略。
+- 审查结论：**通过。本次审查未发现 blocker/high/medium 问题。** 原中风险 finding 已闭环：短横屏的拾取提示与治疗卡均改为单一 `top` 定位，并明确 `bottom: auto`，不再同时受上下边约束而压缩。
+- 浏览器证据：本机 production preview、音量 0，强制展示真实 `.healing-progress` 与 `.interaction-prompt` DOM。844×390 下治疗卡 `clientHeight/scrollHeight=57/57px`、提示 `28/28px`；667×375 下同为 `57/57px`、`28/28px`，均无裁切。两尺寸逐项计算与右下武器 HUD、顶部 HUD、准星、小地图、摇杆、开火/瞄准/跳跃/拾取/换弹/切枪/绷带/急救和暂停按钮的相交面积，结果全部为 0；控制台无 error/warn。
+- 验证：`npm run build` 与 `git diff --check 7eadf84` 通过，构建仅保留既有大 chunk warning；未发现业务源码中的 `context.Background()`。由于业务实现与测试均未变化，沿用上一轮已通过的 26 files / 254 app tests、3 files / 26 Worker tests、五 seed 武装率和完整局唯一胜者证据。
+- 残余风险：真实手机多指手感仍需设备人工复核，但与本次 CSS finding 无关，不阻塞通过结论。

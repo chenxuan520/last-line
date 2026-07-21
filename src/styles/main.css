@@ -2272,14 +2272,16 @@ h1 {
   }
 
   #ui-root.is-touch-input .interaction-prompt {
-    bottom: 126px;
+    top: calc(50% + 24px);
+    bottom: auto;
     max-width: 240px;
     padding: 8px 12px;
     font-size: 10px;
   }
 
   #ui-root.is-touch-input .healing-progress {
-    bottom: 106px;
+    top: calc(50% - 100px);
+    bottom: auto;
   }
 
   #ui-root.is-touch-input .hud-footer {
