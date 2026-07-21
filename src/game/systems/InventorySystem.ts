@@ -7,6 +7,7 @@ import {
   type MapObstacle,
 } from "../../config/map";
 import type { ActorCommand } from "../commands/ActorCommand";
+import { StaticGridIndex } from "../spatial/StaticGridIndex";
 import {
   getActiveWeapon,
   getReserveAmmo,
@@ -26,10 +27,32 @@ const DROP_MARKER_HEIGHT = 0.45;
 const DROP_MINIMUM_SPACING = 0.62;
 const DROP_WALL_CLEARANCE = 0.25;
 const ACTOR_EYE_HEIGHT = 1.76;
+const DROP_OBSTACLE_CELL_SIZE = 32;
+const DROP_LOOT_GRID_KEY_OFFSET = 4_096;
+const DROP_LOOT_GRID_KEY_STRIDE = 8_192;
+const DROP_OFFSETS = [
+  ...dropRing(1.2, 20, 0),
+  ...dropRing(1.55, 28, Math.PI / 28),
+  ...dropRing(1.9, 36, 0),
+  ...dropRing(2.2, 44, Math.PI / 44),
+  ...dropRing(2.45, 50, 0),
+  ...dropRing(2.65, 56, Math.PI / 56),
+];
+const WEAPON_ITEM_IDS = new Map(
+  Object.values(ITEMS)
+    .filter((item) => item.kind === "weapon" && item.weaponId)
+    .map((item) => [item.weaponId as string, item.id] as const),
+);
+const dropObstacleIndexes = new WeakMap<MapLayout, StaticGridIndex<DropObstacleEntry>>();
 
 export class InventorySystem {
   private readonly droppedDeadActors = new WeakSet<ActorState>();
   private nextLootId = 1;
+  private layout: MapLayout;
+
+  public constructor(initialLayout: MapLayout = createMapLayout(0)) {
+    this.layout = initialLayout;
+  }
 
   public update(state: MatchState, deltaSeconds: number, events: GameEvent[]): void {
     for (const actor of Object.values(state.actors)) {
@@ -135,6 +158,7 @@ export class InventorySystem {
       }
       this.droppedDeadActors.add(actor);
       actor.inventory.usingItem = null;
+      const placement = createDropPlacementContext(state, this.getLayout(state.mapSeed));
 
       for (let slot = 0; slot < actor.inventory.weaponSlots.length; slot += 1) {
         const weapon = actor.inventory.weaponSlots[slot];
@@ -143,26 +167,26 @@ export class InventorySystem {
         }
         const itemId = this.getWeaponItemId(weapon.weaponId);
         if (itemId) {
-          this.createGroundLoot(state, actor, itemId, 1, events, weapon, "death");
+          this.createGroundLoot(state, actor, itemId, 1, events, weapon, "death", placement);
         }
         actor.inventory.weaponSlots[slot] = null;
       }
 
       for (const stack of actor.inventory.backpack) {
         if (stack.quantity > 0) {
-          this.createGroundLoot(state, actor, stack.itemId, stack.quantity, events, undefined, "death");
+          this.createGroundLoot(state, actor, stack.itemId, stack.quantity, events, undefined, "death", placement);
         }
       }
       actor.inventory.backpack = [];
 
       if (actor.inventory.armorLevel > 0) {
-        this.createGroundLoot(state, actor, `armor.${actor.inventory.armorLevel}`, 1, events, undefined, "death");
+        this.createGroundLoot(state, actor, `armor.${actor.inventory.armorLevel}`, 1, events, undefined, "death", placement);
         actor.inventory.armorLevel = 0;
         actor.armor = 0;
         actor.maxArmor = 0;
       }
       if (actor.inventory.helmetLevel > 0) {
-        this.createGroundLoot(state, actor, `helmet.${actor.inventory.helmetLevel}`, 1, events, undefined, "death");
+        this.createGroundLoot(state, actor, `helmet.${actor.inventory.helmetLevel}`, 1, events, undefined, "death", placement);
         actor.inventory.helmetLevel = 0;
       }
     }
@@ -410,10 +434,14 @@ export class InventorySystem {
     events: GameEvent[],
     weapon?: WeaponState,
     source: GroundLootState["source"] = "drop",
+    placement?: DropPlacementContext,
   ): EntityId {
-    const reusable = Object.values(state.groundLoot)
-      .filter((loot) => !loot.available)
-      .sort((left, right) => left.id.localeCompare(right.id))[0];
+    let reusable: GroundLootState | undefined;
+    for (const lootId in state.groundLoot) {
+      const loot = state.groundLoot[lootId];
+      if (!loot || loot.available) continue;
+      if (!reusable || loot.id.localeCompare(reusable.id) < 0) reusable = loot;
+    }
     let lootId = reusable?.id;
     if (!lootId) {
       do {
@@ -422,22 +450,24 @@ export class InventorySystem {
       } while (state.groundLoot[lootId]);
     }
 
-    state.groundLoot[lootId] = {
+    const loot: GroundLootState = {
       id: lootId,
       generation: reusable ? (reusable.generation ?? 0) + 1 : 0,
       itemId,
       quantity,
       ...(weapon ? { weapon } : {}),
-      position: findDynamicDropPosition(state, actor),
+      position: findDynamicDropPosition(state, actor, this.getLayout(state.mapSeed), placement),
       available: true,
       source,
     };
+    state.groundLoot[lootId] = loot;
+    placement?.lootIndex.add(loot);
     events.push({ type: "item-dropped", actorId: actor.id, lootId, itemId, quantity });
     return lootId;
   }
 
   private getWeaponItemId(weaponId: string): string | null {
-    return Object.values(ITEMS).find((item) => item.kind === "weapon" && item.weaponId === weaponId)?.id ?? null;
+    return weaponItemId(weaponId);
   }
 
   private getBackpackQuantity(actor: ActorState, itemId: string): number {
@@ -462,6 +492,11 @@ export class InventorySystem {
     }
     return true;
   }
+
+  private getLayout(seed: number): MapLayout {
+    if (this.layout.seed !== seed) this.layout = createMapLayout(seed);
+    return this.layout;
+  }
 }
 
 export function findPickupCandidate(
@@ -469,7 +504,22 @@ export function findPickupCandidate(
   groundLoot: Readonly<Record<EntityId, GroundLootState>>,
 ): GroundLootState | null {
   if (!actor.alive || actor.deployment !== "grounded") return null;
-  return getPickupCandidates(actor, groundLoot)[0] ?? null;
+  let nearest: GroundLootState | null = null;
+  let nearestDistanceSquared = Number.POSITIVE_INFINITY;
+  for (const lootId in groundLoot) {
+    const loot = groundLoot[lootId];
+    if (!loot?.available || loot.quantity <= 0 || !canActorPickLoot(actor, loot)) continue;
+    const distanceSquared = lootDistanceSquared(actor, loot);
+    if (distanceSquared > INTERACTION_DISTANCE_SQUARED) continue;
+    if (
+      distanceSquared < nearestDistanceSquared ||
+      (distanceSquared === nearestDistanceSquared && nearest && loot.id.localeCompare(nearest.id) < 0)
+    ) {
+      nearest = loot;
+      nearestDistanceSquared = distanceSquared;
+    }
+  }
+  return nearest;
 }
 
 export function findNearbyLootCandidate(
@@ -477,11 +527,22 @@ export function findNearbyLootCandidate(
   groundLoot: Readonly<Record<EntityId, GroundLootState>>,
 ): GroundLootState | null {
   if (!actor.alive || actor.deployment !== "grounded") return null;
-  return Object.values(groundLoot)
-    .filter((loot) => loot.available && loot.quantity > 0 && lootDistanceSquared(actor, loot) <= INTERACTION_DISTANCE_SQUARED)
-    .sort((left, right) =>
-      lootDistanceSquared(actor, left) - lootDistanceSquared(actor, right) || left.id.localeCompare(right.id)
-    )[0] ?? null;
+  let nearest: GroundLootState | null = null;
+  let nearestDistanceSquared = Number.POSITIVE_INFINITY;
+  for (const lootId in groundLoot) {
+    const loot = groundLoot[lootId];
+    if (!loot?.available || loot.quantity <= 0) continue;
+    const distanceSquared = lootDistanceSquared(actor, loot);
+    if (distanceSquared > INTERACTION_DISTANCE_SQUARED) continue;
+    if (
+      distanceSquared < nearestDistanceSquared ||
+      (distanceSquared === nearestDistanceSquared && nearest && loot.id.localeCompare(nearest.id) < 0)
+    ) {
+      nearest = loot;
+      nearestDistanceSquared = distanceSquared;
+    }
+  }
+  return nearest;
 }
 
 function getPickupCandidates(
@@ -532,19 +593,16 @@ function canActorPickLoot(actor: ActorState, loot: GroundLootState): boolean {
     actor.inventory.backpack.length < actor.inventory.maxBackpackStacks;
 }
 
-function findDynamicDropPosition(state: MatchState, actor: ActorState): ActorState["position"] {
-  const layout = createMapLayout(state.mapSeed);
-  const existing = Object.values(state.groundLoot).filter((loot) => loot.available);
-  const offsets = [
-    ...dropRing(1.2, 20, 0),
-    ...dropRing(1.55, 28, Math.PI / 28),
-    ...dropRing(1.9, 36, 0),
-    ...dropRing(2.2, 44, Math.PI / 44),
-    ...dropRing(2.45, 50, 0),
-    ...dropRing(2.65, 56, Math.PI / 56),
-  ];
+function findDynamicDropPosition(
+  state: MatchState,
+  actor: ActorState,
+  layout: MapLayout,
+  existingPlacement?: DropPlacementContext,
+): ActorState["position"] {
+  const placement = existingPlacement ?? createDropPlacementContext(state, layout);
+  const { lootIndex } = placement;
   let fallback: { position: ActorState["position"]; clearance: number } | null = null;
-  for (const offset of offsets) {
+  for (const offset of DROP_OFFSETS) {
     const x = actor.position.x + offset.x;
     const z = actor.position.z + offset.z;
     const support = getSupportHeight(
@@ -560,10 +618,7 @@ function findDynamicDropPosition(state: MatchState, actor: ActorState): ActorSta
       vectorDistance(candidate, actor.position) > 3 ||
       !isDropClearOfWalls(candidate, support, layout)
     ) continue;
-    const clearance = existing.reduce(
-      (minimum, loot) => Math.min(minimum, Math.hypot(loot.position.x - x, loot.position.z - z)),
-      Number.POSITIVE_INFINITY,
-    );
+    const clearance = lootIndex.minimumHorizontalDistance(x, z);
     if (clearance >= DROP_MINIMUM_SPACING) return candidate;
     if (!fallback || clearance > fallback.clearance) fallback = { position: candidate, clearance };
   }
@@ -589,11 +644,10 @@ function isDropClearOfWalls(
   support: number,
   layout: MapLayout,
 ): boolean {
-  return (
-    layout.wallSegments.every((wall) => !blocksDrop(candidate, support, wall, BUILDING_ROOF_CAP_HEIGHT)) &&
-    layout.rockObstacles.every((rock) => !blocksDrop(candidate, support, rock)) &&
-    layout.coverObstacles.every((cover) => !blocksDrop(candidate, support, cover))
-  );
+  for (const entry of getDropObstacleIndex(layout).queryPoint(candidate.x, candidate.z)) {
+    if (blocksDrop(candidate, support, entry.obstacle, entry.topPadding)) return false;
+  }
+  return true;
 }
 
 function blocksDrop(
@@ -615,7 +669,88 @@ function pointNearWall(x: number, z: number, wall: MapObstacle): boolean {
 }
 
 function weaponItemId(weaponId: string): string | null {
-  return Object.values(ITEMS).find((item) => item.kind === "weapon" && item.weaponId === weaponId)?.id ?? null;
+  return WEAPON_ITEM_IDS.get(weaponId) ?? null;
+}
+
+interface DropObstacleEntry {
+  obstacle: MapObstacle;
+  topPadding: number;
+}
+
+interface DropPlacementContext {
+  layout: MapLayout;
+  lootIndex: DropLootIndex;
+}
+
+class DropLootIndex {
+  private readonly cells = new Map<number, GroundLootState[]>();
+
+  public constructor(groundLoot: Readonly<Record<EntityId, GroundLootState>>) {
+    for (const lootId in groundLoot) {
+      const loot = groundLoot[lootId];
+      if (loot?.available) this.add(loot);
+    }
+  }
+
+  public add(loot: GroundLootState): void {
+    const key = dropLootGridKey(loot.position.x, loot.position.z);
+    const cell = this.cells.get(key);
+    if (cell) cell.push(loot);
+    else this.cells.set(key, [loot]);
+  }
+
+  public minimumHorizontalDistance(x: number, z: number): number {
+    const cellX = dropLootCell(x);
+    const cellZ = dropLootCell(z);
+    let minimum = Number.POSITIVE_INFINITY;
+    for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+      for (let offsetZ = -1; offsetZ <= 1; offsetZ += 1) {
+        const cell = this.cells.get(dropLootGridKeyFromCells(cellX + offsetX, cellZ + offsetZ));
+        if (!cell) continue;
+        for (const loot of cell) {
+          minimum = Math.min(minimum, Math.hypot(loot.position.x - x, loot.position.z - z));
+        }
+      }
+    }
+    return minimum;
+  }
+}
+
+function createDropPlacementContext(state: MatchState, layout: MapLayout): DropPlacementContext {
+  return {
+    layout,
+    lootIndex: new DropLootIndex(state.groundLoot),
+  };
+}
+
+function getDropObstacleIndex(layout: MapLayout): StaticGridIndex<DropObstacleEntry> {
+  let index = dropObstacleIndexes.get(layout);
+  if (index) return index;
+  const entries: DropObstacleEntry[] = [
+    ...layout.wallSegments.map((obstacle) => ({ obstacle, topPadding: BUILDING_ROOF_CAP_HEIGHT })),
+    ...layout.rockObstacles.map((obstacle) => ({ obstacle, topPadding: 0 })),
+    ...layout.coverObstacles.map((obstacle) => ({ obstacle, topPadding: 0 })),
+  ];
+  index = new StaticGridIndex(entries, DROP_OBSTACLE_CELL_SIZE, ({ obstacle }) => ({
+    minimumX: obstacle.center.x - obstacle.width / 2 - DROP_WALL_CLEARANCE,
+    maximumX: obstacle.center.x + obstacle.width / 2 + DROP_WALL_CLEARANCE,
+    minimumZ: obstacle.center.z - obstacle.depth / 2 - DROP_WALL_CLEARANCE,
+    maximumZ: obstacle.center.z + obstacle.depth / 2 + DROP_WALL_CLEARANCE,
+  }));
+  dropObstacleIndexes.set(layout, index);
+  return index;
+}
+
+function dropLootCell(value: number): number {
+  return Math.floor(value / DROP_MINIMUM_SPACING);
+}
+
+function dropLootGridKey(x: number, z: number): number {
+  return dropLootGridKeyFromCells(dropLootCell(x), dropLootCell(z));
+}
+
+function dropLootGridKeyFromCells(cellX: number, cellZ: number): number {
+  return (cellX + DROP_LOOT_GRID_KEY_OFFSET) * DROP_LOOT_GRID_KEY_STRIDE + cellZ + DROP_LOOT_GRID_KEY_OFFSET;
 }
 
 function vectorDistance(left: ActorState["position"], right: ActorState["position"]): number {

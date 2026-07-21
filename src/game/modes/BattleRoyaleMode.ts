@@ -93,13 +93,14 @@ export class BattleRoyaleMode implements GameMode {
       return;
     }
 
-    if (this.finishIfOnlyOneRemains(state, events)) {
+    const living = Object.values(state.actors).filter((actor) => actor.alive);
+    if (this.finishIfOnlyOneRemains(state, events, living)) {
       return;
     }
 
-    this.updateSafeZone(state, delta, events);
-    this.applySafeZoneDamage(state, delta, events);
-    this.finishIfOnlyOneRemains(state, events);
+    this.updateSafeZone(state, delta, events, living.length);
+    this.applySafeZoneDamage(state, delta, events, living);
+    this.finishIfOnlyOneRemains(state, events, living.filter((actor) => actor.alive));
   }
 
   private updateFlight(state: MatchState, deltaSeconds: number, events: GameEvent[]): void {
@@ -108,8 +109,9 @@ export class BattleRoyaleMode implements GameMode {
     const aircraftPosition = interpolateVector(state.flight.start, state.flight.end, state.flight.progress);
     const autoEjectProgress = Math.min(AUTO_EJECT_PROGRESS, getLastIslandFlightProgress(state.flight));
     const autoEjectPosition = interpolateVector(state.flight.start, state.flight.end, autoEjectProgress);
+    const actors = Object.values(state.actors);
 
-    for (const actor of Object.values(state.actors)) {
+    for (const actor of actors) {
       if (actor.deployment === "aircraft") {
         actor.position = state.flight.progress >= autoEjectProgress
           ? { ...autoEjectPosition }
@@ -118,7 +120,7 @@ export class BattleRoyaleMode implements GameMode {
     }
 
     if (state.flight.progress >= autoEjectProgress) {
-      for (const actor of Object.values(state.actors)) {
+      for (const actor of actors) {
         if (actor.deployment === "aircraft") {
           actor.deployment = "parachuting";
           actor.velocity = { x: 0, y: -5, z: 0 };
@@ -126,18 +128,23 @@ export class BattleRoyaleMode implements GameMode {
       }
     }
 
-    if (Object.values(state.actors).every((actor) => !actor.alive || actor.deployment === "grounded")) {
+    if (actors.every((actor) => !actor.alive || actor.deployment === "grounded")) {
       state.phase = "combat";
       events.push({ type: "phase-changed", phase: "combat" });
       events.push({ type: "safe-zone-changed", stageIndex: state.safeZone.stageIndex, status: "waiting" });
     }
   }
 
-  private updateSafeZone(state: MatchState, deltaSeconds: number, events: GameEvent[]): void {
+  private updateSafeZone(
+    state: MatchState,
+    deltaSeconds: number,
+    events: GameEvent[],
+    livingActorCount: number,
+  ): void {
     let remaining = deltaSeconds;
     let transitions = 0;
     const transitionLimit = this.config.safeZoneStages.length * 2 + 1;
-    const shrinkSpeed = Object.values(state.actors).filter((actor) => actor.alive).length < 5 ? 2 : 1;
+    const shrinkSpeed = livingActorCount < 5 ? 2 : 1;
 
     while (state.safeZone.status !== "closed" && transitions < transitionLimit) {
       if (state.safeZone.status === "waiting") {
@@ -208,14 +215,19 @@ export class BattleRoyaleMode implements GameMode {
     }
   }
 
-  private applySafeZoneDamage(state: MatchState, deltaSeconds: number, events: GameEvent[]): void {
+  private applySafeZoneDamage(
+    state: MatchState,
+    deltaSeconds: number,
+    events: GameEvent[],
+    livingActors: readonly ActorState[],
+  ): void {
     const damage = state.safeZone.damagePerSecond * deltaSeconds;
     if (damage <= 0) {
       return;
     }
 
-    const living = Object.values(state.actors)
-      .filter((actor) => actor.alive && actor.deployment === "grounded")
+    const living = livingActors
+      .filter((actor) => actor.deployment === "grounded")
       .sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
     const outside = living.filter((actor) =>
       state.safeZone.radius <= 0 ||
@@ -233,8 +245,11 @@ export class BattleRoyaleMode implements GameMode {
     }
   }
 
-  private finishIfOnlyOneRemains(state: MatchState, events: GameEvent[]): boolean {
-    const living = Object.values(state.actors).filter((actor) => actor.alive);
+  private finishIfOnlyOneRemains(
+    state: MatchState,
+    events: GameEvent[],
+    living: readonly ActorState[],
+  ): boolean {
     if (living.length !== 1) {
       return false;
     }

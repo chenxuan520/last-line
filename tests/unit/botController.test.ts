@@ -685,6 +685,48 @@ describe("BotController", () => {
     expect(internal.forcedRelocationUntilSeconds).toBe(-1);
   });
 
+  it("uses its pinned layout for forced relocation after the global seed cache is evicted", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    const baseLayout = createMapLayout(0x7f00_0101);
+    let terrainReads = 0;
+    const pinnedLayout = new Proxy(baseLayout, {
+      get(target, property, receiver) {
+        if (property === "terrainHills") terrainReads += 1;
+        return Reflect.get(target, property, receiver) as unknown;
+      },
+    });
+    state.mapSeed = baseLayout.seed;
+    state.groundLoot = {};
+    player.alive = false;
+    bot.position = {
+      x: 0,
+      y: getTerrainHeight(0, 0, baseLayout) + 1.76,
+      z: 0,
+    };
+    state.safeZone.center = { x: 0, y: 0, z: 0 };
+    state.safeZone.radius = 500;
+    state.safeZone.targetCenter = { x: 200, y: 0, z: 0 };
+    state.safeZone.targetRadius = 300;
+    state.elapsedSeconds = 1;
+    const controller = new BotController(1, () => 0.5, false, pinnedLayout);
+    const internal = controller as unknown as {
+      forcedRelocationTarget: Vector3State | null;
+      forcedRelocationUntilSeconds: number;
+    };
+    internal.forcedRelocationTarget = null;
+    internal.forcedRelocationUntilSeconds = 10;
+    for (let offset = 1; offset <= 9; offset += 1) createMapLayout(baseLayout.seed + offset);
+    expect(createMapLayout(baseLayout.seed)).not.toBe(baseLayout);
+    terrainReads = 0;
+
+    controller.update(bot, state, miss, 1 / 30, player.id);
+
+    expect(terrainReads).toBeGreaterThan(0);
+  }, 30_000);
+
   it("leaves a building through its door when rotating into the safe zone", () => {
     const state = groundedState();
     const bot = state.actors["bot-1"];

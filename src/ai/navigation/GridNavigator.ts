@@ -13,6 +13,7 @@ import {
   type RoofRamp,
 } from "../../config/map";
 import type { Vector3State } from "../../game/state/types";
+import { StaticGridIndex } from "../../game/spatial/StaticGridIndex";
 
 const DEFAULT_CLEARANCE = 0.4;
 const PATH_CLEARANCE = 0.64;
@@ -20,7 +21,10 @@ const WAYPOINT_PADDING = 0.13;
 const MAX_PATH_SEARCH_NODES = 256;
 const ACTOR_EYE_HEIGHT = 1.76;
 const ACTOR_HEIGHT = 1.8;
+const NAVIGATION_GRID_CELL_SIZE = 32;
 const DEFAULT_BLOCKING_OBSTACLES = [...MAP_WALL_SEGMENTS, ...MAP_ROCK_OBSTACLES, ...MAP_COVER_OBSTACLES];
+const layoutBlockingObstacles = new WeakMap<MapLayout, readonly MapObstacle[]>();
+const layoutBlockerIndexes = new WeakMap<MapLayout, StaticGridIndex<MapObstacle>>();
 
 export class GridNavigator {
   private readonly layout: MapLayout | null;
@@ -29,21 +33,35 @@ export class GridNavigator {
   private readonly roofRamps: readonly RoofRamp[];
   private readonly blockingObstacles: readonly MapObstacle[];
   private readonly clearance: number;
+  private readonly pathClearance: number;
+  private readonly blockerIndex: StaticGridIndex<MapObstacle> | null;
 
   public constructor(
     layoutOrObstacles: MapLayout | readonly MapObstacle[] = createMapLayout(0),
     roofRamps: readonly RoofRamp[] = MAP_ROOF_RAMPS,
     blockingObstacles: readonly MapObstacle[] = DEFAULT_BLOCKING_OBSTACLES,
     clearance = DEFAULT_CLEARANCE,
+    useSpatialIndex = true,
   ) {
     this.layout = isMapLayout(layoutOrObstacles) ? layoutOrObstacles : null;
     this.obstacles = this.layout?.obstacles ?? layoutOrObstacles as readonly MapObstacle[];
     this.buildings = this.obstacles.filter(isMapBuilding);
     this.roofRamps = this.layout?.roofRamps ?? roofRamps;
-    this.blockingObstacles = this.layout
-      ? [...this.layout.wallSegments, ...this.layout.rockObstacles, ...this.layout.coverObstacles]
-      : blockingObstacles;
+    this.blockingObstacles = this.layout ? getLayoutBlockingObstacles(this.layout) : blockingObstacles;
     this.clearance = clearance;
+    this.pathClearance = Math.max(clearance, PATH_CLEARANCE);
+    this.blockerIndex = useSpatialIndex ? this.createBlockerIndex(clearance) : null;
+  }
+
+  private createBlockerIndex(clearance: number): StaticGridIndex<MapObstacle> {
+    if (this.layout && clearance === DEFAULT_CLEARANCE) {
+      const shared = layoutBlockerIndexes.get(this.layout);
+      if (shared) return shared;
+      const created = createBlockerIndex(this.blockingObstacles, this.pathClearance);
+      layoutBlockerIndexes.set(this.layout, created);
+      return created;
+    }
+    return createBlockerIndex(this.blockingObstacles, this.pathClearance);
   }
 
   public findPath(start: Vector3State, target: Vector3State): Vector3State[] {
@@ -105,11 +123,10 @@ export class GridNavigator {
         return [...current.path, { ...target }];
       }
 
-      const nearestBlockers = nearestBlockingObstacles(
+      const nearestBlockers = this.nearestBlockingObstacles(
         current.point,
         target,
         blockers,
-        Math.max(this.clearance, PATH_CLEARANCE),
       );
 
       for (const { obstacle } of nearestBlockers) {
@@ -243,25 +260,26 @@ export class GridNavigator {
     };
   }
 
-  private blockersForLocation(location: SurfaceLocation): MapObstacle[] {
+  private blockersForLocation(location: SurfaceLocation): SurfaceBlockers {
     const supportY = location.supportY;
-    const blockers = this.blockingObstacles.filter((obstacle) => {
+    const fullScan = this.blockerIndex ? null : this.blockingObstacles.filter((obstacle) => {
       const bottomY = obstacle.center.y - obstacle.height / 2;
       const topY = obstacle.center.y + obstacle.height / 2;
       return bottomY < supportY + ACTOR_HEIGHT && topY > supportY + 0.05;
     });
+    let stairwell: MapObstacle | null = null;
     if (location.building?.stairwell && location.level > 0) {
-      const stairwell = location.building.stairwell;
-      blockers.push({
+      const geometry = location.building.stairwell;
+      stairwell = {
         id: `${location.building.id}-stairwell-${location.level}`,
-        center: { x: stairwell.centerX, y: supportY + ACTOR_HEIGHT / 2, z: stairwell.centerZ },
-        width: stairwell.width,
+        center: { x: geometry.centerX, y: supportY + ACTOR_HEIGHT / 2, z: geometry.centerZ },
+        width: geometry.width,
         height: ACTOR_HEIGHT,
-        depth: stairwell.depth,
+        depth: geometry.depth,
         color: "#000000",
-      });
+      };
     }
-    return blockers;
+    return { supportY, fullScan, stairwell };
   }
 
   private groundSupport(point: Vector3State): number {
@@ -272,18 +290,47 @@ export class GridNavigator {
     return { ...GROUND_LOCATION, supportY: this.groundSupport(point) };
   }
 
-  private isBlocked(point: Vector3State, blockers: readonly MapObstacle[]): boolean {
+  private isBlocked(point: Vector3State, blockers: SurfaceBlockers): boolean {
     const mapLimit = MAP_HALF_SIZE - this.clearance;
     if (point.x < -mapLimit || point.x > mapLimit || point.z < -mapLimit || point.z > mapLimit) {
       return true;
     }
-    return blockers.some((obstacle) => pointInsideObstacle(point, obstacle, this.clearance));
+    const candidates = blockers.fullScan ?? this.blockerIndex?.queryPoint(point.x, point.z) ?? [];
+    for (const obstacle of candidates) {
+      if (
+        (blockers.fullScan !== null || obstacleOverlapsSurface(obstacle, blockers.supportY)) &&
+        pointInsideObstacle(point, obstacle, this.clearance)
+      ) return true;
+    }
+    return Boolean(blockers.stairwell && pointInsideObstacle(point, blockers.stairwell, this.clearance));
   }
 
-  private hasLineOfSight(start: Vector3State, target: Vector3State, blockers: readonly MapObstacle[]): boolean {
-    return !blockers.some((obstacle) =>
-      segmentIntersectsObstacle(start, target, obstacle, Math.max(this.clearance, PATH_CLEARANCE)),
-    );
+  private hasLineOfSight(start: Vector3State, target: Vector3State, blockers: SurfaceBlockers): boolean {
+    const candidates = blockers.fullScan ?? this.blockerIndex?.querySegment(start.x, start.z, target.x, target.z) ?? [];
+    for (const obstacle of candidates) {
+      if (
+        (blockers.fullScan !== null || obstacleOverlapsSurface(obstacle, blockers.supportY)) &&
+        segmentIntersectsObstacle(start, target, obstacle, this.pathClearance)
+      ) return false;
+    }
+    return !blockers.stairwell || !segmentIntersectsObstacle(start, target, blockers.stairwell, this.pathClearance);
+  }
+
+  private nearestBlockingObstacles(
+    start: Vector3State,
+    target: Vector3State,
+    blockers: SurfaceBlockers,
+  ): Array<{ obstacle: MapObstacle; progress: number }> {
+    const nearest: Array<{ obstacle: MapObstacle; progress: number }> = [];
+    const candidates = blockers.fullScan ?? this.blockerIndex?.querySegment(start.x, start.z, target.x, target.z) ?? [];
+    for (const obstacle of candidates) {
+      if (blockers.fullScan === null && !obstacleOverlapsSurface(obstacle, blockers.supportY)) continue;
+      insertBlockingObstacle(nearest, start, target, obstacle, this.pathClearance);
+    }
+    if (blockers.stairwell) {
+      insertBlockingObstacle(nearest, start, target, blockers.stairwell, this.pathClearance);
+    }
+    return nearest;
   }
 }
 
@@ -296,6 +343,12 @@ interface SurfaceLocation {
 interface GroundTransition {
   path: Vector3State[];
   ground: Vector3State;
+}
+
+interface SurfaceBlockers {
+  supportY: number;
+  fullScan: readonly MapObstacle[] | null;
+  stairwell: MapObstacle | null;
 }
 
 const GROUND_LOCATION: SurfaceLocation = { building: null, level: 0, supportY: 0 };
@@ -408,28 +461,52 @@ function segmentObstacleEntryProgress(
   return maximumTime > 1e-6 ? minimumTime : null;
 }
 
-function nearestBlockingObstacles(
+function insertBlockingObstacle(
+  nearest: Array<{ obstacle: MapObstacle; progress: number }>,
   start: Vector3State,
   target: Vector3State,
-  blockers: readonly MapObstacle[],
+  obstacle: MapObstacle,
   clearance: number,
-): Array<{ obstacle: MapObstacle; progress: number }> {
-  const nearest: Array<{ obstacle: MapObstacle; progress: number }> = [];
-  for (const obstacle of blockers) {
-    const progress = segmentObstacleEntryProgress(start, target, obstacle, clearance);
-    if (progress === null) continue;
-    let insertionIndex = nearest.length;
-    for (let index = 0; index < nearest.length; index += 1) {
-      if (progress < (nearest[index]?.progress ?? Number.POSITIVE_INFINITY)) {
-        insertionIndex = index;
-        break;
-      }
+): void {
+  const progress = segmentObstacleEntryProgress(start, target, obstacle, clearance);
+  if (progress === null) return;
+  let insertionIndex = nearest.length;
+  for (let index = 0; index < nearest.length; index += 1) {
+    if (progress < (nearest[index]?.progress ?? Number.POSITIVE_INFINITY)) {
+      insertionIndex = index;
+      break;
     }
-    if (insertionIndex >= 3) continue;
-    nearest.splice(insertionIndex, 0, { obstacle, progress });
-    if (nearest.length > 3) nearest.pop();
   }
-  return nearest;
+  if (insertionIndex >= 3) return;
+  nearest.splice(insertionIndex, 0, { obstacle, progress });
+  if (nearest.length > 3) nearest.pop();
+}
+
+function obstacleOverlapsSurface(obstacle: MapObstacle, supportY: number): boolean {
+  const bottomY = obstacle.center.y - obstacle.height / 2;
+  const topY = obstacle.center.y + obstacle.height / 2;
+  return bottomY < supportY + ACTOR_HEIGHT && topY > supportY + 0.05;
+}
+
+function getLayoutBlockingObstacles(layout: MapLayout): readonly MapObstacle[] {
+  let obstacles = layoutBlockingObstacles.get(layout);
+  if (!obstacles) {
+    obstacles = [...layout.wallSegments, ...layout.rockObstacles, ...layout.coverObstacles];
+    layoutBlockingObstacles.set(layout, obstacles);
+  }
+  return obstacles;
+}
+
+function createBlockerIndex(
+  obstacles: readonly MapObstacle[],
+  clearance: number,
+): StaticGridIndex<MapObstacle> {
+  return new StaticGridIndex(obstacles, NAVIGATION_GRID_CELL_SIZE, (obstacle) => ({
+    minimumX: obstacle.center.x - obstacle.width / 2 - clearance,
+    maximumX: obstacle.center.x + obstacle.width / 2 + clearance,
+    minimumZ: obstacle.center.z - obstacle.depth / 2 - clearance,
+    maximumZ: obstacle.center.z + obstacle.depth / 2 + clearance,
+  }));
 }
 
 function horizontalDistance(start: Vector3State, target: Vector3State): number {

@@ -1,5 +1,6 @@
 import { BATTLE_ROYALE_CONFIG } from "../config/battleRoyale";
 import { WEAPONS } from "../config/weapons";
+import { createMapLayout, type MapLayout } from "../config/map";
 import { BotController } from "../controllers/BotController";
 import { createIdleCommand, type ActorCommand } from "../game/commands/ActorCommand";
 import { GameSimulation } from "../game/GameSimulation";
@@ -37,8 +38,9 @@ export class MatchRuntime {
   public readonly state: MatchState;
   private readonly simulation: GameSimulation;
   private readonly world: SimulationCombatWorld;
+  private readonly layout: MapLayout;
   private readonly bots = new Map<EntityId, BotController>();
-  private readonly botCommands = new Map<EntityId, ActorCommand>();
+  private readonly botContinuousCommands = new Map<EntityId, ActorCommand>();
   private readonly takeoverBots = new Map<EntityId, BotController>();
   private readonly disconnectedAtTick = new Map<EntityId, number>();
   private readonly inbox = new CommandInbox();
@@ -58,14 +60,21 @@ export class MatchRuntime {
         random,
         { startWithBandage: options.startWithBandage },
       );
-    this.simulation = new GameSimulation(this.state, new BattleRoyaleMode(BATTLE_ROYALE_CONFIG, random), WEAPONS);
-    this.world = new SimulationCombatWorld(this.state);
+    this.layout = createMapLayout(this.state.mapSeed);
+    this.simulation = new GameSimulation(this.state, new BattleRoyaleMode(BATTLE_ROYALE_CONFIG, random), WEAPONS, this.layout);
+    this.world = new SimulationCombatWorld(this.state, true, this.layout);
     this.tickValue = options.tick ?? 0;
     this.snapshotSequenceValue = options.snapshotSequence ?? 0;
     this.eventSequenceValue = options.eventSequence ?? 0;
     Object.values(this.state.actors).filter((actor) => actor.kind === "bot").forEach((actor, index) => {
-      this.bots.set(actor.id, new BotController(index + 1, seededRandom(options.seed + 1_000 + index), options.disableAiSnipers));
-      this.botCommands.set(actor.id, createIdleCommand());
+      this.bots.set(actor.id, new BotController(
+        index + 1,
+        seededRandom(options.seed + 1_000 + index),
+        options.disableAiSnipers,
+        this.layout,
+      ));
+      const idle = createIdleCommand();
+      this.botContinuousCommands.set(actor.id, continuousCommand(idle));
     });
     if (!options.state) {
       this.simulation.start();
@@ -111,7 +120,12 @@ export class MatchRuntime {
       if (disconnectedAt !== undefined && this.tickValue - disconnectedAt >= TAKEOVER_TICKS) {
         let controller = this.takeoverBots.get(actorId);
         if (!controller) {
-          controller = new BotController(10_000 + index, seededRandom(this.options.seed + 20_000 + index), this.options.disableAiSnipers);
+          controller = new BotController(
+            10_000 + index,
+            seededRandom(this.options.seed + 20_000 + index),
+            this.options.disableAiSnipers,
+            this.layout,
+          );
           this.takeoverBots.set(actorId, controller);
         }
         commands.set(actorId, controller.update(
@@ -139,10 +153,10 @@ export class MatchRuntime {
             this.options.humanActorIds[0] ?? actorId,
             actor.deployment === "grounded" ? getLivingActorCount() : undefined,
           );
-          this.botCommands.set(actorId, command);
+          this.botContinuousCommands.set(actorId, continuousCommand(command));
           commands.set(actorId, command);
         } else {
-          commands.set(actorId, continuousCommand(this.botCommands.get(actorId) ?? createIdleCommand()));
+          commands.set(actorId, this.botContinuousCommands.get(actorId) ?? createIdleCommand());
         }
       }
       botIndex += 1;

@@ -8,6 +8,7 @@ import {
   type RoofRamp,
 } from "../../config/map";
 import type { ActorState, EntityId, MatchState, Vector3State } from "../state/types";
+import { StaticGridIndex } from "../spatial/StaticGridIndex";
 import type { CombatWorld, ShotResult, ShotTrace } from "./CombatSystem";
 
 const ACTOR_HIT_HEIGHT = 1.8;
@@ -15,22 +16,24 @@ const ACTOR_HIT_RADIUS = 0.42;
 const ACTOR_EYE_TO_FEET = 1.76;
 const GEOMETRY_EPSILON = 1e-9;
 const COMBAT_GRID_CELL_SIZE = 32;
-const COMBAT_GRID_KEY_OFFSET = 32_768;
 
 export class SimulationCombatWorld implements CombatWorld {
   private layout: MapLayout;
   private layoutSeed: number;
   private environmentObstacles: readonly MapObstacle[];
-  private obstacleIndex: StaticObstacleIndex;
+  private obstacleIndex: StaticGridIndex<MapObstacle>;
+  private rampIndex: StaticGridIndex<RoofRamp>;
 
   public constructor(
     private readonly state: MatchState,
     private readonly useSpatialIndex = true,
+    initialLayout: MapLayout = createMapLayout(state.mapSeed),
   ) {
-    this.layoutSeed = state.mapSeed;
-    this.layout = createMapLayout(state.mapSeed);
+    this.layoutSeed = initialLayout.seed;
+    this.layout = initialLayout;
     this.environmentObstacles = environmentObstacles(this.layout);
-    this.obstacleIndex = new StaticObstacleIndex(this.environmentObstacles);
+    this.obstacleIndex = createObstacleIndex(this.environmentObstacles);
+    this.rampIndex = createRampIndex(this.layout.roofRamps);
   }
 
   public traceShot(trace: ShotTrace): EntityId | null {
@@ -46,7 +49,12 @@ export class SimulationCombatWorld implements CombatWorld {
     const layout = this.getLayout();
     let nearestEnvironment: SurfaceHit | null = intersectTerrain(trace.origin, direction, trace.range, layout);
     const obstacles = this.useSpatialIndex
-      ? this.obstacleIndex.query(trace.origin, direction, trace.range)
+      ? this.obstacleIndex.querySegment(
+        trace.origin.x,
+        trace.origin.z,
+        trace.origin.x + direction.x * trace.range,
+        trace.origin.z + direction.z * trace.range,
+      )
       : this.environmentObstacles;
     for (const obstacle of obstacles) {
       const hit = intersectObstacle(trace.origin, direction, trace.range, obstacle);
@@ -54,7 +62,15 @@ export class SimulationCombatWorld implements CombatWorld {
         nearestEnvironment = hit;
       }
     }
-    for (const ramp of layout.roofRamps) {
+    const ramps = this.useSpatialIndex
+      ? this.rampIndex.querySegment(
+        trace.origin.x,
+        trace.origin.z,
+        trace.origin.x + direction.x * trace.range,
+        trace.origin.z + direction.z * trace.range,
+      )
+      : layout.roofRamps;
+    for (const ramp of ramps) {
       const hit = intersectRamp(trace.origin, direction, trace.range, ramp);
       if (hit && (!nearestEnvironment || hit.distance < nearestEnvironment.distance)) {
         nearestEnvironment = hit;
@@ -128,108 +144,29 @@ export class SimulationCombatWorld implements CombatWorld {
       this.layoutSeed = this.state.mapSeed;
       this.layout = createMapLayout(this.state.mapSeed);
       this.environmentObstacles = environmentObstacles(this.layout);
-      this.obstacleIndex = new StaticObstacleIndex(this.environmentObstacles);
+      this.obstacleIndex = createObstacleIndex(this.environmentObstacles);
+      this.rampIndex = createRampIndex(this.layout.roofRamps);
     }
     return this.layout;
   }
 }
 
-class StaticObstacleIndex {
-  private readonly cells = new Map<number, number[]>();
-  private readonly visited: Uint32Array;
-  private readonly candidateIndices: number[] = [];
-  private readonly candidates: MapObstacle[] = [];
-  private generation = 0;
-
-  public constructor(private readonly obstacles: readonly MapObstacle[]) {
-    this.visited = new Uint32Array(obstacles.length);
-    for (let index = 0; index < obstacles.length; index += 1) {
-      const obstacle = obstacles[index];
-      if (!obstacle) continue;
-      const minimumX = Math.floor((obstacle.center.x - obstacle.width / 2 - GEOMETRY_EPSILON) / COMBAT_GRID_CELL_SIZE);
-      const maximumX = Math.floor((obstacle.center.x + obstacle.width / 2 + GEOMETRY_EPSILON) / COMBAT_GRID_CELL_SIZE);
-      const minimumZ = Math.floor((obstacle.center.z - obstacle.depth / 2 - GEOMETRY_EPSILON) / COMBAT_GRID_CELL_SIZE);
-      const maximumZ = Math.floor((obstacle.center.z + obstacle.depth / 2 + GEOMETRY_EPSILON) / COMBAT_GRID_CELL_SIZE);
-      for (let cellX = minimumX; cellX <= maximumX; cellX += 1) {
-        for (let cellZ = minimumZ; cellZ <= maximumZ; cellZ += 1) {
-          const key = combatGridKey(cellX, cellZ);
-          const cell = this.cells.get(key);
-          if (cell) cell.push(index);
-          else this.cells.set(key, [index]);
-        }
-      }
-    }
-  }
-
-  public query(origin: Vector3State, direction: Vector3State, range: number): readonly MapObstacle[] {
-    this.generation = (this.generation + 1) >>> 0;
-    if (this.generation === 0) {
-      this.visited.fill(0);
-      this.generation = 1;
-    }
-    this.candidateIndices.length = 0;
-    this.candidates.length = 0;
-
-    let cellX = Math.floor(origin.x / COMBAT_GRID_CELL_SIZE);
-    let cellZ = Math.floor(origin.z / COMBAT_GRID_CELL_SIZE);
-    const endX = origin.x + direction.x * range;
-    const endZ = origin.z + direction.z * range;
-    const endCellX = Math.floor(endX / COMBAT_GRID_CELL_SIZE);
-    const endCellZ = Math.floor(endZ / COMBAT_GRID_CELL_SIZE);
-    const stepX = direction.x > GEOMETRY_EPSILON ? 1 : direction.x < -GEOMETRY_EPSILON ? -1 : 0;
-    const stepZ = direction.z > GEOMETRY_EPSILON ? 1 : direction.z < -GEOMETRY_EPSILON ? -1 : 0;
-    const deltaX = stepX === 0 ? Number.POSITIVE_INFINITY : Math.abs(COMBAT_GRID_CELL_SIZE / direction.x);
-    const deltaZ = stepZ === 0 ? Number.POSITIVE_INFINITY : Math.abs(COMBAT_GRID_CELL_SIZE / direction.z);
-    const boundaryX = stepX > 0 ? (cellX + 1) * COMBAT_GRID_CELL_SIZE : cellX * COMBAT_GRID_CELL_SIZE;
-    const boundaryZ = stepZ > 0 ? (cellZ + 1) * COMBAT_GRID_CELL_SIZE : cellZ * COMBAT_GRID_CELL_SIZE;
-    let distanceX = stepX === 0 ? Number.POSITIVE_INFINITY : (boundaryX - origin.x) / direction.x;
-    let distanceZ = stepZ === 0 ? Number.POSITIVE_INFINITY : (boundaryZ - origin.z) / direction.z;
-    const maximumCells = Math.abs(endCellX - cellX) + Math.abs(endCellZ - cellZ) + 3;
-
-    for (let visitedCells = 0; visitedCells < maximumCells; visitedCells += 1) {
-      this.addCell(cellX, cellZ);
-      if (cellX === endCellX && cellZ === endCellZ) break;
-      if (Math.abs(distanceX - distanceZ) <= GEOMETRY_EPSILON) {
-        this.addCell(cellX + stepX, cellZ);
-        this.addCell(cellX, cellZ + stepZ);
-        cellX += stepX;
-        cellZ += stepZ;
-        distanceX += deltaX;
-        distanceZ += deltaZ;
-      } else if (distanceX < distanceZ) {
-        cellX += stepX;
-        distanceX += deltaX;
-      } else {
-        cellZ += stepZ;
-        distanceZ += deltaZ;
-      }
-    }
-
-    this.candidateIndices.sort(compareNumbers);
-    for (const index of this.candidateIndices) {
-      const obstacle = this.obstacles[index];
-      if (obstacle) this.candidates.push(obstacle);
-    }
-    return this.candidates;
-  }
-
-  private addCell(cellX: number, cellZ: number): void {
-    const cell = this.cells.get(combatGridKey(cellX, cellZ));
-    if (!cell) return;
-    for (const index of cell) {
-      if (this.visited[index] === this.generation) continue;
-      this.visited[index] = this.generation;
-      this.candidateIndices.push(index);
-    }
-  }
+function createObstacleIndex(obstacles: readonly MapObstacle[]): StaticGridIndex<MapObstacle> {
+  return new StaticGridIndex(obstacles, COMBAT_GRID_CELL_SIZE, (obstacle) => ({
+    minimumX: obstacle.center.x - obstacle.width / 2,
+    maximumX: obstacle.center.x + obstacle.width / 2,
+    minimumZ: obstacle.center.z - obstacle.depth / 2,
+    maximumZ: obstacle.center.z + obstacle.depth / 2,
+  }));
 }
 
-function combatGridKey(cellX: number, cellZ: number): number {
-  return (cellX + COMBAT_GRID_KEY_OFFSET) * 65_536 + cellZ + COMBAT_GRID_KEY_OFFSET;
-}
-
-function compareNumbers(left: number, right: number): number {
-  return left - right;
+function createRampIndex(ramps: readonly RoofRamp[]): StaticGridIndex<RoofRamp> {
+  return new StaticGridIndex(ramps, COMBAT_GRID_CELL_SIZE, (ramp) => ({
+    minimumX: ramp.centerX - ramp.width / 2,
+    maximumX: ramp.centerX + ramp.width / 2,
+    minimumZ: Math.min(ramp.startZ, ramp.endZ),
+    maximumZ: Math.max(ramp.startZ, ramp.endZ),
+  }));
 }
 
 function environmentObstacles(layout: MapLayout): readonly MapObstacle[] {

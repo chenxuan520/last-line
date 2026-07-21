@@ -125,6 +125,18 @@ describe("InventorySystem", () => {
     expect(findPickupCandidate(actor, state.groundLoot)).toBeNull();
   });
 
+  it("keeps stable loot-id ordering for equally distant pickup candidates", () => {
+    const state = createState();
+    const actor = state.actors.player;
+    actor.inventory.backpack = [];
+    state.groundLoot.zulu = createLoot("zulu", "ammo.rifle", 30, 1);
+    state.groundLoot.alpha = createLoot("alpha", "ammo.rifle", 30, -1);
+    state.groundLoot.zulu.position.y = actor.position.y - 1.31;
+    state.groundLoot.alpha.position.y = actor.position.y - 1.31;
+
+    expect(findPickupCandidate(actor, state.groundLoot)?.id).toBe("alpha");
+  });
+
   it("fills two weapon slots, switches weapons, and drops the replaced active weapon", () => {
     const state = createState();
     const actor = state.actors.player;
@@ -474,6 +486,34 @@ describe("InventorySystem", () => {
     expect(drops).toHaveLength(40);
     expect(positions.size).toBe(40);
   });
+
+  it("uses its pinned layout for death drops after the global seed cache is evicted", () => {
+    const state = createState();
+    const actor = state.actors.player;
+    const baseLayout = createMapLayout(0x7f00_0001);
+    let terrainReads = 0;
+    const pinnedLayout = new Proxy(baseLayout, {
+      get(target, property, receiver) {
+        if (property === "terrainHills") terrainReads += 1;
+        return Reflect.get(target, property, receiver) as unknown;
+      },
+    });
+    const inventory = new InventorySystem(pinnedLayout);
+    state.mapSeed = baseLayout.seed;
+    actor.position = {
+      x: 0,
+      y: getTerrainHeight(0, 0, baseLayout) + 1.76,
+      z: 0,
+    };
+    for (let offset = 1; offset <= 9; offset += 1) createMapLayout(baseLayout.seed + offset);
+    expect(createMapLayout(baseLayout.seed)).not.toBe(baseLayout);
+    terrainReads = 0;
+    actor.alive = false;
+
+    inventory.dropDeadInventories(state, []);
+
+    expect(terrainReads).toBeGreaterThan(0);
+  }, 30_000);
 
   it("reuses inactive loot records during repeated drop and pickup", () => {
     const state = createState();

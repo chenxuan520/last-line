@@ -5,6 +5,7 @@ import {
   getTerrainHeight,
   LANDING_ZONE_COUNT,
   LOOT_SPAWN_POINTS,
+  type MapLayout,
 } from "../config/map";
 import { WEAPONS } from "../config/weapons";
 import type { ActorCommand } from "../game/commands/ActorCommand";
@@ -58,8 +59,9 @@ interface LootSelection {
 }
 
 export class BotController {
-  private navigator = new GridNavigator();
-  private navigatorSeed = 0;
+  private layout: MapLayout;
+  private navigator: GridNavigator;
+  private navigatorSeed: number;
   private dropProgress: number | null = null;
   private readonly dropProgressJitter: number;
   private readonly landingPoiSlot: number;
@@ -110,12 +112,18 @@ export class BotController {
   private forcedRelocationSequence = 0;
   private zonePathRetryAtSeconds = -1;
   private readonly perceptionCandidates: ActorState[] = [];
+  private controlledActorId = "";
+  private controlledActorNumericId = 0;
 
   public constructor(
     index = 0,
     private readonly random: () => number = Math.random,
     private readonly disableSnipers = false,
+    initialLayout: MapLayout = createMapLayout(0),
   ) {
+    this.layout = initialLayout;
+    this.navigator = new GridNavigator(initialLayout);
+    this.navigatorSeed = initialLayout.seed;
     this.dropProgressJitter = randomBetween(this.random, -0.045, 0.045);
     this.landingPoiSlot = Math.max(0, index - 1) % LANDING_ZONE_COUNT;
     this.landingPoiWave = Math.floor(Math.max(0, index - 1) / LANDING_ZONE_COUNT);
@@ -131,8 +139,14 @@ export class BotController {
     livingActorCount?: number,
   ): ActorCommand {
     this.updateDeltaSeconds = deltaSeconds;
-    const layout = createMapLayout(state.mapSeed);
+    if (actor.id !== this.controlledActorId) {
+      this.controlledActorId = actor.id;
+      this.controlledActorNumericId = numericId(actor.id);
+    }
+    let layout = this.layout;
     if (state.mapSeed !== this.navigatorSeed) {
+      layout = createMapLayout(state.mapSeed);
+      this.layout = layout;
       this.navigator = new GridNavigator(layout);
       this.navigatorSeed = state.mapSeed;
       this.waypoint = null;
@@ -202,7 +216,7 @@ export class BotController {
     const endgameSearch = livingActors <= ENDGAME_SEARCH_ACTORS;
     this.decisionSeconds -= deltaSeconds;
     this.fireSeconds -= deltaSeconds;
-    const interval = endgameSearch ? 0.1 : playerDistance < 80 ? 0.08 : 0.22 + (numericId(actor.id) % 4) * 0.04;
+    const interval = endgameSearch ? 0.1 : playerDistance < 80 ? 0.08 : 0.22 + (this.controlledActorNumericId % 4) * 0.04;
     if (livenessTriggered) this.decisionSeconds = 0;
     if (this.decisionSeconds > 0) {
       const command = {
@@ -532,7 +546,7 @@ export class BotController {
     const lootSelection = this.findUsefulLoot(actor, state);
     if (lootSelection) return this.cache(this.moveToLoot(actor, lootSelection, command));
     this.lootTargetId = null;
-    const patrol = this.findPatrolTarget(actor, state, layout);
+    const patrol = this.findPatrolTarget(actor, state, layout, livingActors);
     if (patrol) return this.cache(this.navigate(actor, patrol.target, command, patrol.path));
     this.patrolTarget = null;
     return this.cache(this.navigateIntoZone(
@@ -548,8 +562,8 @@ export class BotController {
     actor: ActorState,
     state: MatchState,
     layout: ReturnType<typeof createMapLayout>,
+    livingActors: number,
   ): { target: Vector3State; path: Vector3State[] } | null {
-    const livingActors = Object.values(state.actors).filter((candidate) => candidate.alive).length;
     const endgameSearch = livingActors <= ENDGAME_SEARCH_ACTORS;
     const searchCurrentZone = endgameSearch && state.safeZone.targetRadius < 24;
     const patrolCenter = searchCurrentZone ? state.safeZone.center : state.safeZone.targetCenter;
@@ -580,10 +594,10 @@ export class BotController {
       endgameSearch ? 420 : lateGame ? 260 : 180,
     ));
     for (let attempt = 0; attempt < 12; attempt += 1) {
-      const angle = numericId(actor.id) * 2.399963 + (this.patrolSequence + attempt) * 1.618034;
+      const angle = this.controlledActorNumericId * 2.399963 + (this.patrolSequence + attempt) * 1.618034;
       const radiusScale = endgameSearch
-        ? [0.82, 0.5, 0.68][(numericId(actor.id) + this.patrolSequence + attempt) % 3] ?? 0.68
-        : 0.35 + ((numericId(actor.id) + this.patrolSequence + attempt * 3) % 6) * 0.1;
+        ? [0.82, 0.5, 0.68][(this.controlledActorNumericId + this.patrolSequence + attempt) % 3] ?? 0.68
+        : 0.35 + ((this.controlledActorNumericId + this.patrolSequence + attempt * 3) % 6) * 0.1;
       const radius = usableRadius * radiusScale;
       const x = patrolCenter.x + Math.cos(angle) * radius;
       const z = patrolCenter.z + Math.sin(angle) * radius;
@@ -795,7 +809,7 @@ export class BotController {
     const nearbyCandidateCount = Math.min(3, candidates.length);
     const candidateOffset = hasWeapon || nearbyCandidateCount === 0
       ? 0
-      : (numericId(actor.id) * 7 + this.landingPoiWave) % nearbyCandidateCount;
+      : (this.controlledActorNumericId * 7 + this.landingPoiWave) % nearbyCandidateCount;
     const orderedCandidates = candidateOffset === 0
       ? candidates
       : [
@@ -837,7 +851,7 @@ export class BotController {
 
   private findLandingTarget(state: MatchState): Vector3State {
     if (this.weaponLandingTarget) return this.weaponLandingTarget;
-    const layout = createMapLayout(state.mapSeed);
+    const layout = this.layout;
     const weaponLoot = Object.values(state.groundLoot)
       .filter((loot) => this.isAllowedLoot(loot) && ITEMS[loot.itemId]?.kind === "weapon")
       .sort((left, right) => left.id.localeCompare(right.id));
@@ -1054,7 +1068,7 @@ export class BotController {
     }
     candidates.push({ ...center });
     for (let offset = 0; offset < 3; offset += 1) {
-      const angle = numericId(actor.id) * 2.399963 +
+      const angle = this.controlledActorNumericId * 2.399963 +
         (this.forcedRelocationSequence + offset) * Math.PI / 6;
       const targetRadius = Math.min(60, Math.max(18, radius * 0.58));
       candidates.push({
@@ -1067,7 +1081,7 @@ export class BotController {
     for (const candidate of candidates) {
       const target = {
         x: candidate.x,
-        y: getTerrainHeight(candidate.x, candidate.z, state.mapSeed) + 1.76,
+        y: getTerrainHeight(candidate.x, candidate.z, this.layout) + 1.76,
         z: candidate.z,
       };
       if (horizontalDistance(actor.position, target) < 8) continue;
@@ -1132,7 +1146,7 @@ export class BotController {
       z: center.z + fromCenter.z * entryRadius,
     }, { ...center }];
     for (let offset = 0; offset < 8 && radius > 0; offset += 1) {
-      const angle = numericId(actor.id) * 2.399963 + offset * Math.PI / 4;
+      const angle = this.controlledActorNumericId * 2.399963 + offset * Math.PI / 4;
       candidates.push({
         x: center.x + Math.cos(angle) * radius * 0.55,
         y: center.y,

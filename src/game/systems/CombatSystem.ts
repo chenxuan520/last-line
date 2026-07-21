@@ -76,9 +76,10 @@ export class CombatSystem {
     commands: ReadonlyMap<EntityId, ActorCommand>,
     world: CombatWorld,
     events: GameEvent[],
+    orderedEntries?: readonly (readonly [EntityId, ActorCommand])[],
   ): void {
     const pendingDamage: PendingDamage[] = [];
-    const orderedCommands = [...commands].sort(([leftId], [rightId]) => compareIds(leftId, rightId));
+    const orderedCommands = orderedEntries ?? [...commands].sort(([leftId], [rightId]) => compareIds(leftId, rightId));
     for (const [actorId, command] of orderedCommands) {
       this.collectCommand(state, actorId, command, world, events, pendingDamage);
     }

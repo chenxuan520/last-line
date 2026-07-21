@@ -296,6 +296,27 @@ describe("SimulationCombatWorld", () => {
       expect(indexed.traceShotDetailed(ray)).toEqual(completeScan.traceShotDetailed(ray));
     }
   });
+
+  it("keeps every indexed roof-ramp trace identical to the complete geometry scan", () => {
+    const layout = createMapLayout(0);
+    const shooter = createActorState("shooter", "player", { x: 0, y: 1.76, z: 0 });
+    const state = createState(shooter);
+    const indexed = new SimulationCombatWorld(state);
+    const completeScan = new SimulationCombatWorld(state, false);
+
+    for (const ramp of layout.roofRamps) {
+      const z = (ramp.startZ + ramp.endZ) / 2;
+      const surfaceY = getRampHeight(ramp, ramp.centerX, z);
+      if (surfaceY === null) throw new Error(`ramp surface missing: ${ramp.id}`);
+      const ray: ShotTrace = {
+        shooterId: shooter.id,
+        origin: { x: ramp.centerX, y: surfaceY + 5, z },
+        direction: { x: 0, y: -1, z: 0 },
+        range: 10,
+      };
+      expect(indexed.traceShotDetailed(ray), ramp.id).toEqual(completeScan.traceShotDetailed(ray));
+    }
+  });
 });
 
 function createState(...actors: ReturnType<typeof createActorState>[]): MatchState {

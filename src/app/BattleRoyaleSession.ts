@@ -12,6 +12,7 @@ import {
 } from "../client/render/scenes/IslandScene";
 import { GameHud } from "../client/ui/GameHud";
 import type { GameSettings } from "../config/settings";
+import { createMapLayout } from "../config/map";
 import { WEAPONS } from "../config/weapons";
 import { BotController } from "../controllers/BotController";
 import { HumanController } from "../controllers/HumanController";
@@ -82,7 +83,8 @@ export class BattleRoyaleSession {
     state: MatchState,
   ) {
     const mode = new BattleRoyaleMode();
-    this.simulation = new GameSimulation(state, mode, WEAPONS);
+    const layout = createMapLayout(state.mapSeed);
+    this.simulation = new GameSimulation(state, mode, WEAPONS, layout);
     this.scene = bundle.scene;
     this.camera = bundle.camera;
     this.actorRoots = bundle.actorRoots;
@@ -96,10 +98,10 @@ export class BattleRoyaleSession {
     this.humanController = new HumanController(canvas, settings.sensitivity, { touchRoot: uiRoot });
     this.audio = audio;
     this.effects = new CombatEffects(this.scene);
-    this.combatWorld = new SimulationCombatWorld(state);
+    this.combatWorld = new SimulationCombatWorld(state, true, layout);
     Object.values(state.actors).forEach((actor, index) => {
       if (actor.kind === "bot") {
-        this.botControllers.set(actor.id, new BotController(index, Math.random, settings.disableAiSnipers));
+        this.botControllers.set(actor.id, new BotController(index, Math.random, settings.disableAiSnipers, layout));
       }
     });
   }

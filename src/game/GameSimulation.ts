@@ -1,4 +1,5 @@
 import type { WeaponConfig } from "../config/weapons";
+import { createMapLayout, type MapLayout } from "../config/map";
 import type { ActorCommand } from "./commands/ActorCommand";
 import type { GameMode } from "./modes/GameMode";
 import { compareActorTurns } from "./rules/resolveSimultaneous";
@@ -10,16 +11,19 @@ import type { EntityId, GameEvent, MatchState } from "./state/types";
 
 export class GameSimulation {
   private readonly combat: CombatSystem;
-  private readonly inventory = new InventorySystem();
-  private readonly movement = new MovementSystem();
+  private readonly inventory: InventorySystem;
+  private readonly movement: MovementSystem;
   private events: GameEvent[] = [];
 
   public constructor(
     public readonly state: MatchState,
     private readonly mode: GameMode,
     weapons: Readonly<Record<string, WeaponConfig>>,
+    layout: MapLayout = createMapLayout(state.mapSeed),
   ) {
     this.combat = new CombatSystem(weapons);
+    this.inventory = new InventorySystem(layout);
+    this.movement = new MovementSystem(layout);
   }
 
   public start(): void {
@@ -48,7 +52,7 @@ export class GameSimulation {
     for (const [actorId, command] of inventoryCommands) {
       this.inventory.processCommand(this.state, actorId, command, this.events);
     }
-    this.combat.processCommands(this.state, commands, world, this.events);
+    this.combat.processCommands(this.state, commands, world, this.events, orderedCommands);
     this.mode.update(this.state, deltaSeconds, this.events);
     this.inventory.dropDeadInventories(this.state, this.events);
   }

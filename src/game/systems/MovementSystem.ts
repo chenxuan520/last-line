@@ -31,8 +31,10 @@ const MAX_COLLISION_STEP = ACTOR_RADIUS / 2;
 const MAX_STEP_UP = 0.35;
 const SURFACE_EPSILON = 0.08;
 const WALL_COLLISION_CELL_SIZE = 64;
-const wallCollisionIndexes = new WeakMap<MapLayout, Map<string, MapObstacle[]>>();
-const supportIndexes = new WeakMap<MapLayout, Map<string, SupportCell>>();
+const SPATIAL_GRID_KEY_STRIDE = 256;
+const EMPTY_WALLS: readonly MapObstacle[] = [];
+const wallCollisionIndexes = new WeakMap<MapLayout, Map<number, MapObstacle[]>>();
+const supportIndexes = new WeakMap<MapLayout, Map<number, SupportCell>>();
 
 interface SupportCell {
   ramps: RoofRamp[];
@@ -40,7 +42,15 @@ interface SupportCell {
   rocks: MapRockObstacle[];
 }
 
+const EMPTY_SUPPORTS: SupportCell = { ramps: [], slabs: [], rocks: [] };
+
 export class MovementSystem {
+  private layout: MapLayout;
+
+  public constructor(initialLayout: MapLayout = createMapLayout(0)) {
+    this.layout = initialLayout;
+  }
+
   public processCommand(
     state: MatchState,
     actorId: EntityId,
@@ -51,7 +61,7 @@ export class MovementSystem {
     if (!actor?.alive || !Number.isFinite(deltaSeconds) || deltaSeconds <= 0) {
       return;
     }
-    const layout = createMapLayout(state.mapSeed);
+    const layout = this.getLayout(state.mapSeed);
 
     const aimLength = Math.hypot(command.aimDirection.x, command.aimDirection.z);
     if (aimLength > 0) {
@@ -94,6 +104,11 @@ export class MovementSystem {
 
     this.moveHorizontally(actor, command.move, command.sprint ? SPRINT_SPEED : WALK_SPEED, deltaSeconds, layout);
     this.moveVertically(actor, command.jump, deltaSeconds, layout);
+  }
+
+  private getLayout(seed: number): MapLayout {
+    if (this.layout.seed !== seed) this.layout = createMapLayout(seed);
+    return this.layout;
   }
 
   private moveHorizontally(
@@ -299,7 +314,7 @@ function resolveWallOverlap(actor: ActorState, layout: MapLayout): void {
 function getNearbyWalls(x: number, z: number, layout: MapLayout): readonly MapObstacle[] {
   let index = wallCollisionIndexes.get(layout);
   if (!index) {
-    index = new Map<string, MapObstacle[]>();
+    index = new Map<number, MapObstacle[]>();
     for (const wall of [...layout.wallSegments, ...layout.rockObstacles, ...layout.coverObstacles]) {
       const minimumCellX = wallCell(wall.center.x - wall.width / 2 - ACTOR_RADIUS);
       const maximumCellX = wallCell(wall.center.x + wall.width / 2 + ACTOR_RADIUS);
@@ -307,7 +322,7 @@ function getNearbyWalls(x: number, z: number, layout: MapLayout): readonly MapOb
       const maximumCellZ = wallCell(wall.center.z + wall.depth / 2 + ACTOR_RADIUS);
       for (let cellX = minimumCellX; cellX <= maximumCellX; cellX += 1) {
         for (let cellZ = minimumCellZ; cellZ <= maximumCellZ; cellZ += 1) {
-          const key = `${cellX}:${cellZ}`;
+          const key = spatialGridKey(cellX, cellZ);
           const walls = index.get(key);
           if (walls) walls.push(wall);
           else index.set(key, [wall]);
@@ -316,7 +331,7 @@ function getNearbyWalls(x: number, z: number, layout: MapLayout): readonly MapOb
     }
     wallCollisionIndexes.set(layout, index);
   }
-  return index.get(`${wallCell(x)}:${wallCell(z)}`) ?? [];
+  return index.get(spatialGridKey(wallCell(x), wallCell(z))) ?? EMPTY_WALLS;
 }
 
 export function getWallCollisionCandidateCount(x: number, z: number, layout: MapLayout): number {
@@ -390,7 +405,7 @@ function getCeilingBottom(
 function getNearbySupports(x: number, z: number, layout: MapLayout): SupportCell {
   let index = supportIndexes.get(layout);
   if (!index) {
-    index = new Map<string, SupportCell>();
+    index = new Map<number, SupportCell>();
     for (const ramp of layout.roofRamps) {
       addSupportToIndex(
         index,
@@ -426,11 +441,11 @@ function getNearbySupports(x: number, z: number, layout: MapLayout): SupportCell
     }
     supportIndexes.set(layout, index);
   }
-  return index.get(`${wallCell(x)}:${wallCell(z)}`) ?? { ramps: [], slabs: [], rocks: [] };
+  return index.get(spatialGridKey(wallCell(x), wallCell(z))) ?? EMPTY_SUPPORTS;
 }
 
 function addSupportToIndex(
-  index: Map<string, SupportCell>,
+  index: Map<number, SupportCell>,
   kind: keyof SupportCell,
   support: RoofRamp | MapFloorSlab | MapRockObstacle,
   minimumX: number,
@@ -440,7 +455,7 @@ function addSupportToIndex(
 ): void {
   for (let cellX = wallCell(minimumX); cellX <= wallCell(maximumX); cellX += 1) {
     for (let cellZ = wallCell(minimumZ); cellZ <= wallCell(maximumZ); cellZ += 1) {
-      const key = `${cellX}:${cellZ}`;
+      const key = spatialGridKey(cellX, cellZ);
       let cell = index.get(key);
       if (!cell) {
         cell = { ramps: [], slabs: [], rocks: [] };
@@ -451,6 +466,10 @@ function addSupportToIndex(
       if (kind === "rocks") cell.rocks.push(support as MapRockObstacle);
     }
   }
+}
+
+function spatialGridKey(cellX: number, cellZ: number): number {
+  return cellX * SPATIAL_GRID_KEY_STRIDE + cellZ;
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {

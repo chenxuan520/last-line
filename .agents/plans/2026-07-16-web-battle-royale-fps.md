@@ -565,6 +565,18 @@
 - 2026-07-21 15:10：reviewer 复审无 findings，确认原中风险布局问题闭环，且原 `5ddf86d..bf4682d` 范围不存在剩余 blocker/high/medium 问题；修复未引入与顶部 HUD、准星、小地图或触控按钮的新重叠。准备提交并推送 CSS 修复及完整 review 记录。
 - 2026-07-21 15:15：review 闭环修复已提交并推送 `main`，提交为 `3b1bfaf fix: stabilize short mobile HUD`；最终 CI `29809517369`、GitHub Pages 和 Cloudflare Pages deployment `e7aa788b-4305-4772-8279-a6307b8c29eb` 均成功。工作区仅保留未跟踪参考文件 `session-ses_082c.md`，未提交。
 
+#### 2026-07-21 17:39 +0800：第二轮性能余量优化完成实现
+
+- 在不降低 AI 数量、决策频率、感知范围、LOS/射线精度、寻路节点或掉落规则的前提下，新增通用静态二维格索引：`SimulationCombatWorld` 将约 278–300 条楼梯坡道也纳入保守射线 broadphase；`GridNavigator` 对墙、岩石和掩体的点/线段查询使用同一保守索引，并按原 blocker 顺序恢复候选，保留可关闭索引的完整扫描模式用于逐路径等价回归。
+- 动态掉落预计算 234 个固定候选 offset；每个死亡背包只构建一次附近 loot 格，墙/岩石/掩体使用静态候选索引，inactive loot ID 改为单遍选择且武器 item ID 使用固定映射。相同 4 个完整死亡背包基准由优化前中位约 `629.70ms` 降至约 `4.15ms`；60 条确定性导航由约 `1102.27ms` 降至约 `64.17ms`，逐路径 mismatch 为 0；300 条射线中位由约 `9.66ms` 降至约 `5.90–7.38ms`。这些时间仅作本机观察，不写入 CI 阈值。
+- 规则循环继续移除等价重复工作：Movement 空 cell 复用并改数值格 key；GameSimulation 的稳定命令顺序复用于 Combat；BattleRoyaleMode 每 tick 复用 living actor 集；服务端复用非 cohort Bot 的 continuous command；Bot 复用已传入的存活数并缓存受控 actor 数字 ID。已通过 typecheck、射线/导航/掉落/移动/Bot/模拟/模式/服务端定向回归；新增静态格 corner supercover、60 条导航完整扫描等价、全坡道射线等价及等距 loot ID tie 测试。完整门禁、49 Bot 多 seed 与最终 benchmark 待执行。
+
+- 2026-07-21 17:58：补齐多房间/多 Bot 长期余量：同一 `MapLayout` 的导航 blocker 数组和静态格由所有 Bot 共享，不再为 49 个 Controller 重复构建；每个 Bot 与 `MovementSystem` 强持有本局 layout，避免全局 8-seed cache 在多个房间交错时反复驱逐并重建地图。独立 49 Bot 完整局约 `7.04s`，五个武装 seed 约 `2.69–3.98s`，继续保持每 seed 至少 42/49 武装及唯一胜者；这些时间同样仅作观察。
+- 2026-07-21 17:58：最终自动门禁通过：应用 **28 files / 259 tests**、Worker **3 files / 26 tests**、`npm run typecheck`、`npm run build`、`npm run build:worker` 全部成功；构建仅有既有 >500kB chunk warning。完整套件覆盖 401 seed 地图、多层建筑/坡道、AI 五 seed 搜集和完整局、同时结算、联机运行时、掉落复用及新增索引等价测试。此次没有修改展示层，按项目门禁无需额外浏览器视觉验收；准备进入用户要求的 reviewer 闭环。
+- 2026-07-21 18:18：采纳 reviewer 唯一高风险 finding。确认 `InventorySystem` 首次死亡掉落、Bot 首次跳伞目标与 forced relocation 仍可能在本局 seed 被全局 8 项 cache 驱逐后调用 `createMapLayout(seed)`，与“多房间不重建地图”的目标冲突。现由 `BattleRoyaleSession` / `MatchRuntime` 在房间建立时生成并强持有同一 `MapLayout`，传给 `GameSimulation`、`InventorySystem`、`MovementSystem`、`SimulationCombatWorld` 和全部普通/接管 Bot；Bot 落点与强制迁移、Inventory 死亡/手动掉落均使用该对象，只有真实 mapSeed 改变才重新生成。
+- 2026-07-21 18:18：新增超过 8 个其他 seed 驱逐全局 cache 后的结构回归，以 Proxy 断言死亡掉落和 forced relocation 仍读取原 pinned layout，而非用不稳定耗时阈值；同时固化负坐标、格边界、极小正 delta 和 generation wrap 的静态格测试。`typecheck:app` 以及 Inventory/Bot/StaticGrid/MatchRuntime **4 files / 80 tests** 通过，等待 reviewer 复审和最终完整门禁。
+- 2026-07-21 18:29：reviewer 复审为 `No findings`，确认 pinned layout finding 及完整性能改动范围闭环。修复后的完整门禁由 reviewer 再次执行并通过：应用 **28 files / 262 tests**、Worker **3 files / 26 tests**、`npm run typecheck`、`npm run build`、`npm run build:worker`、`git diff --check f470f9d` 均成功；五 seed 武装率与完整局唯一胜者保持。最终独立基准为 300 rays 中位 `6.96ms`、60 paths 中位 `82.82ms` 且 mismatch 0、四个完整死亡背包中位 `6.23ms`；时间仅作本机观察。当前无展示层改动、无已知 blocker/high/medium finding，等待提交推送。
+
 ## 审查
 
 ### 2026-07-16 14:27 +0800：当前未提交实现审查（不通过）
@@ -1414,3 +1426,30 @@
 - 浏览器证据：本机 production preview、音量 0，强制展示真实 `.healing-progress` 与 `.interaction-prompt` DOM。844×390 下治疗卡 `clientHeight/scrollHeight=57/57px`、提示 `28/28px`；667×375 下同为 `57/57px`、`28/28px`，均无裁切。两尺寸逐项计算与右下武器 HUD、顶部 HUD、准星、小地图、摇杆、开火/瞄准/跳跃/拾取/换弹/切枪/绷带/急救和暂停按钮的相交面积，结果全部为 0；控制台无 error/warn。
 - 验证：`npm run build` 与 `git diff --check 7eadf84` 通过，构建仅保留既有大 chunk warning；未发现业务源码中的 `context.Background()`。由于业务实现与测试均未变化，沿用上一轮已通过的 26 files / 254 app tests、3 files / 26 Worker tests、五 seed 武装率和完整局唯一胜者证据。
 - 残余风险：真实手机多指手感仍需设备人工复核，但与本次 CSS finding 无关，不阻塞通过结论。
+
+### 2026-07-21 18:12 +0800：第二轮性能余量优化完整审查（不通过）
+
+- 审查范围：以本 plan 的 2026-07-21 17:39–17:58 Build 记录、`AGENTS.md`、`README.md` 和用户本轮性能/行为等价要求为基线；确认当前分支为 `main`、`HEAD=origin/main=f470f9d`、merge-base 亦为 `f470f9d`，完整审查工作区相对 `f470f9d` 的 10 个源码文件、4 个测试文件及本 plan 增量。未跟踪参考文件 `session-ses_082c.md` 按要求忽略且未触碰。
+- 审查结论：**不通过。** 静态格 DDA、射线/坡道、导航 indexed/full、掉落顺序与复用、命令/living 集合复用未发现玩法或 AI 质量差异；但“多房间下避免 8-seed cache 驱逐后重建地图”的性能目标只完成了一部分，仍有 1 项高风险阻塞。
+
+#### Finding
+
+1. **[高] 活跃房间持有的 layout 被全局 8-seed cache 驱逐后，死亡掉落和 Bot 强制迁移仍会同步重建整张地图，造成远超 30 Hz tick 预算的停顿。** `src/game/systems/InventorySystem.ts:149-156,708-712` 每个新尸体仍通过 `createMapLayout(state.mapSeed)` 创建 placement context；`src/controllers/BotController.ts:1077-1080` 的 forced relocation 仍把数字 seed 传给 `getTerrainHeight`，后者会再次进入 `createMapLayout`。因此即使 `SimulationCombatWorld`、`MovementSystem` 和 Bot 已强持有本局 `MapLayout`，这些热点也没有复用该对象。`src/config/map.ts:170,319-323` 的 cache 只有 8 项；本机用一个仍被强引用的 layout、再生成 12 个其他 seed 后复现：原 seed 再取返回不同对象并同步重建约 `247ms`，实际 `InventorySystem.dropDeadInventories` 的同类驱逐场景约 `358ms`（默认尸体 3 件掉落），而服务端 tick 预算约 `33ms`。这会在 9 个以上不同 seed 房间交错运行时把任一新死亡/卡死迁移放大为明显房间卡顿，与本轮“为后续功能预留余量”和 Build 中的多房间闭环声明冲突。Builder 需让 Inventory placement 与 Bot relocation 使用每局已持有的 layout，不再在运行时依赖全局 bounded cache 命中；writer 需补一个超过 8 个 seed 交错后执行死亡掉落/强制迁移、结构性断言不重建 layout 的回归，不能用易抖动时间阈值代替。
+
+#### 验证与残余风险
+
+- 本机实际执行 `npm run test`：应用 **28 files / 259 tests**、Worker **3 files / 26 tests** 全通过；五 seed 均保持 `>=42/49` 武装，49 Bot 完整局产生唯一胜者。`npm run typecheck`、`npm run build`、`npm run build:worker`、`git diff --check f470f9d` 均通过；构建仅有既有 >500kB chunk warning。未发现业务源码中的 `context.Background()`。
+- 额外差分验证：`StaticGridIndex` 对 3 种 cell size、共 30,000 条含负坐标、格边界、corner、极小 delta 的随机线段与 AABB 完整扫描比较，无候选漏失、重复或 source-order 变化，并人工推进 generation wrap；`SimulationCombatWorld` 在 seed `0/42/4294967295` 上比较 7,056 条 indexed/full 射线，覆盖每条坡道的上下垂直与双向斜射，结果逐项一致；两个共享 index 的 navigator 在 6 个 seed 上交错比较 960 条 indexed/full 路径，结果一致。
+- 已静态确认共享 `StaticGridIndex` 返回数组的当前调用链均在下一次 query 前同步消费，未发现嵌套 query 或系统原地修改复用 command；但仓库内 `staticGridIndex` 新增测试只覆盖单个正坐标 corner，负坐标、边界、极小 delta、generation wrap 与返回数组别名仍仅有本轮临时差分证据。该测试缺口本身暂不另列 blocker，修复上述多房间 finding 时建议一并固化关键边界。
+- 本轮没有展示层改动，未做浏览器视觉验收。Builder 必须先处理上述多房间运行时重建问题，再发起复审；其余检查项无需因本结论重写。
+
+### 2026-07-21 18:27 +0800：多房间 pinned layout finding 复审（通过）
+
+- 审查范围：对照本 plan 2026-07-21 18:12 的唯一高风险 finding，并继续复核当前 `main` 工作区相对指定基线 `f470f9d` 的完整范围；当前 `HEAD=origin/main=f470f9d`、merge-base 为 `f470f9d`，范围为 11 个源码文件、5 个测试文件及本 plan 增量。未跟踪参考文件 `session-ses_082c.md` 继续按要求忽略且未触碰。
+- 审查结论：**通过。本次复审未发现明确问题。** 上轮多房间 cache 驱逐后死亡掉落/forced relocation 重建地图的 finding 已闭环；其余空间索引、射线、导航、AI、掉落和规则循环改动复核后仍未发现行为回归。
+- Finding 闭环：`BattleRoyaleSession` 为单机创建一次本局 layout，并将同一对象传给 `GameSimulation`、`SimulationCombatWorld` 和全部 Bot；`MatchRuntime` 从新局或 checkpoint clone 的 `state.mapSeed` 创建并强持有 layout，传给 Simulation、World、普通 Bot，并在断线接管 Bot 创建时继续传入。`GameSimulation` 再把该对象传给 Inventory/Movement。各系统只在自身观察到 `state.mapSeed` 真变化时回退到 `createMapLayout`；生产对局中 mapSeed 不会原地变化，防御性变化路径仍能更新到新布局。
+- 掉落链复核：死亡背包只创建一次使用 pinned layout 的 placement context；手动丢弃、满背包换栈、替换武器/护甲/头盔均汇入 `createGroundLoot`，其无 placement 分支同样先取实例 layout 再创建 context，不会回到全局 cache。自定义 cache 驱逐后验证确认手动和替换掉落均实际读取 pinned layout。
+- Proxy 回归复核：两个测试都会先生成 9 个其他 seed 并确认原 seed 已从 cache 驱逐；上一实现不会持有传入 Proxy，因而 terrain read 断言会失败。Bot 测试的 navigator 也会读取 layout，不能单独证明 forced target 高度来源；本轮另将 navigator stub 为空路径后执行同一 forced relocation，仍观测到 pinned Proxy terrain read，并结合 `BotController.ts:1082-1085` 确认高度直接使用 `this.layout`，不是伪覆盖。StaticGrid 新回归覆盖负 cell、精确边界附近 `1e-12` 坐标和 generation wrap；上一轮 30,000 条随机差分继续作为 tiny-delta/边界补充证据。
+- 构造与对象复用复核：新增参数均有默认值，既有测试/独立调用方兼容；`SimulationCombatWorld(state, false)` 的完整扫描参数语义未改变。复用的 continuous command 没有被规则系统原地修改；living actor 集、命令排序和共享 GridNavigator query buffer 的同步消费关系也未因本轮修复变化。未发现业务源码中的 `context.Background()`。
+- 验证：本机实际执行 `npm run test`，应用 **28 files / 262 tests**、Worker **3 files / 26 tests** 全通过；五 seed 继续全部 `>=42/49` 武装，49 Bot 完整局产生唯一胜者。`npm run typecheck`、`npm run build`、`npm run build:worker`、`git diff --check f470f9d` 均通过，构建仅保留既有 >500kB chunk warning。另以运行时对象身份检查确认新局、checkpoint restore、普通 Bot 和 takeover Bot 与 Simulation/Inventory/Movement/World 共享预期 layout。
+- 残余风险（非阻塞）：Proxy 驱逐测试各自需要生成 9 张完整地图，在并发较慢环境中约 9–10 秒，但已有 30 秒测试余量且没有使用时间阈值；本轮无展示层改动，因此未做浏览器视觉验收。
