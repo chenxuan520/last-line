@@ -591,6 +591,7 @@
 - 2026-07-21 20:00：采纳 reviewer 复审的新 finding：固定 18m parachuting 上限会在正常 3-tick snapshot 下错误平滑 6–18m 的不可能位移。现显式传入真实 server tick gap，并按 `hypot(64m/s 水平滑翔, 5m/s 垂直下降) × gap + 0.35m` 计算本次动态上限，同时保留 18m 硬上限；因此 10m/0.2s 和约 16m/0.25s 合法高速移动继续平滑，17m/0.1s 与 >18m 跳变立即对齐。`MAX_GLIDE_SPEED` / `PARACHUTE_DESCENT_SPEED` 从权威 Movement 导出，避免网络层复制玩法数值。`npm run typecheck` 与 smoothing/throttle/Movement/Runtime **4 files / 29 tests** 通过。
 - 2026-07-21 20:00：按用户要求补齐长期文档。README 新增联机本地预测、远端 120–250ms 插值、传送 snap 和追 tick burst 抑制说明；`docs/architecture.md` 详细记录 snapshot→authoritative replace→pending input replay→visual correction 流程、远端 transition 选择、动态 parachuting 位移预算、80ms snapshot throttle、event/loot 累积和 finished 尾帧契约，并明确所有平滑只属于展示层，不改变命中、拾取、库存、安全区或结果状态。等待 reviewer 第三轮复审。
 - 2026-07-21 20:06：reviewer 第三轮复审为 `No findings`，确认动态 parachuting 预算、18m hard cap、异常 tick、deployment snap、权威常量依赖和 README/architecture 均与实现一致；前两轮其余 smoothing/throttle/reconciliation 范围继续无剩余 blocker/high/medium。Reviewer 再次执行应用 **30 files / 269 tests**、Worker **3 files / 26 tests**、typecheck、应用/Worker build 和 diff check，全部通过。Chrome 保持清理后的仅 `about:blank` 状态，等待提交推送和生产部署。
+- 2026-07-21 20:12：首轮联机平滑实现提交 `0e3597a fix: smooth multiplayer movement` 已推送，CI `29828821107` 与 GitHub Pages 成功；该提交之后仍按 reviewer 意见继续补动态 parachuting snap 边界和长期文档，因此当前最终工作区相对 `0e3597a` 还有待提交的闭环修正。最终 reviewer 已 `No findings`、完整门禁为 269/26 tests 全绿，等待提交该闭环修正后再部署 Worker；生产 Worker 尚未更新，避免在未确认活动房间状态时擅自重启在线房间。
 
 ## 审查
 
