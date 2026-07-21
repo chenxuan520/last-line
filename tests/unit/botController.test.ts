@@ -109,6 +109,35 @@ describe("BotController", () => {
     expect(command.fire).toBe(false);
   });
 
+  it("checks dense combat line of sight in nearest-target order", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    const nearest = state.actors["bot-2"];
+    if (!bot || !player || !nearest) throw new Error("actors missing");
+    for (const actor of Object.values(state.actors)) {
+      actor.alive = actor.id === bot.id || actor.id === player.id || actor.id === nearest.id;
+    }
+    bot.position = { x: 0, y: 1.76, z: 0 };
+    bot.yaw = Math.PI / 2;
+    player.position = { x: 30, y: 1.76, z: 0 };
+    nearest.position = { x: 10, y: 1.76, z: 0 };
+    const checked: string[] = [];
+    const world: CombatWorld = {
+      traceShot: () => null,
+      hasLineOfSight: (_observerId, targetId) => {
+        checked.push(targetId);
+        return true;
+      },
+    };
+
+    const command = new BotController(1, () => 0.5).update(bot, state, world, 1, player.id);
+
+    expect(checked).toEqual([nearest.id]);
+    expect(command.fire).toBe(true);
+    expect(command.aimDirection.x).toBeGreaterThan(0.99);
+  });
+
   it("fires while moving toward cover at twenty-five health", () => {
     const state = groundedState();
     const bot = state.actors["bot-1"];

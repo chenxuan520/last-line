@@ -5,6 +5,7 @@ import { AssetCatalog } from "../../src/assets/AssetCatalog";
 import {
   applyActorVisualPose,
   createIslandScene,
+  setActorEquipmentVisual,
   setActorWeaponVisual,
 } from "../../src/client/render/scenes/IslandScene";
 import { createMapLayout, getTerrainHeight, HOSPITAL_WALL_COLOR } from "../../src/config/map";
@@ -23,13 +24,25 @@ describe("IslandScene lifecycle", () => {
 
     for (let restart = 0; restart < 4; restart += 1) {
       const state = createBattleRoyaleState("player", undefined, () => 0.5);
-      const bundle = await createIslandScene(engine, assets, state.actors, state.groundLoot, state.mapSeed);
+      const showGroundLootModels = restart > 0;
+      const bundle = await createIslandScene(
+        engine,
+        assets,
+        state.actors,
+        state.groundLoot,
+        state.mapSeed,
+        showGroundLootModels,
+      );
       const layout = createMapLayout(state.mapSeed);
       expect(engine.scenes).toHaveLength(1);
       expect(bundle.lootMeshes.size).toBe(Object.keys(state.groundLoot).length);
       expect([...bundle.lootMeshes.values()].every((mesh) =>
         mesh.isPickable && mesh.scaling.x === 1 && mesh.scaling.y === 1 && mesh.scaling.z === 1
       )).toBe(true);
+      expect([...bundle.lootMeshes.values()].every((mesh) => mesh.metadata?.lootModel === showGroundLootModels)).toBe(true);
+      if (!showGroundLootModels) {
+        expect([...bundle.lootMeshes.values()].every((mesh) => mesh.getTotalVertices() === 24)).toBe(true);
+      }
       const spawnMarker = bundle.lootMeshes.values().next().value;
       const spawnMaterial = spawnMarker?.material;
       state.groundLoot.death = {
@@ -216,8 +229,21 @@ describe("IslandScene lifecycle", () => {
       expect(botRoot.position).toEqual(originalBotPosition);
       const weaponMeshes = botRoot.getChildMeshes(false).filter((mesh) => mesh.metadata?.actorVisual === "weapon");
       const parachuteMeshes = botRoot.getChildMeshes(false).filter((mesh) => mesh.metadata?.actorVisual === "parachute");
+      const vestMeshes = botRoot.getChildMeshes(false).filter((mesh) => mesh.metadata?.actorVisual === "vest");
+      const helmetMeshes = botRoot.getChildMeshes(false).filter((mesh) => mesh.metadata?.actorVisual === "helmet");
       expect(parachuteMeshes).toHaveLength(1);
       expect(parachuteMeshes.every((mesh) => !mesh.isEnabled(false))).toBe(true);
+      expect(vestMeshes).toHaveLength(1);
+      expect(helmetMeshes).toHaveLength(1);
+      expect(vestMeshes.every((mesh) => !mesh.isEnabled(false))).toBe(true);
+      expect(helmetMeshes.every((mesh) => !mesh.isEnabled(false))).toBe(true);
+      expect(vestMeshes[0]?.material).not.toBe(bundle.scene.getMaterialByName("actor-gear-material"));
+      setActorEquipmentVisual(botRoot, 1, 2);
+      expect(vestMeshes.every((mesh) => mesh.isEnabled(false))).toBe(true);
+      expect(helmetMeshes.every((mesh) => mesh.isEnabled(false))).toBe(true);
+      setActorEquipmentVisual(botRoot, 0, 0);
+      expect(vestMeshes.every((mesh) => !mesh.isEnabled(false))).toBe(true);
+      expect(helmetMeshes.every((mesh) => !mesh.isEnabled(false))).toBe(true);
       const weaponIds = new Set(weaponMeshes.map((mesh) => mesh.metadata?.weaponId));
       expect(weaponIds).toEqual(new Set(["rifle", "smg", "shotgun", "sniper"]));
       expect(weaponMeshes.every((mesh) => !mesh.isEnabled(false))).toBe(true);
@@ -244,7 +270,7 @@ describe("IslandScene lifecycle", () => {
     engine.dispose();
   }, 60_000);
 
-  it("uses reusable billboard item icons when the setting is enabled", async () => {
+  it("uses reusable low-poly ground loot models when the setting is enabled", async () => {
     const engine = new NullEngine();
     const assets = createAssets();
     const state = createBattleRoyaleState("player", {
@@ -257,18 +283,25 @@ describe("IslandScene lifecycle", () => {
     const bundle = await createIslandScene(engine, assets, state.actors, state.groundLoot, state.mapSeed, true);
     const marker = bundle.lootMeshes.get(loot.id);
     if (!marker) throw new Error("rifle marker missing");
+    const rifleGeometry = marker.geometry;
     const spawnMaterial = marker.material;
 
     expect(marker.metadata).toMatchObject({
-      assetId: "ui.weapon.rifle",
-      resolvedAssetId: "ui.weapon.rifle",
-      lootIcon: true,
+      itemId: "weapon.rifle",
+      lootModel: true,
+      modelId: "weapon.rifle",
     });
-    expect(marker.billboardMode).not.toBe(0);
-    expect(marker.position.y).toBeCloseTo(loot.position.y + 0.5);
+    expect(marker.billboardMode).toBe(0);
+    expect(marker.getTotalVertices()).toBeGreaterThan(24);
+    expect(marker.getChildMeshes()).toHaveLength(0);
+    expect(marker.position.y).toBeCloseTo(loot.position.y);
     expect(bundle.lootMeshes.size).toBe(Object.keys(state.groundLoot).length);
-    expect(bundle.scene.textures.filter((texture) => texture.name.startsWith("loot-icon-texture-"))).toHaveLength(14);
-    expect(bundle.scene.materials.filter((entry) => entry.name.startsWith("loot-icon-material-"))).toHaveLength(14);
+    expect(bundle.scene.meshes.filter((mesh) => mesh.name.startsWith("loot-model-template-"))).toHaveLength(15);
+    expect(bundle.scene.materials.filter((entry) => entry.name.startsWith("loot-model-material-"))).toHaveLength(14);
+    const secondRifle = [...bundle.lootMeshes.values()].find((candidate) =>
+      candidate !== marker && candidate.metadata?.itemId === "weapon.rifle"
+    );
+    expect(secondRifle?.geometry).toBe(rifleGeometry);
 
     loot.itemId = "bandage";
     loot.generation = (loot.generation ?? 0) + 1;
@@ -276,15 +309,17 @@ describe("IslandScene lifecycle", () => {
     bundle.syncLootMeshes(state.groundLoot);
 
     expect(bundle.lootMeshes.get(loot.id)).toBe(marker);
+    expect(marker.geometry).not.toBe(rifleGeometry);
     expect(marker.material).not.toBe(spawnMaterial);
     expect(marker.metadata).toMatchObject({
-      assetId: "ui.item.bandage",
-      resolvedAssetId: "ui.item.bandage",
+      itemId: "bandage",
       lootSource: "death",
-      lootIcon: true,
+      lootModel: true,
+      modelId: "bandage",
     });
-    expect(bundle.scene.textures.filter((texture) => texture.name.startsWith("loot-icon-texture-"))).toHaveLength(14);
-    expect(bundle.scene.materials.filter((entry) => entry.name.startsWith("loot-icon-material-"))).toHaveLength(15);
+    expect(marker.getTotalVertices()).toBeGreaterThan(24);
+    expect(bundle.scene.meshes.filter((mesh) => mesh.name.startsWith("loot-model-template-"))).toHaveLength(15);
+    expect(bundle.scene.materials.filter((entry) => entry.name.startsWith("loot-model-material-"))).toHaveLength(14);
 
     bundle.scene.dispose();
     engine.dispose();

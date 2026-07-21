@@ -34,7 +34,11 @@ export class GameHud {
     mapSeed: number,
     onResume: () => void,
     private readonly onRestart: () => void,
-    private readonly options: { online?: boolean; actorLabels?: Readonly<Record<string, string>> } = {},
+    private readonly options: {
+      online?: boolean;
+      actorLabels?: Readonly<Record<string, string>>;
+      touchInput?: boolean;
+    } = {},
   ) {
     const crosshair = assets.resolve("ui.crosshair", "svg");
     const mapLayout = createMapLayout(mapSeed);
@@ -45,7 +49,7 @@ export class GameHud {
       const end = projectToMinimap({ x: endX, y: 0, z: endZ });
       return `M${start.x} ${start.y}L${end.x} ${end.y}`;
     }).join(" ");
-    root.className = "is-playing";
+    root.className = options.touchInput ? "is-playing is-touch-input" : "is-playing";
     root.innerHTML = `
       <section class="hud" aria-label="游戏状态">
         <header class="hud-topbar">
@@ -91,6 +95,21 @@ export class GameHud {
           <span><b>WASD</b>移动</span><span><b>SHIFT</b>冲刺</span><span><b>SPACE</b>跳伞 / 跳跃</span><span><b>F</b>拾取</span>
           <span><b>1 / 2</b>切枪</span><span><b>Q</b>绷带</span><span><b>H</b>急救包</span><span><b>R</b>换弹</span>
         </aside>
+        ${options.touchInput ? `
+          <div class="touch-controls" data-hud="touch-controls" aria-label="触控操作">
+            <div class="touch-look-area" data-touch-role="look" aria-label="滑动视角"></div>
+            <div class="touch-joystick" data-touch-role="move" aria-label="移动摇杆"><i></i><b data-touch-knob></b></div>
+            <button class="touch-action touch-fire" type="button" data-touch-action="fire">开火</button>
+            <button class="touch-action touch-scope" type="button" data-touch-action="scope">瞄准</button>
+            <button class="touch-action touch-jump" type="button" data-touch-action="jump">跳跃</button>
+            <button class="touch-action touch-pickup" type="button" data-touch-action="interact">拾取</button>
+            <button class="touch-action touch-reload" type="button" data-touch-action="reload">换弹</button>
+            <button class="touch-action touch-switch" type="button" data-touch-action="switch-weapon">切枪</button>
+            <button class="touch-action touch-bandage" type="button" data-touch-action="bandage">绷带</button>
+            <button class="touch-action touch-medkit" type="button" data-touch-action="medkit">急救</button>
+            <button class="touch-action touch-pause" type="button" data-touch-action="pause" aria-label="暂停">Ⅱ</button>
+          </div>
+        ` : ""}
         <aside class="inventory-card">
           <div class="weapon-slots" data-hud="weapon-slots"></div>
           <div class="backpack" data-hud="backpack"></div>
@@ -109,9 +128,10 @@ export class GameHud {
         </footer>
         <div class="pause-card" data-hud="pause">
           <strong>${options.online ? "联机对局进行中" : "对局已暂停"}</strong>
-          <span>${options.online ? "点击返回战斗；服务器不会暂停" : "点击继续并锁定鼠标"}</span>
+          <span>${options.online ? "点击返回战斗；服务器不会暂停" : options.touchInput ? "点击继续触控操作" : "点击继续并锁定鼠标"}</span>
           <button type="button" data-action="resume">继续游戏</button>
         </div>
+        <div class="orientation-card" data-hud="orientation"><strong>请旋转至横屏</strong><span>横屏模式可使用完整触控操作</span></div>
         <div class="result-card" data-hud="result" hidden></div>
         <aside class="leaderboard" data-hud="leaderboard" hidden aria-label="本局排行榜">
           <header><strong>本局排行榜</strong><span>存活优先 · 击杀排序</span></header>
@@ -138,10 +158,11 @@ export class GameHud {
     state: MatchState,
     player: ActorState,
     viewedActor: ActorState,
-    pointerLocked: boolean,
+    inputActive: boolean,
     fps: number,
     scoped = false,
     leaderboardVisible = false,
+    orientationBlocked = false,
   ): void {
     this.setText("health", Math.ceil(viewedActor.health).toString());
     this.setText("armor", Math.ceil(viewedActor.armor).toString());
@@ -196,10 +217,19 @@ export class GameHud {
     }
     const promptSignature = pickupPromptSignature(player, state.groundLoot);
     if (promptSignature !== this.promptSignature) {
-      this.setText("prompt", pickupPromptText(player, state.groundLoot));
+      this.setText("prompt", pickupPromptText(player, state.groundLoot, this.options.touchInput === true));
       this.promptSignature = promptSignature;
     }
-    this.requireElement("pause").classList.toggle("is-visible", !pointerLocked && player.alive && !this.resultVisible);
+    this.requireElement("pause").classList.toggle(
+      "is-visible",
+      !inputActive && !orientationBlocked && player.alive && !this.resultVisible,
+    );
+    this.requireElement("orientation").classList.toggle("is-visible", orientationBlocked && player.alive && !this.resultVisible);
+    this.elements.get("touch-controls")?.classList.toggle(
+      "is-visible",
+      inputActive && !orientationBlocked && player.alive && !this.resultVisible,
+    );
+    this.root.querySelector<HTMLElement>("[data-touch-action='scope']")?.classList.toggle("is-active", scoped);
     this.updateLeaderboard(state, player.id, leaderboardVisible);
   }
 
@@ -264,7 +294,9 @@ export class GameHud {
       "任务失败",
       `${eliminatedBy} · 第 ${placement} 名 · ${kills} 次淘汰`,
       "重新部署",
-      `${spectatingKiller ? "正在观察击杀者" : "正在观察存活角色"} · 空格或滚轮切换目标`,
+      this.options.touchInput
+        ? `${spectatingKiller ? "正在观察击杀者" : "正在观察存活角色"} · 使用箭头切换目标`
+        : `${spectatingKiller ? "正在观察击杀者" : "正在观察存活角色"} · 空格或滚轮切换目标`,
     );
     this.requireElement("result").classList.add("is-eliminated");
   }
@@ -298,7 +330,22 @@ export class GameHud {
     button.addEventListener("click", this.onRestart);
     const hintElement = document.createElement("small");
     hintElement.textContent = hint ?? "";
-    result.replaceChildren(heading, body, ...(hint ? [hintElement] : []), button);
+    const spectatorControls = document.createElement("div");
+    spectatorControls.className = "touch-spectator-controls";
+    for (const [action, label] of [["spectator-previous", "←"], ["spectator-next", "→"]] as const) {
+      const spectatorButton = document.createElement("button");
+      spectatorButton.type = "button";
+      spectatorButton.dataset.touchAction = action;
+      spectatorButton.textContent = label;
+      spectatorControls.append(spectatorButton);
+    }
+    result.replaceChildren(
+      heading,
+      body,
+      ...(hint ? [hintElement] : []),
+      ...(hint && this.options.touchInput ? [spectatorControls] : []),
+      button,
+    );
   }
 
   private appendFeed(text: string): void {
@@ -449,11 +496,12 @@ export function combatCounterLabel(state: MatchState, player: ActorState): strin
 export function pickupPromptText(
   player: ActorState,
   groundLoot: MatchState["groundLoot"],
+  touchInput = false,
 ): string {
   const pickup = findPickupCandidate(player, groundLoot);
   const nearby = pickup ?? findNearbyLootCandidate(player, groundLoot);
   return pickup
-    ? `F 拾取 ${getItemLabel(pickup.itemId)}`
+    ? `${touchInput ? "拾取" : "F 拾取"} ${getItemLabel(pickup.itemId)}`
     : nearby
       ? `${getItemLabel(nearby.itemId)} · 当前无法拾取`
       : "";

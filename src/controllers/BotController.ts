@@ -109,6 +109,7 @@ export class BotController {
   private forcedRelocationUntilSeconds = -1;
   private forcedRelocationSequence = 0;
   private zonePathRetryAtSeconds = -1;
+  private readonly perceptionCandidates: ActorState[] = [];
 
   public constructor(
     index = 0,
@@ -127,6 +128,7 @@ export class BotController {
     world: CombatWorld,
     deltaSeconds: number,
     playerId: string,
+    livingActorCount?: number,
   ): ActorCommand {
     this.updateDeltaSeconds = deltaSeconds;
     const layout = createMapLayout(state.mapSeed);
@@ -196,7 +198,7 @@ export class BotController {
 
     const player = state.actors[playerId];
     const playerDistance = player?.alive ? horizontalDistance(actor.position, player.position) : Number.POSITIVE_INFINITY;
-    const livingActors = Object.values(state.actors).filter((candidate) => candidate.alive).length;
+    const livingActors = livingActorCount ?? Object.values(state.actors).filter((candidate) => candidate.alive).length;
     const endgameSearch = livingActors <= ENDGAME_SEARCH_ACTORS;
     this.decisionSeconds -= deltaSeconds;
     this.fireSeconds -= deltaSeconds;
@@ -491,6 +493,15 @@ export class BotController {
       state.elapsedSeconds <= this.damageInvestigationUntilSeconds
     ) {
       command.aimDirection = { ...this.damageInvestigationDirection };
+      if (
+        this.navigationPreservesAim &&
+        this.navigationPath.length > 0 &&
+        this.navigationTarget?.x === this.damageInvestigationTarget.x &&
+        this.navigationTarget.z === this.damageInvestigationTarget.z &&
+        Math.abs((this.navigationTarget?.y ?? this.damageInvestigationTarget.y) - this.damageInvestigationTarget.y) <= 0.2
+      ) {
+        return this.cache(this.navigate(actor, this.damageInvestigationTarget, command, undefined, true));
+      }
       const path = this.navigator.findPath(actor.position, this.damageInvestigationTarget);
       if (path.length > 0) {
         return this.cache(this.navigate(actor, this.damageInvestigationTarget, command, path, true));
@@ -587,21 +598,24 @@ export class BotController {
   }
 
   private findVisibleTarget(actor: ActorState, state: MatchState, world: CombatWorld): ActorState | null {
-    let nearest: ActorState | null = null;
-    let nearestDistance = Number.POSITIVE_INFINITY;
+    this.perceptionCandidates.length = 0;
     const facing = { x: Math.sin(actor.yaw), y: 0, z: Math.cos(actor.yaw) };
     for (const candidate of Object.values(state.actors)) {
       if (!candidate.alive || candidate.id === actor.id || candidate.deployment === "aircraft") continue;
       const offset = subtract(candidate.position, actor.position);
-      const distance = Math.hypot(offset.x, offset.y, offset.z);
-      if (distance > 150 || distance >= nearestDistance) continue;
+      const distanceSquared = offset.x * offset.x + offset.y * offset.y + offset.z * offset.z;
+      if (distanceSquared > 150 ** 2) continue;
       const direction = normalizeFlat(offset);
-      const inView = distance < 12 || direction.x * facing.x + direction.z * facing.z > -0.2;
-      if (!inView || world.hasLineOfSight?.(actor.id, candidate.id) !== true) continue;
-      nearest = candidate;
-      nearestDistance = distance;
+      const inView = distanceSquared < 12 ** 2 || direction.x * facing.x + direction.z * facing.z > -0.2;
+      if (inView) this.perceptionCandidates.push(candidate);
     }
-    return nearest;
+    this.perceptionCandidates.sort((left, right) =>
+      distanceSquared(actor.position, left.position) - distanceSquared(actor.position, right.position)
+    );
+    for (const candidate of this.perceptionCandidates) {
+      if (world.hasLineOfSight?.(actor.id, candidate.id) === true) return candidate;
+    }
+    return null;
   }
 
   private retreatFromThreat(

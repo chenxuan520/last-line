@@ -7,6 +7,7 @@ import {
   applyActorVisualPose,
   createIslandScene,
   setActorParachuteVisual,
+  setActorEquipmentVisual,
   setActorWeaponVisual,
 } from "../client/render/scenes/IslandScene";
 import { GameHud } from "../client/ui/GameHud";
@@ -92,7 +93,7 @@ export class BattleRoyaleSession {
     this.aircraftInteriorRoot = bundle.aircraftInteriorRoot;
     this.syncAircraftVisual = bundle.syncAircraftVisual;
     this.syncSafeZoneRing = bundle.syncSafeZoneRing;
-    this.humanController = new HumanController(canvas, settings.sensitivity);
+    this.humanController = new HumanController(canvas, settings.sensitivity, { touchRoot: uiRoot });
     this.audio = audio;
     this.effects = new CombatEffects(this.scene);
     this.combatWorld = new SimulationCombatWorld(state);
@@ -121,7 +122,7 @@ export class BattleRoyaleSession {
       state.actors,
       state.groundLoot,
       state.mapSeed,
-      settings.showGroundLootIcons,
+      settings.showGroundLootModels,
     );
     return new BattleRoyaleSession(canvas, uiRoot, assets, settings, audio, onRestart, bundle, state);
   }
@@ -133,14 +134,15 @@ export class BattleRoyaleSession {
       this.uiRoot,
       this.assets,
       this.simulation.state.mapSeed,
-      () => this.requestPointerLock(),
+      () => this.resumeInput(),
       this.onRestart,
+      { touchInput: this.humanController.usesTouchControls() },
     );
     this.audio.start();
     this.simulation.start();
     this.processEvents();
     this.syncVisuals();
-    this.requestPointerLock();
+    this.resumeInput();
   }
 
   public update(frameSeconds: number, fps: number): void {
@@ -156,8 +158,8 @@ export class BattleRoyaleSession {
         spectatorSwitch,
       );
     }
-    const pointerLocked = document.pointerLockElement === this.canvas;
-    const shouldAdvance = this.simulation.state.phase !== "finished" && (pointerLocked || !player.alive);
+    const inputActive = this.humanController.isGameplayInputActive();
+    const shouldAdvance = this.simulation.state.phase !== "finished" && (inputActive || !player.alive);
     if (shouldAdvance) {
       this.clock.advance(frameSeconds, (deltaSeconds) => this.fixedUpdate(deltaSeconds));
     }
@@ -167,18 +169,19 @@ export class BattleRoyaleSession {
       this.simulation.state,
       player,
       this.spectatorActorId ? this.simulation.state.actors[this.spectatorActorId] ?? player : player,
-      pointerLocked,
+      inputActive,
       fps,
       this.humanController.isScoped(player),
       this.humanController.isLeaderboardVisible(),
+      this.humanController.isOrientationBlocked(),
     );
   }
 
   public dispose(): void {
     this.active = false;
+    this.humanController.dispose();
     this.hud?.dispose();
     this.hud = null;
-    this.humanController.dispose();
     this.effects.dispose();
     this.scene.dispose();
   }
@@ -187,11 +190,24 @@ export class BattleRoyaleSession {
     if (this.simulation.state.phase === "finished") return;
     const commands = new Map<EntityId, ActorCommand>();
     const player = this.getActor(PLAYER_ID);
+    let livingActorCount: number | undefined;
     this.humanController.rememberActor(player);
     if (player.alive) commands.set(PLAYER_ID, this.humanController.createCommand(player));
     for (const [actorId, controller] of this.botControllers) {
       const actor = this.getActor(actorId);
-      if (actor.alive) commands.set(actorId, controller.update(actor, this.simulation.state, this.combatWorld, deltaSeconds, PLAYER_ID));
+      if (actor.alive) {
+        if (actor.deployment === "grounded") {
+          livingActorCount ??= Object.values(this.simulation.state.actors).filter((candidate) => candidate.alive).length;
+        }
+        commands.set(actorId, controller.update(
+          actor,
+          this.simulation.state,
+          this.combatWorld,
+          deltaSeconds,
+          PLAYER_ID,
+          livingActorCount,
+        ));
+      }
     }
     this.simulation.step(deltaSeconds, commands, this.combatWorld);
     this.processEvents();
@@ -288,12 +304,13 @@ export class BattleRoyaleSession {
         const pose = jumpPoses.get(actorId) ?? neutralJumpVisualPose();
         const visualRoot = this.actorVisualRoots.get(actorId);
         if (visualRoot) applyActorVisualPose(visualRoot, pose.actorY, pose.actorRotationX);
-        const signature = `${actor.alive}:${actor.deployment}:${getActiveWeapon(actor)?.weaponId ?? "none"}:${actorId === cameraActor.id}`;
+        const signature = `${actor.alive}:${actor.deployment}:${getActiveWeapon(actor)?.weaponId ?? "none"}:${actor.inventory.armorLevel}:${actor.inventory.helmetLevel}:${actorId === cameraActor.id}`;
         if (this.actorVisualSignatures.get(actorId) !== signature) {
           root.setEnabled(actor.alive && actor.deployment !== "aircraft" && actorId !== cameraActor.id);
           if (actor.kind === "bot") {
             setActorWeaponVisual(root, getActiveWeapon(actor)?.weaponId ?? null);
             setActorParachuteVisual(root, actor.deployment === "parachuting");
+            setActorEquipmentVisual(root, actor.inventory.armorLevel, actor.inventory.helmetLevel);
           }
           this.actorVisualSignatures.set(actorId, signature);
         }
@@ -301,7 +318,7 @@ export class BattleRoyaleSession {
       for (const [lootId, mesh] of this.lootMeshes) {
         const loot = this.simulation.state.groundLoot[lootId];
         mesh.setEnabled(Boolean(loot?.available));
-        if (loot?.available && mesh.metadata?.lootIcon !== true) mesh.rotation.y += 0.06;
+        if (loot?.available) mesh.rotation.y += mesh.metadata?.lootModel === true ? 0.008 : 0.06;
       }
       const zone = this.simulation.state.safeZone;
       this.syncSafeZoneRing(zone.center.x, zone.center.z, zone.radius);
@@ -336,8 +353,12 @@ export class BattleRoyaleSession {
     return actor;
   }
 
-  private requestPointerLock(): void {
+  private resumeInput(): void {
     this.audio.start();
+    if (this.humanController.usesTouchControls()) {
+      this.humanController.resumeInput();
+      return;
+    }
     void this.canvas.requestPointerLock().catch(() => {
       // Embedded and headless browsers may reject pointer lock; the resume card remains available.
     });

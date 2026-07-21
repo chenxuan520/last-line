@@ -26,13 +26,13 @@ Simultaneous lethal damage uses a deterministic tick-based selector. The selecte
 
 ## Controllers
 
-`HumanController` maps keyboard and mouse state to `ActorCommand`.
+`HumanController` maps keyboard, mouse, and touch state to the same `ActorCommand`. `TouchInputAdapter` only tracks bounded Pointer Event state for the movement joystick, look region, fire hold, and one-shot HUD actions; it never reads or mutates authoritative match state. Portrait rotation, page hiding, pause, healing, and disposal clear held touch state to prevent stuck movement or fire.
 
 Each `BotController` has independent decision timers and memory. Bots use the same commands and systems as the player for movement, looting, firing, reloading, switching weapons, and healing.
 
 ## Rendering
 
-`IslandScene` builds the 2400m island from per-match seeded map points: eight irregular named POIs, eight wilderness compounds, nearest-neighbor roads, randomly scattered enterable buildings, variable-density loot, dense natural details, procedural actors, a terrain-following safe-zone ribbon, and weapon-specific first-person/third-person models. `MapLayout.hospital` deterministically reuses one existing building as a white two-story hospital, adds a visual-only medical cross and minimap marker, and relocates two existing supplemental medical records to its reachable ground floor without increasing building or loot counts. The player camera applies scope FOV only while a sniper is active and the right mouse button is held.
+`IslandScene` builds the 2400m island from per-match seeded map points: eight irregular named POIs, eight wilderness compounds, nearest-neighbor roads, randomly scattered enterable buildings, variable-density loot, dense natural details, procedural actors, a terrain-following safe-zone ribbon, and weapon-specific first-person/third-person models. Ground loot optionally uses 14 shared low-poly geometry templates; each loot record still owns one reusable mesh and switches shared geometry/material in place when its record generation changes. `MapLayout.hospital` deterministically reuses one existing building as a white two-story hospital, adds a visual-only medical cross and minimap marker, and relocates two existing supplemental medical records to its reachable ground floor without increasing building or loot counts. The player camera applies scope FOV only while a sniper is active and the right mouse button is held or touch ADS is toggled.
 
 Optional GLB models are loaded asynchronously and instantiated as non-pickable visual children. Procedural models remain the fallback. Repeated loot drops reuse inactive state IDs and marker meshes, and scene disposal clears marker references and imported containers.
 
@@ -66,4 +66,4 @@ When registration/login is required, the gateway validates the player access tok
 
 ## Boundaries
 
-Single-player never opens a network connection and retains its existing pause semantics. Multiplayer is server-authoritative and can run in guest or account-required mode. There are no social features, rankings, server-side lag-compensated hit rewind, or speculative future 5v5 rules.
+Single-player never opens a network connection and pauses when desktop pointer lock or touch input is inactive. Multiplayer is server-authoritative and continues while a touch client is paused, hidden, or portrait-oriented; that client settles to idle input. Mobile gameplay requires landscape orientation. There are no social features, rankings, server-side lag-compensated hit rewind, or speculative future 5v5 rules.

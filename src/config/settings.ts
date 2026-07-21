@@ -6,7 +6,7 @@ export interface GameSettings {
   sensitivity: number;
   startWithBandage: boolean;
   disableAiSnipers: boolean;
-  showGroundLootIcons: boolean;
+  showGroundLootModels: boolean;
 }
 
 export const DEFAULT_SETTINGS: GameSettings = {
@@ -15,5 +15,5 @@ export const DEFAULT_SETTINGS: GameSettings = {
   sensitivity: 1,
   startWithBandage: true,
   disableAiSnipers: true,
-  showGroundLootIcons: false,
+  showGroundLootModels: true,
 };

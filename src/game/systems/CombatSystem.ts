@@ -200,6 +200,7 @@ export class CombatSystem {
   }
 
   private applyPendingDamage(state: MatchState, pendingDamage: readonly PendingDamage[], events: GameEvent[]): void {
+    if (pendingDamage.length === 0) return;
     const living = Object.values(state.actors)
       .filter((actor) => actor.alive)
       .sort((left, right) => compareIds(left.id, right.id));

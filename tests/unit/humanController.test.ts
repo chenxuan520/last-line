@@ -242,6 +242,98 @@ describe("HumanController weapon switching", () => {
     expect(controller.consumeSpectatorSwitchRequest()).toBe(1);
     controller.dispose();
   });
+
+  it("emits the same movement, look, fire, and one-shot commands from touch input", () => {
+    const canvas = new EventTarget() as HTMLCanvasElement;
+    const documentTarget = new EventTarget() as Document;
+    Object.defineProperty(documentTarget, "pointerLockElement", { configurable: true, value: null });
+    vi.stubGlobal("document", documentTarget);
+    const actor = createActorState("player", "player", { x: 0, y: 1.76, z: 0 });
+    actor.inventory.weaponSlots[1] = createWeaponState("smg");
+    const controller = new HumanController(canvas, 1, { touchEnabled: true });
+    controller.rememberActor(actor);
+
+    controller.setTouchMovement(0, 1, 0.9);
+    controller.applyTouchLook(100, 0);
+    controller.setTouchFire(true);
+    controller.triggerTouchAction("jump");
+    controller.triggerTouchAction("interact");
+    controller.triggerTouchAction("switch-weapon");
+    const command = controller.createCommand(actor);
+
+    expect(controller.usesTouchControls()).toBe(true);
+    expect(controller.isGameplayInputActive()).toBe(true);
+    expect(command.move.x).toBeCloseTo(Math.sin(0.42));
+    expect(command.move.z).toBeCloseTo(Math.cos(0.42));
+    expect(command.sprint).toBe(true);
+    expect(command.fire).toBe(true);
+    expect(command.jump).toBe(true);
+    expect(command.interact).toBe(true);
+    expect(command.switchWeapon).toBe(1);
+    expect(controller.createCommand(actor)).toMatchObject({
+      jump: false,
+      interact: false,
+      switchWeapon: null,
+      fire: true,
+    });
+
+    controller.setTouchFire(false);
+    controller.triggerTouchAction("pause");
+    expect(controller.isGameplayInputActive()).toBe(false);
+    expect(controller.createCommand(actor)).toMatchObject({ fire: false, move: { x: 0, y: 0, z: 0 } });
+    controller.resumeInput();
+    expect(controller.isGameplayInputActive()).toBe(true);
+    controller.dispose();
+  });
+
+  it("suppresses held touch movement and fire when healing starts", () => {
+    const canvas = new EventTarget() as HTMLCanvasElement;
+    const documentTarget = new EventTarget() as Document;
+    Object.defineProperty(documentTarget, "pointerLockElement", { configurable: true, value: null });
+    vi.stubGlobal("document", documentTarget);
+    const actor = createActorState("player", "player", { x: 0, y: 1.76, z: 0 });
+    actor.health = 40;
+    actor.inventory.backpack = [{ itemId: "bandage", quantity: 1 }];
+    const controller = new HumanController(canvas, 1, { touchEnabled: true });
+    controller.rememberActor(actor);
+
+    controller.setTouchMovement(0.5, 0.5, 1);
+    controller.setTouchFire(true);
+    controller.triggerTouchAction("bandage");
+
+    expect(controller.createCommand(actor)).toMatchObject({
+      move: { x: 0, y: 0, z: 0 },
+      sprint: false,
+      fire: false,
+      useItem: "bandage",
+    });
+    expect(controller.createCommand(actor).useItem).toBeNull();
+    controller.dispose();
+  });
+
+  it("toggles touch scope and supports touch spectator directions", () => {
+    const canvas = new EventTarget() as HTMLCanvasElement;
+    const documentTarget = new EventTarget() as Document;
+    Object.defineProperty(documentTarget, "pointerLockElement", { configurable: true, value: null });
+    vi.stubGlobal("document", documentTarget);
+    const actor = createActorState("player", "player", { x: 0, y: 1.76, z: 0 });
+    actor.inventory.weaponSlots[0] = createWeaponState("sniper");
+    const controller = new HumanController(canvas, 1, { touchEnabled: true });
+    controller.rememberActor(actor);
+
+    controller.triggerTouchAction("scope");
+    expect(controller.isScoped(actor)).toBe(true);
+    controller.triggerTouchAction("scope");
+    expect(controller.isScoped(actor)).toBe(false);
+
+    actor.alive = false;
+    controller.rememberActor(actor);
+    controller.triggerTouchAction("spectator-previous");
+    expect(controller.consumeSpectatorSwitchRequest()).toBe(-1);
+    controller.triggerTouchAction("spectator-next");
+    expect(controller.consumeSpectatorSwitchRequest()).toBe(1);
+    controller.dispose();
+  });
 });
 
 function createState(actor: ReturnType<typeof createActorState>): MatchState {

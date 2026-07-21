@@ -4,14 +4,12 @@ import type { Engine } from "@babylonjs/core/Engines/engine";
 import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
-import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import { CreateCapsule } from "@babylonjs/core/Meshes/Builders/capsuleBuilder";
 import { CreateCylinder } from "@babylonjs/core/Meshes/Builders/cylinderBuilder";
 import { CreateGround } from "@babylonjs/core/Meshes/Builders/groundBuilder";
-import { CreatePlane } from "@babylonjs/core/Meshes/Builders/planeBuilder";
 import { CreateSphere } from "@babylonjs/core/Meshes/Builders/sphereBuilder";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
@@ -20,7 +18,7 @@ import type { Node } from "@babylonjs/core/node";
 import { Scene } from "@babylonjs/core/scene";
 import type { AssetCatalog } from "../../../assets/AssetCatalog";
 import type { AssetEntry } from "../../../assets/types";
-import { getItemIconAssetId } from "../../itemIcon";
+import { ITEMS } from "../../../config/items";
 import {
   createMapRoadSegments,
   createMapLayout,
@@ -90,6 +88,7 @@ interface IslandMaterials {
   window: StandardMaterial;
   door: StandardMaterial;
   botBody: StandardMaterial;
+  actorArmor: StandardMaterial;
   playerHitbox: StandardMaterial;
   gear: StandardMaterial;
   weaponRifle: StandardMaterial;
@@ -123,7 +122,7 @@ export async function createIslandScene(
   actors: Readonly<Record<EntityId, ActorState>>,
   groundLoot: Readonly<Record<EntityId, GroundLootState>>,
   mapSeed = 0,
-  showGroundLootIcons = false,
+  showGroundLootModels = true,
   localActorId?: EntityId,
 ): Promise<IslandSceneBundle> {
   const player = (localActorId ? actors[localActorId] : undefined) ??
@@ -183,8 +182,7 @@ export async function createIslandScene(
     groundLoot,
     materials.loot,
     materials.deathLoot,
-    assets,
-    showGroundLootIcons,
+    showGroundLootModels,
   );
   const { mesh: safeZoneRing, sync: syncSafeZoneRing } = createSafeZoneRing(scene, materials.safeZone, layout);
 
@@ -226,7 +224,7 @@ async function replaceCatalogModels(
       const visualRoot = actorVisualRoots.get(actor.id);
       if (!root || !visualRoot) continue;
       root.getChildMeshes()
-        .filter((mesh) => mesh.metadata?.actorVisual !== "weapon" && mesh.metadata?.actorVisual !== "parachute")
+        .filter((mesh) => !["weapon", "parachute", "vest", "helmet", "backpack"].includes(mesh.metadata?.actorVisual))
         .forEach((mesh) => mesh.setEnabled(false));
       const instance = character.container.instantiateModelsToScene((name) => `${actor.id}-${name}`);
       attachModel(instance.rootNodes, visualRoot, character.descriptor);
@@ -348,6 +346,7 @@ function createMaterials(scene: Scene, assets: AssetCatalog): IslandMaterials {
     window: windowMaterial,
     door: material(scene, "building-door-material", "#4c3d31"),
     botBody: material(scene, "bot-body-material", botColor),
+    actorArmor: material(scene, "actor-armor-material", "#465248"),
     playerHitbox,
     gear: material(scene, "actor-gear-material", "#252d2b"),
     weaponRifle: material(scene, "weapon-rifle-material", rifleColor),
@@ -1002,6 +1001,7 @@ function createActors(
       createBot(scene, visualRoot, actor.id, materials);
       setActorWeaponVisual(root, getActiveWeapon(actor)?.weaponId ?? null);
       setActorParachuteVisual(root, actor.deployment === "parachuting");
+      setActorEquipmentVisual(root, actor.inventory.armorLevel, actor.inventory.helmetLevel);
     }
 
     actorRoots.set(actor.id, root);
@@ -1059,12 +1059,14 @@ function createBot(scene: Scene, root: TransformNode, actorId: EntityId, materia
   helmet.position.y = 0.35;
   helmet.material = materials.gear;
   markActorVisual(helmet, actorId, "helmet");
+  helmet.setEnabled(false);
 
   const vest = CreateBox(`vest-${actorId}`, { width: 0.66, height: 0.64, depth: 0.09 }, scene);
   vest.parent = root;
   vest.position.set(0, -0.62, 0.4);
-  vest.material = materials.gear;
+  vest.material = materials.actorArmor;
   markActorVisual(vest, actorId, "vest");
+  vest.setEnabled(false);
 
   const backpack = CreateBox(`backpack-${actorId}`, { width: 0.48, height: 0.58, depth: 0.22 }, scene);
   backpack.parent = root;
@@ -1111,6 +1113,17 @@ export function setActorWeaponVisual(root: TransformNode, weaponId: string | nul
 export function setActorParachuteVisual(root: TransformNode, parachuting: boolean): void {
   for (const mesh of root.getChildMeshes(false)) {
     if (mesh.metadata?.actorVisual === "parachute") mesh.setEnabled(parachuting);
+  }
+}
+
+export function setActorEquipmentVisual(
+  root: TransformNode,
+  armorLevel: number,
+  helmetLevel: number,
+): void {
+  for (const mesh of root.getChildMeshes(false)) {
+    if (mesh.metadata?.actorVisual === "vest") mesh.setEnabled(armorLevel > 0);
+    if (mesh.metadata?.actorVisual === "helmet") mesh.setEnabled(helmetLevel > 0);
   }
 }
 
@@ -1327,65 +1340,198 @@ function weaponMaterial(materials: IslandMaterials, weaponId: WeaponVisualId): S
   return materials.weaponRifle;
 }
 
+const LOOT_MODEL_COLORS: Readonly<Record<string, string>> = {
+  "weapon.rifle": "#596552",
+  "weapon.smg": "#4f6762",
+  "weapon.shotgun": "#765d43",
+  "weapon.sniper": "#515961",
+  "ammo.rifle": "#877447",
+  "ammo.light": "#637763",
+  "ammo.shell": "#9a5542",
+  "ammo.sniper": "#68617d",
+  "armor.1": "#5e6a57",
+  "armor.2": "#3f514d",
+  "helmet.1": "#667059",
+  "helmet.2": "#3d4b48",
+  bandage: "#d7d0b9",
+  medkit: "#68745f",
+};
+
+function createLootModelMaterial(scene: Scene, itemId: string, death = false): StandardMaterial {
+  const color = Color3.FromHexString(death ? "#c85e50" : (LOOT_MODEL_COLORS[itemId] ?? "#c3b678"));
+  const material = new StandardMaterial(
+    `${death ? "loot-model-death-material" : "loot-model-material"}-${itemId.replaceAll(".", "-")}`,
+    scene,
+  );
+  material.diffuseColor = color;
+  material.emissiveColor = color.scale(death ? 0.22 : 0.12);
+  material.specularColor = Color3.Black();
+  return material;
+}
+
+function createLootModelTemplates(scene: Scene, fallbackMaterial: StandardMaterial): Map<string, Mesh> {
+  const templates = new Map<string, Mesh>();
+  for (const itemId of Object.keys(ITEMS)) {
+    templates.set(itemId, createLootModelTemplate(scene, itemId, createLootModelMaterial(scene, itemId)));
+  }
+  const fallback = CreateBox("loot-model-template-fallback", { size: 0.62 }, scene);
+  fallback.rotation.set(0, Math.PI / 4, Math.PI / 4);
+  fallback.material = fallbackMaterial;
+  fallback.isVisible = false;
+  fallback.isPickable = false;
+  templates.set("fallback", fallback);
+  return templates;
+}
+
+function createLootModelTemplate(scene: Scene, itemId: string, modelMaterial: StandardMaterial): Mesh {
+  const parts: Mesh[] = [];
+  const addBox = (
+    name: string,
+    width: number,
+    height: number,
+    depth: number,
+    x = 0,
+    y = 0,
+    z = 0,
+  ): Mesh => {
+    const mesh = CreateBox(`${itemId}-${name}`, { width, height, depth }, scene);
+    mesh.position.set(x, y, z);
+    mesh.material = modelMaterial;
+    parts.push(mesh);
+    return mesh;
+  };
+  const addCylinder = (
+    name: string,
+    height: number,
+    diameterTop: number,
+    diameterBottom: number,
+    x = 0,
+    y = 0,
+    z = 0,
+    tessellation = 8,
+  ): Mesh => {
+    const mesh = CreateCylinder(
+      `${itemId}-${name}`,
+      { height, diameterTop, diameterBottom, tessellation },
+      scene,
+    );
+    mesh.position.set(x, y, z);
+    mesh.material = modelMaterial;
+    parts.push(mesh);
+    return mesh;
+  };
+
+  const item = ITEMS[itemId];
+  if (item?.kind === "weapon" && item.weaponId) {
+    const weaponId = item.weaponId as WeaponVisualId;
+    const scale = 0.95;
+    for (const [name, kind, x, y, z, width, height, depth, rotationX = 0] of weaponPieces(weaponId, false)) {
+      const mesh = kind === "barrel"
+        ? addCylinder(name, depth * scale, width * scale, width * scale)
+        : addBox(name, width * scale, height * scale, depth * scale);
+      mesh.position.set(z * scale, 0.12 + y * scale, -x * scale);
+      if (kind === "barrel") mesh.rotation.z = Math.PI / 2 + rotationX;
+      else mesh.rotation.set(rotationX, Math.PI / 2, 0);
+    }
+  } else if (item?.kind === "ammo") {
+    const isShell = itemId === "ammo.shell";
+    const isSniper = itemId === "ammo.sniper";
+    const crateWidth = isShell ? 0.72 : isSniper ? 0.92 : 0.82;
+    addBox("crate", crateWidth, 0.36, 0.58, 0, -0.08, 0);
+    addBox("lid", crateWidth + 0.06, 0.09, 0.62, 0, 0.14, 0);
+    const cartridgeCount = isShell ? 3 : isSniper ? 2 : 4;
+    for (let index = 0; index < cartridgeCount; index += 1) {
+      const spacing = cartridgeCount === 2 ? 0.28 : 0.18;
+      const x = (index - (cartridgeCount - 1) / 2) * spacing;
+      const cartridge = addCylinder(
+        `cartridge-${index}`,
+        isSniper ? 0.5 : isShell ? 0.38 : 0.42,
+        isShell ? 0.11 : 0.07,
+        isShell ? 0.12 : 0.09,
+        x,
+        0.33,
+        -0.03,
+        7,
+      );
+      cartridge.rotation.z = (index - (cartridgeCount - 1) / 2) * 0.09;
+    }
+  } else if (item?.kind === "armor") {
+    const levelTwo = itemId === "armor.2";
+    addBox("vest", 0.78, 0.68, 0.28, 0, 0.03, 0);
+    addBox("left-strap", 0.16, 0.68, 0.16, -0.31, 0.28, 0);
+    addBox("right-strap", 0.16, 0.68, 0.16, 0.31, 0.28, 0);
+    addBox("front-plate", levelTwo ? 0.62 : 0.52, levelTwo ? 0.42 : 0.32, 0.1, 0, 0, -0.18);
+    if (levelTwo) {
+      addBox("left-pouch", 0.22, 0.22, 0.16, -0.22, -0.2, -0.22);
+      addBox("right-pouch", 0.22, 0.22, 0.16, 0.22, -0.2, -0.22);
+    }
+  } else if (item?.kind === "helmet") {
+    const levelTwo = itemId === "helmet.2";
+    const shell = CreateSphere(`${itemId}-shell`, { diameter: levelTwo ? 0.9 : 0.82, segments: 8 }, scene);
+    shell.position.y = 0.03;
+    shell.scaling.y = levelTwo ? 0.62 : 0.55;
+    shell.material = modelMaterial;
+    parts.push(shell);
+    addCylinder("rim", 0.1, levelTwo ? 0.96 : 0.88, levelTwo ? 0.96 : 0.88, 0, -0.16, 0, 8);
+    if (levelTwo) addBox("visor", 0.7, 0.18, 0.08, 0, -0.02, -0.43);
+  } else if (itemId === "bandage") {
+    for (const [index, x, z] of [[0, -0.18, 0.08], [1, 0.18, -0.08]] as const) {
+      const roll = addCylinder(`roll-${index}`, 0.5, 0.3, 0.3, x, 0, z, 10);
+      roll.rotation.z = Math.PI / 2;
+    }
+    addBox("wrap", 0.74, 0.12, 0.2, 0, 0, 0);
+  } else if (itemId === "medkit") {
+    addBox("case", 0.78, 0.64, 0.36, 0, 0.01, 0);
+    addBox("handle", 0.4, 0.12, 0.16, 0, 0.4, 0);
+    addBox("cross-vertical", 0.14, 0.38, 0.08, 0, 0.02, -0.22);
+    addBox("cross-horizontal", 0.38, 0.14, 0.08, 0, 0.02, -0.22);
+  } else {
+    addBox("fallback", 0.62, 0.62, 0.62);
+  }
+
+  const merged = Mesh.MergeMeshes(parts, true, true);
+  if (!merged) throw new Error(`Unable to create loot model ${itemId}`);
+  merged.name = `loot-model-template-${itemId.replaceAll(".", "-")}`;
+  merged.material = modelMaterial;
+  merged.isVisible = false;
+  merged.isPickable = false;
+  return merged;
+}
+
 function createLootMeshes(
   scene: Scene,
   groundLoot: Readonly<Record<EntityId, GroundLootState>>,
   lootMaterial: StandardMaterial,
   deathLootMaterial: StandardMaterial,
-  assets: AssetCatalog,
-  showGroundLootIcons: boolean,
+  showGroundLootModels: boolean,
 ): {
   lootMeshes: Map<EntityId, Mesh>;
   syncLootMeshes: (groundLoot: Readonly<Record<EntityId, GroundLootState>>) => void;
 } {
-  const template = showGroundLootIcons
-    ? CreatePlane("loot-marker-template", { size: 1.05 }, scene)
-    : CreateBox("loot-marker-template", { size: 0.62 }, scene);
-  if (showGroundLootIcons) {
-    template.billboardMode = Mesh.BILLBOARDMODE_ALL | Mesh.BILLBOARDMODE_USE_POSITION;
-  } else {
-    template.rotation.set(0, Math.PI / 4, Math.PI / 4);
-  }
-  template.material = lootMaterial;
-  template.isVisible = false;
-  template.isPickable = false;
-  const textures = new Map<string, Texture>();
-  const iconMaterials = new Map<string, StandardMaterial>();
-  const resolvedIcons = new Map<string, AssetEntry>();
-  const getIconMaterial = (assetId: string, death: boolean): { material: StandardMaterial; resolvedId: string } => {
-    let resolved = resolvedIcons.get(assetId);
-    if (!resolved) {
-      resolved = assets.resolve(assetId, "image");
-      resolvedIcons.set(assetId, resolved);
+  const boxTemplate = CreateBox("loot-marker-template", { size: 0.62 }, scene);
+  boxTemplate.rotation.set(0, Math.PI / 4, Math.PI / 4);
+  boxTemplate.material = lootMaterial;
+  boxTemplate.isVisible = false;
+  boxTemplate.isPickable = false;
+  const modelTemplates = showGroundLootModels ? createLootModelTemplates(scene, lootMaterial) : new Map<string, Mesh>();
+  const deathMaterials = new Map<string, StandardMaterial>();
+  const getModelId = (itemId: string): string => modelTemplates.has(itemId) ? itemId : "fallback";
+  const getModelMaterial = (modelId: string, death: boolean): StandardMaterial => {
+    if (!death) return (modelTemplates.get(modelId)?.material as StandardMaterial | null) ?? lootMaterial;
+    if (modelId === "fallback") return deathLootMaterial;
+    let modelDeathMaterial = deathMaterials.get(modelId);
+    if (!modelDeathMaterial) {
+      modelDeathMaterial = createLootModelMaterial(scene, modelId, true);
+      deathMaterials.set(modelId, modelDeathMaterial);
     }
-    const key = `${resolved.id}:${death ? "death" : "spawn"}`;
-    let iconMaterial = iconMaterials.get(key);
-    if (!iconMaterial) {
-      let texture = textures.get(resolved.id);
-      if (!texture) {
-        if (!resolved.url) throw new Error(`Loot icon ${resolved.id} has no URL`);
-        texture = new Texture(resolved.url, scene, false, false);
-        texture.name = `loot-icon-texture-${resolved.id}`;
-        texture.hasAlpha = resolved.type === "svg";
-        textures.set(resolved.id, texture);
-      }
-      iconMaterial = new StandardMaterial(`loot-icon-material-${key}`, scene);
-      iconMaterial.diffuseTexture = texture;
-      iconMaterial.diffuseColor = death ? Color3.FromHexString("#ff8169") : Color3.White();
-      iconMaterial.emissiveColor = death ? Color3.FromHexString("#7a251d") : Color3.FromHexString("#252a22");
-      iconMaterial.specularColor = Color3.Black();
-      iconMaterial.disableLighting = true;
-      iconMaterial.backFaceCulling = false;
-      iconMaterial.useAlphaFromDiffuseTexture = texture.hasAlpha;
-      iconMaterials.set(key, iconMaterial);
-    }
-    return { material: iconMaterial, resolvedId: resolved.id };
+    return modelDeathMaterial;
   };
 
   const lootMeshes = new Map<EntityId, Mesh>();
   const adapter: LootMarkerViewAdapter<Mesh> = {
     create(loot) {
-      const marker = template.clone(`loot-marker-${loot.id}`);
+      const modelId = showGroundLootModels ? getModelId(loot.itemId) : "fallback";
+      const marker = (showGroundLootModels ? modelTemplates.get(modelId) : boxTemplate)?.clone(`loot-marker-${loot.id}`);
       if (!marker) {
         throw new Error(`Unable to create marker for loot ${loot.id}`);
       }
@@ -1394,17 +1540,21 @@ function createLootMeshes(
       return marker;
     },
     update(marker, loot) {
-      const assetId = getItemIconAssetId(loot.itemId);
-      const icon = showGroundLootIcons ? getIconMaterial(assetId, loot.source === "death") : null;
-      marker.material = icon?.material ?? (loot.source === "death" ? deathLootMaterial : lootMaterial);
-      marker.position.set(loot.position.x, loot.position.y + (showGroundLootIcons ? 0.5 : 0), loot.position.z);
+      const modelId = showGroundLootModels ? getModelId(loot.itemId) : "fallback";
+      const modelTemplate = modelTemplates.get(modelId);
+      if (showGroundLootModels && marker.metadata?.modelId !== modelId) {
+        modelTemplate?.geometry?.applyToMesh(marker);
+      }
+      marker.material = showGroundLootModels
+        ? getModelMaterial(modelId, loot.source === "death")
+        : (loot.source === "death" ? deathLootMaterial : lootMaterial);
+      marker.position.set(loot.position.x, loot.position.y, loot.position.z);
       marker.metadata = {
         lootId: loot.id,
         itemId: loot.itemId,
-        assetId,
-        resolvedAssetId: icon?.resolvedId ?? assetId,
         lootSource: loot.source ?? "spawn",
-        lootIcon: showGroundLootIcons,
+        lootModel: showGroundLootModels,
+        modelId,
       };
       marker.setEnabled(loot.available);
     },
@@ -1416,9 +1566,8 @@ function createLootMeshes(
   syncLootMeshes(groundLoot);
   scene.onDisposeObservable.addOnce(() => {
     lootMeshes.clear();
-    textures.clear();
-    iconMaterials.clear();
-    resolvedIcons.clear();
+    modelTemplates.clear();
+    deathMaterials.clear();
   });
 
   return { lootMeshes, syncLootMeshes };

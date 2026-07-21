@@ -33,12 +33,14 @@ body,
 #app {
   width: 100%;
   height: 100%;
+  min-height: 100dvh;
   margin: 0;
   overflow: hidden;
 }
 
 body {
-  min-width: 960px;
+  min-width: 0;
+  overscroll-behavior: none;
 }
 
 button,
@@ -299,7 +301,8 @@ h1 {
   font-weight: 700;
 }
 
-.settings-grid .ai-sniper-setting {
+.settings-grid .ai-sniper-setting,
+.settings-grid .loot-model-setting {
   grid-column: 1 / -1;
 }
 
@@ -1682,8 +1685,152 @@ h1 {
   letter-spacing: 0.08em;
 }
 
+.touch-controls,
+.orientation-card {
+  display: none;
+}
+
+#ui-root.is-touch-input {
+  touch-action: none;
+  -webkit-touch-callout: none;
+}
+
+.touch-controls.is-visible {
+  position: absolute;
+  inset: 0;
+  z-index: 9;
+  display: block;
+  pointer-events: none;
+}
+
+.touch-look-area {
+  position: absolute;
+  inset: 0 0 0 36%;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.touch-joystick {
+  position: absolute;
+  bottom: max(22px, env(safe-area-inset-bottom));
+  left: max(22px, env(safe-area-inset-left));
+  z-index: 2;
+  width: 126px;
+  height: 126px;
+  border: 1px solid rgb(216 226 199 / 24%);
+  border-radius: 50%;
+  background: rgb(7 12 9 / 28%);
+  box-shadow: inset 0 0 26px rgb(0 0 0 / 22%);
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.touch-joystick i,
+.touch-joystick b {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border-radius: 50%;
+  translate: -50% -50%;
+  pointer-events: none;
+}
+
+.touch-joystick i {
+  width: 52px;
+  height: 52px;
+  border: 1px solid rgb(207 220 184 / 18%);
+}
+
+.touch-joystick b {
+  width: 42px;
+  height: 42px;
+  border: 1px solid rgb(224 233 207 / 34%);
+  background: rgb(183 197 139 / 32%);
+  box-shadow: 0 4px 18px rgb(0 0 0 / 28%);
+}
+
+.touch-action {
+  position: absolute;
+  z-index: 3;
+  display: grid;
+  width: 50px;
+  height: 50px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgb(213 224 192 / 28%);
+  border-radius: 50%;
+  color: #e9eee1;
+  background: rgb(12 19 15 / 52%);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 24%);
+  font: 800 10px/1 var(--tactical-font);
+  letter-spacing: 0.04em;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.touch-action:active,
+.touch-action.is-active {
+  border-color: rgb(218 230 188 / 72%);
+  background: rgb(159 177 113 / 58%);
+}
+
+.touch-fire {
+  right: max(20px, env(safe-area-inset-right));
+  bottom: max(72px, calc(env(safe-area-inset-bottom) + 58px));
+  width: 76px;
+  height: 76px;
+  border-color: rgb(219 112 91 / 48%);
+  background: rgb(111 40 31 / 48%);
+  font-size: 13px;
+}
+
+.touch-jump {
+  right: max(105px, calc(env(safe-area-inset-right) + 88px));
+  bottom: max(22px, env(safe-area-inset-bottom));
+}
+
+.touch-pickup {
+  right: max(105px, calc(env(safe-area-inset-right) + 88px));
+  bottom: max(82px, calc(env(safe-area-inset-bottom) + 60px));
+}
+
+.touch-scope {
+  right: max(105px, calc(env(safe-area-inset-right) + 88px));
+  bottom: max(142px, calc(env(safe-area-inset-bottom) + 120px));
+}
+
+.touch-reload {
+  right: max(20px, env(safe-area-inset-right));
+  bottom: max(158px, calc(env(safe-area-inset-bottom) + 144px));
+}
+
+.touch-switch {
+  right: max(166px, calc(env(safe-area-inset-right) + 148px));
+  bottom: max(22px, env(safe-area-inset-bottom));
+}
+
+.touch-bandage {
+  right: max(226px, calc(env(safe-area-inset-right) + 208px));
+  bottom: max(22px, env(safe-area-inset-bottom));
+}
+
+.touch-medkit {
+  right: max(286px, calc(env(safe-area-inset-right) + 268px));
+  bottom: max(22px, env(safe-area-inset-bottom));
+}
+
+.touch-pause {
+  top: max(12px, env(safe-area-inset-top));
+  right: max(208px, calc(env(safe-area-inset-right) + 190px));
+  width: 44px;
+  height: 44px;
+  border-radius: 4px;
+  font-size: 15px;
+}
+
 .pause-card,
-.result-card {
+.result-card,
+.orientation-card {
   position: absolute;
   top: 50%;
   left: 50%;
@@ -1707,7 +1854,8 @@ h1 {
 }
 
 .pause-card::before,
-.result-card::before {
+.result-card::before,
+.orientation-card::before {
   position: absolute;
   top: 0;
   left: 50%;
@@ -1719,7 +1867,8 @@ h1 {
 }
 
 .pause-card::after,
-.result-card::after {
+.result-card::after,
+.orientation-card::after {
   position: absolute;
   right: 12px;
   bottom: 12px;
@@ -1732,20 +1881,23 @@ h1 {
 }
 
 .pause-card.is-visible,
-.result-card:not([hidden]) {
+.result-card:not([hidden]),
+.orientation-card.is-visible {
   display: grid;
   gap: 12px;
 }
 
 .pause-card > strong,
-.result-card > strong {
+.result-card > strong,
+.orientation-card > strong {
   color: #edf0e8;
   font: 600 30px/1.1 var(--tactical-font);
   letter-spacing: 0.04em;
 }
 
 .pause-card span,
-.result-card p {
+.result-card p,
+.orientation-card span {
   margin: 0;
   color: var(--ink-muted);
   font: 600 11px/1.4 var(--tactical-font);
@@ -1756,6 +1908,25 @@ h1 {
   color: #d5dccf;
   font: 700 10px/1.4 var(--tactical-font);
   letter-spacing: 0.05em;
+}
+
+.orientation-card {
+  z-index: 7;
+  width: min(380px, calc(100vw - 32px));
+}
+
+.touch-spectator-controls {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
+
+.result-card .touch-spectator-controls button {
+  width: 64px;
+  min-height: 44px;
+  margin-top: 0;
+  padding: 8px 12px;
+  font-size: 18px;
 }
 
 .result-card.is-eliminated {
@@ -1967,6 +2138,199 @@ h1 {
 
   .weapon-status {
     height: 64px;
+  }
+}
+
+@media (max-width: 700px) {
+  #ui-root:not(.is-playing) {
+    display: block;
+    overflow-y: auto;
+    padding: max(18px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
+  }
+
+  #ui-root:not(.is-playing)::after {
+    inset: 12px;
+  }
+
+  .menu-panel,
+  .multiplayer-panel {
+    width: 100%;
+    min-width: 0;
+    padding: 26px 22px;
+  }
+
+  .game-logo {
+    width: min(100%, 330px);
+  }
+
+  .menu-description {
+    margin: 15px 0 18px;
+    line-height: 1.55;
+  }
+
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-grid .ai-sniper-setting,
+  .settings-grid .loot-model-setting {
+    grid-column: auto;
+  }
+
+  .menu-actions,
+  .multiplayer-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 700px) {
+  #ui-root:not(.is-playing) {
+    display: block;
+    overflow-y: auto;
+    padding: max(14px, env(safe-area-inset-top)) max(28px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(28px, env(safe-area-inset-left));
+  }
+
+  #ui-root:not(.is-playing) .menu-panel {
+    width: min(560px, 100%);
+    margin: 0 auto;
+    padding: 24px 30px;
+  }
+
+  #ui-root:not(.is-playing) .game-logo {
+    width: min(100%, 300px);
+  }
+
+  #ui-root:not(.is-playing) .menu-description {
+    margin: 12px 0 16px;
+    line-height: 1.45;
+  }
+
+  #ui-root.is-touch-input .controls-card,
+  #ui-root.is-touch-input .inventory-card,
+  #ui-root.is-touch-input .kill-feed,
+  #ui-root.is-touch-input .performance,
+  #ui-root.is-touch-input .helmet-vital {
+    display: none;
+  }
+
+  #ui-root.is-touch-input .hud-topbar {
+    top: max(7px, env(safe-area-inset-top));
+    right: max(8px, env(safe-area-inset-right));
+    left: max(8px, env(safe-area-inset-left));
+    height: 44px;
+  }
+
+  #ui-root.is-touch-input .location-block,
+  #ui-root.is-touch-input .zone-block,
+  #ui-root.is-touch-input .alive-counter {
+    height: 44px;
+  }
+
+  #ui-root.is-touch-input .location-block {
+    min-width: 142px;
+    padding: 5px 12px;
+  }
+
+  #ui-root.is-touch-input .location-block strong {
+    font-size: 14px;
+  }
+
+  #ui-root.is-touch-input .location-block small,
+  #ui-root.is-touch-input .hud-kicker {
+    font-size: 7px;
+  }
+
+  #ui-root.is-touch-input .zone-block {
+    width: 154px;
+    padding: 5px 12px;
+  }
+
+  #ui-root.is-touch-input .zone-block strong {
+    font-size: 18px;
+  }
+
+  #ui-root.is-touch-input .alive-counter {
+    min-width: 104px;
+    padding: 5px 10px;
+  }
+
+  #ui-root.is-touch-input .alive-counter span {
+    font-size: 20px;
+  }
+
+  #ui-root.is-touch-input .minimap-card {
+    top: max(58px, calc(env(safe-area-inset-top) + 50px));
+    right: max(8px, env(safe-area-inset-right));
+    width: 112px;
+    padding: 6px;
+  }
+
+  #ui-root.is-touch-input .minimap-heading strong,
+  #ui-root.is-touch-input .minimap-heading span,
+  #ui-root.is-touch-input .minimap-scale {
+    font-size: 6px;
+  }
+
+  #ui-root.is-touch-input .interaction-prompt {
+    bottom: 126px;
+    max-width: 240px;
+    padding: 8px 12px;
+    font-size: 10px;
+  }
+
+  #ui-root.is-touch-input .healing-progress {
+    bottom: 106px;
+  }
+
+  #ui-root.is-touch-input .hud-footer {
+    right: auto;
+    bottom: max(7px, env(safe-area-inset-bottom));
+    left: max(158px, calc(env(safe-area-inset-left) + 150px));
+    width: 210px;
+    height: 46px;
+  }
+
+  #ui-root.is-touch-input .vitals {
+    gap: 5px;
+  }
+
+  #ui-root.is-touch-input .vital-block {
+    width: 100px;
+    height: 46px;
+    padding: 6px 8px;
+  }
+
+  #ui-root.is-touch-input .vital-block strong {
+    font-size: 16px;
+  }
+
+  #ui-root.is-touch-input .weapon-status {
+    position: fixed;
+    right: max(178px, calc(env(safe-area-inset-right) + 160px));
+    bottom: max(78px, calc(env(safe-area-inset-bottom) + 60px));
+    min-width: 134px;
+    height: 50px;
+    padding: 6px 10px;
+  }
+
+  #ui-root.is-touch-input .weapon-status img {
+    width: 42px;
+  }
+
+  #ui-root.is-touch-input .weapon-status strong {
+    font-size: 18px;
+  }
+
+  #ui-root.is-touch-input .touch-joystick {
+    width: 116px;
+    height: 116px;
+  }
+
+  #ui-root.is-touch-input .pause-card,
+  #ui-root.is-touch-input .result-card {
+    width: min(360px, calc(100vw - 24px));
+    min-height: 170px;
+    padding: 22px 28px;
   }
 }
 

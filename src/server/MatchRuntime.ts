@@ -99,6 +99,11 @@ export class MatchRuntime {
   public step(): void {
     if (this.state.phase === "finished") return;
     const commands = new Map<EntityId, ActorCommand>();
+    let livingActorCount: number | undefined;
+    const getLivingActorCount = (): number => {
+      livingActorCount ??= Object.values(this.state.actors).filter((candidate) => candidate.alive).length;
+      return livingActorCount;
+    };
     for (const [index, actorId] of this.options.humanActorIds.entries()) {
       const actor = this.state.actors[actorId];
       if (!actor?.alive) continue;
@@ -109,7 +114,14 @@ export class MatchRuntime {
           controller = new BotController(10_000 + index, seededRandom(this.options.seed + 20_000 + index), this.options.disableAiSnipers);
           this.takeoverBots.set(actorId, controller);
         }
-        commands.set(actorId, controller.update(actor, this.state, this.world, 1 / TICK_RATE, actorId));
+        commands.set(actorId, controller.update(
+          actor,
+          this.state,
+          this.world,
+          1 / TICK_RATE,
+          actorId,
+          actor.deployment === "grounded" ? getLivingActorCount() : undefined,
+        ));
       } else {
         commands.set(actorId, this.inbox.consume(actorId, this.tickValue));
       }
@@ -125,6 +137,7 @@ export class MatchRuntime {
             this.world,
             BOT_COHORTS / TICK_RATE,
             this.options.humanActorIds[0] ?? actorId,
+            actor.deployment === "grounded" ? getLivingActorCount() : undefined,
           );
           this.botCommands.set(actorId, command);
           commands.set(actorId, command);

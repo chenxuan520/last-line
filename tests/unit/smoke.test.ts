@@ -19,8 +19,8 @@ describe("project smoke test", () => {
     expect(DEFAULT_SETTINGS.disableAiSnipers).toBe(true);
   });
 
-  it("keeps the dormant ground loot icon preview disabled", () => {
-    expect(DEFAULT_SETTINGS.showGroundLootIcons).toBe(false);
+  it("shows low-poly ground loot models for new users", () => {
+    expect(DEFAULT_SETTINGS.showGroundLootModels).toBe(true);
   });
 
   it("attenuates remote gunshots by distance", () => {

@@ -7,6 +7,7 @@ import {
   applyActorVisualPose,
   createIslandScene,
   setActorParachuteVisual,
+  setActorEquipmentVisual,
   setActorWeaponVisual,
 } from "../client/render/scenes/IslandScene";
 import { GameHud } from "../client/ui/GameHud";
@@ -104,7 +105,7 @@ export class MultiplayerSession implements GameSession {
     this.aircraftInteriorRoot = bundle.aircraftInteriorRoot;
     this.syncAircraftVisual = bundle.syncAircraftVisual;
     this.syncSafeZoneRing = bundle.syncSafeZoneRing;
-    this.humanController = new HumanController(canvas, settings.sensitivity);
+    this.humanController = new HumanController(canvas, settings.sensitivity, { touchRoot: uiRoot });
     this.effects = new CombatEffects(this.scene);
     this.lastSnapshotSequence = initial.snapshotSequence;
     this.processSequencedEvents(initial.events);
@@ -132,7 +133,7 @@ export class MultiplayerSession implements GameSession {
       initial.state.actors,
       initial.state.groundLoot,
       initial.state.mapSeed,
-      settings.showGroundLootIcons,
+      settings.showGroundLootModels,
       initial.localActorId,
     );
     return new MultiplayerSession(
@@ -156,14 +157,14 @@ export class MultiplayerSession implements GameSession {
       this.uiRoot,
       this.assets,
       this.state.mapSeed,
-      () => this.requestPointerLock(),
+      () => this.resumeInput(),
       this.onExit,
-      { online: true, actorLabels: this.displayNames },
+      { online: true, actorLabels: this.displayNames, touchInput: this.humanController.usesTouchControls() },
     );
     this.audio.start();
     this.syncVisuals();
     this.synchronizeOutcome();
-    this.requestPointerLock();
+    this.resumeInput();
   }
 
   public update(frameSeconds: number, fps: number): void {
@@ -187,15 +188,16 @@ export class MultiplayerSession implements GameSession {
     this.effects.update(frameSeconds);
     this.syncVisuals();
     const viewedActor = this.spectatorActorId ? this.state.actors[this.spectatorActorId] ?? player : player;
-    const pointerLocked = document.pointerLockElement === this.canvas;
+    const inputActive = this.humanController.isGameplayInputActive();
     this.hud?.update(
       this.state,
       player,
       viewedActor,
-      pointerLocked,
+      inputActive,
       fps,
       this.humanController.isScoped(player),
       this.humanController.isLeaderboardVisible(),
+      this.humanController.isOrientationBlocked(),
     );
   }
 
@@ -206,9 +208,9 @@ export class MultiplayerSession implements GameSession {
     this.connection.setMessageHandler(null);
     this.connection.setStatusHandler(null);
     this.connection.close();
+    this.humanController.dispose();
     this.hud?.dispose();
     this.hud = null;
-    this.humanController.dispose();
     this.effects.dispose();
     this.scene.dispose();
     this.queuedMessages.length = 0;
@@ -451,7 +453,7 @@ export class MultiplayerSession implements GameSession {
       const pose = this.getJumpVisualPose(actor);
       const visualRoot = this.actorVisualRoots.get(actorId);
       if (visualRoot) applyActorVisualPose(visualRoot, pose.actorY, pose.actorRotationX);
-      const signature = `${actor.alive}:${actor.deployment}:${getActiveWeapon(actor)?.weaponId ?? "none"}:${actorId === cameraActor.id}:${this.visibleActorIds.has(actorId)}`;
+      const signature = `${actor.alive}:${actor.deployment}:${getActiveWeapon(actor)?.weaponId ?? "none"}:${actor.inventory.armorLevel}:${actor.inventory.helmetLevel}:${actorId === cameraActor.id}:${this.visibleActorIds.has(actorId)}`;
       if (this.actorVisualSignatures.get(actorId) !== signature) {
         root.setEnabled(
           actor.alive &&
@@ -462,6 +464,7 @@ export class MultiplayerSession implements GameSession {
         if (actorId !== this.localActorId) {
           setActorWeaponVisual(root, getActiveWeapon(actor)?.weaponId ?? null);
           setActorParachuteVisual(root, actor.deployment === "parachuting");
+          setActorEquipmentVisual(root, actor.inventory.armorLevel, actor.inventory.helmetLevel);
         }
         this.actorVisualSignatures.set(actorId, signature);
       }
@@ -469,7 +472,7 @@ export class MultiplayerSession implements GameSession {
     for (const [lootId, mesh] of this.lootMeshes) {
       const loot = this.state.groundLoot[lootId];
       mesh.setEnabled(Boolean(loot?.available));
-      if (loot?.available && mesh.metadata?.lootIcon !== true) mesh.rotation.y += 0.06;
+      if (loot?.available) mesh.rotation.y += mesh.metadata?.lootModel === true ? 0.008 : 0.06;
     }
     this.syncSafeZoneRing(this.state.safeZone.center.x, this.state.safeZone.center.z, this.state.safeZone.radius);
   }
@@ -515,8 +518,12 @@ export class MultiplayerSession implements GameSession {
     return actor;
   }
 
-  private requestPointerLock(): void {
+  private resumeInput(): void {
     this.audio.start();
+    if (this.humanController.usesTouchControls()) {
+      this.humanController.resumeInput();
+      return;
+    }
     void this.canvas.requestPointerLock().catch(() => {});
   }
 }

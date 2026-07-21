@@ -258,6 +258,44 @@ describe("SimulationCombatWorld", () => {
     expect(reusedWorld.traceShot(shot)).toBeNull();
     expect(reusedWorld.traceShot(shot)).toBe(new SimulationCombatWorld(state).traceShot(shot));
   });
+
+  it("keeps indexed dense-combat rays identical to the complete geometry scan", () => {
+    const shooter = createActorState("shooter", "player", { x: 0, y: 1.76, z: 0 });
+    const targets = Array.from({ length: 20 }, (_, index) => createActorState(
+      `target-${index}`,
+      "bot",
+      {
+        x: Math.sin(index * 2.13) * (40 + index * 5),
+        y: 1.76,
+        z: Math.cos(index * 1.71) * (35 + index * 6),
+      },
+    ));
+    const state = createState(shooter, ...targets);
+    const indexed = new SimulationCombatWorld(state);
+    const completeScan = new SimulationCombatWorld(state, false);
+
+    for (let index = 0; index < 240; index += 1) {
+      const x = Math.sin(index * 1.93) * (100 + index % 17 * 54);
+      const z = Math.cos(index * 2.27) * (120 + index % 13 * 63);
+      const origin = {
+        x,
+        y: getTerrainHeight(x, z, state.mapSeed) + 1.76 + index % 4 * 1.8,
+        z,
+      };
+      const ray: ShotTrace = {
+        shooterId: shooter.id,
+        origin,
+        direction: {
+          x: Math.sin(index * 0.73),
+          y: (index % 9 - 4) * 0.035,
+          z: Math.cos(index * 0.73),
+        },
+        range: 40 + index % 7 * 80,
+      };
+
+      expect(indexed.traceShotDetailed(ray)).toEqual(completeScan.traceShotDetailed(ray));
+    }
+  });
 });
 
 function createState(...actors: ReturnType<typeof createActorState>[]): MatchState {

@@ -105,19 +105,12 @@ export class GridNavigator {
         return [...current.path, { ...target }];
       }
 
-      const nearestBlockers = blockers
-        .map((obstacle) => ({
-          obstacle,
-          progress: segmentObstacleEntryProgress(
-            current.point,
-            target,
-            obstacle,
-            Math.max(this.clearance, PATH_CLEARANCE),
-          ),
-        }))
-        .filter((entry): entry is { obstacle: MapObstacle; progress: number } => entry.progress !== null)
-        .sort((left, right) => left.progress - right.progress)
-        .slice(0, 3);
+      const nearestBlockers = nearestBlockingObstacles(
+        current.point,
+        target,
+        blockers,
+        Math.max(this.clearance, PATH_CLEARANCE),
+      );
 
       for (const { obstacle } of nearestBlockers) {
         for (const waypoint of obstacleCorners(obstacle, start.y, cornerOffset)) {
@@ -391,25 +384,52 @@ function segmentObstacleEntryProgress(
   let minimumTime = 0;
   let maximumTime = 1;
 
-  for (const [origin, delta, minimum, maximum] of [
-    [start.x, target.x - start.x, minimumX, maximumX],
-    [start.z, target.z - start.z, minimumZ, maximumZ],
-  ] as const) {
-    if (delta === 0) {
-      if (origin < minimum || origin > maximum) {
-        return null;
-      }
-      continue;
-    }
-    const firstTime = (minimum - origin) / delta;
-    const secondTime = (maximum - origin) / delta;
+  const deltaX = target.x - start.x;
+  if (deltaX === 0) {
+    if (start.x < minimumX || start.x > maximumX) return null;
+  } else {
+    const firstTime = (minimumX - start.x) / deltaX;
+    const secondTime = (maximumX - start.x) / deltaX;
     minimumTime = Math.max(minimumTime, Math.min(firstTime, secondTime));
     maximumTime = Math.min(maximumTime, Math.max(firstTime, secondTime));
-    if (minimumTime > maximumTime) {
-      return null;
-    }
+    if (minimumTime > maximumTime) return null;
+  }
+
+  const deltaZ = target.z - start.z;
+  if (deltaZ === 0) {
+    if (start.z < minimumZ || start.z > maximumZ) return null;
+  } else {
+    const firstTime = (minimumZ - start.z) / deltaZ;
+    const secondTime = (maximumZ - start.z) / deltaZ;
+    minimumTime = Math.max(minimumTime, Math.min(firstTime, secondTime));
+    maximumTime = Math.min(maximumTime, Math.max(firstTime, secondTime));
+    if (minimumTime > maximumTime) return null;
   }
   return maximumTime > 1e-6 ? minimumTime : null;
+}
+
+function nearestBlockingObstacles(
+  start: Vector3State,
+  target: Vector3State,
+  blockers: readonly MapObstacle[],
+  clearance: number,
+): Array<{ obstacle: MapObstacle; progress: number }> {
+  const nearest: Array<{ obstacle: MapObstacle; progress: number }> = [];
+  for (const obstacle of blockers) {
+    const progress = segmentObstacleEntryProgress(start, target, obstacle, clearance);
+    if (progress === null) continue;
+    let insertionIndex = nearest.length;
+    for (let index = 0; index < nearest.length; index += 1) {
+      if (progress < (nearest[index]?.progress ?? Number.POSITIVE_INFINITY)) {
+        insertionIndex = index;
+        break;
+      }
+    }
+    if (insertionIndex >= 3) continue;
+    nearest.splice(insertionIndex, 0, { obstacle, progress });
+    if (nearest.length > 3) nearest.pop();
+  }
+  return nearest;
 }
 
 function horizontalDistance(start: Vector3State, target: Vector3State): number {

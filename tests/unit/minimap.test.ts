@@ -137,6 +137,7 @@ describe("minimap projection", () => {
 
     expect(pickupPromptSignature(player, state.groundLoot)).not.toBe(fullArmorSignature);
     expect(pickupPromptText(player, state.groundLoot)).toBe("F 拾取 二级护甲");
+    expect(pickupPromptText(player, state.groundLoot, true)).toBe("拾取 二级护甲");
   });
 
   it("refreshes the pickup prompt when backpack capacity increases", () => {

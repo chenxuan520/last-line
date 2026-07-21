@@ -14,9 +14,24 @@ const ACTOR_HIT_HEIGHT = 1.8;
 const ACTOR_HIT_RADIUS = 0.42;
 const ACTOR_EYE_TO_FEET = 1.76;
 const GEOMETRY_EPSILON = 1e-9;
+const COMBAT_GRID_CELL_SIZE = 32;
+const COMBAT_GRID_KEY_OFFSET = 32_768;
 
 export class SimulationCombatWorld implements CombatWorld {
-  public constructor(private readonly state: MatchState) {}
+  private layout: MapLayout;
+  private layoutSeed: number;
+  private environmentObstacles: readonly MapObstacle[];
+  private obstacleIndex: StaticObstacleIndex;
+
+  public constructor(
+    private readonly state: MatchState,
+    private readonly useSpatialIndex = true,
+  ) {
+    this.layoutSeed = state.mapSeed;
+    this.layout = createMapLayout(state.mapSeed);
+    this.environmentObstacles = environmentObstacles(this.layout);
+    this.obstacleIndex = new StaticObstacleIndex(this.environmentObstacles);
+  }
 
   public traceShot(trace: ShotTrace): EntityId | null {
     return this.traceShotDetailed(trace).targetId;
@@ -28,28 +43,13 @@ export class SimulationCombatWorld implements CombatWorld {
       return missResult(trace.origin, { x: 0, y: 0, z: 1 }, 0);
     }
 
-    const layout = createMapLayout(this.state.mapSeed);
+    const layout = this.getLayout();
     let nearestEnvironment: SurfaceHit | null = intersectTerrain(trace.origin, direction, trace.range, layout);
-    for (const wall of layout.wallSegments) {
-      const hit = intersectObstacle(trace.origin, direction, trace.range, wall);
-      if (hit && (!nearestEnvironment || hit.distance < nearestEnvironment.distance)) {
-        nearestEnvironment = hit;
-      }
-    }
-    for (const rock of layout.rockObstacles) {
-      const hit = intersectObstacle(trace.origin, direction, trace.range, rock);
-      if (hit && (!nearestEnvironment || hit.distance < nearestEnvironment.distance)) {
-        nearestEnvironment = hit;
-      }
-    }
-    for (const cover of layout.coverObstacles) {
-      const hit = intersectObstacle(trace.origin, direction, trace.range, cover);
-      if (hit && (!nearestEnvironment || hit.distance < nearestEnvironment.distance)) {
-        nearestEnvironment = hit;
-      }
-    }
-    for (const slab of layout.floorSlabs) {
-      const hit = intersectObstacle(trace.origin, direction, trace.range, slab);
+    const obstacles = this.useSpatialIndex
+      ? this.obstacleIndex.query(trace.origin, direction, trace.range)
+      : this.environmentObstacles;
+    for (const obstacle of obstacles) {
+      const hit = intersectObstacle(trace.origin, direction, trace.range, obstacle);
       if (hit && (!nearestEnvironment || hit.distance < nearestEnvironment.distance)) {
         nearestEnvironment = hit;
       }
@@ -63,8 +63,9 @@ export class SimulationCombatWorld implements CombatWorld {
 
     let nearestActorId: EntityId | null = null;
     let nearestActorHit: ActorSurfaceHit | null = null;
-    const actors = Object.values(this.state.actors).sort((left, right) => compareIds(left.id, right.id));
-    for (const actor of actors) {
+    for (const actorId in this.state.actors) {
+      const actor = this.state.actors[actorId];
+      if (!actor) continue;
       if (!actor.alive || actor.deployment === "aircraft" || actor.id === trace.shooterId) {
         continue;
       }
@@ -121,6 +122,123 @@ export class SimulationCombatWorld implements CombatWorld {
       range: distance + GEOMETRY_EPSILON,
     }) === targetId;
   }
+
+  private getLayout(): MapLayout {
+    if (this.layoutSeed !== this.state.mapSeed) {
+      this.layoutSeed = this.state.mapSeed;
+      this.layout = createMapLayout(this.state.mapSeed);
+      this.environmentObstacles = environmentObstacles(this.layout);
+      this.obstacleIndex = new StaticObstacleIndex(this.environmentObstacles);
+    }
+    return this.layout;
+  }
+}
+
+class StaticObstacleIndex {
+  private readonly cells = new Map<number, number[]>();
+  private readonly visited: Uint32Array;
+  private readonly candidateIndices: number[] = [];
+  private readonly candidates: MapObstacle[] = [];
+  private generation = 0;
+
+  public constructor(private readonly obstacles: readonly MapObstacle[]) {
+    this.visited = new Uint32Array(obstacles.length);
+    for (let index = 0; index < obstacles.length; index += 1) {
+      const obstacle = obstacles[index];
+      if (!obstacle) continue;
+      const minimumX = Math.floor((obstacle.center.x - obstacle.width / 2 - GEOMETRY_EPSILON) / COMBAT_GRID_CELL_SIZE);
+      const maximumX = Math.floor((obstacle.center.x + obstacle.width / 2 + GEOMETRY_EPSILON) / COMBAT_GRID_CELL_SIZE);
+      const minimumZ = Math.floor((obstacle.center.z - obstacle.depth / 2 - GEOMETRY_EPSILON) / COMBAT_GRID_CELL_SIZE);
+      const maximumZ = Math.floor((obstacle.center.z + obstacle.depth / 2 + GEOMETRY_EPSILON) / COMBAT_GRID_CELL_SIZE);
+      for (let cellX = minimumX; cellX <= maximumX; cellX += 1) {
+        for (let cellZ = minimumZ; cellZ <= maximumZ; cellZ += 1) {
+          const key = combatGridKey(cellX, cellZ);
+          const cell = this.cells.get(key);
+          if (cell) cell.push(index);
+          else this.cells.set(key, [index]);
+        }
+      }
+    }
+  }
+
+  public query(origin: Vector3State, direction: Vector3State, range: number): readonly MapObstacle[] {
+    this.generation = (this.generation + 1) >>> 0;
+    if (this.generation === 0) {
+      this.visited.fill(0);
+      this.generation = 1;
+    }
+    this.candidateIndices.length = 0;
+    this.candidates.length = 0;
+
+    let cellX = Math.floor(origin.x / COMBAT_GRID_CELL_SIZE);
+    let cellZ = Math.floor(origin.z / COMBAT_GRID_CELL_SIZE);
+    const endX = origin.x + direction.x * range;
+    const endZ = origin.z + direction.z * range;
+    const endCellX = Math.floor(endX / COMBAT_GRID_CELL_SIZE);
+    const endCellZ = Math.floor(endZ / COMBAT_GRID_CELL_SIZE);
+    const stepX = direction.x > GEOMETRY_EPSILON ? 1 : direction.x < -GEOMETRY_EPSILON ? -1 : 0;
+    const stepZ = direction.z > GEOMETRY_EPSILON ? 1 : direction.z < -GEOMETRY_EPSILON ? -1 : 0;
+    const deltaX = stepX === 0 ? Number.POSITIVE_INFINITY : Math.abs(COMBAT_GRID_CELL_SIZE / direction.x);
+    const deltaZ = stepZ === 0 ? Number.POSITIVE_INFINITY : Math.abs(COMBAT_GRID_CELL_SIZE / direction.z);
+    const boundaryX = stepX > 0 ? (cellX + 1) * COMBAT_GRID_CELL_SIZE : cellX * COMBAT_GRID_CELL_SIZE;
+    const boundaryZ = stepZ > 0 ? (cellZ + 1) * COMBAT_GRID_CELL_SIZE : cellZ * COMBAT_GRID_CELL_SIZE;
+    let distanceX = stepX === 0 ? Number.POSITIVE_INFINITY : (boundaryX - origin.x) / direction.x;
+    let distanceZ = stepZ === 0 ? Number.POSITIVE_INFINITY : (boundaryZ - origin.z) / direction.z;
+    const maximumCells = Math.abs(endCellX - cellX) + Math.abs(endCellZ - cellZ) + 3;
+
+    for (let visitedCells = 0; visitedCells < maximumCells; visitedCells += 1) {
+      this.addCell(cellX, cellZ);
+      if (cellX === endCellX && cellZ === endCellZ) break;
+      if (Math.abs(distanceX - distanceZ) <= GEOMETRY_EPSILON) {
+        this.addCell(cellX + stepX, cellZ);
+        this.addCell(cellX, cellZ + stepZ);
+        cellX += stepX;
+        cellZ += stepZ;
+        distanceX += deltaX;
+        distanceZ += deltaZ;
+      } else if (distanceX < distanceZ) {
+        cellX += stepX;
+        distanceX += deltaX;
+      } else {
+        cellZ += stepZ;
+        distanceZ += deltaZ;
+      }
+    }
+
+    this.candidateIndices.sort(compareNumbers);
+    for (const index of this.candidateIndices) {
+      const obstacle = this.obstacles[index];
+      if (obstacle) this.candidates.push(obstacle);
+    }
+    return this.candidates;
+  }
+
+  private addCell(cellX: number, cellZ: number): void {
+    const cell = this.cells.get(combatGridKey(cellX, cellZ));
+    if (!cell) return;
+    for (const index of cell) {
+      if (this.visited[index] === this.generation) continue;
+      this.visited[index] = this.generation;
+      this.candidateIndices.push(index);
+    }
+  }
+}
+
+function combatGridKey(cellX: number, cellZ: number): number {
+  return (cellX + COMBAT_GRID_KEY_OFFSET) * 65_536 + cellZ + COMBAT_GRID_KEY_OFFSET;
+}
+
+function compareNumbers(left: number, right: number): number {
+  return left - right;
+}
+
+function environmentObstacles(layout: MapLayout): readonly MapObstacle[] {
+  return [
+    ...layout.wallSegments,
+    ...layout.rockObstacles,
+    ...layout.coverObstacles,
+    ...layout.floorSlabs,
+  ];
 }
 
 interface ActorSurfaceHit {
@@ -143,11 +261,13 @@ function intersectActor(
     (origin.y - closestY) ** 2 +
     (origin.z - actor.position.z) ** 2;
   if (originDistanceSquared <= ACTOR_HIT_RADIUS ** 2) {
-    return { distance: 0, normal: scale(direction, -1) };
+    return { distance: 0, normal: { x: -direction.x, y: -direction.y, z: -direction.z } };
   }
 
   let nearest = Number.POSITIVE_INFINITY;
-  let nearestNormal: Vector3State = scale(direction, -1);
+  let normalX = -direction.x;
+  let normalY = -direction.y;
+  let normalZ = -direction.z;
   const radialA = direction.x ** 2 + direction.z ** 2;
   if (radialA > GEOMETRY_EPSILON) {
     const offsetX = origin.x - actor.position.x;
@@ -157,49 +277,74 @@ function intersectActor(
     const discriminant = radialB ** 2 - 4 * radialA * radialC;
     if (discriminant >= 0) {
       const root = Math.sqrt(discriminant);
-      const distances = [(-radialB - root) / (2 * radialA), (-radialB + root) / (2 * radialA)];
-      for (const distance of distances) {
+      const nearDistance = (-radialB - root) / (2 * radialA);
+      const farDistance = (-radialB + root) / (2 * radialA);
+      for (let rootIndex = 0; rootIndex < 2; rootIndex += 1) {
+        const distance = rootIndex === 0 ? nearDistance : farDistance;
         const y = origin.y + direction.y * distance;
         if (distance >= 0 && distance <= range && y >= segmentMinY && y <= segmentMaxY) {
           if (distance < nearest) {
             nearest = distance;
-            const point = pointAlong(origin, direction, distance);
-            nearestNormal = normalize({ x: point.x - actor.position.x, y: 0, z: point.z - actor.position.z }) ?? nearestNormal;
+            const offsetX = origin.x + direction.x * distance - actor.position.x;
+            const offsetZ = origin.z + direction.z * distance - actor.position.z;
+            const magnitude = Math.hypot(offsetX, offsetZ);
+            if (magnitude > GEOMETRY_EPSILON) {
+              normalX = offsetX / magnitude;
+              normalY = 0;
+              normalZ = offsetZ / magnitude;
+            }
           }
         }
       }
     }
   }
 
-  for (const centerY of [segmentMinY, segmentMaxY]) {
-    const distance = intersectSphere(
+  for (let capIndex = 0; capIndex < 2; capIndex += 1) {
+    const centerY = capIndex === 0 ? segmentMinY : segmentMaxY;
+    const distance = intersectSphereCoordinates(
       origin,
       direction,
       range,
-      { x: actor.position.x, y: centerY, z: actor.position.z },
+      actor.position.x,
+      centerY,
+      actor.position.z,
       ACTOR_HIT_RADIUS,
     );
     if (distance !== null) {
       if (distance < nearest) {
         nearest = distance;
-        const point = pointAlong(origin, direction, distance);
-        nearestNormal = normalize(subtract(point, { x: actor.position.x, y: centerY, z: actor.position.z })) ?? nearestNormal;
+        const offsetX = origin.x + direction.x * distance - actor.position.x;
+        const offsetY = origin.y + direction.y * distance - centerY;
+        const offsetZ = origin.z + direction.z * distance - actor.position.z;
+        const magnitude = Math.hypot(offsetX, offsetY, offsetZ);
+        if (magnitude > GEOMETRY_EPSILON) {
+          normalX = offsetX / magnitude;
+          normalY = offsetY / magnitude;
+          normalZ = offsetZ / magnitude;
+        }
       }
     }
   }
-  return Number.isFinite(nearest) ? { distance: nearest, normal: nearestNormal } : null;
+  return Number.isFinite(nearest)
+    ? { distance: nearest, normal: { x: normalX, y: normalY, z: normalZ } }
+    : null;
 }
 
-function intersectSphere(
+function intersectSphereCoordinates(
   origin: Vector3State,
   direction: Vector3State,
   range: number,
-  center: Vector3State,
+  centerX: number,
+  centerY: number,
+  centerZ: number,
   radius: number,
 ): number | null {
-  const offset = subtract(origin, center);
-  const projected = dot(offset, direction);
-  const discriminant = projected ** 2 - (dot(offset, offset) - radius ** 2);
+  const offsetX = origin.x - centerX;
+  const offsetY = origin.y - centerY;
+  const offsetZ = origin.z - centerZ;
+  const projected = offsetX * direction.x + offsetY * direction.y + offsetZ * direction.z;
+  const discriminant = projected ** 2 -
+    (offsetX * offsetX + offsetY * offsetY + offsetZ * offsetZ - radius ** 2);
   if (discriminant < 0) {
     return null;
   }
@@ -221,48 +366,86 @@ function intersectObstacle(
   range: number,
   obstacle: MapObstacle,
 ): SurfaceHit | null {
-  return intersectBox(
+  return intersectBoxBounds(
     origin,
     direction,
     range,
-    [
-      ["x", obstacle.center.x - obstacle.width / 2, obstacle.center.x + obstacle.width / 2],
-      ["y", obstacle.center.y - obstacle.height / 2, obstacle.center.y + obstacle.height / 2],
-      ["z", obstacle.center.z - obstacle.depth / 2, obstacle.center.z + obstacle.depth / 2],
-    ],
+    obstacle.center.x - obstacle.width / 2,
+    obstacle.center.x + obstacle.width / 2,
+    obstacle.center.y - obstacle.height / 2,
+    obstacle.center.y + obstacle.height / 2,
+    obstacle.center.z - obstacle.depth / 2,
+    obstacle.center.z + obstacle.depth / 2,
   );
 }
 
-function intersectBox(
+function intersectBoxBounds(
   origin: Vector3State,
   direction: Vector3State,
   range: number,
-  bounds: readonly (readonly [keyof Vector3State, number, number])[],
+  minimumX: number,
+  maximumX: number,
+  minimumY: number,
+  maximumY: number,
+  minimumZ: number,
+  maximumZ: number,
 ): SurfaceHit | null {
   let near = 0;
   let far = range;
-  let hitNormal: Vector3State = { x: 0, y: 0, z: 0 };
-  for (const [axis, minimum, maximum] of bounds) {
-    if (Math.abs(direction[axis]) <= GEOMETRY_EPSILON) {
-      if (origin[axis] < minimum || origin[axis] > maximum) {
-        return null;
-      }
-      continue;
-    }
-    const first = (minimum - origin[axis]) / direction[axis];
-    const second = (maximum - origin[axis]) / direction[axis];
+  let normalX = 0;
+  let normalY = 0;
+  let normalZ = 0;
+
+  if (Math.abs(direction.x) <= GEOMETRY_EPSILON) {
+    if (origin.x < minimumX || origin.x > maximumX) return null;
+  } else {
+    const first = (minimumX - origin.x) / direction.x;
+    const second = (maximumX - origin.x) / direction.x;
     const axisNear = Math.min(first, second);
     if (axisNear > near) {
       near = axisNear;
-      hitNormal = { x: 0, y: 0, z: 0 };
-      hitNormal[axis] = first < second ? -1 : 1;
+      normalX = first < second ? -1 : 1;
+      normalY = 0;
+      normalZ = 0;
     }
     far = Math.min(far, Math.max(first, second));
-    if (near > far) {
-      return null;
-    }
+    if (near > far) return null;
   }
-  return near <= range ? { distance: near, normal: hitNormal } : null;
+
+  if (Math.abs(direction.y) <= GEOMETRY_EPSILON) {
+    if (origin.y < minimumY || origin.y > maximumY) return null;
+  } else {
+    const first = (minimumY - origin.y) / direction.y;
+    const second = (maximumY - origin.y) / direction.y;
+    const axisNear = Math.min(first, second);
+    if (axisNear > near) {
+      near = axisNear;
+      normalX = 0;
+      normalY = first < second ? -1 : 1;
+      normalZ = 0;
+    }
+    far = Math.min(far, Math.max(first, second));
+    if (near > far) return null;
+  }
+
+  if (Math.abs(direction.z) <= GEOMETRY_EPSILON) {
+    if (origin.z < minimumZ || origin.z > maximumZ) return null;
+  } else {
+    const first = (minimumZ - origin.z) / direction.z;
+    const second = (maximumZ - origin.z) / direction.z;
+    const axisNear = Math.min(first, second);
+    if (axisNear > near) {
+      near = axisNear;
+      normalX = 0;
+      normalY = 0;
+      normalZ = first < second ? -1 : 1;
+    }
+    far = Math.min(far, Math.max(first, second));
+    if (near > far) return null;
+  }
+  return near <= range
+    ? { distance: near, normal: { x: normalX, y: normalY, z: normalZ } }
+    : null;
 }
 
 function intersectTerrain(
@@ -271,7 +454,7 @@ function intersectTerrain(
   range: number,
   layout: MapLayout,
 ): SurfaceHit | null {
-  const initialOffset = terrainOffset(origin, layout);
+  const initialOffset = terrainOffsetAt(origin.x, origin.y, origin.z, layout);
   if (initialOffset !== null && initialOffset <= 0) {
     return { distance: 0, normal: terrainNormal(origin.x, origin.z, layout) };
   }
@@ -280,15 +463,21 @@ function intersectTerrain(
   let previousOffset = initialOffset;
   for (let distance = stepSize; distance <= range + stepSize; distance += stepSize) {
     const boundedDistance = Math.min(distance, range);
-    const point = pointAlong(origin, direction, boundedDistance);
-    const offset = terrainOffset(point, layout);
+    const pointX = origin.x + direction.x * boundedDistance;
+    const pointY = origin.y + direction.y * boundedDistance;
+    const pointZ = origin.z + direction.z * boundedDistance;
+    const offset = terrainOffsetAt(pointX, pointY, pointZ, layout);
     if (offset !== null && offset <= 0 && (previousOffset === null || previousOffset > 0)) {
       let low = previousDistance;
       let high = boundedDistance;
       for (let iteration = 0; iteration < 12; iteration += 1) {
         const middle = (low + high) / 2;
-        const middlePoint = pointAlong(origin, direction, middle);
-        const middleOffset = terrainOffset(middlePoint, layout);
+        const middleOffset = terrainOffsetAt(
+          origin.x + direction.x * middle,
+          origin.y + direction.y * middle,
+          origin.z + direction.z * middle,
+          layout,
+        );
         if (middleOffset === null || middleOffset > 0) {
           low = middle;
         } else {
@@ -325,9 +514,9 @@ function intersectRamp(
   return { distance, normal };
 }
 
-function terrainOffset(point: Vector3State, layout: MapLayout): number | null {
-  if (Math.abs(point.x) > MAP_HALF_SIZE || Math.abs(point.z) > MAP_HALF_SIZE) return null;
-  return point.y - getTerrainHeight(point.x, point.z, layout);
+function terrainOffsetAt(x: number, y: number, z: number, layout: MapLayout): number | null {
+  if (Math.abs(x) > MAP_HALF_SIZE || Math.abs(z) > MAP_HALF_SIZE) return null;
+  return y - getTerrainHeight(x, z, layout);
 }
 
 function terrainNormal(x: number, z: number, layout: MapLayout): Vector3State {
@@ -381,8 +570,4 @@ function length(value: Vector3State): number {
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.max(minimum, Math.min(maximum, value));
-}
-
-function compareIds(left: EntityId, right: EntityId): number {
-  return left < right ? -1 : left > right ? 1 : 0;
 }

@@ -47,10 +47,12 @@ export class GameApp {
       this.session?.scene.render();
     });
     window.addEventListener("resize", this.handleResize);
+    window.visualViewport?.addEventListener("resize", this.handleResize);
   }
 
   public dispose(): void {
     window.removeEventListener("resize", this.handleResize);
+    window.visualViewport?.removeEventListener("resize", this.handleResize);
     this.engine.stopRenderLoop();
     this.session?.dispose();
     this.multiplayerConnection?.close();
@@ -110,9 +112,10 @@ export class GameApp {
         <div class="settings-grid" aria-label="游戏设置">
           <label>画面质量<select data-setting="quality"><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></label>
           <label class="volume-setting"><span>主音量 <output data-volume-output></output></span><input aria-label="主音量" data-setting="volume" type="range" min="0" max="1" step="0.1" value="${this.settings.volume}" /></label>
-          <label>鼠标灵敏度<input data-setting="sensitivity" type="range" min="0.4" max="2" step="0.1" value="${this.settings.sensitivity}" /></label>
+          <label>视角灵敏度<input data-setting="sensitivity" type="range" min="0.4" max="2" step="0.1" value="${this.settings.sensitivity}" /></label>
           <label class="starter-setting"><span>初始补给</span><span class="starter-option"><input data-setting="start-with-bandage" type="checkbox" ${this.settings.startWithBandage ? "checked" : ""} /><i></i><b>携带 1 条绷带</b></span></label>
           <label class="starter-setting ai-sniper-setting"><span>AI 规则</span><span class="starter-option"><input data-setting="disable-ai-snipers" type="checkbox" ${this.settings.disableAiSnipers ? "checked" : ""} /><i></i><b>禁用狙击枪与狙击弹</b></span></label>
+          <label class="starter-setting loot-model-setting"><span>物资显示</span><span class="starter-option"><input data-setting="show-ground-loot-models" type="checkbox" ${this.settings.showGroundLootModels ? "checked" : ""} /><i></i><b>显示三维物资模型</b></span></label>
         </div>
         <div class="menu-actions">
           <button class="primary-button" data-action="start"><span>开始游戏</span><b>DEPLOY</b></button>
@@ -152,6 +155,11 @@ export class GameApp {
     const disableAiSnipers = this.uiRoot.querySelector<HTMLInputElement>("[data-setting='disable-ai-snipers']");
     disableAiSnipers?.addEventListener("change", () => {
       this.settings = { ...this.settings, disableAiSnipers: disableAiSnipers.checked };
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings));
+    });
+    const showGroundLootModels = this.uiRoot.querySelector<HTMLInputElement>("[data-setting='show-ground-loot-models']");
+    showGroundLootModels?.addEventListener("change", () => {
+      this.settings = { ...this.settings, showGroundLootModels: showGroundLootModels.checked };
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings));
     });
     this.uiRoot.querySelector<HTMLButtonElement>("[data-action='start']")?.addEventListener("click", () => {
@@ -520,13 +528,16 @@ export class GameApp {
     const sensitivity = Number(this.uiRoot.querySelector<HTMLInputElement>("[data-setting='sensitivity']")?.value);
     const startWithBandage = this.uiRoot.querySelector<HTMLInputElement>("[data-setting='start-with-bandage']")?.checked;
     const disableAiSnipers = this.uiRoot.querySelector<HTMLInputElement>("[data-setting='disable-ai-snipers']")?.checked;
+    const showGroundLootModels = this.uiRoot.querySelector<HTMLInputElement>("[data-setting='show-ground-loot-models']")?.checked;
     this.settings = {
       quality: isQuality(quality) ? quality : DEFAULT_SETTINGS.quality,
       volume: normalizeVolume(volume),
       sensitivity: Number.isFinite(sensitivity) ? sensitivity : DEFAULT_SETTINGS.sensitivity,
       startWithBandage: typeof startWithBandage === "boolean" ? startWithBandage : DEFAULT_SETTINGS.startWithBandage,
       disableAiSnipers: typeof disableAiSnipers === "boolean" ? disableAiSnipers : DEFAULT_SETTINGS.disableAiSnipers,
-      showGroundLootIcons: false,
+      showGroundLootModels: typeof showGroundLootModels === "boolean"
+        ? showGroundLootModels
+        : DEFAULT_SETTINGS.showGroundLootModels,
     };
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings));
   }
@@ -562,7 +573,9 @@ function loadSettings(): GameSettings {
       disableAiSnipers: typeof value?.disableAiSnipers === "boolean"
         ? value.disableAiSnipers
         : DEFAULT_SETTINGS.disableAiSnipers,
-      showGroundLootIcons: false,
+      showGroundLootModels: typeof value?.showGroundLootModels === "boolean"
+        ? value.showGroundLootModels
+        : DEFAULT_SETTINGS.showGroundLootModels,
     };
   } catch {
     return { ...DEFAULT_SETTINGS };
