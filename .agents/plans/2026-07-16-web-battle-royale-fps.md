@@ -614,7 +614,34 @@
 - 2026-07-22 01:28：最终自动门禁通过：应用 **30 files / 271 tests**、Worker **3 files / 27 tests**、standalone **2 files / 15 tests**、`npm run typecheck`、生产 build 和 diff check 全绿。静音 production preview 确认 250 个三维 marker 中四类枪械全部 scale=`2`、其余物资全部 scale=`1.45`、非死亡材质全部为 `#E2C66D`；对局中实际产生的一件死亡霰弹枪保持 `#C85E50`。只读四枪 gallery 可见 receiver、补充连接体和主枪管连续接合，枪械轮廓清楚，console 无 error/warn；截图 `loot-gun-scale-connectivity.png` 存于临时目录。验收后关闭独立 Chrome context、停止 4173 preview，并确认只剩 `about:blank`。下一步按用户明确指定顺序先提交推送，再启动 reviewer。
 - 2026-07-22 01:36：实现、测试、README 和当时 Build 记录已按用户指定顺序先随 `1d65983 fix: refine ground loot models` 提交并推送，随后启动 reviewer。Reviewer 对 `0055e21..1d65983` 完整范围复核为 `No findings`，并再次通过 271/27/15 tests、全量 typecheck、build 和 diff check；详细证据已写入下方 Review。GitHub Actions run `29853134306` 与 GitHub Pages 成功，Cloudflare Pages production deployment `2982e8bd-24af-41c0-9e50-b569aa4c4c5c` 已发布 `1d65983`。本次无 Worker、权威规则或服务端改动，不需部署 Worker；工作区仍只剩外部 `.gitignore` 改动，未纳入提交。
 
+#### 2026-07-22 02:14 +0800：动态枪械复现与主题 favicon
+
+- 用户反馈自然生成枪械已正确，但主动丢弃和死亡掉落仍疑似存在枪体断口，并允许在无法复现时不强行修改。用真实 `InventorySystem` 分别执行“玩家携带步枪→主动丢弃”和“Bot 携带 SMG→死亡背包掉落”，两条路径都复用了 inactive loot record；同步后动态 marker 与同型号自然 marker 使用同一个 geometry object、相同顶点数和 scale=`2`，仅 drop/death 材质按黄色/红色区分。未复现来源相关的几何差异，因此没有继续修改已验证正确的枪械模板或权威逻辑。
+- `islandScene.test.ts` 保留上述真实规则链路回归，覆盖 inactive ammo record→黄色 drop rifle，以及 inactive spawn SMG record→红色 death SMG；断言动态 marker 与自然同型号共享 geometry、顶点数和 2 倍缩放，防止未来 record generation/source 复用引入来源特有断口。定向 IslandScene 4 项通过。
+- 定位网页丑 favicon 的原因是 `index.html` 直接把“缺失素材”用的红底白叉 `fallback.svg` 当作站点图标。新增独立 `public/assets/ui/favicon.svg`：深绿圆角战术底、浅绿安全区环、岛屿山脊、白色最后防线与定位点，移除红框/叉号，并在 `index.html` 以 `image/svg+xml` 引用；fallback 素材本身继续仅承担资源失败提示，不改变既有 fallback 合同。
+- production build 和 diff check 通过；静音 production preview 中 favicon 请求返回 200 `image/svg+xml`，页面引用新文件且 SVG 不含旧红色/叉号，主题色继续为 `#111711`，console 无 error/warn。图标原图截图 `favicon-preview.png` 存于临时目录。验收后已关闭全部任务 page/context、停止 4173 服务并确认只剩 `about:blank`。
+- 2026-07-22 02:18：最终自动门禁通过：应用 **30 files / 271 tests**、Worker **3 files / 27 tests**、standalone **2 files / 15 tests**、`npm run typecheck`、生产 build 和 diff check 全绿；构建仅保留既有大 chunk warning。动态枪没有可证实的来源差异，因此本轮业务实现只新增独立 favicon，枪械部分仅增加真实 drop/death 规则链回归，不做猜测性修复。等待 reviewer 终审。
+- 2026-07-22 02:26：确认 reviewer 的唯一 Medium 为真实测试证据缺口，不是业务错误。动态回归现显式保存 inactive ammo/SMG 的原 ID、generation 和 marker 引用，分别断言真实 drop/death 后 ID 不变、generation 严格 `+1`、旧 marker 原地复用；死亡 SMG 另选未被复用的第二个自然 SMG marker 作为独立对照，并断言两者不是同一 Mesh、但共享 geometry 和顶点数，消除对象自比。无需修改枪械业务实现，等待定向验证与复审。
+- 2026-07-22 02:27：修正后定向 IslandScene 4 项、`typecheck:app` 和 diff check 通过；reviewer 复审 `No findings`，唯一 Medium 已闭环，favicon 路径/fallback 和“不强改无法复现的动态枪”结论继续成立。准备提交并推送。
+
 ## 审查
+
+### 2026-07-22 02:26 +0800：动态 loot 回归唯一 Medium 复审（通过）
+
+- 审查范围：继续以 `main@e26530c` 为基线，重读最新 Build 617–624 行和上一轮 Review，复核当前完整增量及 `tests/unit/islandScene.test.ts` 对唯一 Medium 的修正；`.gitignore` 外部并发改动继续完全忽略、未触碰且未纳入结论。
+- 审查结论：**通过。本次复审未发现明确问题（No findings）。** 上一轮唯一 Medium 已闭环，当前无 blocker/high/medium finding；不修改动态枪械业务实现、favicon 与 fallback 的前序结论继续成立。
+- Medium disposition：drop rifle 现保存 inactive ammo 的 ID、generation 与旧 marker，并分别断言 ID 不变、generation `+1`、marker 同一引用，再与自然 rifle geometry 对照；death SMG 同样锁定 inactive spawn SMG 的 ID/generation/marker。独立对照通过不同 loot ID 选择第二个仍为 spawn 的 SMG，明确断言 death marker 与其不是同一 Mesh、但共享 geometry 和顶点数，已消除对象自比。两段顺序执行时第一段 record 已恢复 available，第二段只主动停用目标 SMG；真实 Inventory 复用选择及 fixture 状态没有串扰。该测试能同时保护 record/marker 有界复用、跨 item geometry 切换和 death source 展示，保留合理。
+- plan disposition：Build 624 行准确记录了 finding 性质、两条 ID/generation/marker 断言及独立自然 SMG 对照；原 619–620 行关于真实 drop/death 链与共享 geometry 的描述现已有对应持久断言支持。
+- 验证：Reviewer 实际执行定向 IslandScene **4/4 tests**、`npm run typecheck:app` 和 scoped diff check，全部通过。上一轮已通过的完整 **271/27/15 tests**、全量 typecheck 和生产 build 所覆盖的业务/favicon 实现未变化；本轮仅补测试与 plan 记录。
+
+### 2026-07-22 02:23 +0800：动态枪械复现与主题 favicon 终审（不通过）
+
+- 审查范围：基于本 plan 最新 Build 617–623 行及前序三维物资 Review，以用户指定 `main@e26530c` 为基线；确认当前 `HEAD/main/origin/main=e26530c139b4c28947285902b40c71d353488b02`、merge-base 相同，完整审查当前 plan、`index.html`、新增 `favicon.svg` 和 `islandScene.test.ts`。工作区 `.gitignore` 外部并发改动完全忽略、未触碰且未纳入结论。
+- 审查结论：**不通过。** 未发现 blocker/high 或业务实现回归；不猜测性修改动态枪械符合当前证据，favicon 实现亦未见问题。但新增回归没有真正锁定其声称的 record 复用与死亡枪几何对照，且 Build 对测试覆盖描述过强，存在 1 项 Medium 验证缺口。
+- **[中][待 writer 补测试并修正记录] 动态 loot 回归会在不复用 record 时继续通过，死亡 SMG 的 geometry/顶点断言还是同一 Mesh 与自身比较。** `tests/unit/islandScene.test.ts:352-371` 虽把 rifle ammo record 置为 inactive，却未断言 drop 后仍是该 ID、generation 严格递增或 marker 引用原地复用；若实现改为新增 record，当前共享 rifle geometry、scale、颜色和 metadata 断言仍全绿。`:373-393` 中 `smgLoot` 与 `naturalSmg` 都取第一个 spawn SMG；当前 fixture 下两者均为 `loot-2`，死亡复用后 `deathSmg` 仍是这个 marker，因此 `deathSmg.geometry === naturalSmg.geometry` 与顶点数比较是对象自比，无法捕获 death source 特有的 geometry 回归。Reviewer 用真实两条 Inventory 链确认当前确实分别复用了 `loot-17`（generation `0→1`）和 `loot-2`（`0→1`），所以这是持久回归的断言缺口，不是现行业务 bug。需显式断言两条动态 loot 的 ID/generation 和旧 marker 引用，并用另一条仍为 spawn 的同型号 SMG marker/预先保存的独立自然对照验证共享 geometry；同步收敛 Build 619–620 行的覆盖表述。
+- 动态枪 disposition：`InventorySystem` 当前真实执行结果与静态调用链一致；`IslandScene` 只按 item/model ID 选择或切换共享 geometry，`source` 仅选择死亡/普通材质，前序四枪连接射线、缩放和支撑面回归继续存在。用户已允许无法复现时不强改，当前没有证据支持修改模板或权威规则；应只修测试证据。
+- favicon disposition：`vite.config.ts` 使用 `base: "./"`，生产 `dist/index.html` 保留 `./assets/ui/favicon.svg`，因此根域解析为 `/assets/...`、GitHub `/last-line/` 解析为 `/last-line/assets/...`；资源已复制到 dist。SVG 只有内部 gradient 与基础图形，无 script、事件、外链、foreignObject 或解析风险，64×64 viewBox/高对比轮廓适合作为 favicon；asset manifest 仍引用原 `fallback.svg`，fallback 合同未改变。
+- 验证：Reviewer 实际执行完整 `npm run test`（应用 **30 files / 271 tests**、Worker **3 files / 27 tests**、standalone **2 files / 15 tests**）、`npm run typecheck`、`npm run build` 和 scoped diff check，全部通过；构建仅保留既有大 chunk warning。通过结果不能覆盖上述断言空洞。待 writer 补齐测试/记录后复审；无需修改业务代码。
 
 ### 2026-07-22 01:35 +0800：1d65983 三维枪械与物资颜色完整审查（通过）
 

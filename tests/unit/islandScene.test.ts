@@ -11,8 +11,10 @@ import {
   setActorWeaponVisual,
 } from "../../src/client/render/scenes/IslandScene";
 import { createMapLayout, getTerrainHeight, HOSPITAL_WALL_COLOR } from "../../src/config/map";
+import { createIdleCommand } from "../../src/game/commands/ActorCommand";
 import { createBattleRoyaleState, createBattleRoyaleStateForHumans } from "../../src/game/modes/BattleRoyaleMode";
 import { createWeaponState } from "../../src/game/state/types";
+import { InventorySystem } from "../../src/game/systems/InventorySystem";
 import { getSupportHeight } from "../../src/game/systems/MovementSystem";
 
 describe("IslandScene lifecycle", () => {
@@ -341,6 +343,79 @@ describe("IslandScene lifecycle", () => {
       );
       expect(bundle.scene.pickWithRay(ray, (candidate) => candidate === weaponMarker)?.hit).toBe(true);
     }
+    const inventory = new InventorySystem(layout);
+    const player = state.actors.player;
+    player.deployment = "grounded";
+    player.position = { x: 0, y: getTerrainHeight(0, 0, layout) + 1.76, z: 0 };
+    player.inventory.weaponSlots = [createWeaponState("rifle"), null];
+    player.inventory.activeWeaponSlot = 0;
+    const reusableAmmoLoot = Object.values(state.groundLoot).find((entry) => entry.itemId === "ammo.rifle");
+    if (!reusableAmmoLoot) throw new Error("reusable ammo loot missing");
+    const reusableAmmoId = reusableAmmoLoot.id;
+    const reusableAmmoGeneration = reusableAmmoLoot.generation ?? 0;
+    const reusableAmmoMarker = bundle.lootMeshes.get(reusableAmmoId);
+    if (!reusableAmmoMarker) throw new Error("reusable ammo marker missing");
+    reusableAmmoLoot.available = false;
+    inventory.processCommand(state, player.id, {
+      ...createIdleCommand(),
+      dropItem: "weapon.rifle",
+    }, []);
+    bundle.syncLootMeshes(state.groundLoot);
+    const droppedRifleLoot = Object.values(state.groundLoot).find((entry) => entry.source === "drop" && entry.itemId === "weapon.rifle");
+    if (!droppedRifleLoot) throw new Error("dropped rifle loot missing");
+    const droppedRifle = bundle.lootMeshes.get(droppedRifleLoot.id);
+    if (!droppedRifle) throw new Error("dropped rifle marker missing");
+    expect(droppedRifleLoot.id).toBe(reusableAmmoId);
+    expect(droppedRifleLoot.generation).toBe(reusableAmmoGeneration + 1);
+    expect(droppedRifle).toBe(reusableAmmoMarker);
+    expect(droppedRifle.geometry).toBe(rifleGeometry);
+    expect(droppedRifle.scaling.equals(new Vector3(2, 2, 2))).toBe(true);
+    expect((droppedRifle.material as StandardMaterial).diffuseColor.toHexString()).toBe("#E2C66D");
+    expect(droppedRifle.metadata).toMatchObject({
+      itemId: "weapon.rifle",
+      lootSource: "drop",
+      lootModelScale: 2,
+    });
+
+    const bot = Object.values(state.actors).find((actor) => actor.kind === "bot");
+    const smgLoot = Object.values(state.groundLoot).find((entry) => entry.itemId === "weapon.smg" && entry.source === "spawn");
+    const independentSmgLoot = Object.values(state.groundLoot).find((entry) =>
+      entry.itemId === "weapon.smg" && entry.source === "spawn" && entry.id !== smgLoot?.id
+    );
+    if (!bot || !smgLoot || !independentSmgLoot) throw new Error("death drop fixtures missing");
+    const reusableSmgId = smgLoot.id;
+    const reusableSmgGeneration = smgLoot.generation ?? 0;
+    const reusableSmgMarker = bundle.lootMeshes.get(reusableSmgId);
+    const independentNaturalSmg = bundle.lootMeshes.get(independentSmgLoot.id);
+    if (!reusableSmgMarker || !independentNaturalSmg) throw new Error("smg marker fixtures missing");
+    smgLoot.available = false;
+    bot.deployment = "grounded";
+    bot.position = { x: 2, y: getTerrainHeight(2, 0, layout) + 1.76, z: 0 };
+    bot.inventory.weaponSlots = [createWeaponState("smg"), null];
+    bot.inventory.activeWeaponSlot = 0;
+    bot.inventory.backpack = [];
+    bot.inventory.armorLevel = 0;
+    bot.inventory.helmetLevel = 0;
+    bot.alive = false;
+    inventory.dropDeadInventories(state, []);
+    bundle.syncLootMeshes(state.groundLoot);
+    const deathSmgLoot = Object.values(state.groundLoot).find((entry) => entry.source === "death" && entry.itemId === "weapon.smg");
+    if (!deathSmgLoot) throw new Error("death smg loot missing");
+    const deathSmg = bundle.lootMeshes.get(deathSmgLoot.id);
+    if (!deathSmg) throw new Error("death smg marker missing");
+    expect(deathSmgLoot.id).toBe(reusableSmgId);
+    expect(deathSmgLoot.generation).toBe(reusableSmgGeneration + 1);
+    expect(deathSmg).toBe(reusableSmgMarker);
+    expect(deathSmg).not.toBe(independentNaturalSmg);
+    expect(deathSmg.geometry).toBe(independentNaturalSmg.geometry);
+    expect(deathSmg.getTotalVertices()).toBe(independentNaturalSmg.getTotalVertices());
+    expect(deathSmg.scaling.equals(new Vector3(2, 2, 2))).toBe(true);
+    expect((deathSmg.material as StandardMaterial).diffuseColor.toHexString()).toBe("#C85E50");
+    expect(deathSmg.metadata).toMatchObject({
+      itemId: "weapon.smg",
+      lootSource: "death",
+      lootModelScale: 2,
+    });
     const classicMarkerDiagonal = 0.62 * Math.sqrt(3);
     for (const modelMarker of bundle.lootMeshes.values()) {
       const modelLoot = state.groundLoot[String(modelMarker.metadata?.lootId)];
