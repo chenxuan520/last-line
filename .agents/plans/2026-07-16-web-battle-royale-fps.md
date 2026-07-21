@@ -576,6 +576,7 @@
 - 2026-07-21 18:18：采纳 reviewer 唯一高风险 finding。确认 `InventorySystem` 首次死亡掉落、Bot 首次跳伞目标与 forced relocation 仍可能在本局 seed 被全局 8 项 cache 驱逐后调用 `createMapLayout(seed)`，与“多房间不重建地图”的目标冲突。现由 `BattleRoyaleSession` / `MatchRuntime` 在房间建立时生成并强持有同一 `MapLayout`，传给 `GameSimulation`、`InventorySystem`、`MovementSystem`、`SimulationCombatWorld` 和全部普通/接管 Bot；Bot 落点与强制迁移、Inventory 死亡/手动掉落均使用该对象，只有真实 mapSeed 改变才重新生成。
 - 2026-07-21 18:18：新增超过 8 个其他 seed 驱逐全局 cache 后的结构回归，以 Proxy 断言死亡掉落和 forced relocation 仍读取原 pinned layout，而非用不稳定耗时阈值；同时固化负坐标、格边界、极小正 delta 和 generation wrap 的静态格测试。`typecheck:app` 以及 Inventory/Bot/StaticGrid/MatchRuntime **4 files / 80 tests** 通过，等待 reviewer 复审和最终完整门禁。
 - 2026-07-21 18:29：reviewer 复审为 `No findings`，确认 pinned layout finding 及完整性能改动范围闭环。修复后的完整门禁由 reviewer 再次执行并通过：应用 **28 files / 262 tests**、Worker **3 files / 26 tests**、`npm run typecheck`、`npm run build`、`npm run build:worker`、`git diff --check f470f9d` 均成功；五 seed 武装率与完整局唯一胜者保持。最终独立基准为 300 rays 中位 `6.96ms`、60 paths 中位 `82.82ms` 且 mismatch 0、四个完整死亡背包中位 `6.23ms`；时间仅作本机观察。当前无展示层改动、无已知 blocker/high/medium finding，等待提交推送。
+- 2026-07-21 18:31：第二轮性能余量优化及 reviewer 闭环已提交并推送 `main`，实现提交为 `0a40305 perf: improve simulation headroom`；`origin/main` 已对齐。未跟踪参考文件 `session-ses_082c.md` 未加入提交，等待主分支 CI 与自动部署完成。
 
 ## 审查
 
