@@ -577,6 +577,7 @@
 - 2026-07-21 18:18：新增超过 8 个其他 seed 驱逐全局 cache 后的结构回归，以 Proxy 断言死亡掉落和 forced relocation 仍读取原 pinned layout，而非用不稳定耗时阈值；同时固化负坐标、格边界、极小正 delta 和 generation wrap 的静态格测试。`typecheck:app` 以及 Inventory/Bot/StaticGrid/MatchRuntime **4 files / 80 tests** 通过，等待 reviewer 复审和最终完整门禁。
 - 2026-07-21 18:29：reviewer 复审为 `No findings`，确认 pinned layout finding 及完整性能改动范围闭环。修复后的完整门禁由 reviewer 再次执行并通过：应用 **28 files / 262 tests**、Worker **3 files / 26 tests**、`npm run typecheck`、`npm run build`、`npm run build:worker`、`git diff --check f470f9d` 均成功；五 seed 武装率与完整局唯一胜者保持。最终独立基准为 300 rays 中位 `6.96ms`、60 paths 中位 `82.82ms` 且 mismatch 0、四个完整死亡背包中位 `6.23ms`；时间仅作本机观察。当前无展示层改动、无已知 blocker/high/medium finding，等待提交推送。
 - 2026-07-21 18:31：第二轮性能余量优化及 reviewer 闭环已提交并推送 `main`，实现提交为 `0a40305 perf: improve simulation headroom`；`origin/main` 已对齐。未跟踪参考文件 `session-ses_082c.md` 未加入提交，等待主分支 CI 与自动部署完成。
+- 2026-07-21 18:36：记录提交 `758c2fc docs: record performance optimization` 后，覆盖完整实现的主分支 CI `29822566601` 与 GitHub Pages 均成功；实现提交对应的前一 run 因后续文档 push 被 concurrency 正常取消，不代表校验失败。Cloudflare Pages production deployment `bcab4c96-1b02-4153-8d76-b42b5633affd` 已发布 `758c2fc`，实现提交 `0a40305` 亦有成功 deployment `392673a2-25f5-4ca5-a046-116b0b7884f1`。等待提交本条最终部署记录。
 
 ## 审查
 
