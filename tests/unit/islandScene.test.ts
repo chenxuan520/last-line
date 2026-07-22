@@ -3,6 +3,8 @@ import { BackgroundMaterial } from "@babylonjs/core/Materials/Background/backgro
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { MultiMaterial } from "@babylonjs/core/Materials/multiMaterial";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
+import { VertexBuffer } from "@babylonjs/core/Buffers/buffer";
+import { InstancedMesh } from "@babylonjs/core/Meshes/instancedMesh";
 import { Ray } from "@babylonjs/core/Culling/ray";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -138,6 +140,8 @@ describe("IslandScene lifecycle", () => {
       expect(terrainColors.size).toBeGreaterThan(100);
       expect(treeTrunks).toHaveLength(384);
       expect(treeFoliage).toHaveLength(384);
+      expect(treeTrunks.every((mesh) => mesh instanceof InstancedMesh)).toBe(true);
+      expect(treeFoliage.every((mesh) => mesh instanceof InstancedMesh)).toBe(true);
       expect(treeFoliage.every((mesh) => mesh.getTotalVertices() < 160)).toBe(true);
       expect(hospitalCrosses).toHaveLength(1);
       expect(hospitalCrosses[0]).toMatchObject({ isPickable: false, checkCollisions: false });
@@ -255,7 +259,10 @@ describe("IslandScene lifecycle", () => {
         expect(lowerY).toBeCloseTo(getTerrainHeight(x, z, layout) + 0.12, 5);
         expect(upperY).toBeCloseTo(getTerrainHeight(x, z, layout) + 1.5, 5);
       }
+      const positionBuffer = bundle.safeZoneRing.getVertexBuffer(VertexBuffer.PositionKind);
       bundle.syncSafeZoneRing(40, -30, 100);
+      expect(bundle.safeZoneRing.getVertexBuffer(VertexBuffer.PositionKind)).toBe(positionBuffer);
+      expect(bundle.safeZoneRing.getVertexBuffer(VertexBuffer.NormalKind)).toBeFalsy();
       const movedRingPositions = bundle.safeZoneRing.getVerticesData("position") ?? [];
       expect(movedRingPositions[0]).toBeCloseTo(140);
       expect(movedRingPositions[2]).toBeCloseTo(-30);
@@ -541,21 +548,25 @@ describe("IslandScene lifecycle", () => {
       state.mapSeed,
       false,
       "human-1",
+      "low",
     );
 
     expect(bundle.scene.getMeshByName("body-human-1")).toBeNull();
     expect(bundle.scene.getMeshByName("body-human-2")).not.toBeNull();
     expect(bundle.actorRoots.get("human-2")?.getChildMeshes(false)
       .some((mesh) => mesh.metadata?.actorVisual === "parachute")).toBe(true);
+    expect(bundle.scene.meshes.filter((mesh) => /^tree-trunk-\d+$/.test(mesh.name))).toHaveLength(128);
+    expect(bundle.scene.meshes.filter((mesh) => /^rock-\d+$/.test(mesh.name))).toHaveLength(32);
+    expect(bundle.scene.meshes.filter((mesh) => /^shrub-\d+$/.test(mesh.name))).toHaveLength(60);
 
     bundle.scene.dispose();
     engine.dispose();
   }, 30_000);
 
-  it("loads and switches all three catalog weapon models for first and third person", async () => {
+  it("loads and switches all four catalog weapon models and character LODs", async () => {
     const assets = await createGlbAssets();
-    const state = createBattleRoyaleState("player", {
-      participantCount: 2,
+    const state = createBattleRoyaleStateForHumans(["player", "human-2"], {
+      participantCount: 3,
       flightSeconds: 1,
       safeZoneStages: [{ waitSeconds: 1, shrinkSeconds: 1, radius: 100, damagePerSecond: 1 }],
     }, () => 0.5);
@@ -569,7 +580,8 @@ describe("IslandScene lifecycle", () => {
 
     const bundle = await createIslandScene(engine, assets, state.actors, state.groundLoot, state.mapSeed);
     const botRoot = bundle.actorRoots.get(bot.id);
-    if (!botRoot) throw new Error("test bot root missing");
+    const humanRoot = bundle.actorRoots.get("human-2");
+    if (!botRoot || !humanRoot) throw new Error("test remote roots missing");
     const viewMeshes = bundle.viewWeaponRoot.getChildMeshes(false)
       .filter((mesh) => mesh.metadata?.actorVisual === "weapon");
     const botMeshes = botRoot.getChildMeshes(false)
@@ -578,12 +590,28 @@ describe("IslandScene lifecycle", () => {
     for (const weaponId of ["rifle", "smg", "shotgun", "sniper"] as const) {
       expect(viewMeshes.some((mesh) => mesh.metadata?.visualModel === `model.weapon.${weaponId}`)).toBe(true);
       expect(botMeshes.some((mesh) => mesh.metadata?.visualModel === `model.weapon.${weaponId}`)).toBe(true);
+      expect(botMeshes.some((mesh) => mesh.metadata?.visualModel === `model.weapon.${weaponId}.lod1`)).toBe(true);
     }
-    expect(botMeshes.some((mesh) => mesh.metadata?.visualModel === "model.character.enemy")).toBe(false);
+    const baseCharacter = bundle.scene.getTransformNodeByName(`${bot.id}-character-base`);
+    const lodCharacter = bundle.scene.getTransformNodeByName(`${bot.id}-character-lod1`);
+    expect(baseCharacter?.metadata?.visualModel).toBe("model.character.enemy");
+    expect(lodCharacter?.metadata?.visualModel).toBe("model.character.enemy.lod1");
+    expect(bundle.scene.getTransformNodeByName("human-2-character-base")?.metadata?.visualModel)
+      .toBe("model.character.player");
+    expect(bundle.scene.getTransformNodeByName("human-2-character-lod1")?.metadata?.visualModel)
+      .toBe("model.character.player.lod1");
+    bundle.camera.position.copyFrom(botRoot.position);
+    bundle.scene.render();
+    expect(baseCharacter?.isEnabled()).toBe(true);
+    expect(lodCharacter?.isEnabled()).toBe(false);
+    bundle.camera.position.set(1_000, 200, 1_000);
+    bundle.scene.render();
+    expect(baseCharacter?.isEnabled()).toBe(false);
+    expect(lodCharacter?.isEnabled()).toBe(true);
     expect(botRoot.getChildMeshes(false).filter((mesh) => mesh.metadata?.actorVisual === "parachute")
       .every((mesh) => mesh.isEnabled(false))).toBe(true);
     expect(botMeshes.filter((mesh) => mesh.metadata?.weaponId === "smg" && mesh.metadata?.visualModel)
-      .every((mesh) => mesh.isEnabled(false))).toBe(true);
+      .some((mesh) => mesh.isEnabled())).toBe(true);
     setActorWeaponVisual(bundle.viewWeaponRoot, "shotgun");
     expect(viewMeshes.filter((mesh) => mesh.metadata?.visualModel === "model.weapon.shotgun")
       .every((mesh) => mesh.isEnabled(false))).toBe(true);
@@ -594,6 +622,36 @@ describe("IslandScene lifecycle", () => {
 
     bundle.scene.dispose();
     expect(engine.scenes).toHaveLength(0);
+    engine.dispose();
+  }, 30_000);
+
+  it("keeps procedural actors and does not download GLBs on low quality", async () => {
+    const assets = await createGlbAssets();
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockClear();
+    const state = createBattleRoyaleState("player", {
+      participantCount: 2,
+      flightSeconds: 1,
+      safeZoneStages: [{ waitSeconds: 1, shrinkSeconds: 1, radius: 100, damagePerSecond: 1 }],
+    }, () => 0.5);
+    const engine = new NullEngine();
+
+    const bundle = await createIslandScene(
+      engine,
+      assets,
+      state.actors,
+      state.groundLoot,
+      state.mapSeed,
+      false,
+      undefined,
+      "low",
+    );
+
+    expect(fetchMock.mock.calls.some(([input]) => input.toString().endsWith(".glb"))).toBe(false);
+    expect(bundle.scene.getMeshByName("body-bot-1")).not.toBeNull();
+    expect(bundle.scene.meshes.some((mesh) => mesh.metadata?.visualModel)).toBe(false);
+
+    bundle.scene.dispose();
     engine.dispose();
   }, 30_000);
 
@@ -707,14 +765,38 @@ async function createGlbAssets(): Promise<AssetCatalog> {
             "texture.sky.overcast",
             "texture.sky.storm",
           ].map((id) => ({ id, type: "svg", url: `/${id}.svg`, fallback: "fallback.ui" })),
-          { id: "model.character.player", type: "procedural-model", fallback: "fallback.model" },
-          { id: "model.character.enemy", type: "model", url: "/enemy.glb", fallback: "fallback.model" },
-          ...["rifle", "smg", "shotgun", "sniper"].map((weaponId) => ({
-            id: `model.weapon.${weaponId}`,
-            type: "model",
-            url: `/${weaponId}.glb`,
-            fallback: "fallback.model",
-          })),
+          ...["player", "enemy"].flatMap((kind) => [
+            {
+              id: `model.character.${kind}`,
+              type: "model",
+              url: `/${kind}.glb`,
+              fallback: "fallback.model",
+              metadata: { requiredNodes: "root,weapon_socket,backpack_socket" },
+            },
+            {
+              id: `model.character.${kind}.lod1`,
+              type: "model",
+              url: `/${kind}-lod1.glb`,
+              fallback: "fallback.model",
+              metadata: { requiredNodes: "root,weapon_socket,backpack_socket" },
+            },
+          ]),
+          ...["rifle", "smg", "shotgun", "sniper"].flatMap((weaponId) => [
+            {
+              id: `model.weapon.${weaponId}`,
+              type: "model",
+              url: `/${weaponId}.glb`,
+              fallback: "fallback.model",
+              metadata: { requiredNodes: "root,grip,muzzle" },
+            },
+            {
+              id: `model.weapon.${weaponId}.lod1`,
+              type: "model",
+              url: `/${weaponId}-lod1.glb`,
+              fallback: "fallback.model",
+              metadata: { requiredNodes: "root,grip,muzzle" },
+            },
+          ]),
         ],
       });
     }
@@ -734,7 +816,14 @@ function createMinimalGlb(): Uint8Array<ArrayBuffer> {
     asset: { version: "2.0" },
     scene: 0,
     scenes: [{ nodes: [0] }],
-    nodes: [{ name: "root", mesh: 0 }],
+    nodes: [
+      { name: "root", children: [1, 2, 3, 4, 5] },
+      { name: "visual", mesh: 0 },
+      { name: "weapon_socket", translation: [0.32, 0.9, 0.27] },
+      { name: "backpack_socket", translation: [0, 1.08, -0.42] },
+      { name: "grip", translation: [0, -0.14, -0.08] },
+      { name: "muzzle", translation: [0, 0, 1.2] },
+    ],
     buffers: [{ byteLength: 36 }],
     bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: 36, target: 34962 }],
     accessors: [{

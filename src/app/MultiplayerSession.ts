@@ -88,6 +88,7 @@ export class MultiplayerSession implements GameSession {
   private playerEliminated = false;
   private spectatorActorId: EntityId | null = null;
   private visibleActorIds = new Set<EntityId>();
+  private lastViewWeaponId: string | null = null;
 
   private constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -145,6 +146,7 @@ export class MultiplayerSession implements GameSession {
       initial.state.mapSeed,
       settings.showGroundLootModels,
       initial.localActorId,
+      settings.quality,
     );
     return new MultiplayerSession(
       canvas,
@@ -172,7 +174,7 @@ export class MultiplayerSession implements GameSession {
       { online: true, actorLabels: this.displayNames, touchInput: this.humanController.usesTouchControls() },
     );
     this.audio.start();
-    this.syncVisuals();
+    this.syncVisuals(0);
     this.synchronizeOutcome();
     this.resumeInput();
   }
@@ -196,7 +198,7 @@ export class MultiplayerSession implements GameSession {
       this.clock.advance(frameSeconds, (deltaSeconds) => this.sendInput(deltaSeconds));
     }
     this.effects.update(frameSeconds);
-    this.syncVisuals();
+    this.syncVisuals(frameSeconds);
     const viewedActor = this.spectatorActorId ? this.state.actors[this.spectatorActorId] ?? player : player;
     const inputActive = this.humanController.isGameplayInputActive();
     this.hud?.update(
@@ -204,6 +206,7 @@ export class MultiplayerSession implements GameSession {
       player,
       viewedActor,
       inputActive,
+      frameSeconds,
       fps,
       this.humanController.isScoped(player),
       this.humanController.isLeaderboardVisible(),
@@ -459,27 +462,43 @@ export class MultiplayerSession implements GameSession {
     }
   }
 
-  private syncVisuals(): void {
+  private syncVisuals(frameSeconds: number): void {
     const player = this.getActor(this.localActorId);
     const spectator = this.spectatorActorId ? this.state.actors[this.spectatorActorId] : undefined;
     const cameraActor = spectator ?? player;
     const activeViewWeapon = getActiveWeapon(cameraActor);
     const scoped = cameraActor.id === this.localActorId && this.humanController.isScoped(player);
-    this.camera.fov = scoped ? WEAPONS[activeViewWeapon?.weaponId ?? ""]?.scopeFov ?? 1.18 : 1.18;
-    this.viewWeaponRoot.setEnabled(Boolean(activeViewWeapon) && !scoped && cameraActor.deployment === "grounded");
-    setActorWeaponVisual(this.viewWeaponRoot, activeViewWeapon?.weaponId ?? null);
-    this.aircraftInteriorRoot.setEnabled(cameraActor.id === this.localActorId && player.deployment === "aircraft");
+    const targetFov = scoped ? WEAPONS[activeViewWeapon?.weaponId ?? ""]?.scopeFov ?? 1.18 : 1.18;
+    if (this.camera.fov !== targetFov) this.camera.fov = targetFov;
+    const viewWeaponEnabled = Boolean(activeViewWeapon) && !scoped && cameraActor.deployment === "grounded";
+    if (this.viewWeaponRoot.isEnabled() !== viewWeaponEnabled) this.viewWeaponRoot.setEnabled(viewWeaponEnabled);
+    const viewWeaponId = activeViewWeapon?.weaponId ?? null;
+    if (this.lastViewWeaponId !== viewWeaponId) {
+      setActorWeaponVisual(this.viewWeaponRoot, viewWeaponId);
+      this.lastViewWeaponId = viewWeaponId;
+    }
+    const aircraftInteriorEnabled = cameraActor.id === this.localActorId && player.deployment === "aircraft";
+    if (this.aircraftInteriorRoot.isEnabled() !== aircraftInteriorEnabled) {
+      this.aircraftInteriorRoot.setEnabled(aircraftInteriorEnabled);
+    }
     this.syncAircraftVisual(this.state.flight, this.state.phase === "flight" && player.deployment !== "aircraft");
     const cameraPose = this.getJumpVisualPose(cameraActor);
     const cameraPosition = this.visualPosition(cameraActor.id, cameraActor.position);
-    this.camera.position.set(cameraPosition.x, cameraPosition.y + cameraPose.cameraY, cameraPosition.z);
-    this.camera.rotation.set(cameraActor.pitch, cameraActor.yaw, 0);
+    const cameraY = cameraPosition.y + cameraPose.cameraY;
+    if (!this.camera.position.equalsToFloats(cameraPosition.x, cameraY, cameraPosition.z)) {
+      this.camera.position.set(cameraPosition.x, cameraY, cameraPosition.z);
+    }
+    if (!this.camera.rotation.equalsToFloats(cameraActor.pitch, cameraActor.yaw, 0)) {
+      this.camera.rotation.set(cameraActor.pitch, cameraActor.yaw, 0);
+    }
     this.syncViewWeaponVisual(activeViewWeapon, cameraPose.weaponY, cameraPose.weaponRotationX);
     for (const [actorId, root] of this.actorRoots) {
       const actor = this.getActor(actorId);
       const position = this.visualPosition(actorId, actor.position);
-      root.position.set(position.x, position.y, position.z);
-      root.rotation.y = actor.yaw;
+      if (!root.position.equalsToFloats(position.x, position.y, position.z)) {
+        root.position.set(position.x, position.y, position.z);
+      }
+      if (root.rotation.y !== actor.yaw) root.rotation.y = actor.yaw;
       const pose = this.getJumpVisualPose(actor);
       const visualRoot = this.actorVisualRoots.get(actorId);
       if (visualRoot) applyActorVisualPose(visualRoot, pose.actorY, pose.actorRotationX);
@@ -501,8 +520,11 @@ export class MultiplayerSession implements GameSession {
     }
     for (const [lootId, mesh] of this.lootMeshes) {
       const loot = this.state.groundLoot[lootId];
-      mesh.setEnabled(Boolean(loot?.available));
-      if (loot?.available) mesh.rotation.y += mesh.metadata?.lootModel === true ? 0.008 : 0.06;
+      const enabled = Boolean(loot?.available);
+      if (mesh.isEnabled(false) !== enabled) mesh.setEnabled(enabled);
+      if (enabled) {
+        mesh.rotation.y += (mesh.metadata?.lootModel === true ? 0.24 : 1.8) * Math.min(frameSeconds, 0.1);
+      }
     }
     this.syncSafeZoneRing(this.state.safeZone.center.x, this.state.safeZone.center.z, this.state.safeZone.radius);
   }
@@ -549,12 +571,13 @@ export class MultiplayerSession implements GameSession {
     jumpRotationX: number,
   ): void {
     const reload = getReloadVisualTransform(weapon);
-    this.viewWeaponRoot.position.set(0, (reload?.y ?? 0) + jumpY, 0);
-    this.viewWeaponRoot.rotation.set(
-      (reload?.rotationX ?? 0) + jumpRotationX,
-      0,
-      reload?.rotationZ ?? 0,
-    );
+    const y = (reload?.y ?? 0) + jumpY;
+    const rotationX = (reload?.rotationX ?? 0) + jumpRotationX;
+    const rotationZ = reload?.rotationZ ?? 0;
+    if (!this.viewWeaponRoot.position.equalsToFloats(0, y, 0)) this.viewWeaponRoot.position.set(0, y, 0);
+    if (!this.viewWeaponRoot.rotation.equalsToFloats(rotationX, 0, rotationZ)) {
+      this.viewWeaponRoot.rotation.set(rotationX, 0, rotationZ);
+    }
   }
 
   private getJumpVisualPose(actor: ActorState) {

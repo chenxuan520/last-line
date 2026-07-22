@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createMinimapView, projectToMinimap } from "../../src/client/ui/minimap";
 import {
   combatCounterLabel,
+  createLeaderboardSignature,
   createMinimapSignature,
   pickupPromptSignature,
   pickupPromptText,
@@ -118,6 +119,12 @@ describe("minimap projection", () => {
       "player",
       "bot-2",
     ]);
+    const signature = createLeaderboardSignature([player, bot1, bot2]);
+    player.position.x += 10;
+    player.yaw += 1;
+    expect(createLeaderboardSignature([bot2, player, bot1])).toBe(signature);
+    player.kills += 1;
+    expect(createLeaderboardSignature([player, bot1, bot2])).not.toBe(signature);
   });
 
   it("switches the flight counter to kills as soon as the player lands", () => {

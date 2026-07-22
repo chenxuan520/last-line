@@ -2,7 +2,7 @@ import { Engine } from "@babylonjs/core/Engines/engine";
 import { AssetCatalog } from "../assets/AssetCatalog";
 import { AudioFeedback } from "../client/audio/AudioFeedback";
 import { BATTLE_ROYALE_CONFIG } from "../config/battleRoyale";
-import { DEFAULT_SETTINGS, type GameSettings, type QualityLevel } from "../config/settings";
+import { DEFAULT_SETTINGS, QUALITY_PROFILES, type GameSettings, type QualityLevel } from "../config/settings";
 import {
   getDefaultMultiplayerApiUrl,
   MultiplayerAuthClient,
@@ -543,7 +543,9 @@ export class GameApp {
   }
 
   private applyQuality(): void {
-    this.engine.setHardwareScalingLevel(this.settings.quality === "high" ? 1 : this.settings.quality === "medium" ? 1.35 : 1.75);
+    const profile = QUALITY_PROFILES[this.settings.quality];
+    this.engine.setHardwareScalingLevel(profile.hardwareScalingLevel);
+    this.engine.maxFPS = profile.maxFps;
   }
 
   private renderError(error: unknown): void {

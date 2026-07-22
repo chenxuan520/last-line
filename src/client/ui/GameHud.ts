@@ -28,6 +28,9 @@ export class GameHud {
   private minimapSignature = "";
   private healingSignature = "";
   private promptSignature = "";
+  private leaderboardSignature = "";
+  private leaderboardVisible = false;
+  private refreshSeconds = 0.1;
 
   public constructor(
     private readonly root: HTMLDivElement,
@@ -160,11 +163,40 @@ export class GameHud {
     player: ActorState,
     viewedActor: ActorState,
     inputActive: boolean,
+    frameSeconds: number,
     fps: number,
     scoped = false,
     leaderboardVisible = false,
     orientationBlocked = false,
   ): void {
+    const weapon = getActiveWeapon(viewedActor);
+    const config = weapon ? WEAPONS[weapon.weaponId] : undefined;
+    const scopedWeapon = config?.scopeFov !== undefined;
+    this.requireElement("scope").classList.toggle("is-visible", scoped);
+    this.requireElement("crosshair").classList.toggle("is-hidden", scopedWeapon);
+    this.requireElement("pause").classList.toggle(
+      "is-visible",
+      !inputActive && !orientationBlocked && player.alive && !this.resultVisible,
+    );
+    this.requireElement("orientation").classList.toggle("is-visible", orientationBlocked && player.alive && !this.resultVisible);
+    this.elements.get("touch-controls")?.classList.toggle(
+      "is-visible",
+      inputActive && !orientationBlocked && player.alive && !this.resultVisible,
+    );
+    this.root.querySelector<HTMLElement>("[data-touch-action='scope']")?.classList.toggle("is-active", scoped);
+    const leaderboardBecameVisible = leaderboardVisible && !this.leaderboardVisible;
+    const leaderboard = this.requireElement("leaderboard");
+    if (leaderboard.hidden === leaderboardVisible) leaderboard.hidden = !leaderboardVisible;
+    this.leaderboardVisible = leaderboardVisible;
+
+    this.refreshSeconds += Math.max(0, frameSeconds);
+    const refresh = this.refreshSeconds >= 0.1;
+    if (refresh) this.refreshSeconds %= 0.1;
+    if (leaderboardVisible && (leaderboardBecameVisible || refresh)) {
+      this.updateLeaderboard(state, player.id);
+    }
+    if (!refresh) return;
+
     this.setText("health", Math.ceil(viewedActor.health).toString());
     this.setText("armor", Math.ceil(viewedActor.armor).toString());
     this.setText("helmet", viewedActor.inventory.helmetLevel.toString());
@@ -189,11 +221,6 @@ export class GameHud {
       this.healingSignature = healingSignature;
     }
 
-    const weapon = getActiveWeapon(viewedActor);
-    const config = weapon ? WEAPONS[weapon.weaponId] : undefined;
-    const scopedWeapon = config?.scopeFov !== undefined;
-    this.requireElement("scope").classList.toggle("is-visible", scoped);
-    this.requireElement("crosshair").classList.toggle("is-hidden", scopedWeapon);
     const weaponIconId = weapon ? getItemIconAssetId(`weapon.${weapon.weaponId}`) : "";
     if (weaponIconId !== this.weaponIconId) {
       const weaponIcon = this.requireElement("weapon-icon") as HTMLImageElement;
@@ -221,24 +248,14 @@ export class GameHud {
       this.setText("prompt", pickupPromptText(player, state.groundLoot, this.options.touchInput === true));
       this.promptSignature = promptSignature;
     }
-    this.requireElement("pause").classList.toggle(
-      "is-visible",
-      !inputActive && !orientationBlocked && player.alive && !this.resultVisible,
-    );
-    this.requireElement("orientation").classList.toggle("is-visible", orientationBlocked && player.alive && !this.resultVisible);
-    this.elements.get("touch-controls")?.classList.toggle(
-      "is-visible",
-      inputActive && !orientationBlocked && player.alive && !this.resultVisible,
-    );
-    this.root.querySelector<HTMLElement>("[data-touch-action='scope']")?.classList.toggle("is-active", scoped);
-    this.updateLeaderboard(state, player.id, leaderboardVisible);
   }
 
-  private updateLeaderboard(state: MatchState, playerId: string, visible: boolean): void {
-    const leaderboard = this.requireElement("leaderboard");
-    leaderboard.hidden = !visible;
-    if (!visible) return;
-    const actors = sortLeaderboardActors(Object.values(state.actors));
+  private updateLeaderboard(state: MatchState, playerId: string): void {
+    const actorValues = Object.values(state.actors);
+    const signature = createLeaderboardSignature(actorValues);
+    if (signature === this.leaderboardSignature) return;
+    this.leaderboardSignature = signature;
+    const actors = sortLeaderboardActors(actorValues);
     const fragment = document.createDocumentFragment();
     actors.forEach((actor, index) => {
       const row = document.createElement("div");
@@ -467,6 +484,13 @@ export function sortLeaderboardActors(actors: readonly ActorState[]): ActorState
     right.kills - left.kills ||
     left.id.localeCompare(right.id),
   );
+}
+
+export function createLeaderboardSignature(actors: readonly ActorState[]): string {
+  return actors
+    .map((actor) => `${actor.id}:${actor.alive ? 1 : 0}:${actor.kills}`)
+    .sort()
+    .join("|");
 }
 
 export function createMinimapSignature(state: MatchState, actor: ActorState): string {

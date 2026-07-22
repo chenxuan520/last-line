@@ -193,39 +193,95 @@
     },
     {
       "id": "model.character.player",
-      "type": "procedural-model",
+      "type": "model",
+      "url": "./assets/models/character-player.glb",
       "fallback": "fallback.model",
-      "metadata": { "shape": "soldier", "color": "#809d5e" }
+      "metadata": {
+        "shape": "soldier",
+        "color": "#809d5e",
+        "requiredNodes": "root,weapon_socket,backpack_socket"
+      }
+    },
+    {
+      "id": "model.character.player.lod1",
+      "type": "model",
+      "url": "./assets/models/character-player-lod1.glb",
+      "fallback": "fallback.model",
+      "metadata": { "requiredNodes": "root,weapon_socket,backpack_socket" }
     },
     {
       "id": "model.character.enemy",
-      "type": "procedural-model",
+      "type": "model",
+      "url": "./assets/models/character-enemy.glb",
       "fallback": "fallback.model",
-      "metadata": { "shape": "soldier", "color": "#bd6357" }
+      "metadata": {
+        "shape": "soldier",
+        "color": "#bd6357",
+        "requiredNodes": "root,weapon_socket,backpack_socket"
+      }
+    },
+    {
+      "id": "model.character.enemy.lod1",
+      "type": "model",
+      "url": "./assets/models/character-enemy-lod1.glb",
+      "fallback": "fallback.model",
+      "metadata": { "requiredNodes": "root,weapon_socket,backpack_socket" }
     },
     {
       "id": "model.weapon.rifle",
-      "type": "procedural-model",
+      "type": "model",
+      "url": "./assets/models/weapon-rifle.glb",
       "fallback": "fallback.model",
-      "metadata": { "shape": "rifle", "color": "#283126" }
+      "metadata": { "shape": "rifle", "color": "#283126", "requiredNodes": "root,grip,muzzle" }
+    },
+    {
+      "id": "model.weapon.rifle.lod1",
+      "type": "model",
+      "url": "./assets/models/weapon-rifle-lod1.glb",
+      "fallback": "fallback.model",
+      "metadata": { "requiredNodes": "root,grip,muzzle" }
     },
     {
       "id": "model.weapon.smg",
-      "type": "procedural-model",
+      "type": "model",
+      "url": "./assets/models/weapon-smg.glb",
       "fallback": "fallback.model",
-      "metadata": { "shape": "smg", "color": "#263838" }
+      "metadata": { "shape": "smg", "color": "#263838", "requiredNodes": "root,grip,muzzle" }
+    },
+    {
+      "id": "model.weapon.smg.lod1",
+      "type": "model",
+      "url": "./assets/models/weapon-smg-lod1.glb",
+      "fallback": "fallback.model",
+      "metadata": { "requiredNodes": "root,grip,muzzle" }
     },
     {
       "id": "model.weapon.shotgun",
-      "type": "procedural-model",
+      "type": "model",
+      "url": "./assets/models/weapon-shotgun.glb",
       "fallback": "fallback.model",
-      "metadata": { "shape": "shotgun", "color": "#3b3028" }
+      "metadata": { "shape": "shotgun", "color": "#3b3028", "requiredNodes": "root,grip,muzzle" }
+    },
+    {
+      "id": "model.weapon.shotgun.lod1",
+      "type": "model",
+      "url": "./assets/models/weapon-shotgun-lod1.glb",
+      "fallback": "fallback.model",
+      "metadata": { "requiredNodes": "root,grip,muzzle" }
     },
     {
       "id": "model.weapon.sniper",
-      "type": "procedural-model",
+      "type": "model",
+      "url": "./assets/models/weapon-sniper.glb",
       "fallback": "fallback.model",
-      "metadata": { "shape": "sniper", "color": "#354238" }
+      "metadata": { "shape": "sniper", "color": "#354238", "requiredNodes": "root,grip,muzzle" }
+    },
+    {
+      "id": "model.weapon.sniper.lod1",
+      "type": "model",
+      "url": "./assets/models/weapon-sniper-lod1.glb",
+      "fallback": "fallback.model",
+      "metadata": { "requiredNodes": "root,grip,muzzle" }
     }
   ]
 }

@@ -36,9 +36,13 @@ URL-backed entries also require `url`. Replaceable entries should define a type-
 
 ## Loading and Fallback
 
-The catalog preloads URL-backed assets and caches bytes. It validates manifest shape, duplicate IDs, fallback existence, fallback type, SVG structure, and browser image decoding.
+The catalog preloads URL-backed UI and image assets and caches bytes. GLBs are loaded and cached on demand when a medium/high-quality scene needs them; low quality keeps the procedural character/weapon fallback and does not download GLBs. The catalog validates manifest shape, duplicate IDs, fallback existence, fallback type, SVG structure, and browser image decoding.
 
 GLB loading additionally requires at least one renderable mesh. If `requiredNodes` is present, every comma-separated node must exist. A network, decode, mesh, or node failure logs the resource ID and keeps the procedural fallback.
+
+Character GLBs use `root,weapon_socket,backpack_socket`; weapon GLBs use `root,grip,muzzle`. The stable base IDs have matching `.lod1` IDs, for example `model.character.enemy.lod1` and `model.weapon.rifle.lod1`. The client selects character base/LOD1 groups by camera distance; this is presentation-only and never enters authoritative match state.
+
+Remote human actors use `model.character.player`, bots use `model.character.enemy`, and the local first-person actor does not render a third-person body. Third-person weapons align their `grip` node to the character `weapon_socket`; the first-person view always uses the base weapon asset.
 
 ## Gameplay Isolation
 

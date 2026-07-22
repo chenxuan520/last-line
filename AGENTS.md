@@ -75,7 +75,7 @@ npm run preview
 - Resolve every blocker, high, and medium finding, then request re-review. Do not commit, push, deploy, or report completion while any such finding remains, unless the plan records a specific, evidence-backed reason that no code change is required.
 - Record each review round and the disposition of every finding in the current plan's `## Review`; record implementation, validation, commit, and deployment results incrementally under `## Build`.
 - Keep engineering documentation current in the same change. Update `AGENTS.md`, README, and relevant `docs/` whenever architecture, contracts, security, persistence, deployment, commands, or long-term validation rules change.
-- After any Chrome/Edge verification, close every page/context opened for the task, stop its local servers, and confirm only the unavoidable blank page remains. Keep volume at `0` throughout.
+- Immediately after each Chrome/Edge MCP verification—not later at task completion—actively close every page/context opened for that verification, stop every local server it started, and confirm only the unavoidable `about:blank` page remains before continuing other work. Never leave an opened verification page, browser context, render loop, or local server running between verification rounds. Keep volume at `0` throughout.
 
 ## Completion Checklist
 

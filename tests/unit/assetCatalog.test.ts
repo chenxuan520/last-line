@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { AssetCatalog } from "../../src/assets/AssetCatalog";
 import { validateAssetManifest } from "../../src/assets/validateAssetManifest";
+import productionManifest from "../../public/assets/asset-manifest.json";
 
 const manifest = validateAssetManifest({
   version: 1,
@@ -48,6 +49,32 @@ describe("asset manifest", () => {
         ],
       }),
     ).toThrow("fallback 类型不兼容");
+  });
+
+  it("declares base and LOD1 GLBs with the required model nodes", () => {
+    const production = validateAssetManifest(productionManifest);
+    for (const character of ["player", "enemy"]) {
+      for (const suffix of ["", ".lod1"]) {
+        const entry = production.assets.find((asset) => asset.id === `model.character.${character}${suffix}`);
+        expect(entry).toMatchObject({
+          type: "model",
+          fallback: "fallback.model",
+          metadata: { requiredNodes: "root,weapon_socket,backpack_socket" },
+        });
+        expect(entry?.url).toMatch(/\.glb$/);
+      }
+    }
+    for (const weapon of ["rifle", "smg", "shotgun", "sniper"]) {
+      for (const suffix of ["", ".lod1"]) {
+        const entry = production.assets.find((asset) => asset.id === `model.weapon.${weapon}${suffix}`);
+        expect(entry).toMatchObject({
+          type: "model",
+          fallback: "fallback.model",
+          metadata: { requiredNodes: "root,grip,muzzle" },
+        });
+        expect(entry?.url).toMatch(/\.glb$/);
+      }
+    }
   });
 
   it("preloads payloads and falls back after a network failure", async () => {

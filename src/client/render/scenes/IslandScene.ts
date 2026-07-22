@@ -14,6 +14,8 @@ import { CreateCapsule } from "@babylonjs/core/Meshes/Builders/capsuleBuilder";
 import { CreateCylinder } from "@babylonjs/core/Meshes/Builders/cylinderBuilder";
 import { CreateGround } from "@babylonjs/core/Meshes/Builders/groundBuilder";
 import { CreateSphere } from "@babylonjs/core/Meshes/Builders/sphereBuilder";
+import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
+import "@babylonjs/core/Meshes/instancedMesh";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { SubMesh } from "@babylonjs/core/Meshes/subMesh";
 import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
@@ -34,6 +36,7 @@ import {
   type MapWallOpening,
 } from "../../../config/map";
 import { getActiveWeapon, type ActorState, type EntityId, type FlightState, type GroundLootState } from "../../../game/state/types";
+import { QUALITY_PROFILES, type QualityLevel, type QualityProfile } from "../../../config/settings";
 import { syncLootMarkerViews, type LootMarkerViewAdapter } from "../LootMarkerViewAdapter";
 import { loadCatalogModel } from "../loadCatalogModel";
 import { getPoiVisualType } from "../../poiVisuals";
@@ -130,6 +133,7 @@ export async function createIslandScene(
   mapSeed = 0,
   showGroundLootModels = true,
   localActorId?: EntityId,
+  quality: QualityLevel = "high",
 ): Promise<IslandSceneBundle> {
   const player = (localActorId ? actors[localActorId] : undefined) ??
     Object.values(actors).find((actor) => actor.kind === "player");
@@ -160,7 +164,8 @@ export async function createIslandScene(
 
   const materials = createMaterials(scene, assets);
   createSkyDome(scene, assets, mapSeed);
-  createIslandEnvironment(scene, materials, layout);
+  const qualityProfile = QUALITY_PROFILES[quality];
+  createIslandEnvironment(scene, materials, layout, qualityProfile);
   createPois(scene, materials, layout);
 
   const { actorRoots, actorVisualRoots } = createActors(scene, actors, materials, player.id);
@@ -171,18 +176,31 @@ export async function createIslandScene(
   aircraftVisualRoot.setEnabled(false);
   const syncAircraftVisual = (flight: FlightState, visible: boolean): void => {
     const progress = Math.max(0, Math.min(1, flight.progress));
-    aircraftVisualRoot.position.set(
-      lerp(flight.start.x, flight.end.x, progress),
-      lerp(flight.start.y, flight.end.y, progress),
-      lerp(flight.start.z, flight.end.z, progress),
-    );
-    aircraftVisualRoot.rotation.y = Math.atan2(flight.end.x - flight.start.x, flight.end.z - flight.start.z);
-    aircraftVisualRoot.setEnabled(visible && progress < 1);
+    const x = lerp(flight.start.x, flight.end.x, progress);
+    const y = lerp(flight.start.y, flight.end.y, progress);
+    const z = lerp(flight.start.z, flight.end.z, progress);
+    if (!aircraftVisualRoot.position.equalsToFloats(x, y, z)) aircraftVisualRoot.position.set(x, y, z);
+    const yaw = Math.atan2(flight.end.x - flight.start.x, flight.end.z - flight.start.z);
+    if (aircraftVisualRoot.rotation.y !== yaw) aircraftVisualRoot.rotation.y = yaw;
+    const enabled = visible && progress < 1;
+    if (aircraftVisualRoot.isEnabled() !== enabled) aircraftVisualRoot.setEnabled(enabled);
   };
   const viewWeaponRoot = createViewWeapon(scene, camera, materials);
   setActorWeaponVisual(viewWeaponRoot, getActiveWeapon(player)?.weaponId ?? null);
   viewWeaponRoot.setEnabled(Boolean(getActiveWeapon(player)));
-  await replaceCatalogModels(scene, assets, actors, actorRoots, actorVisualRoots, viewWeaponRoot, player.id);
+  if (quality !== "low") {
+    await replaceCatalogModels(
+      scene,
+      camera,
+      assets,
+      actors,
+      actorRoots,
+      actorVisualRoots,
+      viewWeaponRoot,
+      player.id,
+      qualityProfile.modelLodDistance,
+    );
+  }
 
   const { lootMeshes, syncLootMeshes } = createLootMeshes(
     scene,
@@ -215,53 +233,225 @@ export function getSkyAssetId(mapSeed: number): (typeof SKY_ASSET_IDS)[number] {
 
 async function replaceCatalogModels(
   scene: Scene,
+  camera: UniversalCamera,
   assets: AssetCatalog,
   actors: Readonly<Record<EntityId, ActorState>>,
   actorRoots: Map<EntityId, TransformNode>,
   actorVisualRoots: Map<EntityId, TransformNode>,
   viewWeaponRoot: TransformNode,
   localActorId: EntityId,
+  modelLodDistance: number,
 ): Promise<void> {
   const weaponIds = ["rifle", "smg", "shotgun", "sniper"] as const;
-  const [character, ...weapons] = await Promise.all([
-    loadCatalogModel(scene, assets, "model.character.enemy"),
-    ...weaponIds.map((weaponId) => loadCatalogModel(scene, assets, `model.weapon.${weaponId}`)),
-  ]);
+  const characterIds = ["player", "enemy"] as const;
+  const requiredCharacterIds = characterIds.filter((kind) => Object.values(actors).some((actor) =>
+    actor.id !== localActorId && (actor.kind === "player" ? "player" : "enemy") === kind
+  ));
+  const loadIfDeclared = (assetId: string) => assets.has(assetId)
+    ? loadCatalogModel(scene, assets, assetId)
+    : Promise.resolve(null);
+  const loadedCharacters = await Promise.all(requiredCharacterIds.flatMap((kind) => [
+    loadIfDeclared(`model.character.${kind}`),
+    loadIfDeclared(`model.character.${kind}.lod1`),
+  ]));
+  const loadedWeapons = await Promise.all(weaponIds.flatMap((weaponId) => [
+    loadIfDeclared(`model.weapon.${weaponId}`),
+    loadIfDeclared(`model.weapon.${weaponId}.lod1`),
+  ]));
+  const characterModels = new Map(requiredCharacterIds.map((kind, index) => [kind, {
+    base: loadedCharacters[index * 2] ?? null,
+    lod1: loadedCharacters[index * 2 + 1] ?? null,
+  }]));
+  const weaponModels = new Map(weaponIds.map((weaponId, index) => [weaponId, {
+    base: loadedWeapons[index * 2] ?? null,
+    lod1: loadedWeapons[index * 2 + 1] ?? null,
+  }]));
+  const loadedContainers = [...loadedCharacters, ...loadedWeapons]
+    .flatMap((loaded) => loaded ? [loaded.container] : []);
 
-  if (character) {
-    for (const actor of Object.values(actors)) {
-      if (actor.id === localActorId) continue;
-      const root = actorRoots.get(actor.id);
-      const visualRoot = actorVisualRoots.get(actor.id);
-      if (!root || !visualRoot) continue;
-      root.getChildMeshes()
-        .filter((mesh) => !["weapon", "parachute", "vest", "helmet", "backpack"].includes(mesh.metadata?.actorVisual))
-        .forEach((mesh) => mesh.setEnabled(false));
-      const instance = character.container.instantiateModelsToScene((name) => `${actor.id}-${name}`);
-      attachModel(instance.rootNodes, visualRoot, character.descriptor);
-    }
-    scene.onDisposeObservable.addOnce(() => character.container.dispose());
-  }
-
-  for (const [index, weapon] of weapons.entries()) {
-    const weaponId = weaponIds[index];
-    if (!weapon || !weaponId) continue;
+  for (const weaponId of weaponIds) {
+    const weapon = weaponModels.get(weaponId)?.base ?? weaponModels.get(weaponId)?.lod1;
+    if (!weapon) continue;
     suppressProceduralWeapon(viewWeaponRoot, weaponId);
     const viewInstance = weapon.container.instantiateModelsToScene((name) => `view-${weaponId}-${name}`);
     attachModel(viewInstance.rootNodes, viewWeaponRoot, weapon.descriptor, true, weaponId);
-    for (const actor of Object.values(actors)) {
-      if (actor.kind !== "bot") continue;
-      const root = actorRoots.get(actor.id);
-      const visualRoot = actorVisualRoots.get(actor.id);
-      if (!root || !visualRoot) continue;
-      suppressProceduralWeapon(root, weaponId);
-      const instance = weapon.container.instantiateModelsToScene((name) => `${actor.id}-${weaponId}-${name}`);
-      attachModel(instance.rootNodes, visualRoot, weapon.descriptor, false, weaponId);
-      setActorWeaponVisual(root, getActiveWeapon(actor)?.weaponId ?? null);
+  }
+  setActorWeaponVisual(viewWeaponRoot, getActiveWeapon(actors[localActorId])?.weaponId ?? null);
+
+  const actorLods: Array<{
+    actorRoot: TransformNode;
+    base: TransformNode | null;
+    lod1: TransformNode | null;
+  }> = [];
+  for (const actor of Object.values(actors)) {
+    if (actor.id === localActorId) continue;
+    const actorRoot = actorRoots.get(actor.id);
+    const visualRoot = actorVisualRoots.get(actor.id);
+    if (!actorRoot || !visualRoot) continue;
+    const kind = actor.kind === "player" ? "player" : "enemy";
+    const character = characterModels.get(kind);
+    if (!character?.base && !character?.lod1) continue;
+    suppressProceduralCharacter(actorRoot);
+    const base = character.base
+      ? instantiateCharacterModel(scene, character.base, actor, visualRoot, "base")
+      : null;
+    const lod1 = character.lod1
+      ? instantiateCharacterModel(scene, character.lod1, actor, visualRoot, "lod1")
+      : null;
+    const visuals = [base, lod1].filter((visual): visual is ImportedCharacterVisual => visual !== null);
+    suppressProceduralEquipment(actorRoot, visuals);
+    for (const visual of visuals) {
+      for (const weaponId of weaponIds) {
+        const models = weaponModels.get(weaponId);
+        const weapon = visual.lod === "lod1"
+          ? models?.lod1 ?? models?.base
+          : models?.base ?? models?.lod1;
+        if (!weapon) continue;
+        instantiateThirdPersonWeapon(weapon, actor, weaponId, visual.weaponSocket);
+        suppressProceduralWeapon(actorRoot, weaponId);
+      }
     }
-    const player = Object.values(actors).find((actor) => actor.kind === "player");
-    setActorWeaponVisual(viewWeaponRoot, player ? getActiveWeapon(player)?.weaponId ?? null : null);
-    scene.onDisposeObservable.addOnce(() => weapon.container.dispose());
+    setActorWeaponVisual(actorRoot, getActiveWeapon(actor)?.weaponId ?? null);
+    setActorEquipmentVisual(actorRoot, actor.inventory.armorLevel, actor.inventory.helmetLevel);
+    actorLods.push({ actorRoot, base: base?.group ?? null, lod1: lod1?.group ?? null });
+  }
+
+  const lodDistanceSquared = modelLodDistance * modelLodDistance;
+  const updateModelLods = (): void => {
+    const cameraPosition = camera.globalPosition;
+    for (const visual of actorLods) {
+      const useLod1 = Boolean(
+        visual.base &&
+        visual.lod1 &&
+        Vector3.DistanceSquared(cameraPosition, visual.actorRoot.getAbsolutePosition()) > lodDistanceSquared
+      );
+      const baseEnabled = !visual.lod1 || !useLod1;
+      const lod1Enabled = !visual.base || useLod1;
+      if (visual.base && visual.base.isEnabled() !== baseEnabled) visual.base.setEnabled(baseEnabled);
+      if (visual.lod1 && visual.lod1.isEnabled() !== lod1Enabled) visual.lod1.setEnabled(lod1Enabled);
+    }
+  };
+  updateModelLods();
+  const lodObserver = actorLods.length > 0 ? scene.onBeforeRenderObservable.add(updateModelLods) : null;
+  scene.onDisposeObservable.addOnce(() => {
+    if (lodObserver) scene.onBeforeRenderObservable.remove(lodObserver);
+    actorLods.length = 0;
+    for (const container of loadedContainers) container.dispose();
+  });
+}
+
+type LoadedCatalogModel = NonNullable<Awaited<ReturnType<typeof loadCatalogModel>>>;
+
+interface ImportedCharacterVisual {
+  group: TransformNode;
+  weaponSocket: TransformNode;
+  lod: "base" | "lod1";
+  hasArmor: boolean;
+  hasHelmet: boolean;
+}
+
+function instantiateCharacterModel(
+  scene: Scene,
+  loaded: LoadedCatalogModel,
+  actor: ActorState,
+  visualRoot: TransformNode,
+  lod: "base" | "lod1",
+): ImportedCharacterVisual | null {
+  const instance = loaded.container.instantiateModelsToScene((name) => `${actor.id}-${lod}-${name}`);
+  const group = new TransformNode(`${actor.id}-character-${lod}`, scene);
+  group.parent = visualRoot;
+  group.metadata = { visualModel: loaded.descriptor.id, modelLod: lod };
+  attachModel(instance.rootNodes, group, loaded.descriptor);
+  const weaponSocket = findImportedNode(instance.rootNodes, "weapon_socket");
+  if (!weaponSocket) {
+    group.dispose();
+    return null;
+  }
+  let hasArmor = false;
+  let hasHelmet = false;
+  for (const mesh of group.getChildMeshes(false)) {
+    const lowerName = mesh.name.toLowerCase();
+    const actorVisual = lowerName.includes("armor") ? "vest" : lowerName.includes("helmet") ? "helmet" : undefined;
+    if (actorVisual === "vest") hasArmor = true;
+    if (actorVisual === "helmet") hasHelmet = true;
+    mesh.metadata = {
+      ...mesh.metadata,
+      actorId: actor.id,
+      modelLod: lod,
+      ...(actorVisual ? { actorVisual } : {}),
+    };
+  }
+  return { group, weaponSocket, lod, hasArmor, hasHelmet };
+}
+
+function instantiateThirdPersonWeapon(
+  loaded: LoadedCatalogModel,
+  actor: ActorState,
+  weaponId: WeaponVisualId,
+  weaponSocket: TransformNode,
+): void {
+  const lod = loaded.descriptor.id.endsWith(".lod1") ? "lod1" : "base";
+  const instance = loaded.container.instantiateModelsToScene((name) =>
+    `${actor.id}-${lod}-${weaponId}-${name}`
+  );
+  const authoredRoot = findImportedNode(instance.rootNodes, "root");
+  const grip = findImportedNode(instance.rootNodes, "grip");
+  if (!authoredRoot || !grip) return;
+  const scale = 0.48;
+  const gripPosition = grip.position.clone();
+  authoredRoot.parent = weaponSocket;
+  authoredRoot.position.set(
+    -gripPosition.x * scale,
+    -gripPosition.y * scale,
+    -gripPosition.z * scale,
+  );
+  authoredRoot.scaling.setAll(scale);
+  for (const rootNode of instance.rootNodes) {
+    if (rootNode !== authoredRoot && rootNode instanceof TransformNode) rootNode.setEnabled(false);
+  }
+  for (const mesh of authoredRoot.getChildMeshes(false)) {
+    mesh.isPickable = false;
+    mesh.metadata = {
+      visualModel: loaded.descriptor.id,
+      actorId: actor.id,
+      actorVisual: "weapon",
+      weaponId,
+      modelLod: lod,
+    };
+    mesh.setEnabled(false);
+  }
+}
+
+function findImportedNode(nodes: readonly Node[], name: string): TransformNode | null {
+  for (const root of nodes) {
+    const candidates = [root, ...root.getDescendants(false)];
+    const match = candidates.find((node) => node.name === name || node.name.endsWith(`-${name}`));
+    if (match instanceof TransformNode) return match;
+  }
+  return null;
+}
+
+function suppressProceduralCharacter(root: TransformNode): void {
+  for (const mesh of root.getChildMeshes(false)) {
+    if (!["weapon", "parachute", "vest", "helmet"].includes(mesh.metadata?.actorVisual)) {
+      mesh.setEnabled(false);
+    }
+  }
+}
+
+function suppressProceduralEquipment(
+  root: TransformNode,
+  visuals: readonly ImportedCharacterVisual[],
+): void {
+  const hasArmor = visuals.some((visual) => visual.hasArmor);
+  const hasHelmet = visuals.some((visual) => visual.hasHelmet);
+  for (const mesh of root.getChildMeshes(false)) {
+    if (mesh.metadata?.visualModel) continue;
+    if ((mesh.metadata?.actorVisual === "vest" && hasArmor) ||
+      (mesh.metadata?.actorVisual === "helmet" && hasHelmet)) {
+      mesh.metadata = { ...mesh.metadata, equipmentFallbackSuppressed: true };
+      mesh.setEnabled(false);
+    }
   }
 }
 
@@ -393,7 +583,12 @@ function createMaterials(scene: Scene, assets: AssetCatalog): IslandMaterials {
   };
 }
 
-function createIslandEnvironment(scene: Scene, materials: IslandMaterials, layout: MapLayout): void {
+function createIslandEnvironment(
+  scene: Scene,
+  materials: IslandMaterials,
+  layout: MapLayout,
+  quality: QualityProfile,
+): void {
   createIslandPerimeter(scene, materials);
 
   const ground = CreateGround(
@@ -446,8 +641,8 @@ function createIslandEnvironment(scene: Scene, materials: IslandMaterials, layou
   createBuildingDetails(scene, materials, layout);
   createRoofRamps(scene, materials, layout);
   createCoverProps(scene, materials, layout);
-  createVegetation(scene, materials.trunk, materials.foliage, layout);
-  createNaturalDetails(scene, materials.rock, materials.shrub, layout);
+  createVegetation(scene, materials.trunk, materials.foliage, layout, quality);
+  createNaturalDetails(scene, materials.rock, materials.shrub, layout, quality);
   mergeStaticBatch(
     scene,
     "building-floor-slabs-batch",
@@ -905,9 +1100,10 @@ function createVegetation(
   trunkMaterial: StandardMaterial,
   foliageMaterial: StandardMaterial,
   layout: MapLayout,
+  quality: QualityProfile,
 ): void {
-  const treeCount = 384;
-  const mountainTreeCount = 160;
+  const treeCount = quality.treeCount;
+  const mountainTreeCount = quality.mountainTreeCount;
   const trunkTemplate = CreateCylinder(
     "tree-trunk-template",
     { height: 5.8, diameterTop: 0.55, diameterBottom: 1.1, tessellation: 7 },
@@ -949,26 +1145,20 @@ function createVegetation(
     const treeScale = index % 11 === 0 ? 1.4 : 0.96 + (index % 4) * 0.025;
     const foliageScaleY = treeScale * (0.94 + (index % 4) * 0.055);
 
-    const trunk = trunkTemplate.clone(`tree-trunk-${index}`);
-    if (trunk) {
-      trunk.position.set(x, terrainY + 2.9 * treeScale, z);
-      trunk.scaling.set(treeScale * (0.92 + (index % 3) * 0.04), treeScale, treeScale * 0.96);
-      trunk.isVisible = true;
-      markDecoration(trunk, "vegetation");
-    }
+    const trunk = trunkTemplate.createInstance(`tree-trunk-${index}`);
+    trunk.position.set(x, terrainY + 2.9 * treeScale, z);
+    trunk.scaling.set(treeScale * (0.92 + (index % 3) * 0.04), treeScale, treeScale * 0.96);
+    markDecoration(trunk, "vegetation");
 
-    const foliage = foliageTemplate.clone(`tree-foliage-${index}`);
-    if (foliage) {
-      foliage.position.set(x, terrainY + 5.8 * treeScale + 5.7 * foliageScaleY - 0.25, z);
-      foliage.isVisible = true;
-      foliage.rotation.y = random() * Math.PI * 2;
-      foliage.scaling.set(
-        treeScale * (0.9 + (index % 3) * 0.06),
-        foliageScaleY,
-        treeScale * (0.9 + ((index + 1) % 3) * 0.06),
-      );
-      markDecoration(foliage, "vegetation");
-    }
+    const foliage = foliageTemplate.createInstance(`tree-foliage-${index}`);
+    foliage.position.set(x, terrainY + 5.8 * treeScale + 5.7 * foliageScaleY - 0.25, z);
+    foliage.rotation.y = random() * Math.PI * 2;
+    foliage.scaling.set(
+      treeScale * (0.9 + (index % 3) * 0.06),
+      foliageScaleY,
+      treeScale * (0.9 + ((index + 1) % 3) * 0.06),
+    );
+    markDecoration(foliage, "vegetation");
   }
 }
 
@@ -977,10 +1167,11 @@ function createNaturalDetails(
   rockMaterial: StandardMaterial,
   shrubMaterial: StandardMaterial,
   layout: MapLayout,
+  quality: QualityProfile,
 ): void {
-  const rockCount = 96;
-  const mountainRockCount = 48;
-  const shrubCount = 180;
+  const rockCount = quality.decorativeRockCount;
+  const mountainRockCount = quality.mountainRockCount;
+  const shrubCount = quality.shrubCount;
   const random = createVisualRandom(layout.seed ^ 0x02e5be93);
   const rockTemplate = CreateSphere("rock-template", { diameter: 1, segments: 5 }, scene);
   rockTemplate.material = rockMaterial;
@@ -988,11 +1179,9 @@ function createNaturalDetails(
   rockTemplate.isPickable = false;
 
   for (const rock of layout.rockObstacles) {
-    const mesh = rockTemplate.clone(rock.id);
-    if (!mesh) continue;
+    const mesh = rockTemplate.createInstance(rock.id);
     mesh.position.set(rock.center.x, rock.center.y, rock.center.z);
     mesh.scaling.set(rock.width, rock.height, rock.depth);
-    mesh.isVisible = true;
     mesh.checkCollisions = false;
     mesh.isPickable = false;
     mesh.metadata = { decoration: "cover-rock", obstacleId: rock.id };
@@ -1000,8 +1189,7 @@ function createNaturalDetails(
   }
 
   for (let index = 0; index < rockCount; index += 1) {
-    const rock = rockTemplate.clone(`rock-${index}`);
-    if (!rock) continue;
+    const rock = rockTemplate.createInstance(`rock-${index}`);
     const position = index < mountainRockCount
       ? randomMountainPosition(random, layout, 3)
       : randomNaturalPosition(random, layout, 3);
@@ -1010,7 +1198,6 @@ function createNaturalDetails(
     rock.position.set(x, getTerrainHeight(x, z, layout) + 0.42 + (index % 3) * 0.12, z);
     rock.scaling.set(1.2 + (index % 4) * 0.38, 0.72 + (index % 3) * 0.18, 1 + ((index + 2) % 4) * 0.31);
     rock.rotation.y = random() * Math.PI * 2;
-    rock.isVisible = true;
     markNaturalDetail(rock, "rock");
   }
 
@@ -1019,15 +1206,13 @@ function createNaturalDetails(
   shrubTemplate.isVisible = false;
   shrubTemplate.isPickable = false;
   for (let index = 0; index < shrubCount; index += 1) {
-    const shrub = shrubTemplate.clone(`shrub-${index}`);
-    if (!shrub) continue;
+    const shrub = shrubTemplate.createInstance(`shrub-${index}`);
     const position = randomNaturalPosition(random, layout, 2);
     if (!position) continue;
     const { x, z } = position;
     shrub.position.set(x, getTerrainHeight(x, z, layout) + 0.68, z);
     shrub.scaling.set(2.1 + (index % 3) * 0.42, 1.05 + (index % 2) * 0.24, 1.8 + ((index + 1) % 3) * 0.36);
     shrub.rotation.y = random() * Math.PI * 2;
-    shrub.isVisible = true;
     markNaturalDetail(shrub, "shrub");
   }
 }
@@ -1143,8 +1328,8 @@ function createActors(
 }
 
 export function applyActorVisualPose(root: TransformNode, y: number, rotationX: number): void {
-  root.position.set(0, y, 0);
-  root.rotation.set(rotationX, 0, 0);
+  if (!root.position.equalsToFloats(0, y, 0)) root.position.set(0, y, 0);
+  if (!root.rotation.equalsToFloats(rotationX, 0, 0)) root.rotation.set(rotationX, 0, 0);
 }
 
 function createPlayerHitbox(
@@ -1236,14 +1421,17 @@ function createBot(scene: Scene, root: TransformNode, actorId: EntityId, materia
 export function setActorWeaponVisual(root: TransformNode, weaponId: string | null): void {
   for (const mesh of root.getChildMeshes(false)) {
     if (mesh.metadata?.actorVisual === "weapon") {
-      mesh.setEnabled(mesh.metadata.weaponId === weaponId && mesh.metadata.weaponFallbackSuppressed !== true);
+      const enabled = mesh.metadata.weaponId === weaponId && mesh.metadata.weaponFallbackSuppressed !== true;
+      if (mesh.isEnabled(false) !== enabled) mesh.setEnabled(enabled);
     }
   }
 }
 
 export function setActorParachuteVisual(root: TransformNode, parachuting: boolean): void {
   for (const mesh of root.getChildMeshes(false)) {
-    if (mesh.metadata?.actorVisual === "parachute") mesh.setEnabled(parachuting);
+    if (mesh.metadata?.actorVisual === "parachute" && mesh.isEnabled(false) !== parachuting) {
+      mesh.setEnabled(parachuting);
+    }
   }
 }
 
@@ -1253,14 +1441,24 @@ export function setActorEquipmentVisual(
   helmetLevel: number,
 ): void {
   for (const mesh of root.getChildMeshes(false)) {
-    if (mesh.metadata?.actorVisual === "vest") mesh.setEnabled(armorLevel > 0);
-    if (mesh.metadata?.actorVisual === "helmet") mesh.setEnabled(helmetLevel > 0);
+    if (mesh.metadata?.actorVisual === "vest") {
+      const enabled = armorLevel > 0 && mesh.metadata?.equipmentFallbackSuppressed !== true;
+      if (mesh.isEnabled(false) !== enabled) mesh.setEnabled(enabled);
+    }
+    if (mesh.metadata?.actorVisual === "helmet") {
+      const enabled = helmetLevel > 0 && mesh.metadata?.equipmentFallbackSuppressed !== true;
+      if (mesh.isEnabled(false) !== enabled) mesh.setEnabled(enabled);
+    }
   }
 }
 
 function suppressProceduralWeapon(root: TransformNode, weaponId: string): void {
   for (const mesh of root.getChildMeshes(false)) {
-    if (mesh.metadata?.actorVisual !== "weapon" || mesh.metadata.weaponId !== weaponId) continue;
+    if (
+      mesh.metadata?.actorVisual !== "weapon" ||
+      mesh.metadata.weaponId !== weaponId ||
+      mesh.metadata.weaponFallback !== true
+    ) continue;
     mesh.metadata = { ...mesh.metadata, weaponFallbackSuppressed: true };
     mesh.setEnabled(false);
   }
@@ -1696,35 +1894,45 @@ function createLootMeshes(
     },
     update(marker, loot) {
       const modelId = showGroundLootModels ? getModelId(loot.itemId) : "fallback";
-      const modelTemplate = modelTemplates.get(modelId);
-      if (showGroundLootModels && marker.metadata?.modelId !== modelId) {
-        modelTemplate?.geometry?.applyToMesh(marker);
-        if (modelTemplate) {
-          marker.rotation.copyFrom(modelTemplate.rotation);
-          marker.rotationQuaternion = modelTemplate.rotationQuaternion?.clone() ?? null;
-        }
-      }
-      marker.material = showGroundLootModels
-        ? getModelMaterial(modelId, loot.source === "death")
-        : (loot.source === "death" ? deathLootMaterial : lootMaterial);
-      const modelScale = showGroundLootModels ? groundLootModelScale(modelId) : 1;
-      marker.scaling.setAll(modelScale);
-      marker.position.set(
+      const visualSignature = [
+        loot.generation ?? 0,
+        loot.itemId,
+        loot.source ?? "spawn",
         loot.position.x,
-        loot.position.y + (showGroundLootModels
-          ? (modelGroundOffsets.get(modelId) ?? 0) - GROUND_LOOT_POSITION_HEIGHT
-          : 0),
+        loot.position.y,
         loot.position.z,
-      );
-      marker.metadata = {
-        lootId: loot.id,
-        itemId: loot.itemId,
-        lootSource: loot.source ?? "spawn",
-        lootModel: showGroundLootModels,
-        lootModelScale: modelScale,
-        modelId,
-      };
-      marker.setEnabled(loot.available);
+      ].join(":");
+      if (marker.metadata?.lootVisualSignature !== visualSignature) {
+        const modelTemplate = modelTemplates.get(modelId);
+        if (showGroundLootModels && marker.metadata?.modelId !== modelId) {
+          modelTemplate?.geometry?.applyToMesh(marker);
+          if (modelTemplate) {
+            marker.rotation.copyFrom(modelTemplate.rotation);
+            marker.rotationQuaternion = modelTemplate.rotationQuaternion?.clone() ?? null;
+          }
+        }
+        marker.material = showGroundLootModels
+          ? getModelMaterial(modelId, loot.source === "death")
+          : (loot.source === "death" ? deathLootMaterial : lootMaterial);
+        const modelScale = showGroundLootModels ? groundLootModelScale(modelId) : 1;
+        if (!marker.scaling.equalsToFloats(modelScale, modelScale, modelScale)) marker.scaling.setAll(modelScale);
+        const y = loot.position.y + (showGroundLootModels
+          ? (modelGroundOffsets.get(modelId) ?? 0) - GROUND_LOOT_POSITION_HEIGHT
+          : 0);
+        if (!marker.position.equalsToFloats(loot.position.x, y, loot.position.z)) {
+          marker.position.set(loot.position.x, y, loot.position.z);
+        }
+        marker.metadata = {
+          lootId: loot.id,
+          itemId: loot.itemId,
+          lootSource: loot.source ?? "spawn",
+          lootModel: showGroundLootModels,
+          lootModelScale: modelScale,
+          modelId,
+          lootVisualSignature: visualSignature,
+        };
+      }
+      if (marker.isEnabled(false) !== loot.available) marker.setEnabled(loot.available);
     },
   };
   const syncLootMeshes = (nextGroundLoot: Readonly<Record<EntityId, GroundLootState>>): void => {
@@ -1759,24 +1967,34 @@ function createSafeZoneRing(
   ring.material = safeZoneMaterial;
   ring.isPickable = false;
   ring.metadata = { visual: "safe-zone" };
-  let lastSignature = "";
+  const positions = new Float32Array((segmentCount + 1) * 6);
+  let initialized = false;
+  let lastCenterX = Number.NaN;
+  let lastCenterZ = Number.NaN;
+  let lastRadius = Number.NaN;
   const sync = (centerX: number, centerZ: number, radius: number): void => {
-    const signature = `${centerX}:${centerZ}:${radius}`;
-    if (signature === lastSignature) return;
-    lastSignature = signature;
-    const positions: number[] = [];
+    if (centerX === lastCenterX && centerZ === lastCenterZ && radius === lastRadius) return;
+    lastCenterX = centerX;
+    lastCenterZ = centerZ;
+    lastRadius = radius;
     for (let segment = 0; segment <= segmentCount; segment += 1) {
       const angle = segment / segmentCount * Math.PI * 2;
       const x = centerX + Math.cos(angle) * radius;
       const z = centerZ + Math.sin(angle) * radius;
       const terrainY = getTerrainHeight(x, z, layout);
-      positions.push(x, terrainY + 0.12, z, x, terrainY + 1.5, z);
+      const offset = segment * 6;
+      positions[offset] = x;
+      positions[offset + 1] = terrainY + 0.12;
+      positions[offset + 2] = z;
+      positions[offset + 3] = x;
+      positions[offset + 4] = terrainY + 1.5;
+      positions[offset + 5] = z;
     }
-    const normals = new Array<number>(positions.length).fill(0);
-    VertexData.ComputeNormals(positions, indices, normals);
-    ring.setVerticesData(VertexBuffer.PositionKind, positions, true);
-    ring.setVerticesData(VertexBuffer.NormalKind, normals, true);
-    ring.refreshBoundingInfo();
+    if (initialized) ring.updateVerticesData(VertexBuffer.PositionKind, positions, true, false);
+    else {
+      ring.setVerticesData(VertexBuffer.PositionKind, positions, true);
+      initialized = true;
+    }
   };
   sync(0, 0, INITIAL_SAFE_ZONE_RADIUS);
   return { mesh: ring, sync };
@@ -1800,7 +2018,7 @@ function markActorVisual(mesh: Mesh, actorId: EntityId, detailType: string): voi
   mesh.metadata = { actorId, actorVisual: detailType };
 }
 
-function markDecoration(mesh: Mesh, decoration: string): void {
+function markDecoration(mesh: AbstractMesh, decoration: string): void {
   mesh.checkCollisions = false;
   mesh.isPickable = false;
   mesh.metadata = { decoration };
@@ -1814,7 +2032,7 @@ function markBuildingDetail(mesh: Mesh, obstacleId: string, detailType: string):
   mesh.freezeWorldMatrix();
 }
 
-function markNaturalDetail(mesh: Mesh, detailType: "rock" | "shrub"): void {
+function markNaturalDetail(mesh: AbstractMesh, detailType: "rock" | "shrub"): void {
   mesh.checkCollisions = false;
   mesh.isPickable = false;
   mesh.metadata = { decoration: "natural-detail", detailType };

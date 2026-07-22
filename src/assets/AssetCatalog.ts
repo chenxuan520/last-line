@@ -12,6 +12,7 @@ export class AssetCatalog {
   private readonly entries: ReadonlyMap<string, AssetEntry>;
   private readonly unavailable = new Set<string>();
   private readonly payloads = new Map<string, ArrayBuffer>();
+  private readonly payloadRequests = new Map<string, Promise<ArrayBuffer>>();
 
   public constructor(manifest: AssetManifest) {
     this.entries = new Map(manifest.assets.map((entry) => [entry.id, entry]));
@@ -47,12 +48,38 @@ export class AssetCatalog {
     return fallback;
   }
 
+  public has(id: string): boolean {
+    return this.entries.has(id);
+  }
+
   public getPayload(id: string): ArrayBuffer | undefined {
     return this.payloads.get(id);
   }
 
+  public async loadPayload(id: string): Promise<ArrayBuffer | undefined> {
+    const cached = this.payloads.get(id);
+    if (cached) return cached;
+    const entry = this.entries.get(id);
+    if (!entry?.url || this.unavailable.has(id)) return undefined;
+    let request = this.payloadRequests.get(id);
+    if (!request) {
+      request = fetch(entry.url).then(async (response) => {
+        if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+        const payload = await response.arrayBuffer();
+        await assertDecodable(entry.type, payload);
+        this.payloads.set(id, payload);
+        return payload;
+      }).catch((error) => {
+        this.unavailable.add(id);
+        throw error;
+      }).finally(() => this.payloadRequests.delete(id));
+      this.payloadRequests.set(id, request);
+    }
+    return request;
+  }
+
   private async preload(onProgress: (progress: number) => void): Promise<void> {
-    const remoteEntries = [...this.entries.values()].filter((entry) => entry.url);
+    const remoteEntries = [...this.entries.values()].filter((entry) => entry.url && entry.type !== "model");
     if (remoteEntries.length === 0) {
       onProgress(1);
       return;

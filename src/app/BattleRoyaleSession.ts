@@ -71,6 +71,7 @@ export class BattleRoyaleSession {
   private spectatorActorId: EntityId | null = null;
   private lastVisualElapsedSeconds = -1;
   private lastVisualActorId: EntityId | null = null;
+  private lastViewWeaponId: string | null = null;
 
   private constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -125,6 +126,8 @@ export class BattleRoyaleSession {
       state.groundLoot,
       state.mapSeed,
       settings.showGroundLootModels,
+      undefined,
+      settings.quality,
     );
     return new BattleRoyaleSession(canvas, uiRoot, assets, settings, audio, onRestart, bundle, state);
   }
@@ -172,6 +175,7 @@ export class BattleRoyaleSession {
       player,
       this.spectatorActorId ? this.simulation.state.actors[this.spectatorActorId] ?? player : player,
       inputActive,
+      frameSeconds,
       fps,
       this.humanController.isScoped(player),
       this.humanController.isLeaderboardVisible(),
@@ -273,16 +277,28 @@ export class BattleRoyaleSession {
     const cameraActor = spectator ?? player;
     const activeViewWeapon = getActiveWeapon(cameraActor);
     const scoped = cameraActor.id === PLAYER_ID && this.humanController.isScoped(player);
-    this.camera.fov = scoped ? WEAPONS[activeViewWeapon?.weaponId ?? ""]?.scopeFov ?? 1.18 : 1.18;
-    this.viewWeaponRoot.setEnabled(Boolean(activeViewWeapon) && !scoped && cameraActor.deployment === "grounded");
-    setActorWeaponVisual(this.viewWeaponRoot, activeViewWeapon?.weaponId ?? null);
+    const targetFov = scoped ? WEAPONS[activeViewWeapon?.weaponId ?? ""]?.scopeFov ?? 1.18 : 1.18;
+    if (this.camera.fov !== targetFov) this.camera.fov = targetFov;
+    const viewWeaponEnabled = Boolean(activeViewWeapon) && !scoped && cameraActor.deployment === "grounded";
+    if (this.viewWeaponRoot.isEnabled() !== viewWeaponEnabled) this.viewWeaponRoot.setEnabled(viewWeaponEnabled);
+    const viewWeaponId = activeViewWeapon?.weaponId ?? null;
+    if (this.lastViewWeaponId !== viewWeaponId) {
+      setActorWeaponVisual(this.viewWeaponRoot, viewWeaponId);
+      this.lastViewWeaponId = viewWeaponId;
+    }
     if (
       this.lastVisualElapsedSeconds !== this.simulation.state.elapsedSeconds ||
       this.lastVisualActorId !== cameraActor.id
     ) {
+      const visualDeltaSeconds = this.lastVisualElapsedSeconds < 0
+        ? 1 / 30
+        : Math.min(0.1, Math.max(0, this.simulation.state.elapsedSeconds - this.lastVisualElapsedSeconds));
       this.lastVisualElapsedSeconds = this.simulation.state.elapsedSeconds;
       this.lastVisualActorId = cameraActor.id;
-      this.aircraftInteriorRoot.setEnabled(cameraActor.id === PLAYER_ID && player.deployment === "aircraft");
+      const aircraftInteriorEnabled = cameraActor.id === PLAYER_ID && player.deployment === "aircraft";
+      if (this.aircraftInteriorRoot.isEnabled() !== aircraftInteriorEnabled) {
+        this.aircraftInteriorRoot.setEnabled(aircraftInteriorEnabled);
+      }
       this.syncAircraftVisual(
         this.simulation.state.flight,
         this.simulation.state.phase === "flight" && player.deployment !== "aircraft",
@@ -292,17 +308,20 @@ export class BattleRoyaleSession {
         jumpPoses.set(actor.id, this.getJumpVisualPose(actor));
       }
       const cameraJumpPose = jumpPoses.get(cameraActor.id) ?? neutralJumpVisualPose();
-      this.camera.position.set(
-        cameraActor.position.x,
-        cameraActor.position.y + cameraJumpPose.cameraY,
-        cameraActor.position.z,
-      );
-      this.camera.rotation.set(cameraActor.pitch, cameraActor.yaw, 0);
+      const cameraY = cameraActor.position.y + cameraJumpPose.cameraY;
+      if (!this.camera.position.equalsToFloats(cameraActor.position.x, cameraY, cameraActor.position.z)) {
+        this.camera.position.set(cameraActor.position.x, cameraY, cameraActor.position.z);
+      }
+      if (!this.camera.rotation.equalsToFloats(cameraActor.pitch, cameraActor.yaw, 0)) {
+        this.camera.rotation.set(cameraActor.pitch, cameraActor.yaw, 0);
+      }
       this.syncViewWeaponVisual(activeViewWeapon, cameraJumpPose);
       for (const [actorId, root] of this.actorRoots) {
         const actor = this.getActor(actorId);
-        root.position.set(actor.position.x, actor.position.y, actor.position.z);
-        root.rotation.y = actor.yaw;
+        if (!root.position.equalsToFloats(actor.position.x, actor.position.y, actor.position.z)) {
+          root.position.set(actor.position.x, actor.position.y, actor.position.z);
+        }
+        if (root.rotation.y !== actor.yaw) root.rotation.y = actor.yaw;
         const pose = jumpPoses.get(actorId) ?? neutralJumpVisualPose();
         const visualRoot = this.actorVisualRoots.get(actorId);
         if (visualRoot) applyActorVisualPose(visualRoot, pose.actorY, pose.actorRotationX);
@@ -319,8 +338,9 @@ export class BattleRoyaleSession {
       }
       for (const [lootId, mesh] of this.lootMeshes) {
         const loot = this.simulation.state.groundLoot[lootId];
-        mesh.setEnabled(Boolean(loot?.available));
-        if (loot?.available) mesh.rotation.y += mesh.metadata?.lootModel === true ? 0.008 : 0.06;
+        const enabled = Boolean(loot?.available);
+        if (mesh.isEnabled(false) !== enabled) mesh.setEnabled(enabled);
+        if (enabled) mesh.rotation.y += (mesh.metadata?.lootModel === true ? 0.24 : 1.8) * visualDeltaSeconds;
       }
       const zone = this.simulation.state.safeZone;
       this.syncSafeZoneRing(zone.center.x, zone.center.z, zone.radius);
@@ -332,12 +352,13 @@ export class BattleRoyaleSession {
     jumpPose: JumpVisualPose,
   ): void {
     const reload = getReloadVisualTransform(weapon);
-    this.viewWeaponRoot.position.set(0, (reload?.y ?? 0) + jumpPose.weaponY, 0);
-    this.viewWeaponRoot.rotation.set(
-      (reload?.rotationX ?? 0) + jumpPose.weaponRotationX,
-      0,
-      reload?.rotationZ ?? 0,
-    );
+    const y = (reload?.y ?? 0) + jumpPose.weaponY;
+    const rotationX = (reload?.rotationX ?? 0) + jumpPose.weaponRotationX;
+    const rotationZ = reload?.rotationZ ?? 0;
+    if (!this.viewWeaponRoot.position.equalsToFloats(0, y, 0)) this.viewWeaponRoot.position.set(0, y, 0);
+    if (!this.viewWeaponRoot.rotation.equalsToFloats(rotationX, 0, rotationZ)) {
+      this.viewWeaponRoot.rotation.set(rotationX, 0, rotationZ);
+    }
   }
 
   private getJumpVisualPose(actor: ActorState): JumpVisualPose {

@@ -17,7 +17,7 @@ export async function loadCatalogModel(
   try {
     await import("@babylonjs/loaders/glTF");
     const { LoadAssetContainerAsync } = await import("@babylonjs/core/Loading/sceneLoader");
-    const payload = assets.getPayload(descriptor.id);
+    const payload = assets.getPayload(descriptor.id) ?? await assets.loadPayload(descriptor.id);
     const source = payload ? new Uint8Array(payload) : descriptor.url;
     container = await LoadAssetContainerAsync(source, scene, {
       pluginExtension: ".glb",
