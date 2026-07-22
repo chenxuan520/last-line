@@ -1490,6 +1490,8 @@
 - 重写“怎么玩”为落点、搜集、跑圈、交火和获胜五步流程，保留桌面键鼠、手机横屏操作、三个在线入口及最小本地启动方式；架构、部署和验证信息收进折叠区并改为文档入口。
 - 涉及文件：`README.md`、`public/assets/ui/logo-readme-light.svg`、本 plan。工作区既有 `.gitignore` 修改按用户确认保持原样，不触碰且不纳入本任务；验证结果见下条记录。
 - 2026-07-22 10:49：README 8 个本地资源/文档引用与浅色 logo SVG XML 检查通过；`npm run typecheck`、完整 `npm run test`（应用 30 files / 271 tests、Worker 3 / 27、standalone 2 / 15）和 `npm run build` 全部通过，新增浅色 logo 后再次执行生产 build 亦通过，构建仅保留既有大 chunk warning。本次只修改展示文档、README 专用视觉资源与 plan，不涉及游戏代码、协议或部署行为。
+- 2026-07-22 11:00：实现随 `489a707 docs: refresh readme landing page` 提交并推送到 `origin/main`；GitHub Actions / Pages run `29887020233` 的 typecheck、全量测试、应用/Worker/standalone build 与 Pages 部署全部成功，仅保留既有 JavaScript actions Node.js 20 弃用提示。
+- 2026-07-22 11:00：在 GitHub 仓库线上 README 分别模拟浅色、深色主题复验；`picture` 会正确选择 `logo-readme-light.svg` / 原 `logo.svg`，logo、CI badge、战场背景图均加载成功且无 broken image，“立即开战”、章节锚点、玩法步骤、操作表和折叠区正常渲染。验收后已关闭隔离浏览器 context，并确认仅剩 `about:blank`。
 
 ## Review
 
