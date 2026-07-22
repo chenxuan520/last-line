@@ -1493,6 +1493,12 @@
 - 2026-07-22 11:00：实现随 `489a707 docs: refresh readme landing page` 提交并推送到 `origin/main`；GitHub Actions / Pages run `29887020233` 的 typecheck、全量测试、应用/Worker/standalone build 与 Pages 部署全部成功，仅保留既有 JavaScript actions Node.js 20 弃用提示。
 - 2026-07-22 11:00：在 GitHub 仓库线上 README 分别模拟浅色、深色主题复验；`picture` 会正确选择 `logo-readme-light.svg` / 原 `logo.svg`，logo、CI badge、战场背景图均加载成功且无 broken image，“立即开战”、章节锚点、玩法步骤、操作表和折叠区正常渲染。验收后已关闭隔离浏览器 context，并确认仅剩 `about:blank`。
 
+#### 2026-07-22 11:08 +0800：补充 MIT 开源协议
+
+- 按用户要求新增标准 MIT `LICENSE`，版权声明为 `Copyright (c) 2026 chenxuan520`；README 首屏增加 MIT badge，底部增加“开源协议”入口并链接到协议全文。
+- 涉及文件：`LICENSE`、`README.md`、本 plan。工作区既有 `.gitignore` 修改继续保持原样，不触碰且不纳入本任务。
+- 2026-07-22 11:09：MIT 全文关键条款、README badge/协议链接和 9 个本地引用检查通过；`npm run build` 与 `git diff --check` 通过，构建仅保留既有大 chunk warning。提交与推送结果待后续记录。
+
 ## Review
 
 ### 2026-07-19 20:35 +0800：origin/main 21cc420 撤退停滞与物资配图关闭审查（不通过）

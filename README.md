@@ -21,6 +21,7 @@
 
 <p align="center">
   <a href="https://github.com/chenxuan520/last-line/actions/workflows/ci.yml"><img src="https://github.com/chenxuan520/last-line/actions/workflows/ci.yml/badge.svg" alt="CI and GitHub Pages"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-739c45.svg" alt="MIT License"></a>
 </p>
 
 ![最后防线孤岛战场](./public/assets/ui/menu-backdrop.webp)
@@ -112,3 +113,7 @@ npm run build
 - [开发约定](AGENTS.md)
 
 </details>
+
+## 开源协议
+
+本项目基于 [MIT License](LICENSE) 开源。
