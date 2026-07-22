@@ -241,59 +241,27 @@
     },
     {
       "id": "model.weapon.rifle",
-      "type": "model",
-      "url": "./assets/models/weapon-rifle.glb",
+      "type": "procedural-model",
       "fallback": "fallback.model",
-      "metadata": { "shape": "rifle", "color": "#283126", "requiredNodes": "root,grip,muzzle" }
-    },
-    {
-      "id": "model.weapon.rifle.lod1",
-      "type": "model",
-      "url": "./assets/models/weapon-rifle-lod1.glb",
-      "fallback": "fallback.model",
-      "metadata": { "requiredNodes": "root,grip,muzzle" }
+      "metadata": { "shape": "rifle", "color": "#283126" }
     },
     {
       "id": "model.weapon.smg",
-      "type": "model",
-      "url": "./assets/models/weapon-smg.glb",
+      "type": "procedural-model",
       "fallback": "fallback.model",
-      "metadata": { "shape": "smg", "color": "#263838", "requiredNodes": "root,grip,muzzle" }
-    },
-    {
-      "id": "model.weapon.smg.lod1",
-      "type": "model",
-      "url": "./assets/models/weapon-smg-lod1.glb",
-      "fallback": "fallback.model",
-      "metadata": { "requiredNodes": "root,grip,muzzle" }
+      "metadata": { "shape": "smg", "color": "#263838" }
     },
     {
       "id": "model.weapon.shotgun",
-      "type": "model",
-      "url": "./assets/models/weapon-shotgun.glb",
+      "type": "procedural-model",
       "fallback": "fallback.model",
-      "metadata": { "shape": "shotgun", "color": "#3b3028", "requiredNodes": "root,grip,muzzle" }
-    },
-    {
-      "id": "model.weapon.shotgun.lod1",
-      "type": "model",
-      "url": "./assets/models/weapon-shotgun-lod1.glb",
-      "fallback": "fallback.model",
-      "metadata": { "requiredNodes": "root,grip,muzzle" }
+      "metadata": { "shape": "shotgun", "color": "#3b3028" }
     },
     {
       "id": "model.weapon.sniper",
-      "type": "model",
-      "url": "./assets/models/weapon-sniper.glb",
+      "type": "procedural-model",
       "fallback": "fallback.model",
-      "metadata": { "shape": "sniper", "color": "#354238", "requiredNodes": "root,grip,muzzle" }
-    },
-    {
-      "id": "model.weapon.sniper.lod1",
-      "type": "model",
-      "url": "./assets/models/weapon-sniper-lod1.glb",
-      "fallback": "fallback.model",
-      "metadata": { "requiredNodes": "root,grip,muzzle" }
+      "metadata": { "shape": "sniper", "color": "#354238" }
     }
   ]
 }

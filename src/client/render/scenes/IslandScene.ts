@@ -196,7 +196,6 @@ export async function createIslandScene(
       actors,
       actorRoots,
       actorVisualRoots,
-      viewWeaponRoot,
       player.id,
       qualityProfile.modelLodDistance,
     );
@@ -238,11 +237,9 @@ async function replaceCatalogModels(
   actors: Readonly<Record<EntityId, ActorState>>,
   actorRoots: Map<EntityId, TransformNode>,
   actorVisualRoots: Map<EntityId, TransformNode>,
-  viewWeaponRoot: TransformNode,
   localActorId: EntityId,
   modelLodDistance: number,
 ): Promise<void> {
-  const weaponIds = ["rifle", "smg", "shotgun", "sniper"] as const;
   const characterIds = ["player", "enemy"] as const;
   const requiredCharacterIds = characterIds.filter((kind) => Object.values(actors).some((actor) =>
     actor.id !== localActorId && (actor.kind === "player" ? "player" : "enemy") === kind
@@ -254,29 +251,12 @@ async function replaceCatalogModels(
     loadIfDeclared(`model.character.${kind}`),
     loadIfDeclared(`model.character.${kind}.lod1`),
   ]));
-  const loadedWeapons = await Promise.all(weaponIds.flatMap((weaponId) => [
-    loadIfDeclared(`model.weapon.${weaponId}`),
-    loadIfDeclared(`model.weapon.${weaponId}.lod1`),
-  ]));
   const characterModels = new Map(requiredCharacterIds.map((kind, index) => [kind, {
     base: loadedCharacters[index * 2] ?? null,
     lod1: loadedCharacters[index * 2 + 1] ?? null,
   }]));
-  const weaponModels = new Map(weaponIds.map((weaponId, index) => [weaponId, {
-    base: loadedWeapons[index * 2] ?? null,
-    lod1: loadedWeapons[index * 2 + 1] ?? null,
-  }]));
-  const loadedContainers = [...loadedCharacters, ...loadedWeapons]
+  const loadedContainers = loadedCharacters
     .flatMap((loaded) => loaded ? [loaded.container] : []);
-
-  for (const weaponId of weaponIds) {
-    const weapon = weaponModels.get(weaponId)?.base;
-    if (!weapon) continue;
-    suppressProceduralWeapon(viewWeaponRoot, weaponId);
-    const viewInstance = weapon.container.instantiateModelsToScene((name) => `view-${weaponId}-${name}`);
-    attachModel(viewInstance.rootNodes, viewWeaponRoot, weapon.descriptor, true, weaponId);
-  }
-  setActorWeaponVisual(viewWeaponRoot, getActiveWeapon(actors[localActorId])?.weaponId ?? null);
 
   const actorLods: Array<{
     actorRoot: TransformNode;
@@ -299,17 +279,6 @@ async function replaceCatalogModels(
     suppressProceduralCharacter(actorRoot);
     const visuals = [base, lod1].filter((visual): visual is ImportedCharacterVisual => visual !== null);
     suppressProceduralEquipment(actorRoot, visuals);
-    for (const visual of visuals) {
-      for (const weaponId of weaponIds) {
-        const models = weaponModels.get(weaponId);
-        if (!models?.base) continue;
-        const weapon = visual.lod === "lod1" ? models.lod1 ?? models.base : models.base;
-        if (!weapon) continue;
-        if (instantiateThirdPersonWeapon(weapon, actor, weaponId, visual.weaponSocket)) {
-          suppressProceduralWeapon(actorRoot, weaponId);
-        }
-      }
-    }
     setActorWeaponVisual(actorRoot, getActiveWeapon(actor)?.weaponId ?? null);
     setActorEquipmentVisual(actorRoot, actor.inventory.armorLevel, actor.inventory.helmetLevel);
     actorLods.push({ actorRoot, base: base?.group ?? null, lod1: lod1?.group ?? null });
@@ -388,45 +357,6 @@ function instantiateCharacterModel(
   return { group, weaponSocket, lod, hasArmor, hasHelmet };
 }
 
-function instantiateThirdPersonWeapon(
-  loaded: LoadedCatalogModel,
-  actor: ActorState,
-  weaponId: WeaponVisualId,
-  weaponSocket: TransformNode,
-): boolean {
-  const lod = loaded.descriptor.id.endsWith(".lod1") ? "lod1" : "base";
-  const instance = loaded.container.instantiateModelsToScene((name) =>
-    `${actor.id}-${lod}-${weaponId}-${name}`
-  );
-  const authoredRoot = findImportedNode(instance.rootNodes, "root");
-  const grip = findImportedNode(instance.rootNodes, "grip");
-  if (!authoredRoot || !grip) return false;
-  const scale = 0.48;
-  const gripPosition = grip.position.clone();
-  authoredRoot.parent = weaponSocket;
-  authoredRoot.position.set(
-    -gripPosition.x * scale,
-    -gripPosition.y * scale,
-    -gripPosition.z * scale,
-  );
-  authoredRoot.scaling.setAll(scale);
-  for (const rootNode of instance.rootNodes) {
-    if (rootNode !== authoredRoot && rootNode instanceof TransformNode) rootNode.setEnabled(false);
-  }
-  for (const mesh of authoredRoot.getChildMeshes(false)) {
-    mesh.isPickable = false;
-    mesh.metadata = {
-      visualModel: loaded.descriptor.id,
-      actorId: actor.id,
-      actorVisual: "weapon",
-      weaponId,
-      modelLod: lod,
-    };
-    mesh.setEnabled(false);
-  }
-  return true;
-}
-
 function findImportedNode(nodes: readonly Node[], name: string): TransformNode | null {
   for (const root of nodes) {
     const candidates = [root, ...root.getDescendants(false)];
@@ -465,13 +395,11 @@ function attachModel(
   nodes: readonly Node[],
   parent: TransformNode | UniversalCamera,
   descriptor: AssetEntry,
-  viewModel = false,
-  weaponId?: WeaponVisualId,
 ): void {
   const scale = numberMetadata(descriptor, "scale", 1);
-  const x = numberMetadata(descriptor, "offsetX", viewModel ? 0.38 : 0);
-  const y = numberMetadata(descriptor, "offsetY", viewModel ? -0.34 : -1.76);
-  const z = numberMetadata(descriptor, "offsetZ", viewModel ? 0.76 : 0);
+  const x = numberMetadata(descriptor, "offsetX", 0);
+  const y = numberMetadata(descriptor, "offsetY", -1.76);
+  const z = numberMetadata(descriptor, "offsetZ", 0);
   for (const node of nodes) {
     if (!(node instanceof TransformNode)) continue;
     node.parent = parent;
@@ -480,10 +408,7 @@ function attachModel(
     const meshes = node instanceof Mesh ? [node, ...node.getChildMeshes()] : node.getChildMeshes();
     for (const mesh of meshes) {
       mesh.isPickable = false;
-      mesh.metadata = weaponId
-        ? { visualModel: descriptor.id, actorVisual: "weapon", weaponId }
-        : { visualModel: descriptor.id };
-      if (weaponId) mesh.setEnabled(false);
+      mesh.metadata = { visualModel: descriptor.id };
     }
   }
 }
@@ -1462,18 +1387,6 @@ export function setActorEquipmentVisual(
       const enabled = helmetLevel > 0 && mesh.metadata?.equipmentFallbackSuppressed !== true;
       if (mesh.isEnabled(false) !== enabled) mesh.setEnabled(enabled);
     }
-  }
-}
-
-function suppressProceduralWeapon(root: TransformNode, weaponId: string): void {
-  for (const mesh of root.getChildMeshes(false)) {
-    if (
-      mesh.metadata?.actorVisual !== "weapon" ||
-      mesh.metadata.weaponId !== weaponId ||
-      mesh.metadata.weaponFallback !== true
-    ) continue;
-    mesh.metadata = { ...mesh.metadata, weaponFallbackSuppressed: true };
-    mesh.setEnabled(false);
   }
 }
 

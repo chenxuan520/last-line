@@ -643,7 +643,9 @@ h1 {
 
 .loading-panel {
   position: relative;
-  width: 420px;
+  width: min(420px, 100%);
+  min-width: 0;
+  max-width: 100%;
   padding: 28px 30px 30px;
   border: 1px solid var(--line);
   background: linear-gradient(120deg, rgb(24 31 25 / 89%), rgb(10 15 12 / 86%));
@@ -2195,6 +2197,11 @@ h1 {
     width: 100%;
     min-width: 0;
     padding: 26px 22px;
+  }
+
+  .loading-panel {
+    margin: 0 auto;
+    padding: 24px 20px 26px;
   }
 
   .game-logo {

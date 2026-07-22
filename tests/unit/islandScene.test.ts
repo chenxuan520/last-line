@@ -573,8 +573,10 @@ describe("IslandScene lifecycle", () => {
     engine.dispose();
   }, 30_000);
 
-  it("loads and switches all four catalog weapon models and character LODs", async () => {
+  it("loads and switches character LODs while keeping procedural held weapons", async () => {
     const assets = await createGlbAssets();
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockClear();
     const state = createBattleRoyaleStateForHumans(["player", "human-2"], {
       participantCount: 3,
       flightSeconds: 1,
@@ -598,10 +600,13 @@ describe("IslandScene lifecycle", () => {
       .filter((mesh) => mesh.metadata?.actorVisual === "weapon");
 
     for (const weaponId of ["rifle", "smg", "shotgun", "sniper"] as const) {
-      expect(viewMeshes.some((mesh) => mesh.metadata?.visualModel === `model.weapon.${weaponId}`)).toBe(true);
-      expect(botMeshes.some((mesh) => mesh.metadata?.visualModel === `model.weapon.${weaponId}`)).toBe(true);
-      expect(botMeshes.some((mesh) => mesh.metadata?.visualModel === `model.weapon.${weaponId}.lod1`)).toBe(true);
+      expect(viewMeshes.filter((mesh) => mesh.metadata?.weaponId === weaponId)
+        .every((mesh) => mesh.metadata?.weaponFallback === true && !mesh.metadata?.visualModel)).toBe(true);
+      expect(botMeshes.filter((mesh) => mesh.metadata?.weaponId === weaponId)
+        .every((mesh) => mesh.metadata?.weaponFallback === true && !mesh.metadata?.visualModel)).toBe(true);
     }
+    expect(fetchMock.mock.calls.some(([input]) => input.toString().includes("/weapon-") && input.toString().endsWith(".glb")))
+      .toBe(false);
     const baseCharacter = bundle.scene.getTransformNodeByName(`${bot.id}-character-base`);
     const lodCharacter = bundle.scene.getTransformNodeByName(`${bot.id}-character-lod1`);
     expect(baseCharacter?.metadata?.visualModel).toBe("model.character.enemy");
@@ -620,14 +625,12 @@ describe("IslandScene lifecycle", () => {
     expect(lodCharacter?.isEnabled()).toBe(true);
     expect(botRoot.getChildMeshes(false).filter((mesh) => mesh.metadata?.actorVisual === "parachute")
       .every((mesh) => mesh.isEnabled(false))).toBe(true);
-    expect(botMeshes.filter((mesh) => mesh.metadata?.weaponId === "smg" && mesh.metadata?.visualModel)
+    expect(botMeshes.filter((mesh) => mesh.metadata?.weaponId === "smg" && mesh.metadata?.weaponFallback === true)
       .some((mesh) => mesh.isEnabled())).toBe(true);
     setActorWeaponVisual(bundle.viewWeaponRoot, "shotgun");
-    expect(viewMeshes.filter((mesh) => mesh.metadata?.visualModel === "model.weapon.shotgun")
-      .every((mesh) => mesh.isEnabled(false))).toBe(true);
-    expect(viewMeshes.filter((mesh) => mesh.metadata?.visualModel && mesh.metadata?.weaponId !== "shotgun")
-      .every((mesh) => !mesh.isEnabled(false))).toBe(true);
-    expect(viewMeshes.filter((mesh) => mesh.metadata?.weaponFallbackSuppressed === true)
+    expect(viewMeshes.filter((mesh) => mesh.metadata?.weaponId === "shotgun")
+      .some((mesh) => mesh.isEnabled(false))).toBe(true);
+    expect(viewMeshes.filter((mesh) => mesh.metadata?.weaponId !== "shotgun")
       .every((mesh) => !mesh.isEnabled(false))).toBe(true);
 
     bundle.scene.dispose();
@@ -635,7 +638,7 @@ describe("IslandScene lifecycle", () => {
     engine.dispose();
   }, 30_000);
 
-  it("preserves production GLB handedness and aligns authored weapon grips", async () => {
+  it("preserves production character handedness while keeping procedural held weapons", async () => {
     const assets = createProductionGlbAssets();
     const state = createBattleRoyaleState("player", {
       participantCount: 2,
@@ -653,28 +656,26 @@ describe("IslandScene lifecycle", () => {
     const bundle = await createIslandScene(engine, assets, state.actors, state.groundLoot, state.mapSeed);
 
     const characterRoot = bundle.scene.getMeshByName(`${bot.id}-base-__root__`);
-    const viewWeaponRoot = bundle.scene.getMeshByName("view-rifle-__root__");
-    const muzzle = bundle.scene.transformNodes.find((node) => node.name === "view-rifle-muzzle");
-    const socket = bundle.scene.transformNodes.find((node) => node.name === `${bot.id}-base-weapon_socket`);
-    const grip = bundle.scene.transformNodes.find((node) => node.name === `${bot.id}-base-rifle-grip`);
-    if (!characterRoot || !viewWeaponRoot || !muzzle || !socket || !grip) {
-      throw new Error("production GLB transform fixtures missing");
-    }
+    const botRoot = bundle.actorRoots.get(bot.id);
+    if (!characterRoot || !botRoot) throw new Error("production character fixture missing");
     bundle.scene.render();
 
     expect(characterRoot.scaling.z).toBeLessThan(0);
     expect(characterRoot.isEnabled()).toBe(true);
-    expect(viewWeaponRoot.scaling.z).toBeLessThan(0);
-    const cameraForward = bundle.camera.getDirection(Vector3.Forward());
-    expect(Vector3.Dot(muzzle.getAbsolutePosition().subtract(bundle.camera.globalPosition), cameraForward)).toBeGreaterThan(0);
-    expect(Vector3.Distance(socket.getAbsolutePosition(), grip.getAbsolutePosition())).toBeLessThan(0.001);
+    expect(bundle.viewWeaponRoot.getChildMeshes(false)
+      .filter((mesh) => mesh.metadata?.weaponId === "rifle" && mesh.metadata?.weaponFallback === true)
+      .some((mesh) => mesh.isEnabled())).toBe(true);
+    expect(botRoot.getChildMeshes(false)
+      .filter((mesh) => mesh.metadata?.weaponId === "rifle" && mesh.metadata?.weaponFallback === true)
+      .some((mesh) => mesh.isEnabled())).toBe(true);
+    expect(bundle.scene.meshes.some((mesh) => String(mesh.metadata?.visualModel).startsWith("model.weapon."))).toBe(false);
 
     bundle.scene.dispose();
     engine.dispose();
   }, 30_000);
 
   it("keeps procedural base models when only LOD1 GLBs load", async () => {
-    const assets = await createGlbAssets(new Set(["/enemy.glb", "/rifle.glb"]));
+    const assets = await createGlbAssets(new Set(["/enemy.glb"]));
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const state = createBattleRoyaleState("player", {
       participantCount: 2,
@@ -709,9 +710,10 @@ describe("IslandScene lifecycle", () => {
     engine.dispose();
   }, 30_000);
 
-  it("keeps procedural weapons when character base succeeds but weapon base fails", async () => {
-    const assets = await createGlbAssets(new Set(["/rifle.glb"]));
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
+  it("does not request catalog weapon models when character base succeeds", async () => {
+    const assets = await createGlbAssets();
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockClear();
     const state = createBattleRoyaleState("player", {
       participantCount: 2,
       flightSeconds: 1,
@@ -731,8 +733,8 @@ describe("IslandScene lifecycle", () => {
     setActorWeaponVisual(botRoot, "rifle");
 
     expect(bundle.scene.getTransformNodeByName(`${bot.id}-character-base`)).not.toBeNull();
-    expect(bundle.viewWeaponRoot.getChildMeshes(false)
-      .some((mesh) => mesh.metadata?.visualModel === "model.weapon.rifle.lod1")).toBe(false);
+    expect(fetchMock.mock.calls.some(([input]) => input.toString().includes("/rifle") && input.toString().endsWith(".glb")))
+      .toBe(false);
     expect(bundle.viewWeaponRoot.getChildMeshes(false)
       .filter((mesh) => mesh.metadata?.weaponId === "rifle" && mesh.metadata?.weaponFallback === true)
       .some((mesh) => mesh.isEnabled())).toBe(true);
@@ -744,8 +746,8 @@ describe("IslandScene lifecycle", () => {
     engine.dispose();
   }, 30_000);
 
-  it("keeps valid base character and weapon models active when LOD1 fails", async () => {
-    const assets = await createGlbAssets(new Set(["/enemy-lod1.glb", "/rifle-lod1.glb"]));
+  it("keeps a valid base character and procedural weapons active when character LOD1 fails", async () => {
+    const assets = await createGlbAssets(new Set(["/enemy-lod1.glb"]));
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const state = createBattleRoyaleState("player", {
       participantCount: 2,
@@ -767,10 +769,8 @@ describe("IslandScene lifecycle", () => {
     expect(baseCharacter.isEnabled()).toBe(true);
     expect(bundle.scene.getTransformNodeByName(`${bot.id}-character-lod1`)).toBeNull();
     expect(botRoot.getChildMeshes(false)
-      .filter((mesh) => mesh.metadata?.weaponId === "rifle" && mesh.metadata?.visualModel === "model.weapon.rifle")
+      .filter((mesh) => mesh.metadata?.weaponId === "rifle" && mesh.metadata?.weaponFallback === true)
       .some((mesh) => mesh.isEnabled())).toBe(true);
-    expect(botRoot.getChildMeshes(false)
-      .some((mesh) => mesh.metadata?.visualModel === "model.weapon.rifle.lod1")).toBe(false);
 
     bundle.scene.dispose();
     engine.dispose();

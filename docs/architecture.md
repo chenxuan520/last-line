@@ -70,7 +70,7 @@ Reconnect rotation is two-phase: the previous token remains valid while a replac
 - Staggered AI decisions based on distance
 - Bounded multi-wall path search with per-Bot path reuse
 - Shared materials and hardware instances for static trees, shrubs, and decorative rocks; reusable loot records keep individually mutable meshes
-- Low/medium/high quality profiles keep all 384 authoritative trees at identical seeded positions and vary only foliage tessellation, decorative-rock/shrub density, hardware scaling, and 60/90/120 FPS ceilings. Low quality keeps procedural character/weapon models without downloading GLBs; medium/high load GLBs on demand and use distance-based character/weapon LOD.
+- Low/medium/high quality profiles keep all 384 authoritative trees at identical seeded positions and vary only foliage tessellation, decorative-rock/shrub density, hardware scaling, and 60/90/120 FPS ceilings. Low quality keeps procedural characters without downloading GLBs; medium/high load character GLBs on demand and use distance-based character LOD. Held weapons remain procedural at every quality level.
 - HUD state-heavy work runs at 10 Hz while scope, pause, orientation, and touch-control feedback remain render-frame responsive; leaderboard DOM rebuilds only when rank fields change
 - Safe-zone geometry reuses one updatable position buffer instead of reallocating vertex/normal arrays during shrinking
 - No dynamic shadows or full rigid-body simulation
