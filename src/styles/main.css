@@ -1177,6 +1177,11 @@ h1 {
   stroke-width: 0.75;
 }
 
+.minimap-poi-icon {
+  filter: drop-shadow(0 0 1.5px rgb(5 10 8 / 85%));
+  pointer-events: none;
+}
+
 .minimap-pois text,
 .minimap-hospital text {
   fill: #dce2d7;

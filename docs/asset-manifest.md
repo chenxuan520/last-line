@@ -30,6 +30,7 @@ URL-backed entries also require `url`. Replaceable entries should define a type-
 ## Supported Formats
 
 - UI: SVG, PNG, WebP
+- Environment textures, POI decals, and equirectangular skies: WebP
 - Models: binary GLB
 - Fallback models: procedural geometry described by metadata
 

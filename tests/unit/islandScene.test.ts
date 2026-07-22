@@ -1,5 +1,8 @@
 import { NullEngine } from "@babylonjs/core/Engines/nullEngine";
+import { BackgroundMaterial } from "@babylonjs/core/Materials/Background/backgroundMaterial";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
+import { MultiMaterial } from "@babylonjs/core/Materials/multiMaterial";
+import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { Ray } from "@babylonjs/core/Culling/ray";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -7,10 +10,11 @@ import { AssetCatalog } from "../../src/assets/AssetCatalog";
 import {
   applyActorVisualPose,
   createIslandScene,
+  getSkyAssetId,
   setActorEquipmentVisual,
   setActorWeaponVisual,
 } from "../../src/client/render/scenes/IslandScene";
-import { createMapLayout, getTerrainHeight, HOSPITAL_WALL_COLOR } from "../../src/config/map";
+import { createMapLayout, getTerrainHeight, HOSPITAL_WALL_COLOR, MAP_SIZE } from "../../src/config/map";
 import { createIdleCommand } from "../../src/game/commands/ActorCommand";
 import { createBattleRoyaleState, createBattleRoyaleStateForHumans } from "../../src/game/modes/BattleRoyaleMode";
 import { createWeaponState } from "../../src/game/state/types";
@@ -97,6 +101,28 @@ describe("IslandScene lifecycle", () => {
       const hospitalCrosses = decorations.filter((mesh) => mesh.metadata?.decoration === "hospital-cross");
       const collisionMeshes = bundle.scene.meshes.filter((mesh) => mesh.metadata?.collision);
       const ground = bundle.scene.getMeshByName("island-ground");
+      const sky = bundle.scene.getMeshByName("island-sky-dome");
+      expect(sky).toMatchObject({ isPickable: false, checkCollisions: false, infiniteDistance: true });
+      expect(sky?.metadata).toMatchObject({ decoration: "sky", skyAssetId: getSkyAssetId(state.mapSeed) });
+      expect(sky?.material).toBeInstanceOf(BackgroundMaterial);
+      const skyTexture = (sky?.material as BackgroundMaterial).diffuseTexture as Texture | null;
+      expect(skyTexture?.name).toBe(getSkyAssetId(state.mapSeed));
+      if (getSkyAssetId(state.mapSeed) === "texture.sky.clearing") {
+        const skyPositions = sky?.getVerticesData("position") ?? [];
+        const skyUvs = sky?.getVerticesData("uv") ?? [];
+        const topVertex = skyPositions.findIndex((value, index) => index % 3 === 1 && value > MAP_SIZE * 0.89);
+        expect(skyUvs[Math.floor(topVertex / 3) * 2 + 1]).toBeCloseTo(0, 5);
+        expect(Math.min(...skyUvs.filter((_, index) => index % 2 === 1))).toBeCloseTo(0, 5);
+        expect(Math.max(...skyUvs.filter((_, index) => index % 2 === 1))).toBeCloseTo(1, 5);
+      }
+      expect(ground?.material).toBeInstanceOf(MultiMaterial);
+      const groundMaterials = (ground?.material as MultiMaterial).subMaterials;
+      expect(groundMaterials.map((surface) => (surface as StandardMaterial).diffuseTexture?.name)).toEqual([
+        "texture.terrain.grass",
+        "texture.terrain.mud",
+        "texture.road",
+      ]);
+      expect(new Set(ground?.subMeshes?.map((subMesh) => subMesh.materialIndex))).toEqual(new Set([0, 1, 2]));
       const positions = ground?.getVerticesData("position") ?? [];
       const indices = ground?.getIndices() ?? [];
       const heights = positions.filter((_, index) => index % 3 === 1);
@@ -129,6 +155,13 @@ describe("IslandScene lifecycle", () => {
       expect(hospitalWallBatch?.getTotalVertices()).toBe(
         hospitalWalls.filter((wall) => !hospitalDoorSills.has(wall.id)).length * 24,
       );
+      const wallMaterials = bundle.scene.materials.filter((sceneMaterial) =>
+        sceneMaterial.name.startsWith("building-material-")
+      ) as StandardMaterial[];
+      expect(wallMaterials.every((sceneMaterial) =>
+        sceneMaterial.diffuseTexture?.name === "texture.building.wall"
+      )).toBe(true);
+      expect(new Set(wallMaterials.map((sceneMaterial) => sceneMaterial.diffuseTexture)).size).toBe(1);
       expect(treeFoliage.every((mesh) =>
         mesh.getBoundingInfo().boundingBox.maximumWorld.y - getTerrainHeight(mesh.position.x, mesh.position.z, layout) > 15
       )).toBe(true);
@@ -157,13 +190,12 @@ describe("IslandScene lifecycle", () => {
       expect(mountainRocks.length).toBeGreaterThanOrEqual(44);
       expect(bundle.scene.meshes.filter((mesh) => /^shrub-\d+$/.test(mesh.name))).toHaveLength(180);
       expect(layeredSurfaces).toHaveLength(0);
-      expect(bundle.scene.meshes.filter((mesh) => mesh.name.startsWith("ocean-"))).toHaveLength(4);
+      expect(bundle.scene.meshes.filter((mesh) => mesh.name.startsWith("ocean-"))).toHaveLength(0);
       const floorMeshes = bundle.scene.meshes.filter(
         (mesh) =>
           mesh.name === "island-ground" ||
           mesh.name.startsWith("island-beach-") ||
-          mesh.name.startsWith("island-wet-shore-") ||
-          mesh.name.startsWith("ocean-"),
+          mesh.name.startsWith("island-wet-shore-"),
       );
       for (let leftIndex = 0; leftIndex < floorMeshes.length; leftIndex += 1) {
         for (let rightIndex = leftIndex + 1; rightIndex < floorMeshes.length; rightIndex += 1) {
@@ -187,16 +219,26 @@ describe("IslandScene lifecycle", () => {
       expect(decorations.every((mesh) => !mesh.isPickable && !mesh.checkCollisions)).toBe(true);
       expect(collisionMeshes).toHaveLength(new Set(layout.wallSegments.map((wall) => wall.color)).size + 1);
       expect(bundle.scene.meshes.length).toBeLessThan(4_000);
-      const hospitalSlabs = layout.floorSlabs.filter((slab) => slab.obstacleId === layout.hospital.buildingId);
-      const regularSlabs = layout.floorSlabs.filter((slab) => slab.obstacleId !== layout.hospital.buildingId);
-      const slabBatch = bundle.scene.getMeshByName("building-slabs-batch");
-      const hospitalSlabBatch = bundle.scene.getMeshByName("hospital-slabs-batch");
-      expect(slabBatch?.metadata?.sourceCount).toBe(regularSlabs.length);
-      expect(slabBatch?.getTotalVertices()).toBe(regularSlabs.length * 24);
-      expect(hospitalSlabBatch?.metadata?.sourceCount).toBe(hospitalSlabs.length);
-      expect(hospitalSlabBatch?.getTotalVertices()).toBe(hospitalSlabs.length * 24);
-      expect(hospitalSlabBatch?.material).toBeInstanceOf(StandardMaterial);
-      expect((hospitalSlabBatch?.material as StandardMaterial).diffuseColor.toHexString().toLowerCase()).toBe(
+      const hospitalFloors = layout.floorSlabs.filter((slab) =>
+        slab.obstacleId === layout.hospital.buildingId && slab.kind === "floor"
+      );
+      const regularFloors = layout.floorSlabs.filter((slab) =>
+        slab.obstacleId !== layout.hospital.buildingId && slab.kind === "floor"
+      );
+      const roofs = layout.floorSlabs.filter((slab) => slab.kind === "roof");
+      const floorBatch = bundle.scene.getMeshByName("building-floor-slabs-batch");
+      const roofBatch = bundle.scene.getMeshByName("building-roof-slabs-batch");
+      const hospitalFloorBatch = bundle.scene.getMeshByName("hospital-floor-slabs-batch");
+      expect(floorBatch?.metadata?.sourceCount).toBe(regularFloors.length);
+      expect(floorBatch?.getTotalVertices()).toBe(regularFloors.length * 24);
+      expect((floorBatch?.material as StandardMaterial).diffuseTexture).toBeNull();
+      expect(roofBatch?.metadata?.sourceCount).toBe(roofs.length);
+      expect(roofBatch?.getTotalVertices()).toBe(roofs.length * 24);
+      expect((roofBatch?.material as StandardMaterial).diffuseTexture?.name).toBe("texture.building.roof");
+      expect(hospitalFloorBatch?.metadata?.sourceCount).toBe(hospitalFloors.length);
+      expect(hospitalFloorBatch?.getTotalVertices()).toBe(hospitalFloors.length * 24);
+      expect(hospitalFloorBatch?.material).toBeInstanceOf(StandardMaterial);
+      expect((hospitalFloorBatch?.material as StandardMaterial).diffuseColor.toHexString().toLowerCase()).toBe(
         HOSPITAL_WALL_COLOR,
       );
       const openingPieceCount =
@@ -554,6 +596,48 @@ describe("IslandScene lifecycle", () => {
     expect(engine.scenes).toHaveLength(0);
     engine.dispose();
   }, 30_000);
+
+  it("selects all sky panoramas deterministically from the map seed", () => {
+    expect([0, 1, 2, 3, -1].map(getSkyAssetId)).toEqual([
+      "texture.sky.clearing",
+      "texture.sky.overcast",
+      "texture.sky.storm",
+      "texture.sky.clearing",
+      "texture.sky.clearing",
+    ]);
+  });
+
+  it("keeps the clearing sky poles stable while lifting the sun into the upper hemisphere", async () => {
+    const engine = new NullEngine();
+    const assets = createAssets();
+    const state = createBattleRoyaleState("player", undefined, () => 0);
+    const bundle = await createIslandScene(
+      engine,
+      assets,
+      state.actors,
+      state.groundLoot,
+      state.mapSeed,
+    );
+    const sky = bundle.scene.getMeshByName("island-sky-dome");
+    const positions = sky?.getVerticesData("position") ?? [];
+    const uvs = sky?.getVerticesData("uv") ?? [];
+    const verticalUvs = uvs.filter((_, index) => index % 2 === 1);
+    const targetY = MAP_SIZE * 0.9 * Math.cos(Math.PI * 0.18);
+    let targetVertex = 0;
+    for (let index = 0; index < positions.length; index += 3) {
+      if (Math.abs((positions[index + 1] ?? 0) - targetY) < Math.abs((positions[targetVertex + 1] ?? 0) - targetY)) {
+        targetVertex = index;
+      }
+    }
+
+    expect(getSkyAssetId(state.mapSeed)).toBe("texture.sky.clearing");
+    expect(Math.min(...verticalUvs)).toBeCloseTo(0, 5);
+    expect(Math.max(...verticalUvs)).toBeCloseTo(1, 5);
+    expect(uvs[targetVertex / 3 * 2 + 1]).toBeCloseTo(0.3, 1);
+
+    bundle.scene.dispose();
+    engine.dispose();
+  });
 });
 
 function createAssets(): AssetCatalog {
@@ -573,6 +657,16 @@ function createAssets(): AssetCatalog {
     "ui.item.bandage",
     "ui.item.medkit",
   ];
+  const textureAssetIds = [
+    "texture.terrain.grass",
+    "texture.terrain.mud",
+    "texture.road",
+    "texture.building.roof",
+    "texture.building.wall",
+    "texture.sky.clearing",
+    "texture.sky.overcast",
+    "texture.sky.storm",
+  ];
   return new AssetCatalog({
     version: 1,
     assets: [
@@ -580,6 +674,7 @@ function createAssets(): AssetCatalog {
       { id: "fallback.model", type: "procedural-model", metadata: { color: "#cf4b3f" } },
       { id: "ui.crosshair", type: "svg", url: "/crosshair.svg", fallback: "fallback.ui" },
       ...iconAssetIds.map((id) => ({ id, type: "svg" as const, url: `/${id}.svg`, fallback: "fallback.ui" })),
+      ...textureAssetIds.map((id) => ({ id, type: "image" as const, url: `/${id}.webp`, fallback: "fallback.ui" })),
       { id: "model.character.player", type: "procedural-model", fallback: "fallback.model", metadata: { color: "#809d5e" } },
       { id: "model.character.enemy", type: "procedural-model", fallback: "fallback.model", metadata: { color: "#bd6357" } },
       { id: "model.weapon.rifle", type: "procedural-model", fallback: "fallback.model", metadata: { color: "#283126" } },
@@ -602,6 +697,16 @@ async function createGlbAssets(): Promise<AssetCatalog> {
           { id: "fallback.model", type: "procedural-model", metadata: { color: "#cf4b3f" } },
           { id: "ui.crosshair", type: "svg", url: "/crosshair.svg", fallback: "fallback.ui" },
           { id: "ui.weapon.rifle", type: "svg", url: "/rifle.svg", fallback: "fallback.ui" },
+          ...[
+            "texture.terrain.grass",
+            "texture.terrain.mud",
+            "texture.road",
+            "texture.building.roof",
+            "texture.building.wall",
+            "texture.sky.clearing",
+            "texture.sky.overcast",
+            "texture.sky.storm",
+          ].map((id) => ({ id, type: "svg", url: `/${id}.svg`, fallback: "fallback.ui" })),
           { id: "model.character.player", type: "procedural-model", fallback: "fallback.model" },
           { id: "model.character.enemy", type: "model", url: "/enemy.glb", fallback: "fallback.model" },
           ...["rifle", "smg", "shotgun", "sniper"].map((weaponId) => ({

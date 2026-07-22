@@ -9,12 +9,39 @@ import {
 } from "../../src/client/ui/GameHud";
 import { MAP_HALF_SIZE } from "../../src/config/map";
 import { createBattleRoyaleState } from "../../src/game/modes/BattleRoyaleMode";
+import { getPoiDecalAssetId, getPoiVisualType } from "../../src/client/poiVisuals";
 
 describe("minimap projection", () => {
   it("projects map corners and center into the 200px view box", () => {
     expect(projectToMinimap({ x: 0, y: 0, z: 0 })).toEqual({ x: 100, y: 100 });
     expect(projectToMinimap({ x: -MAP_HALF_SIZE, y: 0, z: MAP_HALF_SIZE })).toEqual({ x: 0, y: 0 });
     expect(projectToMinimap({ x: MAP_HALF_SIZE, y: 0, z: -MAP_HALF_SIZE })).toEqual({ x: 200, y: 200 });
+  });
+
+  it("maps every named POI to its stable decal asset", () => {
+    expect([
+      "北港",
+      "灰脊镇",
+      "旧仓区",
+      "高地站",
+      "南岸村",
+      "雷达哨",
+      "西风农场",
+      "东岭营地",
+      "医院",
+    ].map((name) => getPoiDecalAssetId(name))).toEqual([
+      "decal.poi.harbor",
+      "decal.poi.town",
+      "decal.poi.warehouse",
+      "decal.poi.station",
+      "decal.poi.town",
+      "decal.poi.station",
+      "decal.poi.warehouse",
+      "decal.poi.town",
+      "decal.poi.hospital",
+    ]);
+    expect(getPoiVisualType("未知区域")).toBeNull();
+    expect(getPoiDecalAssetId("未知区域")).toBeNull();
   });
 
   it("builds player, route, and safe-zone markers without exposing enemies", () => {

@@ -15,6 +15,7 @@ import {
 } from "../../game/state/types";
 import { createMinimapView, projectToMinimap } from "./minimap";
 import { findNearbyLootCandidate, findPickupCandidate } from "../../game/systems/InventorySystem";
+import { getPoiDecalAssetId } from "../poiVisuals";
 
 export class GameHud {
   private readonly elements = new Map<string, HTMLElement>();
@@ -73,9 +74,9 @@ export class GameHud {
             <g class="minimap-roads"><path d="${mapRoadPath}" /></g>
             <g class="minimap-pois">${mapPoints.map((point) => {
               const projected = projectToMinimap(point.position);
-              return `<g transform="translate(${projected.x} ${projected.y})"><circle r="2" /><text y="-5">${point.name}</text></g>`;
+              return minimapPoiMarker(assets, point.name, projected.x, projected.y);
             }).join("")}</g>
-            <g class="minimap-hospital" transform="translate(${hospitalPoint.x} ${hospitalPoint.y})"><title>医院</title><circle r="2" /><text y="-5">医院</text></g>
+            <g class="minimap-hospital">${minimapPoiMarker(assets, "医院", hospitalPoint.x, hospitalPoint.y)}</g>
             <line class="minimap-flight" data-hud="map-flight" />
             <circle class="minimap-target-zone" data-hud="map-target-zone" />
             <circle class="minimap-current-zone" data-hud="map-current-zone" />
@@ -547,6 +548,16 @@ export function pickupPromptSignature(
 
 function assetUrl(url: string | undefined): string {
   return url ? new URL(url, document.baseURI).href : "";
+}
+
+function minimapPoiMarker(assets: AssetCatalog, name: string, x: number, y: number): string {
+  const assetId = getPoiDecalAssetId(name);
+  const descriptor = assetId ? assets.resolve(assetId, "image") : null;
+  const iconUrl = descriptor?.id === assetId ? assetUrl(descriptor.url) : "";
+  const marker = iconUrl
+    ? `<image class="minimap-poi-icon" href="${iconUrl}" x="-6" y="-6" width="12" height="12" />`
+    : `<circle r="2" />`;
+  return `<g transform="translate(${x} ${y})"><title>${name}</title>${marker}<text y="-8">${name}</text></g>`;
 }
 
 function defaultActorLabel(actorId: string): string {

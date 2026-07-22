@@ -114,6 +114,84 @@
       "fallback": "fallback.ui"
     },
     {
+      "id": "texture.terrain.grass",
+      "type": "image",
+      "url": "./assets/textures/grass.webp",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "texture.terrain.mud",
+      "type": "image",
+      "url": "./assets/textures/mud.webp",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "texture.road",
+      "type": "image",
+      "url": "./assets/textures/road.webp",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "texture.building.roof",
+      "type": "image",
+      "url": "./assets/textures/roof.webp",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "texture.building.wall",
+      "type": "image",
+      "url": "./assets/textures/wall.webp",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "decal.poi.harbor",
+      "type": "image",
+      "url": "./assets/decals/poi-harbor.webp",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "decal.poi.hospital",
+      "type": "image",
+      "url": "./assets/decals/poi-hospital.webp",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "decal.poi.station",
+      "type": "image",
+      "url": "./assets/decals/poi-station.webp",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "decal.poi.town",
+      "type": "image",
+      "url": "./assets/decals/poi-town.webp",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "decal.poi.warehouse",
+      "type": "image",
+      "url": "./assets/decals/poi-warehouse.webp",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "texture.sky.clearing",
+      "type": "image",
+      "url": "./assets/sky/sky-clearing.webp",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "texture.sky.overcast",
+      "type": "image",
+      "url": "./assets/sky/sky-overcast.webp",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "texture.sky.storm",
+      "type": "image",
+      "url": "./assets/sky/sky-storm.webp",
+      "fallback": "fallback.ui"
+    },
+    {
       "id": "model.character.player",
       "type": "procedural-model",
       "fallback": "fallback.model",

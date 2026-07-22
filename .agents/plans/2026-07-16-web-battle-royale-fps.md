@@ -1499,6 +1499,16 @@
 - 涉及文件：`LICENSE`、`README.md`、本 plan。工作区既有 `.gitignore` 修改继续保持原样，不触碰且不纳入本任务。
 - 2026-07-22 11:09：MIT 全文关键条款、README badge/协议链接和 9 个本地引用检查通过；`npm run build` 与 `git diff --check` 通过，构建仅保留既有大 chunk warning。提交与推送结果待后续记录。
 
+#### 2026-07-22 12:17 +0800：地表纹理与小地图 POI 图标接入
+
+- 按用户指定的“前两个”生成资源集合接入 `public/assets/textures/` 与 `public/assets/decals/`，`public/assets/sky/` 暂不接入；`.gitignore` 外部修改继续保持不动。
+- 资源清单新增 5 个地表/建筑纹理和 5 个 POI 图标稳定 ID。地形继续保留 seed 顶点色与权威高度，仅按草地、泥地、道路拆为 3 个共享材质 submesh；墙体颜色继续保留并共享同一墙纹理，屋顶使用独立纹理而室内楼板保持原材质，避免把屋顶波纹带进室内。
+- 小地图按现有 POI 类型语义显示港口、城镇、仓库、信号站和医院图标，保留名称文字及资源失败时的圆点 fallback；新增共享纯映射与回归测试。当前定向 `typecheck:app`、minimap 9 tests、IslandScene 4 tests 与 manifest JSON 解析通过，完整门禁和浏览器效果检查待后续执行。
+- 2026-07-22 14:12：用户确认三张 `2048×1024` 天空图按地图 seed 确定性选择；新增单一不可拾取全景天空球和 3 个稳定 sky asset ID，同 seed 保持相同天气。晴间图使用保持球顶/地平线连续的分段 UV，把太阳抬至上半球且不在岛底重复；阴天、风暴保留原始映射。
+- 2026-07-22 14:12：按用户“悬空岛屿”口径删除岛外 4 个蓝色 `ocean` mesh，只保留方形岛体、沙岸和湿岸收口；地图边界、碰撞、权威高度和规则状态均未改变。`docs/asset-manifest.md` 同步 WebP 环境纹理、POI decal 和等距柱状天空格式。
+- 2026-07-22 14:12：Chrome DevTools MCP 静音生产预览已确认草地/泥地/道路纹理、墙/屋顶纹理、9 个小地图 POI 图标、晴间/阴天/风暴三种天空均成功加载；发现并修正地表顶点色乘暗、StandardMaterial 纯白/纯黑天空和晴间球顶放射拉伸后，最终画面为全景云层覆盖的悬浮岛，岛外不再有蓝色海洋带，晴间太阳只在上半球。稳定约 120 FPS，console 无 error/warn。
+- 2026-07-22 14:21：最终 `npm run typecheck && npm run test && npm run build && git diff --check` 全通过；Vitest 为应用 30 files / 274 tests、Worker 3 / 27、standalone 2 / 15，生产构建仅保留既有大 chunk warning。新增回归覆盖 3 个 seed 天空选择、晴间球顶/球底 UV 连续、太阳上移、单一天空 mesh、共享墙纹理、地表 3 submesh、屋顶/室内楼板分层、无 ocean mesh 和 9 个 POI 映射。
+
 ## Review
 
 ### 2026-07-19 20:35 +0800：origin/main 21cc420 撤退停滞与物资配图关闭审查（不通过）

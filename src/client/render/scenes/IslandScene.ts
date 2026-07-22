@@ -3,7 +3,10 @@ import { VertexBuffer } from "@babylonjs/core/Buffers/buffer";
 import type { Engine } from "@babylonjs/core/Engines/engine";
 import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
+import { BackgroundMaterial } from "@babylonjs/core/Materials/Background/backgroundMaterial";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
+import { MultiMaterial } from "@babylonjs/core/Materials/multiMaterial";
+import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
@@ -12,6 +15,7 @@ import { CreateCylinder } from "@babylonjs/core/Meshes/Builders/cylinderBuilder"
 import { CreateGround } from "@babylonjs/core/Meshes/Builders/groundBuilder";
 import { CreateSphere } from "@babylonjs/core/Meshes/Builders/sphereBuilder";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
+import { SubMesh } from "@babylonjs/core/Meshes/subMesh";
 import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Node } from "@babylonjs/core/node";
@@ -32,8 +36,10 @@ import {
 import { getActiveWeapon, type ActorState, type EntityId, type FlightState, type GroundLootState } from "../../../game/state/types";
 import { syncLootMarkerViews, type LootMarkerViewAdapter } from "../LootMarkerViewAdapter";
 import { loadCatalogModel } from "../loadCatalogModel";
+import { getPoiVisualType } from "../../poiVisuals";
 
 const INITIAL_SAFE_ZONE_RADIUS = MAP_SIZE * 0.36;
+const SKY_ASSET_IDS = ["texture.sky.clearing", "texture.sky.overcast", "texture.sky.storm"] as const;
 const TERRAIN_PATCHES: ReadonlyArray<readonly [number, number, number, number, number, "mud" | "grass"]> = [
   [-620, -380, 184, 116, 0.2, "grass"],
   [-520, 168, 144, 84, -0.45, "mud"],
@@ -52,7 +58,6 @@ const TERRAIN_PATCHES: ReadonlyArray<readonly [number, number, number, number, n
   [644, 660, 128, 76, 0.18, "grass"],
   [-660, 644, 172, 96, -0.28, "mud"],
 ];
-const POI_TYPES = ["harbor", "town", "warehouse", "station", "town", "station", "warehouse", "town"] as const;
 const TERRAIN_COLORS = {
   ground: Color3.FromHexString("#5f704f"),
   highland: Color3.FromHexString("#4c5943"),
@@ -68,10 +73,10 @@ type WeaponPiece = readonly [string, "body" | "gear" | "barrel", number, number,
 type WeaponVisualId = "rifle" | "smg" | "shotgun" | "sniper";
 
 interface IslandMaterials {
-  ground: StandardMaterial;
+  ground: MultiMaterial;
+  wallTexture: Texture | null;
   beach: StandardMaterial;
   shoreWet: StandardMaterial;
-  water: StandardMaterial;
   roadShoulder: StandardMaterial;
   trunk: StandardMaterial;
   foliage: StandardMaterial;
@@ -81,6 +86,7 @@ interface IslandMaterials {
   hay: StandardMaterial;
   poiAccent: StandardMaterial;
   poiDark: StandardMaterial;
+  floor: StandardMaterial;
   roof: StandardMaterial;
   hospitalCeiling: StandardMaterial;
   wallTrim: StandardMaterial;
@@ -153,6 +159,7 @@ export async function createIslandScene(
   sun.specular = new Color3(0.42, 0.46, 0.43);
 
   const materials = createMaterials(scene, assets);
+  createSkyDome(scene, assets, mapSeed);
   createIslandEnvironment(scene, materials, layout);
   createPois(scene, materials, layout);
 
@@ -200,6 +207,10 @@ export async function createIslandScene(
     safeZoneRing,
     syncSafeZoneRing,
   };
+}
+
+export function getSkyAssetId(mapSeed: number): (typeof SKY_ASSET_IDS)[number] {
+  return SKY_ASSET_IDS[(mapSeed >>> 0) % SKY_ASSET_IDS.length] ?? SKY_ASSET_IDS[0];
 }
 
 async function replaceCatalogModels(
@@ -296,11 +307,6 @@ function createMaterials(scene: Scene, assets: AssetCatalog): IslandMaterials {
   const hudColor = assetColor(assets, "ui.crosshair", "svg", "#74d9cb");
   const lootColor = assetColor(assets, "ui.weapon.rifle", "svg", "#e2c66d");
 
-  const water = material(scene, "island-water-material", "#3b6670");
-  water.alpha = 0.92;
-  water.specularColor = new Color3(0.28, 0.4, 0.43);
-  water.specularPower = 56;
-
   const windowMaterial = material(scene, "building-window-material", "#26383b");
   windowMaterial.emissiveColor = new Color3(0.025, 0.035, 0.034);
 
@@ -322,14 +328,40 @@ function createMaterials(scene: Scene, assets: AssetCatalog): IslandMaterials {
   aircraftTrail.disableLighting = true;
   aircraftTrail.alpha = 0.16;
 
-  const ground = material(scene, "island-ground-material", "#ffffff");
+  const groundGrass = texturedMaterial(
+    scene,
+    assets,
+    "island-ground-grass-material",
+    "#ffffff",
+    "texture.terrain.grass",
+    MAP_SIZE / 24,
+  );
+  const groundMud = texturedMaterial(
+    scene,
+    assets,
+    "island-ground-mud-material",
+    "#ffffff",
+    "texture.terrain.mud",
+    MAP_SIZE / 24,
+  );
+  const groundRoad = texturedMaterial(
+    scene,
+    assets,
+    "island-ground-road-material",
+    "#ffffff",
+    "texture.road",
+    MAP_SIZE / 18,
+  );
+  const ground = new MultiMaterial("island-ground-material", scene);
+  ground.subMaterials = [groundGrass, groundMud, groundRoad];
   const roadShoulder = material(scene, "road-shoulder-material", "#746b52");
+  const wallTexture = catalogTexture(scene, assets, "texture.building.wall", 2.5);
 
   return {
     ground,
+    wallTexture,
     beach: material(scene, "island-beach-material", "#a99b70"),
     shoreWet: material(scene, "island-wet-shore-material", "#746f59"),
-    water,
     roadShoulder,
     trunk: material(scene, "tree-trunk-material", "#5d4b38"),
     foliage: material(scene, "tree-foliage-material", "#34533a"),
@@ -339,7 +371,8 @@ function createMaterials(scene: Scene, assets: AssetCatalog): IslandMaterials {
     hay: material(scene, "hay-material", "#a28a4f"),
     poiAccent: material(scene, "poi-accent-material", "#a37848"),
     poiDark: material(scene, "poi-dark-material", "#434b4f"),
-    roof: material(scene, "building-roof-material", "#343b3b"),
+    floor: material(scene, "building-floor-material", "#343b3b"),
+    roof: texturedMaterial(scene, assets, "building-roof-material", "#69706d", "texture.building.roof", 2),
     hospitalCeiling: material(scene, "hospital-ceiling-material", HOSPITAL_WALL_COLOR),
     wallTrim: material(scene, "building-trim-material", "#8a8069"),
     hospitalCross: material(scene, "hospital-cross-material", "#d8473f"),
@@ -368,7 +401,7 @@ function createIslandEnvironment(scene: Scene, materials: IslandMaterials, layou
     { width: MAP_SIZE, height: MAP_SIZE, subdivisions: TERRAIN_GRID_SUBDIVISIONS, updatable: true },
     scene,
   );
-  applyTerrainSurface(ground, layout);
+  applyTerrainSurface(ground, layout, materials.ground);
   ground.material = materials.ground;
   markEnvironment(ground, "island-ground");
 
@@ -384,6 +417,7 @@ function createIslandEnvironment(scene: Scene, materials: IslandMaterials, layou
     let buildingMaterial = buildingMaterials.get(wall.color);
     if (!buildingMaterial) {
       buildingMaterial = material(scene, `building-material-${buildingMaterials.size}`, wall.color);
+      buildingMaterial.diffuseTexture = materials.wallTexture;
       buildingMaterials.set(wall.color, buildingMaterial);
     }
 
@@ -416,21 +450,28 @@ function createIslandEnvironment(scene: Scene, materials: IslandMaterials, layou
   createNaturalDetails(scene, materials.rock, materials.shrub, layout);
   mergeStaticBatch(
     scene,
-    "building-slabs-batch",
+    "building-floor-slabs-batch",
     (mesh) => mesh.metadata?.decoration === "building-detail" &&
-      (mesh.metadata?.detailType === "floor" || mesh.metadata?.detailType === "roof") &&
+      mesh.metadata?.detailType === "floor" &&
       mesh.metadata?.obstacleId !== layout.hospital.buildingId,
     { decoration: "building-detail", detailType: "floor-slabs" },
   );
   mergeStaticBatch(
     scene,
-    "hospital-slabs-batch",
+    "building-roof-slabs-batch",
     (mesh) => mesh.metadata?.decoration === "building-detail" &&
-      (mesh.metadata?.detailType === "floor" || mesh.metadata?.detailType === "roof") &&
+      mesh.metadata?.detailType === "roof",
+    { decoration: "building-detail", detailType: "roof-slabs" },
+  );
+  mergeStaticBatch(
+    scene,
+    "hospital-floor-slabs-batch",
+    (mesh) => mesh.metadata?.decoration === "building-detail" &&
+      mesh.metadata?.detailType === "floor" &&
       mesh.metadata?.obstacleId === layout.hospital.buildingId,
     {
       decoration: "building-detail",
-      detailType: "hospital-slabs",
+      detailType: "hospital-floor-slabs",
       obstacleId: layout.hospital.buildingId,
     },
   );
@@ -459,6 +500,53 @@ function createIslandEnvironment(scene: Scene, materials: IslandMaterials, layou
     (mesh) => mesh.metadata?.decoration === "cover-prop" && mesh.metadata?.coverKind === "hay",
     { decoration: "cover-prop", coverKind: "hay" },
   );
+}
+
+function createSkyDome(scene: Scene, assets: AssetCatalog, mapSeed: number): void {
+  const assetId = getSkyAssetId(mapSeed);
+  const descriptor = assets.resolve(assetId, "image");
+  if (descriptor.id !== assetId || !descriptor.url) return;
+
+  const texture = new Texture(descriptor.url, scene, false, true, Texture.TRILINEAR_SAMPLINGMODE);
+  texture.name = assetId;
+  texture.wrapU = Texture.CLAMP_ADDRESSMODE;
+  texture.wrapV = Texture.CLAMP_ADDRESSMODE;
+  texture.anisotropicFilteringLevel = 1;
+
+  const skyMaterial = new BackgroundMaterial("island-sky-material", scene);
+  skyMaterial.disableDepthWrite = true;
+  skyMaterial.primaryColor = Color3.White();
+  skyMaterial.diffuseTexture = texture;
+  skyMaterial.useEquirectangularFOV = true;
+  skyMaterial.fovMultiplier = 1;
+  skyMaterial.opacityFresnel = false;
+
+  const sky = CreateSphere(
+    "island-sky-dome",
+    { diameter: MAP_SIZE * 1.8, segments: 32, sideOrientation: Mesh.BACKSIDE, updatable: assetId === "texture.sky.clearing" },
+    scene,
+  );
+  if (assetId === "texture.sky.clearing") remapClearingSkyUvs(sky);
+  sky.material = skyMaterial;
+  sky.infiniteDistance = true;
+  sky.isPickable = false;
+  sky.checkCollisions = false;
+  sky.applyFog = false;
+  sky.metadata = { decoration: "sky", skyAssetId: assetId };
+}
+
+function remapClearingSkyUvs(sky: Mesh): void {
+  const uvs = sky.getVerticesData(VertexBuffer.UVKind);
+  if (!uvs) return;
+  for (let index = 1; index < uvs.length; index += 2) {
+    const viewV = uvs[index] ?? 0;
+    uvs[index] = viewV <= 0.18
+      ? viewV / 0.18 * 0.3
+      : viewV <= 0.5
+        ? 0.3 + (viewV - 0.18) / 0.32 * 0.32
+        : 0.62 + (viewV - 0.5) / 0.5 * 0.38;
+  }
+  sky.updateVerticesData(VertexBuffer.UVKind, uvs);
 }
 
 function createHospitalCross(scene: Scene, crossMaterial: StandardMaterial, layout: MapLayout): void {
@@ -507,26 +595,49 @@ function mergeStaticBatch(
   merged.freezeWorldMatrix();
 }
 
-function applyTerrainSurface(ground: Mesh, layout: MapLayout): void {
+function applyTerrainSurface(ground: Mesh, layout: MapLayout, groundMaterial: MultiMaterial): void {
   const positions = ground.getVerticesData(VertexBuffer.PositionKind);
   if (!positions) return;
   const colors: number[] = [];
+  const surfaceKinds: TerrainSurfaceKind[] = [];
   const roadSegments = createMapRoadSegments(layout.landingZones);
   for (let index = 0; index < positions.length; index += 3) {
     const x = positions[index] ?? 0;
     const z = positions[index + 2] ?? 0;
     const height = getTerrainHeight(x, z, layout);
-    const color = getTerrainColor(x, z, height, layout.seed, layout.mapPoints, roadSegments);
+    const surface = getTerrainSurface(x, z, height, layout.seed, layout.mapPoints, roadSegments);
     positions[index + 1] = height;
+    const materialIndex = terrainMaterialIndex(surface.kind);
+    const surfaceMaterial = groundMaterial.subMaterials[materialIndex];
+    const color = surfaceMaterial instanceof StandardMaterial && surfaceMaterial.diffuseTexture
+      ? surface.textureTint
+      : surface.color;
     colors.push(color.r, color.g, color.b, 1);
+    surfaceKinds.push(surface.kind);
   }
   const indices = ground.getIndices();
   if (!indices) return;
   const normals = new Array<number>(positions.length).fill(0);
   VertexData.ComputeNormals(positions, indices, normals);
+  const surfaceIndices: number[][] = [[], [], []];
+  for (let index = 0; index + 2 < indices.length; index += 3) {
+    const triangle = [indices[index] ?? 0, indices[index + 1] ?? 0, indices[index + 2] ?? 0];
+    const kinds = triangle.map((vertexIndex) => surfaceKinds[vertexIndex] ?? "grass");
+    const materialIndex = kinds.includes("road") ? 2 : kinds.includes("mud") ? 1 : 0;
+    surfaceIndices[materialIndex]?.push(...triangle);
+  }
+  const groupedIndices = surfaceIndices.flat();
   ground.updateVerticesData(VertexBuffer.PositionKind, positions);
   ground.updateVerticesData(VertexBuffer.NormalKind, normals);
   ground.setVerticesData(VertexBuffer.ColorKind, colors);
+  ground.setIndices(groupedIndices);
+  ground.subMeshes = [];
+  let indexStart = 0;
+  surfaceIndices.forEach((surface, materialIndex) => {
+    if (surface.length === 0) return;
+    new SubMesh(materialIndex, 0, positions.length / 3, indexStart, surface.length, ground);
+    indexStart += surface.length;
+  });
   ground.useVertexColors = true;
   ground.refreshBoundingInfo();
   ground.freezeWorldMatrix();
@@ -536,7 +647,6 @@ function createIslandPerimeter(scene: Scene, materials: IslandMaterials): void {
   const islandHalfSize = MAP_SIZE / 2;
   createSquareBand(scene, "island-beach", islandHalfSize, islandHalfSize + 10, -0.28, materials.beach);
   createSquareBand(scene, "island-wet-shore", islandHalfSize + 10, islandHalfSize + 20, -0.34, materials.shoreWet);
-  createSquareBand(scene, "ocean", islandHalfSize + 20, islandHalfSize + 140, -1.5, materials.water);
 }
 
 function createSquareBand(
@@ -562,15 +672,22 @@ function createSquareBand(
   });
 }
 
-function getTerrainColor(
+type TerrainSurfaceKind = "grass" | "mud" | "road";
+
+function terrainMaterialIndex(kind: TerrainSurfaceKind): number {
+  return kind === "road" ? 2 : kind === "mud" ? 1 : 0;
+}
+
+function getTerrainSurface(
   x: number,
   z: number,
   height: number,
   seed: number,
   mapPoints: MapLayout["mapPoints"],
   roadSegments: ReadonlyArray<readonly [number, number, number, number]>,
-): Color3 {
+): { color: Color3; textureTint: Color3; kind: TerrainSurfaceKind } {
   let color = height > 4 ? TERRAIN_COLORS.highland : TERRAIN_COLORS.ground;
+  let kind: TerrainSurfaceKind = height > 4 ? "mud" : "grass";
   let naturalSurface = true;
   for (const [patchX, patchZ, width, depth, rotation, type] of TERRAIN_PATCHES) {
     const cosine = Math.cos(rotation);
@@ -581,34 +698,44 @@ function getTerrainColor(
     const localZ = offsetX * sine + offsetZ * cosine;
     if ((localX / (width / 2)) ** 2 + (localZ / (depth / 2)) ** 2 <= 1) {
       color = type === "mud" ? TERRAIN_COLORS.mud : TERRAIN_COLORS.grass;
+      kind = type;
       break;
     }
   }
   if (roadSegments.some(([startX, startZ, endX, endZ]) => pointToSegmentDistance(x, z, startX, startZ, endX, endZ) <= 6)) {
     color = TERRAIN_COLORS.roadShoulder;
+    kind = "road";
     naturalSurface = false;
   }
   mapPoints.forEach((point, index) => {
-    const poiType = POI_TYPES[index];
+    const poiType = getPoiVisualType(point.name);
     if (!poiType) return;
     const width = poiType === "harbor" ? 138 : 126;
     const depth = poiType === "town" ? 118 : 106;
     if (Math.abs(x - point.position.x) <= width / 2 && Math.abs(z - point.position.z) <= depth / 2) {
       color = index % 2 === 0 ? TERRAIN_COLORS.paving : TERRAIN_COLORS.roadShoulder;
+      kind = "road";
       naturalSurface = false;
     }
   });
   if (roadSegments.some(([startX, startZ, endX, endZ]) => pointToSegmentDistance(x, z, startX, startZ, endX, endZ) <= 3.75)) {
     color = TERRAIN_COLORS.road;
+    kind = "road";
     naturalSurface = false;
   }
   mapPoints.forEach((point, index) => {
     if (Math.hypot(x - point.position.x, z - point.position.z) <= 15) {
       color = index % 2 === 0 ? TERRAIN_COLORS.poiDark : TERRAIN_COLORS.poiAccent;
+      kind = "road";
       naturalSurface = false;
     }
   });
-  return naturalSurface ? color.scale(terrainSurfaceShade(x, z, height, seed)) : color;
+  const shade = naturalSurface ? terrainSurfaceShade(x, z, height, seed) : 1;
+  return {
+    color: naturalSurface ? color.scale(shade) : color,
+    textureTint: Color3.White().scale(shade),
+    kind,
+  };
 }
 
 function terrainSurfaceShade(x: number, z: number, height: number, seed: number): number {
@@ -649,7 +776,11 @@ function createBuildingDetails(scene: Scene, materials: IslandMaterials, layout:
     if (!mesh) continue;
     mesh.position.set(slab.center.x, slab.center.y, slab.center.z);
     mesh.scaling.set(slab.width, slab.height, slab.depth);
-    mesh.material = slab.obstacleId === layout.hospital.buildingId ? materials.hospitalCeiling : materials.roof;
+    mesh.material = slab.kind === "roof"
+      ? materials.roof
+      : slab.obstacleId === layout.hospital.buildingId
+        ? materials.hospitalCeiling
+        : materials.floor;
     mesh.isVisible = true;
     markBuildingDetail(mesh, slab.obstacleId, slab.kind);
   }
@@ -902,8 +1033,8 @@ function createNaturalDetails(
 }
 
 function createPois(scene: Scene, materials: IslandMaterials, layout: MapLayout): void {
-  layout.mapPoints.forEach((point, index) => {
-    const poiType = POI_TYPES[index];
+  layout.mapPoints.forEach((point) => {
+    const poiType = getPoiVisualType(point.name);
     if (!poiType) {
       return;
     }
@@ -1720,6 +1851,37 @@ function material(scene: Scene, name: string, hex: string): StandardMaterial {
   result.diffuseColor = color;
   result.specularColor = color.scale(0.08);
   return result;
+}
+
+function texturedMaterial(
+  scene: Scene,
+  assets: AssetCatalog,
+  name: string,
+  hex: string,
+  assetId: string,
+  scale: number,
+): StandardMaterial {
+  const result = material(scene, name, hex);
+  result.diffuseTexture = catalogTexture(scene, assets, assetId, scale);
+  return result;
+}
+
+function catalogTexture(
+  scene: Scene,
+  assets: AssetCatalog,
+  assetId: string,
+  scale: number,
+): Texture | null {
+  const descriptor = assets.resolve(assetId, "image");
+  if (descriptor.id !== assetId || !descriptor.url) return null;
+  const texture = new Texture(descriptor.url, scene, false, true, Texture.TRILINEAR_SAMPLINGMODE);
+  texture.name = assetId;
+  texture.wrapU = Texture.WRAP_ADDRESSMODE;
+  texture.wrapV = Texture.WRAP_ADDRESSMODE;
+  texture.uScale = scale;
+  texture.vScale = scale;
+  texture.anisotropicFilteringLevel = 4;
+  return texture;
 }
 
 function lerp(start: number, end: number, progress: number): number {
