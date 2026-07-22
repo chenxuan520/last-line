@@ -2,6 +2,9 @@ import type { AssetContainer } from "@babylonjs/core/assetContainer";
 import type { Scene } from "@babylonjs/core/scene";
 import type { AssetCatalog } from "../../assets/AssetCatalog";
 import type { AssetEntry } from "../../assets/types";
+import { clearDynamicChunkRecoveryAttempts } from "../dynamicChunkRecovery";
+
+let gltfLoaderRequest: Promise<void> | null = null;
 
 export async function loadCatalogModel(
   scene: Scene,
@@ -15,7 +18,7 @@ export async function loadCatalogModel(
 
   let container: AssetContainer | null = null;
   try {
-    await import("@babylonjs/loaders/glTF");
+    await loadGltfLoader();
     const { LoadAssetContainerAsync } = await import("@babylonjs/core/Loading/sceneLoader");
     const payload = assets.getPayload(descriptor.id) ?? await assets.loadPayload(descriptor.id);
     const source = payload ? new Uint8Array(payload) : descriptor.url;
@@ -33,6 +36,17 @@ export async function loadCatalogModel(
     console.error(`模型 ${assetId} 加载或校验失败，使用程序化 fallback`, error);
     return null;
   }
+}
+
+async function loadGltfLoader(): Promise<void> {
+  if (gltfLoaderRequest) return gltfLoaderRequest;
+  gltfLoaderRequest = import("@babylonjs/loaders/glTF").then(() => {
+    if (typeof sessionStorage !== "undefined") clearDynamicChunkRecoveryAttempts(sessionStorage);
+  }).catch((error) => {
+    gltfLoaderRequest = null;
+    throw error;
+  });
+  return gltfLoaderRequest;
 }
 
 function validateModelContract(container: AssetContainer, descriptor: AssetEntry): void {

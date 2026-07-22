@@ -6,6 +6,7 @@ import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { VertexBuffer } from "@babylonjs/core/Buffers/buffer";
 import { InstancedMesh } from "@babylonjs/core/Meshes/instancedMesh";
 import { Ray } from "@babylonjs/core/Culling/ray";
+import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -605,6 +606,8 @@ describe("IslandScene lifecycle", () => {
       expect(botMeshes.filter((mesh) => mesh.metadata?.weaponId === weaponId)
         .every((mesh) => mesh.metadata?.weaponFallback === true && !mesh.metadata?.visualModel)).toBe(true);
     }
+    expect(botMeshes.filter((mesh) => mesh.metadata?.weaponFallbackSuppressed !== true)
+      .every((mesh) => mesh.parent?.name.includes("weapon_socket") === true)).toBe(true);
     expect(fetchMock.mock.calls.some(([input]) => input.toString().includes("/weapon-") && input.toString().endsWith(".glb")))
       .toBe(false);
     const baseCharacter = bundle.scene.getTransformNodeByName(`${bot.id}-character-base`);
@@ -662,12 +665,27 @@ describe("IslandScene lifecycle", () => {
 
     expect(characterRoot.scaling.z).toBeLessThan(0);
     expect(characterRoot.isEnabled()).toBe(true);
+    const uniform = bundle.scene.getMeshByName(`${bot.id}-base-character-merged-uniform`)?.material as
+      { albedoColor?: Color3 } | null;
+    const uniformDark = bundle.scene.getMeshByName(`${bot.id}-base-character-merged-uniformDark`)?.material as
+      { albedoColor?: Color3 } | null;
+    const uniformLight = bundle.scene.getMeshByName(`${bot.id}-base-character-merged-uniformLight`)?.material as
+      { albedoColor?: Color3 } | null;
+    const skin = bundle.scene.getMeshByName(`${bot.id}-base-character-merged-skin`)?.material as
+      { albedoColor?: Color3 } | null;
+    expect(uniform?.albedoColor?.toHexString()).toBe("#526773");
+    expect(uniformDark?.albedoColor?.toHexString()).toBe("#344550");
+    expect(uniformLight?.albedoColor?.toHexString()).toBe("#6C8290");
+    expect(skin?.albedoColor?.toHexString()).toBe("#946F58");
     expect(bundle.viewWeaponRoot.getChildMeshes(false)
       .filter((mesh) => mesh.metadata?.weaponId === "rifle" && mesh.metadata?.weaponFallback === true)
       .some((mesh) => mesh.isEnabled())).toBe(true);
     expect(botRoot.getChildMeshes(false)
       .filter((mesh) => mesh.metadata?.weaponId === "rifle" && mesh.metadata?.weaponFallback === true)
       .some((mesh) => mesh.isEnabled())).toBe(true);
+    expect(botRoot.getChildMeshes(false)
+      .filter((mesh) => mesh.metadata?.weaponId === "rifle" && mesh.metadata?.weaponFallbackSuppressed !== true)
+      .every((mesh) => mesh.parent?.name.includes("weapon_socket") === true)).toBe(true);
     expect(bundle.scene.meshes.some((mesh) => String(mesh.metadata?.visualModel).startsWith("model.weapon."))).toBe(false);
 
     bundle.scene.dispose();
@@ -975,6 +993,9 @@ async function createGlbAssets(failedModelUrls: ReadonlySet<string> = new Set())
 
 function createProductionGlbAssets(): AssetCatalog {
   const modelEntries = productionManifest.assets.filter((entry) => entry.type === "model") as AssetEntry[];
+  const proceduralWeaponEntries = productionManifest.assets.filter((entry) =>
+    entry.type === "procedural-model" && entry.id.startsWith("model.weapon.")
+  ) as AssetEntry[];
   vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
     const url = input.toString();
     const entry = modelEntries.find((candidate) => candidate.url === url);
@@ -1000,6 +1021,7 @@ function createProductionGlbAssets(): AssetCatalog {
         "texture.sky.storm",
       ].map((id) => ({ id, type: "svg" as const, url: `/${id}.svg`, fallback: "fallback.ui" })),
       ...modelEntries,
+      ...proceduralWeaponEntries,
     ],
   });
 }

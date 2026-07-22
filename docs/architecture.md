@@ -36,6 +36,8 @@ Each `BotController` has independent decision timers and memory. Bots use the sa
 
 Optional GLB models are loaded asynchronously and instantiated as non-pickable visual children. Procedural models remain the fallback. Repeated loot drops reuse inactive state IDs and marker meshes, and scene disposal clears marker references and imported containers.
 
+The enemy character palette uses a dark blue-gray uniform while preserving authored skin colors; remote human characters retain their green palette. Procedural third-person weapons are created under each imported character LOD's `weapon_socket`, so reverting the weapon style does not reintroduce the old character coordinate system. Dynamic GLTF loader chunks receive two bounded reload retries across deployment cache mismatches before character fallback is accepted.
+
 `IslandScene` receives an explicit local actor ID for multiplayer. Only that actor uses the first-person hitbox representation; remote human actors use the same third-person presentation contract as AI while retaining `kind: "player"` in authoritative state.
 
 ## Multiplayer Services

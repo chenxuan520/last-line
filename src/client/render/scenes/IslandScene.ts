@@ -4,6 +4,7 @@ import type { Engine } from "@babylonjs/core/Engines/engine";
 import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { BackgroundMaterial } from "@babylonjs/core/Materials/Background/backgroundMaterial";
+import type { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { MultiMaterial } from "@babylonjs/core/Materials/multiMaterial";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
@@ -196,6 +197,7 @@ export async function createIslandScene(
       actors,
       actorRoots,
       actorVisualRoots,
+      materials,
       player.id,
       qualityProfile.modelLodDistance,
     );
@@ -237,9 +239,11 @@ async function replaceCatalogModels(
   actors: Readonly<Record<EntityId, ActorState>>,
   actorRoots: Map<EntityId, TransformNode>,
   actorVisualRoots: Map<EntityId, TransformNode>,
+  materials: IslandMaterials,
   localActorId: EntityId,
   modelLodDistance: number,
 ): Promise<void> {
+  const weaponIds = ["rifle", "smg", "shotgun", "sniper"] as const;
   const characterIds = ["player", "enemy"] as const;
   const requiredCharacterIds = characterIds.filter((kind) => Object.values(actors).some((actor) =>
     actor.id !== localActorId && (actor.kind === "player" ? "player" : "enemy") === kind
@@ -255,6 +259,10 @@ async function replaceCatalogModels(
     base: loadedCharacters[index * 2] ?? null,
     lod1: loadedCharacters[index * 2 + 1] ?? null,
   }]));
+  for (const models of characterModels.values()) {
+    if (models.base) applyCharacterPalette(models.base);
+    if (models.lod1) applyCharacterPalette(models.lod1);
+  }
   const loadedContainers = loadedCharacters
     .flatMap((loaded) => loaded ? [loaded.container] : []);
 
@@ -279,6 +287,20 @@ async function replaceCatalogModels(
     suppressProceduralCharacter(actorRoot);
     const visuals = [base, lod1].filter((visual): visual is ImportedCharacterVisual => visual !== null);
     suppressProceduralEquipment(actorRoot, visuals);
+    for (const weaponId of weaponIds) suppressProceduralWeapon(actorRoot, weaponId);
+    for (const visual of visuals) {
+      for (const weaponId of weaponIds) {
+        createWeaponModel(
+          scene,
+          visual.weaponSocket,
+          `${actor.id}-${visual.lod}`,
+          weaponId,
+          materials,
+          false,
+          true,
+        );
+      }
+    }
     setActorWeaponVisual(actorRoot, getActiveWeapon(actor)?.weaponId ?? null);
     setActorEquipmentVisual(actorRoot, actor.inventory.armorLevel, actor.inventory.helmetLevel);
     actorLods.push({ actorRoot, base: base?.group ?? null, lod1: lod1?.group ?? null });
@@ -316,6 +338,23 @@ interface ImportedCharacterVisual {
   lod: "base" | "lod1";
   hasArmor: boolean;
   hasHelmet: boolean;
+}
+
+function applyCharacterPalette(loaded: LoadedCatalogModel): void {
+  const materialMetadata = [
+    ["uniformDark", "uniformDarkColor"],
+    ["uniform", "uniformColor"],
+    ["uniformLight", "uniformLightColor"],
+    ["armor", "armorColor"],
+    ["strap", "strapColor"],
+    ["helmet", "helmetColor"],
+  ] as const;
+  for (const [materialName, metadataName] of materialMetadata) {
+    const color = loaded.descriptor.metadata?.[metadataName];
+    const sceneMaterial = loaded.container.materials.find((material) => material.name === materialName);
+    if (typeof color !== "string" || sceneMaterial?.getClassName() !== "PBRMaterial") continue;
+    (sceneMaterial as PBRMaterial).albedoColor = Color3.FromHexString(color);
+  }
 }
 
 function instantiateCharacterModel(
@@ -1390,6 +1429,18 @@ export function setActorEquipmentVisual(
   }
 }
 
+function suppressProceduralWeapon(root: TransformNode, weaponId: string): void {
+  for (const mesh of root.getChildMeshes(false)) {
+    if (
+      mesh.metadata?.actorVisual !== "weapon" ||
+      mesh.metadata.weaponId !== weaponId ||
+      mesh.metadata.weaponFallback !== true
+    ) continue;
+    mesh.metadata = { ...mesh.metadata, weaponFallbackSuppressed: true };
+    mesh.setEnabled(false);
+  }
+}
+
 function createCamera(scene: Scene, player: ActorState): UniversalCamera {
   const camera = new UniversalCamera(
     "player-camera",
@@ -1493,9 +1544,14 @@ function createWeaponModel(
   weaponId: WeaponVisualId,
   materials: IslandMaterials,
   viewModel: boolean,
+  socketModel = false,
 ): void {
-  const scale = viewModel ? 1 : 0.62;
-  const offset = viewModel ? { x: 0.38, y: -0.34, z: 0.72 } : { x: 0.28, y: -0.43, z: 0.32 };
+  const scale = viewModel ? 1 : socketModel ? 0.48 : 0.62;
+  const offset = viewModel
+    ? { x: 0.38, y: -0.34, z: 0.72 }
+    : socketModel
+      ? { x: 0, y: 0, z: 0 }
+      : { x: 0.28, y: -0.43, z: 0.32 };
   const pieces = weaponPieces(weaponId, viewModel);
   pieces.forEach(([name, kind, x, y, z, width, height, depth, rotationX = 0]) => {
     const mesh = kind === "barrel"

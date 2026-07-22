@@ -42,9 +42,11 @@ The catalog preloads URL-backed UI and image assets and caches bytes. Character 
 
 GLB loading additionally requires at least one renderable mesh. If `requiredNodes` is present, every comma-separated node must exist. A network, decode, mesh, or node failure logs the resource ID and keeps the procedural fallback.
 
-Character GLBs use `root,weapon_socket,backpack_socket`. Character entries must also declare exact comma-separated `armorMeshes` and `helmetMeshes` names so equipment visibility never depends on arbitrary mesh naming. These named meshes are validated as renderable during loading. Character base IDs have matching `.lod1` IDs, for example `model.character.enemy.lod1`. The client selects character base/LOD1 groups by camera distance; this is presentation-only and never enters authoritative match state.
+Character GLBs use `root,weapon_socket,backpack_socket`. Character entries must also declare exact comma-separated `armorMeshes` and `helmetMeshes` names so equipment visibility never depends on arbitrary mesh naming. These named meshes are validated as renderable during loading. Character base IDs have matching `.lod1` IDs, for example `model.character.enemy.lod1`. Optional `uniformDarkColor`, `uniformColor`, `uniformLightColor`, `armorColor`, `strapColor`, and `helmetColor` metadata recolors matching authored PBR materials without changing skin. The client selects character base/LOD1 groups by camera distance; this is presentation-only and never enters authoritative match state.
 
 Remote human actors use `model.character.player`, bots use `model.character.enemy`, and the local first-person actor does not render a third-person body. Held weapons use the stable procedural `model.weapon.*` entries in both first and third person. A missing or invalid base character keeps the procedural body fallback at every distance; a missing character LOD1 only makes the valid base remain active at distance.
+
+If a versioned deployment briefly serves HTML for a dynamically imported JavaScript chunk, the browser retries by reloading at most twice. After the retry budget is exhausted, normal model fallback remains available and gameplay is not blocked.
 
 ## Gameplay Isolation
 

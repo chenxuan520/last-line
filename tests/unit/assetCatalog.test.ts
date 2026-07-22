@@ -67,7 +67,7 @@ describe("asset manifest", () => {
     })).toThrow("armorMeshes");
   });
 
-  it("declares base and LOD1 GLBs with the required model nodes", () => {
+  it("declares character LOD GLBs and procedural held weapons", () => {
     const production = validateAssetManifest(productionManifest);
     for (const character of ["player", "enemy"]) {
       for (const suffix of ["", ".lod1"]) {
@@ -84,16 +84,25 @@ describe("asset manifest", () => {
         expect(entry?.url).toMatch(/\.glb$/);
       }
     }
+    const player = production.assets.find((asset) => asset.id === "model.character.player");
+    const enemy = production.assets.find((asset) => asset.id === "model.character.enemy");
+    expect(player?.metadata?.uniformColor).toBeUndefined();
+    expect(enemy?.metadata).toMatchObject({
+      uniformDarkColor: "#344550",
+      uniformColor: "#526773",
+      uniformLightColor: "#6C8290",
+      armorColor: "#252C2E",
+      helmetColor: "#30383A",
+    });
     for (const weapon of ["rifle", "smg", "shotgun", "sniper"]) {
-      for (const suffix of ["", ".lod1"]) {
-        const entry = production.assets.find((asset) => asset.id === `model.weapon.${weapon}${suffix}`);
-        expect(entry).toMatchObject({
-          type: "model",
-          fallback: "fallback.model",
-          metadata: { requiredNodes: "root,grip,muzzle" },
-        });
-        expect(entry?.url).toMatch(/\.glb$/);
-      }
+      const entry = production.assets.find((asset) => asset.id === `model.weapon.${weapon}`);
+      expect(entry).toMatchObject({
+        type: "procedural-model",
+        fallback: "fallback.model",
+        metadata: { shape: weapon, color: expect.any(String) },
+      });
+      expect(entry?.url).toBeUndefined();
+      expect(production.assets.find((asset) => asset.id === `model.weapon.${weapon}.lod1`)).toBeUndefined();
     }
   });
 

@@ -225,7 +225,13 @@
         "color": "#bd6357",
         "requiredNodes": "root,weapon_socket,backpack_socket",
         "armorMeshes": "character-merged-armor",
-        "helmetMeshes": "character-merged-helmet"
+        "helmetMeshes": "character-merged-helmet",
+        "uniformDarkColor": "#344550",
+        "uniformColor": "#526773",
+        "uniformLightColor": "#6C8290",
+        "armorColor": "#252C2E",
+        "strapColor": "#252C2E",
+        "helmetColor": "#30383A"
       }
     },
     {
@@ -236,7 +242,13 @@
       "metadata": {
         "requiredNodes": "root,weapon_socket,backpack_socket",
         "armorMeshes": "character-lod1-armor",
-        "helmetMeshes": "character-lod1-helmet"
+        "helmetMeshes": "character-lod1-helmet",
+        "uniformDarkColor": "#344550",
+        "uniformColor": "#526773",
+        "uniformLightColor": "#6C8290",
+        "armorColor": "#252C2E",
+        "strapColor": "#252C2E",
+        "helmetColor": "#30383A"
       }
     },
     {
