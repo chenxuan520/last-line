@@ -270,7 +270,7 @@ async function replaceCatalogModels(
     .flatMap((loaded) => loaded ? [loaded.container] : []);
 
   for (const weaponId of weaponIds) {
-    const weapon = weaponModels.get(weaponId)?.base ?? weaponModels.get(weaponId)?.lod1;
+    const weapon = weaponModels.get(weaponId)?.base;
     if (!weapon) continue;
     suppressProceduralWeapon(viewWeaponRoot, weaponId);
     const viewInstance = weapon.container.instantiateModelsToScene((name) => `view-${weaponId}-${name}`);
@@ -290,25 +290,24 @@ async function replaceCatalogModels(
     if (!actorRoot || !visualRoot) continue;
     const kind = actor.kind === "player" ? "player" : "enemy";
     const character = characterModels.get(kind);
-    if (!character?.base && !character?.lod1) continue;
-    suppressProceduralCharacter(actorRoot);
-    const base = character.base
-      ? instantiateCharacterModel(scene, character.base, actor, visualRoot, "base")
-      : null;
+    if (!character?.base) continue;
+    const base = instantiateCharacterModel(scene, character.base, actor, visualRoot, "base");
+    if (!base) continue;
     const lod1 = character.lod1
       ? instantiateCharacterModel(scene, character.lod1, actor, visualRoot, "lod1")
       : null;
+    suppressProceduralCharacter(actorRoot);
     const visuals = [base, lod1].filter((visual): visual is ImportedCharacterVisual => visual !== null);
     suppressProceduralEquipment(actorRoot, visuals);
     for (const visual of visuals) {
       for (const weaponId of weaponIds) {
         const models = weaponModels.get(weaponId);
-        const weapon = visual.lod === "lod1"
-          ? models?.lod1 ?? models?.base
-          : models?.base ?? models?.lod1;
+        if (!models?.base) continue;
+        const weapon = visual.lod === "lod1" ? models.lod1 ?? models.base : models.base;
         if (!weapon) continue;
-        instantiateThirdPersonWeapon(weapon, actor, weaponId, visual.weaponSocket);
-        suppressProceduralWeapon(actorRoot, weaponId);
+        if (instantiateThirdPersonWeapon(weapon, actor, weaponId, visual.weaponSocket)) {
+          suppressProceduralWeapon(actorRoot, weaponId);
+        }
       }
     }
     setActorWeaponVisual(actorRoot, getActiveWeapon(actor)?.weaponId ?? null);
@@ -367,11 +366,16 @@ function instantiateCharacterModel(
     group.dispose();
     return null;
   }
+  const armorMeshes = metadataNames(loaded.descriptor, "armorMeshes");
+  const helmetMeshes = metadataNames(loaded.descriptor, "helmetMeshes");
   let hasArmor = false;
   let hasHelmet = false;
   for (const mesh of group.getChildMeshes(false)) {
-    const lowerName = mesh.name.toLowerCase();
-    const actorVisual = lowerName.includes("armor") ? "vest" : lowerName.includes("helmet") ? "helmet" : undefined;
+    const actorVisual = matchesImportedName(mesh.name, armorMeshes)
+      ? "vest"
+      : matchesImportedName(mesh.name, helmetMeshes)
+        ? "helmet"
+        : undefined;
     if (actorVisual === "vest") hasArmor = true;
     if (actorVisual === "helmet") hasHelmet = true;
     mesh.metadata = {
@@ -389,14 +393,14 @@ function instantiateThirdPersonWeapon(
   actor: ActorState,
   weaponId: WeaponVisualId,
   weaponSocket: TransformNode,
-): void {
+): boolean {
   const lod = loaded.descriptor.id.endsWith(".lod1") ? "lod1" : "base";
   const instance = loaded.container.instantiateModelsToScene((name) =>
     `${actor.id}-${lod}-${weaponId}-${name}`
   );
   const authoredRoot = findImportedNode(instance.rootNodes, "root");
   const grip = findImportedNode(instance.rootNodes, "grip");
-  if (!authoredRoot || !grip) return;
+  if (!authoredRoot || !grip) return false;
   const scale = 0.48;
   const gripPosition = grip.position.clone();
   authoredRoot.parent = weaponSocket;
@@ -420,6 +424,7 @@ function instantiateThirdPersonWeapon(
     };
     mesh.setEnabled(false);
   }
+  return true;
 }
 
 function findImportedNode(nodes: readonly Node[], name: string): TransformNode | null {
@@ -433,6 +438,7 @@ function findImportedNode(nodes: readonly Node[], name: string): TransformNode |
 
 function suppressProceduralCharacter(root: TransformNode): void {
   for (const mesh of root.getChildMeshes(false)) {
+    if (mesh.metadata?.visualModel) continue;
     if (!["weapon", "parachute", "vest", "helmet"].includes(mesh.metadata?.actorVisual)) {
       mesh.setEnabled(false);
     }
@@ -470,7 +476,7 @@ function attachModel(
     if (!(node instanceof TransformNode)) continue;
     node.parent = parent;
     node.position.set(x, y, z);
-    node.scaling.setAll(scale);
+    node.scaling.scaleInPlace(scale);
     const meshes = node instanceof Mesh ? [node, ...node.getChildMeshes()] : node.getChildMeshes();
     for (const mesh of meshes) {
       mesh.isPickable = false;
@@ -485,6 +491,17 @@ function attachModel(
 function numberMetadata(descriptor: AssetEntry, name: string, fallback: number): number {
   const value = descriptor.metadata?.[name];
   return typeof value === "number" ? value : fallback;
+}
+
+function metadataNames(descriptor: AssetEntry, name: string): string[] {
+  const value = descriptor.metadata?.[name];
+  return typeof value === "string"
+    ? value.split(",").map((entry) => entry.trim()).filter(Boolean)
+    : [];
+}
+
+function matchesImportedName(actualName: string, expectedNames: readonly string[]): boolean {
+  return expectedNames.some((expected) => actualName === expected || actualName.endsWith(`-${expected}`));
 }
 
 function createMaterials(scene: Scene, assets: AssetCatalog): IslandMaterials {

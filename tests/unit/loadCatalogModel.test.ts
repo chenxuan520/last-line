@@ -49,9 +49,53 @@ describe("loadCatalogModel", () => {
     scene.dispose();
     engine.dispose();
   });
+
+  it("rejects missing declared equipment meshes", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const catalog = await loadCatalog("root", true, { armorMeshes: "missing-armor" });
+    const engine = new NullEngine();
+    const scene = new Scene(engine);
+
+    expect(await loadCatalogModel(scene, catalog, "model.test")).toBeNull();
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("model.test"), expect.any(Error));
+    scene.dispose();
+    engine.dispose();
+  });
+
+  it("rejects character descriptors that bypass manifest equipment validation", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const glb = createMinimalGlb(true);
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(glb, { headers: { "content-type": "model/gltf-binary" } })
+    ));
+    const catalog = new AssetCatalog({
+      version: 1,
+      assets: [
+        { id: "fallback.model", type: "procedural-model" },
+        {
+          id: "model.character.test",
+          type: "model",
+          url: "/test.glb",
+          fallback: "fallback.model",
+          metadata: { requiredNodes: "root" },
+        },
+      ],
+    });
+    const engine = new NullEngine();
+    const scene = new Scene(engine);
+
+    expect(await loadCatalogModel(scene, catalog, "model.character.test")).toBeNull();
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("model.character.test"), expect.any(Error));
+    scene.dispose();
+    engine.dispose();
+  });
 });
 
-async function loadCatalog(requiredNodes: string, withMesh = true): Promise<AssetCatalog> {
+async function loadCatalog(
+  requiredNodes: string,
+  withMesh = true,
+  metadata: Readonly<Record<string, string>> = {},
+): Promise<AssetCatalog> {
   const glb = createMinimalGlb(withMesh);
   vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
     const url = input.toString();
@@ -66,7 +110,7 @@ async function loadCatalog(requiredNodes: string, withMesh = true): Promise<Asse
             type: "model",
             url: "/test.glb",
             fallback: "fallback.model",
-            metadata: { requiredNodes },
+            metadata: { requiredNodes, ...metadata },
           },
         ],
       });

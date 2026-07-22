@@ -199,7 +199,9 @@
       "metadata": {
         "shape": "soldier",
         "color": "#809d5e",
-        "requiredNodes": "root,weapon_socket,backpack_socket"
+        "requiredNodes": "root,weapon_socket,backpack_socket",
+        "armorMeshes": "character-merged-armor",
+        "helmetMeshes": "character-merged-helmet"
       }
     },
     {
@@ -207,7 +209,11 @@
       "type": "model",
       "url": "./assets/models/character-player-lod1.glb",
       "fallback": "fallback.model",
-      "metadata": { "requiredNodes": "root,weapon_socket,backpack_socket" }
+      "metadata": {
+        "requiredNodes": "root,weapon_socket,backpack_socket",
+        "armorMeshes": "character-lod1-armor",
+        "helmetMeshes": "character-lod1-helmet"
+      }
     },
     {
       "id": "model.character.enemy",
@@ -217,7 +223,9 @@
       "metadata": {
         "shape": "soldier",
         "color": "#bd6357",
-        "requiredNodes": "root,weapon_socket,backpack_socket"
+        "requiredNodes": "root,weapon_socket,backpack_socket",
+        "armorMeshes": "character-merged-armor",
+        "helmetMeshes": "character-merged-helmet"
       }
     },
     {
@@ -225,7 +233,11 @@
       "type": "model",
       "url": "./assets/models/character-enemy-lod1.glb",
       "fallback": "fallback.model",
-      "metadata": { "requiredNodes": "root,weapon_socket,backpack_socket" }
+      "metadata": {
+        "requiredNodes": "root,weapon_socket,backpack_socket",
+        "armorMeshes": "character-lod1-armor",
+        "helmetMeshes": "character-lod1-helmet"
+      }
     },
     {
       "id": "model.weapon.rifle",

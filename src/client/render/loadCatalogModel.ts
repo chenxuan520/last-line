@@ -26,7 +26,7 @@ export async function loadCatalogModel(
     if (!container.meshes.some((mesh) => mesh.getTotalVertices() > 0)) {
       throw new Error("模型不包含可渲染 mesh");
     }
-    validateRequiredNodes(container, descriptor);
+    validateModelContract(container, descriptor);
     return { container, descriptor };
   } catch (error) {
     container?.dispose();
@@ -35,14 +35,34 @@ export async function loadCatalogModel(
   }
 }
 
-function validateRequiredNodes(container: AssetContainer, descriptor: AssetEntry): void {
+function validateModelContract(container: AssetContainer, descriptor: AssetEntry): void {
   const required = descriptor.metadata?.requiredNodes;
-  if (typeof required !== "string" || required.trim() === "") {
-    return;
+  if (typeof required === "string" && required.trim() !== "") {
+    const names = new Set(container.getNodes().map((node) => node.name));
+    const missing = metadataNames(descriptor, "requiredNodes").filter((name) => !names.has(name));
+    if (missing.length > 0) {
+      throw new Error(`缺少节点: ${missing.join(", ")}`);
+    }
   }
-  const names = new Set(container.getNodes().map((node) => node.name));
-  const missing = required.split(",").map((name) => name.trim()).filter((name) => name && !names.has(name));
-  if (missing.length > 0) {
-    throw new Error(`缺少节点: ${missing.join(", ")}`);
+
+  const renderableMeshNames = new Set(
+    container.meshes.filter((mesh) => mesh.getTotalVertices() > 0).map((mesh) => mesh.name),
+  );
+  for (const metadataName of ["armorMeshes", "helmetMeshes"] as const) {
+    const declaredNames = metadataNames(descriptor, metadataName);
+    if (descriptor.id.startsWith("model.character.") && declaredNames.length === 0) {
+      throw new Error(`角色模型缺少非空 ${metadataName}`);
+    }
+    const missing = declaredNames.filter((name) => !renderableMeshNames.has(name));
+    if (missing.length > 0) {
+      throw new Error(`缺少 ${metadataName}: ${missing.join(", ")}`);
+    }
   }
+}
+
+function metadataNames(descriptor: AssetEntry, name: string): string[] {
+  const value = descriptor.metadata?.[name];
+  return typeof value === "string"
+    ? value.split(",").map((entry) => entry.trim()).filter(Boolean)
+    : [];
 }

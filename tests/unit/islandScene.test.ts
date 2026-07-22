@@ -7,8 +7,11 @@ import { VertexBuffer } from "@babylonjs/core/Buffers/buffer";
 import { InstancedMesh } from "@babylonjs/core/Meshes/instancedMesh";
 import { Ray } from "@babylonjs/core/Culling/ray";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AssetCatalog } from "../../src/assets/AssetCatalog";
+import type { AssetEntry } from "../../src/assets/types";
 import {
   applyActorVisualPose,
   createIslandScene,
@@ -22,6 +25,7 @@ import { createBattleRoyaleState, createBattleRoyaleStateForHumans } from "../..
 import { createWeaponState } from "../../src/game/state/types";
 import { InventorySystem } from "../../src/game/systems/InventorySystem";
 import { getSupportHeight } from "../../src/game/systems/MovementSystem";
+import productionManifest from "../../public/assets/asset-manifest.json";
 
 describe("IslandScene lifecycle", () => {
   afterEach(() => {
@@ -625,6 +629,147 @@ describe("IslandScene lifecycle", () => {
     engine.dispose();
   }, 30_000);
 
+  it("preserves production GLB handedness and aligns authored weapon grips", async () => {
+    const assets = createProductionGlbAssets();
+    const state = createBattleRoyaleState("player", {
+      participantCount: 2,
+      flightSeconds: 1,
+      safeZoneStages: [{ waitSeconds: 1, shrinkSeconds: 1, radius: 100, damagePerSecond: 1 }],
+    }, () => 0.5);
+    const player = state.actors.player;
+    const bot = state.actors["bot-1"];
+    if (!player || !bot) throw new Error("production GLB actors missing");
+    player.inventory.weaponSlots[0] = createWeaponState("rifle");
+    bot.inventory.weaponSlots[0] = createWeaponState("rifle");
+    player.deployment = "grounded";
+    bot.deployment = "grounded";
+    const engine = new NullEngine();
+    const bundle = await createIslandScene(engine, assets, state.actors, state.groundLoot, state.mapSeed);
+
+    const characterRoot = bundle.scene.getMeshByName(`${bot.id}-base-__root__`);
+    const viewWeaponRoot = bundle.scene.getMeshByName("view-rifle-__root__");
+    const muzzle = bundle.scene.transformNodes.find((node) => node.name === "view-rifle-muzzle");
+    const socket = bundle.scene.transformNodes.find((node) => node.name === `${bot.id}-base-weapon_socket`);
+    const grip = bundle.scene.transformNodes.find((node) => node.name === `${bot.id}-base-rifle-grip`);
+    if (!characterRoot || !viewWeaponRoot || !muzzle || !socket || !grip) {
+      throw new Error("production GLB transform fixtures missing");
+    }
+    bundle.scene.render();
+
+    expect(characterRoot.scaling.z).toBeLessThan(0);
+    expect(characterRoot.isEnabled()).toBe(true);
+    expect(viewWeaponRoot.scaling.z).toBeLessThan(0);
+    const cameraForward = bundle.camera.getDirection(Vector3.Forward());
+    expect(Vector3.Dot(muzzle.getAbsolutePosition().subtract(bundle.camera.globalPosition), cameraForward)).toBeGreaterThan(0);
+    expect(Vector3.Distance(socket.getAbsolutePosition(), grip.getAbsolutePosition())).toBeLessThan(0.001);
+
+    bundle.scene.dispose();
+    engine.dispose();
+  }, 30_000);
+
+  it("keeps procedural base models when only LOD1 GLBs load", async () => {
+    const assets = await createGlbAssets(new Set(["/enemy.glb", "/rifle.glb"]));
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const state = createBattleRoyaleState("player", {
+      participantCount: 2,
+      flightSeconds: 1,
+      safeZoneStages: [{ waitSeconds: 1, shrinkSeconds: 1, radius: 100, damagePerSecond: 1 }],
+    }, () => 0.5);
+    const player = state.actors.player;
+    const bot = state.actors["bot-1"];
+    if (!player || !bot) throw new Error("fallback actors missing");
+    player.inventory.weaponSlots[0] = createWeaponState("rifle");
+    bot.inventory.weaponSlots[0] = createWeaponState("rifle");
+    bot.deployment = "grounded";
+    const engine = new NullEngine();
+    const bundle = await createIslandScene(engine, assets, state.actors, state.groundLoot, state.mapSeed);
+    const botRoot = bundle.actorRoots.get(bot.id);
+    if (!botRoot) throw new Error("fallback bot root missing");
+    setActorWeaponVisual(bundle.viewWeaponRoot, "rifle");
+    setActorWeaponVisual(botRoot, "rifle");
+
+    expect(bundle.scene.getTransformNodeByName(`${bot.id}-character-base`)).toBeNull();
+    expect(bundle.scene.getTransformNodeByName(`${bot.id}-character-lod1`)).toBeNull();
+    expect(bundle.scene.getMeshByName(`body-${bot.id}`)).not.toBeNull();
+    expect(bundle.viewWeaponRoot.getChildMeshes(false)
+      .filter((mesh) => mesh.metadata?.weaponId === "rifle" && mesh.metadata?.weaponFallback === true)
+      .some((mesh) => mesh.isEnabled())).toBe(true);
+    expect(botRoot.getChildMeshes(false)
+      .filter((mesh) => mesh.metadata?.weaponId === "rifle" && mesh.metadata?.weaponFallback === true)
+      .some((mesh) => mesh.isEnabled())).toBe(true);
+    expect(error).toHaveBeenCalled();
+
+    bundle.scene.dispose();
+    engine.dispose();
+  }, 30_000);
+
+  it("keeps procedural weapons when character base succeeds but weapon base fails", async () => {
+    const assets = await createGlbAssets(new Set(["/rifle.glb"]));
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const state = createBattleRoyaleState("player", {
+      participantCount: 2,
+      flightSeconds: 1,
+      safeZoneStages: [{ waitSeconds: 1, shrinkSeconds: 1, radius: 100, damagePerSecond: 1 }],
+    }, () => 0.5);
+    const player = state.actors.player;
+    const bot = state.actors["bot-1"];
+    if (!player || !bot) throw new Error("weapon fallback actors missing");
+    player.inventory.weaponSlots[0] = createWeaponState("rifle");
+    bot.inventory.weaponSlots[0] = createWeaponState("rifle");
+    bot.deployment = "grounded";
+    const engine = new NullEngine();
+    const bundle = await createIslandScene(engine, assets, state.actors, state.groundLoot, state.mapSeed);
+    const botRoot = bundle.actorRoots.get(bot.id);
+    if (!botRoot) throw new Error("weapon fallback bot root missing");
+    setActorWeaponVisual(bundle.viewWeaponRoot, "rifle");
+    setActorWeaponVisual(botRoot, "rifle");
+
+    expect(bundle.scene.getTransformNodeByName(`${bot.id}-character-base`)).not.toBeNull();
+    expect(bundle.viewWeaponRoot.getChildMeshes(false)
+      .some((mesh) => mesh.metadata?.visualModel === "model.weapon.rifle.lod1")).toBe(false);
+    expect(bundle.viewWeaponRoot.getChildMeshes(false)
+      .filter((mesh) => mesh.metadata?.weaponId === "rifle" && mesh.metadata?.weaponFallback === true)
+      .some((mesh) => mesh.isEnabled())).toBe(true);
+    expect(botRoot.getChildMeshes(false)
+      .filter((mesh) => mesh.metadata?.weaponId === "rifle" && mesh.metadata?.weaponFallback === true)
+      .some((mesh) => mesh.isEnabled())).toBe(true);
+
+    bundle.scene.dispose();
+    engine.dispose();
+  }, 30_000);
+
+  it("keeps valid base character and weapon models active when LOD1 fails", async () => {
+    const assets = await createGlbAssets(new Set(["/enemy-lod1.glb", "/rifle-lod1.glb"]));
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const state = createBattleRoyaleState("player", {
+      participantCount: 2,
+      flightSeconds: 1,
+      safeZoneStages: [{ waitSeconds: 1, shrinkSeconds: 1, radius: 100, damagePerSecond: 1 }],
+    }, () => 0.5);
+    const bot = state.actors["bot-1"];
+    if (!bot) throw new Error("LOD fallback bot missing");
+    bot.inventory.weaponSlots[0] = createWeaponState("rifle");
+    bot.deployment = "grounded";
+    const engine = new NullEngine();
+    const bundle = await createIslandScene(engine, assets, state.actors, state.groundLoot, state.mapSeed);
+    const botRoot = bundle.actorRoots.get(bot.id);
+    const baseCharacter = bundle.scene.getTransformNodeByName(`${bot.id}-character-base`);
+    if (!botRoot || !baseCharacter) throw new Error("LOD fallback base character missing");
+    bundle.camera.position.set(1_000, 200, 1_000);
+    bundle.scene.render();
+
+    expect(baseCharacter.isEnabled()).toBe(true);
+    expect(bundle.scene.getTransformNodeByName(`${bot.id}-character-lod1`)).toBeNull();
+    expect(botRoot.getChildMeshes(false)
+      .filter((mesh) => mesh.metadata?.weaponId === "rifle" && mesh.metadata?.visualModel === "model.weapon.rifle")
+      .some((mesh) => mesh.isEnabled())).toBe(true);
+    expect(botRoot.getChildMeshes(false)
+      .some((mesh) => mesh.metadata?.visualModel === "model.weapon.rifle.lod1")).toBe(false);
+
+    bundle.scene.dispose();
+    engine.dispose();
+  }, 30_000);
+
   it("keeps procedural actors and does not download GLBs on low quality", async () => {
     const assets = await createGlbAssets();
     const fetchMock = vi.mocked(fetch);
@@ -743,7 +888,7 @@ function createAssets(): AssetCatalog {
   });
 }
 
-async function createGlbAssets(): Promise<AssetCatalog> {
+async function createGlbAssets(failedModelUrls: ReadonlySet<string> = new Set()): Promise<AssetCatalog> {
   const glb = createMinimalGlb();
   vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
     const url = input.toString();
@@ -771,14 +916,22 @@ async function createGlbAssets(): Promise<AssetCatalog> {
               type: "model",
               url: `/${kind}.glb`,
               fallback: "fallback.model",
-              metadata: { requiredNodes: "root,weapon_socket,backpack_socket" },
+              metadata: {
+                requiredNodes: "root,weapon_socket,backpack_socket",
+                armorMeshes: "armor",
+                helmetMeshes: "helmet",
+              },
             },
             {
               id: `model.character.${kind}.lod1`,
               type: "model",
               url: `/${kind}-lod1.glb`,
               fallback: "fallback.model",
-              metadata: { requiredNodes: "root,weapon_socket,backpack_socket" },
+              metadata: {
+                requiredNodes: "root,weapon_socket,backpack_socket",
+                armorMeshes: "armor",
+                helmetMeshes: "helmet",
+              },
             },
           ]),
           ...["rifle", "smg", "shotgun", "sniper"].flatMap((weaponId) => [
@@ -800,6 +953,9 @@ async function createGlbAssets(): Promise<AssetCatalog> {
         ],
       });
     }
+    if (failedModelUrls.has(url)) {
+      return new Response(null, { status: 404, statusText: "Not Found" });
+    }
     if (url.endsWith(".glb")) {
       return new Response(glb, { headers: { "content-type": "model/gltf-binary" } });
     }
@@ -811,18 +967,51 @@ async function createGlbAssets(): Promise<AssetCatalog> {
   return AssetCatalog.load("/manifest.json");
 }
 
+function createProductionGlbAssets(): AssetCatalog {
+  const modelEntries = productionManifest.assets.filter((entry) => entry.type === "model") as AssetEntry[];
+  vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+    const url = input.toString();
+    const entry = modelEntries.find((candidate) => candidate.url === url);
+    if (!entry?.url) return new Response(null, { status: 404 });
+    const payload = await readFile(resolve(process.cwd(), "public", entry.url.replace(/^\.\//, "")));
+    return new Response(new Uint8Array(payload), { headers: { "content-type": "model/gltf-binary" } });
+  }));
+  return new AssetCatalog({
+    version: 1,
+    assets: [
+      { id: "fallback.ui", type: "svg", url: "/fallback.svg" },
+      { id: "fallback.model", type: "procedural-model", metadata: { color: "#cf4b3f" } },
+      { id: "ui.crosshair", type: "svg", url: "/crosshair.svg", fallback: "fallback.ui" },
+      { id: "ui.weapon.rifle", type: "svg", url: "/rifle.svg", fallback: "fallback.ui" },
+      ...[
+        "texture.terrain.grass",
+        "texture.terrain.mud",
+        "texture.road",
+        "texture.building.roof",
+        "texture.building.wall",
+        "texture.sky.clearing",
+        "texture.sky.overcast",
+        "texture.sky.storm",
+      ].map((id) => ({ id, type: "svg" as const, url: `/${id}.svg`, fallback: "fallback.ui" })),
+      ...modelEntries,
+    ],
+  });
+}
+
 function createMinimalGlb(): Uint8Array<ArrayBuffer> {
   const document = {
     asset: { version: "2.0" },
     scene: 0,
     scenes: [{ nodes: [0] }],
     nodes: [
-      { name: "root", children: [1, 2, 3, 4, 5] },
+      { name: "root", children: [1, 2, 3, 4, 5, 6, 7] },
       { name: "visual", mesh: 0 },
       { name: "weapon_socket", translation: [0.32, 0.9, 0.27] },
       { name: "backpack_socket", translation: [0, 1.08, -0.42] },
       { name: "grip", translation: [0, -0.14, -0.08] },
       { name: "muzzle", translation: [0, 0, 1.2] },
+      { name: "armor", mesh: 0 },
+      { name: "helmet", mesh: 0 },
     ],
     buffers: [{ byteLength: 36 }],
     bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: 36, target: 34962 }],

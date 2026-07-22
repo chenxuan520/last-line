@@ -15,7 +15,9 @@ The manifest is `public/assets/asset-manifest.json`. Gameplay and UI request sta
     "offsetX": 0,
     "offsetY": -1.76,
     "offsetZ": 0,
-    "requiredNodes": "root,weapon_socket"
+    "requiredNodes": "root,weapon_socket,backpack_socket",
+    "armorMeshes": "character-merged-armor",
+    "helmetMeshes": "character-merged-helmet"
   }
 }
 ```
@@ -40,9 +42,9 @@ The catalog preloads URL-backed UI and image assets and caches bytes. GLBs are l
 
 GLB loading additionally requires at least one renderable mesh. If `requiredNodes` is present, every comma-separated node must exist. A network, decode, mesh, or node failure logs the resource ID and keeps the procedural fallback.
 
-Character GLBs use `root,weapon_socket,backpack_socket`; weapon GLBs use `root,grip,muzzle`. The stable base IDs have matching `.lod1` IDs, for example `model.character.enemy.lod1` and `model.weapon.rifle.lod1`. The client selects character base/LOD1 groups by camera distance; this is presentation-only and never enters authoritative match state.
+Character GLBs use `root,weapon_socket,backpack_socket`; weapon GLBs use `root,grip,muzzle`. Character entries must also declare exact comma-separated `armorMeshes` and `helmetMeshes` names so equipment visibility never depends on arbitrary mesh naming. These named meshes are validated as renderable during loading. The stable base IDs have matching `.lod1` IDs, for example `model.character.enemy.lod1` and `model.weapon.rifle.lod1`. The client selects character base/LOD1 groups by camera distance; this is presentation-only and never enters authoritative match state.
 
-Remote human actors use `model.character.player`, bots use `model.character.enemy`, and the local first-person actor does not render a third-person body. Third-person weapons align their `grip` node to the character `weapon_socket`; the first-person view always uses the base weapon asset.
+Remote human actors use `model.character.player`, bots use `model.character.enemy`, and the local first-person actor does not render a third-person body. Third-person weapons align their `grip` node to the character `weapon_socket`; the first-person view always uses the base weapon asset. A missing or invalid base character/weapon keeps the procedural fallback at every distance; a missing LOD1 only makes the valid base remain active at distance.
 
 ## Gameplay Isolation
 
@@ -52,6 +54,6 @@ GLB metadata may adjust visual scale and offset only. Imported meshes are non-pi
 
 1. Add the file under `public/assets/`.
 2. Change only the corresponding manifest entry from a procedural model or old URL to the new URL.
-3. Add `requiredNodes` when the model contract needs named attachment points.
+3. Add `requiredNodes` when the model contract needs named attachment points. Character model entries must also provide non-empty `armorMeshes` and `helmetMeshes` with exact renderable mesh names.
 4. Run `npm run typecheck`, `npm run test`, and `npm run build`.
 5. Open `npm run preview` in local Chrome/Edge with volume `0` and verify scale, offset, and fallback behavior.

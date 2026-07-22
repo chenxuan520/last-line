@@ -51,6 +51,22 @@ describe("asset manifest", () => {
     ).toThrow("fallback 类型不兼容");
   });
 
+  it("requires explicit equipment meshes for character GLBs", () => {
+    expect(() => validateAssetManifest({
+      version: 1,
+      assets: [
+        { id: "fallback.model", type: "procedural-model" },
+        {
+          id: "model.character.test",
+          type: "model",
+          url: "/character.glb",
+          fallback: "fallback.model",
+          metadata: { requiredNodes: "root,weapon_socket,backpack_socket" },
+        },
+      ],
+    })).toThrow("armorMeshes");
+  });
+
   it("declares base and LOD1 GLBs with the required model nodes", () => {
     const production = validateAssetManifest(productionManifest);
     for (const character of ["player", "enemy"]) {
@@ -59,7 +75,11 @@ describe("asset manifest", () => {
         expect(entry).toMatchObject({
           type: "model",
           fallback: "fallback.model",
-          metadata: { requiredNodes: "root,weapon_socket,backpack_socket" },
+          metadata: {
+            requiredNodes: "root,weapon_socket,backpack_socket",
+            armorMeshes: expect.any(String),
+            helmetMeshes: expect.any(String),
+          },
         });
         expect(entry?.url).toMatch(/\.glb$/);
       }

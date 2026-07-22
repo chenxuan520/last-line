@@ -60,6 +60,13 @@ function validateAssetEntry(value: unknown): AssetEntry {
   const metadata = isRecord(value.metadata)
     ? (value.metadata as Record<string, string | number | boolean>)
     : undefined;
+  if (type === "model" && value.id.startsWith("model.character.")) {
+    for (const field of ["armorMeshes", "helmetMeshes"] as const) {
+      if (typeof metadata?.[field] !== "string" || metadata[field].trim() === "") {
+        throw new Error(`角色模型 ${value.id} 缺少非空 ${field}`);
+      }
+    }
+  }
 
   return {
     id: value.id,
