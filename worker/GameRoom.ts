@@ -11,7 +11,11 @@ import {
   type RoomVisibility,
   type ServerMessage,
 } from "../src/network/protocol";
-import { MatchRuntime, type MatchCheckpoint } from "../src/server/MatchRuntime";
+import {
+  isMatchCheckpointCompatible,
+  MatchRuntime,
+  type MatchCheckpoint,
+} from "../src/server/MatchRuntime";
 import { SnapshotThrottle } from "../src/server/SnapshotThrottle";
 import {
   DurableService,
@@ -102,6 +106,20 @@ export class GameRoom extends DurableService<WorkerEnv> {
         && (!this.data.checkpoint || checkpoint.tick > this.data.checkpoint.tick)
       ) this.data.checkpoint = checkpoint;
       if (this.data) {
+        if (
+          (this.data.status === "running" || this.data.status === "finished") &&
+          !isMatchCheckpointCompatible(this.data.checkpoint)
+        ) {
+          this.data.status = "finished";
+          for (const socket of this.ctx.getWebSockets()) {
+            this.send(socket, { type: "error", code: "room-closed", message: "房间版本已过期，请创建新对局" });
+            socket.close(4010, "room version expired");
+          }
+          await this.updateDirectory();
+          await this.ctx.storage.deleteAll();
+          this.data = null;
+          return;
+        }
         const connectedPlayerIds = new Set(this.ctx.getWebSockets().flatMap((socket) => {
           const attachment = socket.deserializeAttachment() as SocketAttachment | null;
           return attachment ? [attachment.playerId] : [];
@@ -523,7 +541,7 @@ export class GameRoom extends DurableService<WorkerEnv> {
       this.runtime = null;
     }
     const restored = this.runtime === null && this.data.checkpoint !== null;
-    this.ensureRuntime();
+    if (!this.ensureRuntime()) return;
     if (restored) {
       this.visibleLootByPlayer.clear();
       for (const socket of this.ctx.getWebSockets()) {
@@ -603,6 +621,7 @@ export class GameRoom extends DurableService<WorkerEnv> {
   private ensureRuntime(): MatchRuntime | null {
     const data = this.data;
     if (this.runtime || !data?.checkpoint) return this.runtime;
+    if (!isMatchCheckpointCompatible(data.checkpoint)) return null;
     const humanActorIds = Object.values(data.members).flatMap((member) => member.actorId ? [member.actorId] : []);
     this.runtime = new MatchRuntime({
       humanActorIds,

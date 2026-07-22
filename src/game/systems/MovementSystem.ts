@@ -315,7 +315,7 @@ function getNearbyWalls(x: number, z: number, layout: MapLayout): readonly MapOb
   let index = wallCollisionIndexes.get(layout);
   if (!index) {
     index = new Map<number, MapObstacle[]>();
-    for (const wall of [...layout.wallSegments, ...layout.rockObstacles, ...layout.coverObstacles]) {
+    for (const wall of [...layout.wallSegments, ...layout.rockObstacles, ...layout.coverObstacles, ...layout.treeTrunks]) {
       const minimumCellX = wallCell(wall.center.x - wall.width / 2 - ACTOR_RADIUS);
       const maximumCellX = wallCell(wall.center.x + wall.width / 2 + ACTOR_RADIUS);
       const minimumCellZ = wallCell(wall.center.z - wall.depth / 2 - ACTOR_RADIUS);

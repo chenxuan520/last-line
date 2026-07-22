@@ -251,5 +251,7 @@ The standalone integration suite verifies static serving, native SQLite account/
 - Complete the plan-linked code review and re-review loop before any production push. Do not deploy with unresolved blocker, high, or medium findings.
 - Keep the game volume at `0` during browser checks.
 - Verify single-player independently, then open two local Chrome/Edge pages and verify quick matching, the 50-player HUD, remote-human presentation, and reconnect behavior.
+- On a coarse-pointer mobile device, verify that a direct start/deploy click requests fullscreen and attempts landscape lock, request denial leaves the existing portrait rotation flow usable, exiting fullscreen exposes the landscape retry action, and unsupported browsers never show a dead action. Fullscreen must never be requested from `orientationchange` without a user gesture.
+- After an authoritative-map/protocol upgrade, refresh browser artifacts and restart active rooms together. Protocol mismatches force stale clients to reconnect, and persisted rooms with an incompatible checkpoint version are automatically closed and deleted instead of resuming against different collision geometry.
 - Verify both admission settings: guest mode must preserve the original flow; account-required mode must block anonymous guest creation, allow registration/login, restore the HttpOnly refresh session after reload, and reject disabled/revoked accounts.
 - Do not install Playwright or download a CI browser for this project.

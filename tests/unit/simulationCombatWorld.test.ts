@@ -5,6 +5,7 @@ import {
   getTerrainHeight,
   MAP_HALF_SIZE,
   MAP_ROCK_OBSTACLES,
+  MAP_TREE_TRUNKS,
   MAP_WALL_SEGMENTS,
 } from "../../src/config/map";
 import { createActorState, type MatchState, type Vector3State } from "../../src/game/state/types";
@@ -88,6 +89,33 @@ describe("SimulationCombatWorld", () => {
     const hit = world.traceShotDetailed(trace(shooter.position, subtract(target.position, shooter.position)));
     expect(hit).toMatchObject({ targetId: null, hitType: "environment" });
     expect(world.hasLineOfSight("shooter", "target")).toBe(false);
+  });
+
+  it("blocks shots with tree trunks while leaving the foliage volume non-authoritative", () => {
+    const tree = MAP_TREE_TRUNKS[0];
+    if (!tree) throw new Error("test tree trunk missing");
+    const shooter = createActorState("shooter", "player", {
+      x: tree.center.x - tree.width / 2 - 5,
+      y: tree.center.y,
+      z: tree.center.z,
+    });
+    const target = createActorState("target", "bot", {
+      x: tree.center.x + tree.width / 2 + 5,
+      y: tree.center.y,
+      z: tree.center.z,
+    });
+    const state = createState(shooter, target);
+    shooter.position.y = tree.center.y;
+    target.position.y = tree.center.y;
+    const world = new SimulationCombatWorld(state);
+
+    expect(world.traceShotDetailed(trace(shooter.position, subtract(target.position, shooter.position))))
+      .toMatchObject({ targetId: null, hitType: "environment" });
+    expect(world.hasLineOfSight(shooter.id, target.id)).toBe(false);
+
+    shooter.position.y = tree.center.y + tree.height / 2 + 4;
+    target.position.y = shooter.position.y;
+    expect(world.traceShot(trace(shooter.position, subtract(target.position, shooter.position)))).toBe(target.id);
   });
 
   it("blocks shots and line of sight with generated fence and hay cover", () => {

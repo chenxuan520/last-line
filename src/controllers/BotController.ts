@@ -675,7 +675,7 @@ export class BotController {
   ): { coverId: string; target: Vector3State; path: Vector3State[] } | null {
     const actorFeetY = actor.position.y - ACTOR_EYE_HEIGHT;
     const actorTopY = actorFeetY + ACTOR_HEIGHT;
-    const blockers = [...layout.wallSegments, ...layout.rockObstacles, ...layout.coverObstacles]
+    const blockers = [...layout.wallSegments, ...layout.rockObstacles, ...layout.coverObstacles, ...layout.treeTrunks]
       .filter((obstacle) =>
         obstacle.center.y - obstacle.height / 2 < actorTopY &&
         obstacle.center.y + obstacle.height / 2 > actorFeetY

@@ -6,6 +6,7 @@ import {
   MAP_HALF_SIZE,
   MAP_ROCK_OBSTACLES,
   MAP_ROOF_RAMPS,
+  MAP_TREE_TRUNKS,
   MAP_WALL_SEGMENTS,
   type MapBuilding,
   type MapLayout,
@@ -22,7 +23,12 @@ const MAX_PATH_SEARCH_NODES = 256;
 const ACTOR_EYE_HEIGHT = 1.76;
 const ACTOR_HEIGHT = 1.8;
 const NAVIGATION_GRID_CELL_SIZE = 32;
-const DEFAULT_BLOCKING_OBSTACLES = [...MAP_WALL_SEGMENTS, ...MAP_ROCK_OBSTACLES, ...MAP_COVER_OBSTACLES];
+const DEFAULT_BLOCKING_OBSTACLES = [
+  ...MAP_WALL_SEGMENTS,
+  ...MAP_ROCK_OBSTACLES,
+  ...MAP_COVER_OBSTACLES,
+  ...MAP_TREE_TRUNKS,
+];
 const layoutBlockingObstacles = new WeakMap<MapLayout, readonly MapObstacle[]>();
 const layoutBlockerIndexes = new WeakMap<MapLayout, StaticGridIndex<MapObstacle>>();
 
@@ -262,11 +268,10 @@ export class GridNavigator {
 
   private blockersForLocation(location: SurfaceLocation): SurfaceBlockers {
     const supportY = location.supportY;
-    const fullScan = this.blockerIndex ? null : this.blockingObstacles.filter((obstacle) => {
-      const bottomY = obstacle.center.y - obstacle.height / 2;
-      const topY = obstacle.center.y + obstacle.height / 2;
-      return bottomY < supportY + ACTOR_HEIGHT && topY > supportY + 0.05;
-    });
+    const ground = location.level === 0;
+    const fullScan = this.blockerIndex ? null : this.blockingObstacles.filter((obstacle) =>
+      this.obstacleOverlapsLocation(obstacle, { supportY, ground })
+    );
     let stairwell: MapObstacle | null = null;
     if (location.building?.stairwell && location.level > 0) {
       const geometry = location.building.stairwell;
@@ -279,7 +284,7 @@ export class GridNavigator {
         color: "#000000",
       };
     }
-    return { supportY, fullScan, stairwell };
+    return { supportY, ground, fullScan, stairwell };
   }
 
   private groundSupport(point: Vector3State): number {
@@ -298,7 +303,7 @@ export class GridNavigator {
     const candidates = blockers.fullScan ?? this.blockerIndex?.queryPoint(point.x, point.z) ?? [];
     for (const obstacle of candidates) {
       if (
-        (blockers.fullScan !== null || obstacleOverlapsSurface(obstacle, blockers.supportY)) &&
+        (blockers.fullScan !== null || this.obstacleOverlapsLocation(obstacle, blockers)) &&
         pointInsideObstacle(point, obstacle, this.clearance)
       ) return true;
     }
@@ -309,7 +314,7 @@ export class GridNavigator {
     const candidates = blockers.fullScan ?? this.blockerIndex?.querySegment(start.x, start.z, target.x, target.z) ?? [];
     for (const obstacle of candidates) {
       if (
-        (blockers.fullScan !== null || obstacleOverlapsSurface(obstacle, blockers.supportY)) &&
+        (blockers.fullScan !== null || this.obstacleOverlapsLocation(obstacle, blockers)) &&
         segmentIntersectsObstacle(start, target, obstacle, this.pathClearance)
       ) return false;
     }
@@ -324,13 +329,23 @@ export class GridNavigator {
     const nearest: Array<{ obstacle: MapObstacle; progress: number }> = [];
     const candidates = blockers.fullScan ?? this.blockerIndex?.querySegment(start.x, start.z, target.x, target.z) ?? [];
     for (const obstacle of candidates) {
-      if (blockers.fullScan === null && !obstacleOverlapsSurface(obstacle, blockers.supportY)) continue;
+      if (blockers.fullScan === null && !this.obstacleOverlapsLocation(obstacle, blockers)) continue;
       insertBlockingObstacle(nearest, start, target, obstacle, this.pathClearance);
     }
     if (blockers.stairwell) {
       insertBlockingObstacle(nearest, start, target, blockers.stairwell, this.pathClearance);
     }
     return nearest;
+  }
+
+  private obstacleOverlapsLocation(
+    obstacle: MapObstacle,
+    blockers: Pick<SurfaceBlockers, "supportY" | "ground">,
+  ): boolean {
+    const supportY = blockers.ground && this.layout && isTreeTrunk(obstacle)
+      ? getTerrainHeight(obstacle.center.x, obstacle.center.z, this.layout)
+      : blockers.supportY;
+    return obstacleOverlapsSurface(obstacle, supportY);
   }
 }
 
@@ -347,6 +362,7 @@ interface GroundTransition {
 
 interface SurfaceBlockers {
   supportY: number;
+  ground: boolean;
   fullScan: readonly MapObstacle[] | null;
   stairwell: MapObstacle | null;
 }
@@ -381,6 +397,10 @@ function isMapLayout(value: MapLayout | readonly MapObstacle[]): value is MapLay
 
 function isMapBuilding(obstacle: MapObstacle): obstacle is MapBuilding {
   return "storyCount" in obstacle && "storyHeight" in obstacle && "baseY" in obstacle;
+}
+
+function isTreeTrunk(obstacle: MapObstacle): boolean {
+  return "kind" in obstacle && obstacle.kind === "tree-trunk";
 }
 
 interface PathSearchNode {
@@ -491,7 +511,7 @@ function obstacleOverlapsSurface(obstacle: MapObstacle, supportY: number): boole
 function getLayoutBlockingObstacles(layout: MapLayout): readonly MapObstacle[] {
   let obstacles = layoutBlockingObstacles.get(layout);
   if (!obstacles) {
-    obstacles = [...layout.wallSegments, ...layout.rockObstacles, ...layout.coverObstacles];
+    obstacles = [...layout.wallSegments, ...layout.rockObstacles, ...layout.coverObstacles, ...layout.treeTrunks];
     layoutBlockingObstacles.set(layout, obstacles);
   }
   return obstacles;

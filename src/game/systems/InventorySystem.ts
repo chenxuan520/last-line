@@ -730,6 +730,7 @@ function getDropObstacleIndex(layout: MapLayout): StaticGridIndex<DropObstacleEn
     ...layout.wallSegments.map((obstacle) => ({ obstacle, topPadding: BUILDING_ROOF_CAP_HEIGHT })),
     ...layout.rockObstacles.map((obstacle) => ({ obstacle, topPadding: 0 })),
     ...layout.coverObstacles.map((obstacle) => ({ obstacle, topPadding: 0 })),
+    ...layout.treeTrunks.map((obstacle) => ({ obstacle, topPadding: 0 })),
   ];
   index = new StaticGridIndex(entries, DROP_OBSTACLE_CELL_SIZE, ({ obstacle }) => ({
     minimumX: obstacle.center.x - obstacle.width / 2 - DROP_WALL_CLEARANCE,

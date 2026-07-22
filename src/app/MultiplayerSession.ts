@@ -11,6 +11,7 @@ import {
   setActorWeaponVisual,
 } from "../client/render/scenes/IslandScene";
 import { GameHud } from "../client/ui/GameHud";
+import type { MobileFullscreenController } from "../client/ui/MobileFullscreenController";
 import { createMapLayout } from "../config/map";
 import type { GameSettings } from "../config/settings";
 import { WEAPONS } from "../config/weapons";
@@ -96,6 +97,7 @@ export class MultiplayerSession implements GameSession {
     private readonly assets: AssetCatalog,
     settings: GameSettings,
     private readonly audio: AudioFeedback,
+    private readonly mobileFullscreen: MobileFullscreenController,
     private readonly connection: MultiplayerConnection,
     private readonly localActorId: EntityId,
     private readonly onExit: () => void,
@@ -134,6 +136,7 @@ export class MultiplayerSession implements GameSession {
     assets: AssetCatalog,
     settings: GameSettings,
     audio: AudioFeedback,
+    mobileFullscreen: MobileFullscreenController,
     connection: MultiplayerConnection,
     initial: FullMessage,
     onExit: () => void,
@@ -154,6 +157,7 @@ export class MultiplayerSession implements GameSession {
       assets,
       settings,
       audio,
+      mobileFullscreen,
       connection,
       initial.localActorId,
       onExit,
@@ -171,7 +175,12 @@ export class MultiplayerSession implements GameSession {
       this.state.mapSeed,
       () => this.resumeInput(),
       this.onExit,
-      { online: true, actorLabels: this.displayNames, touchInput: this.humanController.usesTouchControls() },
+      {
+        online: true,
+        actorLabels: this.displayNames,
+        touchInput: this.humanController.usesTouchControls(),
+        onRequestFullscreen: () => this.mobileFullscreen.requestFromUserGesture(),
+      },
     );
     this.audio.start();
     this.syncVisuals(0);
@@ -201,6 +210,7 @@ export class MultiplayerSession implements GameSession {
     this.syncVisuals(frameSeconds);
     const viewedActor = this.spectatorActorId ? this.state.actors[this.spectatorActorId] ?? player : player;
     const inputActive = this.humanController.isGameplayInputActive();
+    const orientationBlocked = this.humanController.isOrientationBlocked();
     this.hud?.update(
       this.state,
       player,
@@ -210,7 +220,8 @@ export class MultiplayerSession implements GameSession {
       fps,
       this.humanController.isScoped(player),
       this.humanController.isLeaderboardVisible(),
-      this.humanController.isOrientationBlocked(),
+      orientationBlocked,
+      this.mobileFullscreen.needsAction(orientationBlocked),
     );
   }
 

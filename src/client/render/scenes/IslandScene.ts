@@ -1119,8 +1119,6 @@ function createVegetation(
   layout: MapLayout,
   quality: QualityProfile,
 ): void {
-  const treeCount = quality.treeCount;
-  const mountainTreeCount = quality.mountainTreeCount;
   const trunkTemplate = CreateCylinder(
     "tree-trunk-template",
     { height: 5.8, diameterTop: 0.55, diameterBottom: 1.1, tessellation: 7 },
@@ -1137,7 +1135,7 @@ function createVegetation(
   ].map((layer, index) => {
     const mesh = CreateCylinder(
       `tree-foliage-layer-${index}`,
-      { ...layer, tessellation: 7 },
+      { ...layer, tessellation: quality.foliageTessellation },
       scene,
     );
     mesh.position.y = layer.y;
@@ -1152,23 +1150,21 @@ function createVegetation(
   foliageTemplate.isPickable = false;
 
   const random = createVisualRandom(layout.seed ^ 0x68bc21eb);
-  for (let index = 0; index < treeCount; index += 1) {
-    const position = index < mountainTreeCount
-      ? randomMountainPosition(random, layout, 5)
-      : randomNaturalPosition(random, layout, 5);
-    if (!position) continue;
-    const { x, z } = position;
-    const terrainY = getTerrainHeight(x, z, layout);
-    const treeScale = index % 11 === 0 ? 1.4 : 0.96 + (index % 4) * 0.025;
+  for (const [index, tree] of layout.treeTrunks.entries()) {
+    const treeScale = tree.height / 5.8;
     const foliageScaleY = treeScale * (0.94 + (index % 4) * 0.055);
 
-    const trunk = trunkTemplate.createInstance(`tree-trunk-${index}`);
-    trunk.position.set(x, terrainY + 2.9 * treeScale, z);
-    trunk.scaling.set(treeScale * (0.92 + (index % 3) * 0.04), treeScale, treeScale * 0.96);
+    const trunk = trunkTemplate.createInstance(tree.id);
+    trunk.position.set(tree.center.x, tree.center.y, tree.center.z);
+    trunk.scaling.set(tree.width / 1.1, tree.height / 5.8, tree.depth / 1.1);
     markDecoration(trunk, "vegetation");
 
     const foliage = foliageTemplate.createInstance(`tree-foliage-${index}`);
-    foliage.position.set(x, terrainY + 5.8 * treeScale + 5.7 * foliageScaleY - 0.25, z);
+    foliage.position.set(
+      tree.center.x,
+      tree.center.y + tree.height / 2 + 5.7 * foliageScaleY - 0.25,
+      tree.center.z,
+    );
     foliage.rotation.y = random() * Math.PI * 2;
     foliage.scaling.set(
       treeScale * (0.9 + (index % 3) * 0.06),
@@ -2168,7 +2164,7 @@ function randomMountainPosition(
 }
 
 function isNaturalPositionBlocked(x: number, z: number, layout: MapLayout, clearance: number): boolean {
-  return [...layout.obstacles, ...layout.rockObstacles, ...layout.coverObstacles].some((obstacle) =>
+  return [...layout.obstacles, ...layout.rockObstacles, ...layout.coverObstacles, ...layout.treeTrunks].some((obstacle) =>
     Math.abs(x - obstacle.center.x) <= obstacle.width / 2 + clearance &&
     Math.abs(z - obstacle.center.z) <= obstacle.depth / 2 + clearance
   );

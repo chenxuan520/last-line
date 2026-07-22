@@ -6,6 +6,7 @@ import {
   getTerrainHeight,
   MAP_HALF_SIZE,
   MAP_ROCK_OBSTACLES,
+  MAP_TREE_TRUNKS,
   MAP_WALL_SEGMENTS,
 } from "../../src/config/map";
 import { createIdleCommand, type ActorCommand } from "../../src/game/commands/ActorCommand";
@@ -94,6 +95,23 @@ describe("MovementSystem", () => {
     expect(actor.position.x).toBeLessThanOrEqual(rock.center.x - rock.width / 2 - ACTOR_RADIUS + 0.002);
     expect(getSupportHeight(rock.center.x, rock.center.z, Number.POSITIVE_INFINITY, createMapLayout(0))).toBeCloseTo(
       rock.center.y + rock.height / 2,
+      5,
+    );
+  });
+
+  it("blocks movement with tree trunks without treating their tops as support", () => {
+    const tree = MAP_TREE_TRUNKS[0];
+    if (!tree) throw new Error("test tree trunk missing");
+    const layout = createMapLayout(0);
+    const state = createState(tree.center.x - tree.width / 2 - ACTOR_RADIUS - 1, tree.center.z);
+    const actor = state.actors.actor;
+    if (!actor) throw new Error("test actor missing");
+
+    advance(state, movingCommand(1, 0, true), 120, 1 / 60);
+
+    expect(actor.position.x).toBeLessThanOrEqual(tree.center.x - tree.width / 2 - ACTOR_RADIUS + 0.002);
+    expect(getSupportHeight(tree.center.x, tree.center.z, Number.POSITIVE_INFINITY, layout)).toBeCloseTo(
+      getTerrainHeight(tree.center.x, tree.center.z, layout),
       5,
     );
   });

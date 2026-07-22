@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MultiplayerConnection, resolveMultiplayerApiUrl } from "../../src/network/MultiplayerClient";
-import type { RoomAdmission } from "../../src/network/protocol";
+import { MULTIPLAYER_PROTOCOL_VERSION, type RoomAdmission } from "../../src/network/protocol";
 
 describe("MultiplayerConnection lifecycle", () => {
   afterEach(() => {
@@ -38,6 +38,37 @@ describe("MultiplayerConnection lifecycle", () => {
     expect(sockets[0]?.closeCalls).toBe(1);
     connection.close();
     expect(sockets[0]?.closeCalls).toBe(1);
+  });
+
+  it("accepts only the authoritative-tree protocol version", async () => {
+    expect(MULTIPLAYER_PROTOCOL_VERSION).toBe(2);
+    const sockets: FakeWebSocket[] = [];
+    const connection = new MultiplayerConnection(
+      "https://example.test",
+      admission(),
+      () => {
+        const socket = new FakeWebSocket();
+        sockets.push(socket);
+        return socket as unknown as WebSocket;
+      },
+    );
+    const messages = vi.fn();
+    connection.setMessageHandler(messages);
+    const opened = connection.open();
+    sockets[0]?.open();
+    await opened;
+
+    sockets[0]?.serverMessage(JSON.stringify({
+      type: "welcome",
+      protocolVersion: MULTIPLAYER_PROTOCOL_VERSION - 1,
+      roomId: "room-1",
+      playerId: "guest-1",
+      actorId: null,
+      reconnectToken: "next-token",
+      serverTimeMs: 0,
+    }));
+
+    expect(messages).toHaveBeenCalledWith(expect.objectContaining({ code: "protocol-mismatch" }));
   });
 });
 

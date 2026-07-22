@@ -400,6 +400,34 @@ describe("admin control plane", () => {
     firstSocket.close(1000, "done");
     secondSocket.close(1000, "done");
   }, 60_000);
+
+  it("expires a running room restored from a pre-tree checkpoint", async () => {
+    const guest = await publicPost("/v1/guests", { displayName: "Legacy One" });
+    const admission = await publicPost("/v1/matchmaking/quick", guest);
+    const roomId = String(admission.roomId);
+    const stub = env.GAME_ROOMS.getByName(roomId);
+    await runInDurableObject(stub, async (_instance, state) => {
+      const room = await state.storage.get<Record<string, unknown>>("room-v1");
+      if (!room) throw new Error("legacy room state missing");
+      const legacy = {
+        state: {},
+        tick: 0,
+        snapshotSequence: 0,
+        eventSequence: 0,
+      };
+      room.status = "running";
+      room.checkpoint = legacy;
+      await state.storage.put("room-v1", room);
+      await state.storage.put("checkpoint-v1", legacy);
+    });
+
+    await evictDurableObject(stub);
+    const remaining = await runInDurableObject(stub, async (_instance, state) =>
+      state.storage.get("room-v1")
+    );
+
+    expect(remaining).toBeUndefined();
+  }, 60_000);
 });
 
 async function bootstrapAdministrator(): Promise<string> {

@@ -174,6 +174,7 @@ function environmentObstacles(layout: MapLayout): readonly MapObstacle[] {
     ...layout.wallSegments,
     ...layout.rockObstacles,
     ...layout.coverObstacles,
+    ...layout.treeTrunks,
     ...layout.floorSlabs,
   ];
 }

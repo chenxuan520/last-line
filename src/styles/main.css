@@ -1920,6 +1920,39 @@ h1 {
   width: min(380px, calc(100vw - 32px));
 }
 
+.fullscreen-action,
+.orientation-fullscreen-action {
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 1px solid rgb(206 219 180 / 42%);
+  color: #11160f;
+  background: linear-gradient(100deg, #aeba80, #c4cf99);
+  font: 800 11px/1 var(--tactical-font);
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+
+.fullscreen-action {
+  position: absolute;
+  top: max(64px, calc(env(safe-area-inset-top) + 52px));
+  left: 50%;
+  z-index: 12;
+  translate: -50% 0;
+}
+
+.fullscreen-action[hidden],
+.orientation-fullscreen-action[hidden] {
+  display: none;
+}
+
+.fullscreen-action:focus-visible,
+.orientation-fullscreen-action:focus-visible {
+  outline: 2px solid var(--signal-bright);
+  outline-offset: 3px;
+}
+
 .touch-spectator-controls {
   display: flex;
   justify-content: center;

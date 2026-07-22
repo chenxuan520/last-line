@@ -42,6 +42,7 @@ export class GameHud {
       online?: boolean;
       actorLabels?: Readonly<Record<string, string>>;
       touchInput?: boolean;
+      onRequestFullscreen?: () => void;
     } = {},
   ) {
     const crosshair = assets.resolve("ui.crosshair", "svg");
@@ -135,7 +136,8 @@ export class GameHud {
           <span>${options.online ? "点击返回战斗；服务器不会暂停" : options.touchInput ? "点击继续触控操作" : "点击继续并锁定鼠标"}</span>
           <button type="button" data-action="resume">继续游戏</button>
         </div>
-        <div class="orientation-card" data-hud="orientation"><strong>请旋转至横屏</strong><span>横屏模式可使用完整触控操作</span></div>
+        <div class="orientation-card" data-hud="orientation"><strong>请旋转至横屏</strong><span>横屏模式可使用完整触控操作</span>${options.onRequestFullscreen ? '<button class="orientation-fullscreen-action" data-hud="orientation-fullscreen-action" type="button" hidden>进入横屏全屏</button>' : ""}</div>
+        ${options.onRequestFullscreen ? '<button class="fullscreen-action" data-hud="fullscreen-action" type="button" hidden>进入全屏</button>' : ""}
         <div class="result-card" data-hud="result" hidden></div>
         <aside class="leaderboard" data-hud="leaderboard" hidden aria-label="本局排行榜">
           <header><strong>本局排行榜</strong><span>存活优先 · 击杀排序</span></header>
@@ -151,6 +153,10 @@ export class GameHud {
     this.damageFlash = this.requireElement("damage-flash");
     this.killFeed = this.requireElement("kill-feed");
     root.querySelector<HTMLButtonElement>("[data-action='resume']")?.addEventListener("click", onResume);
+    root.querySelector<HTMLButtonElement>("[data-hud='orientation-fullscreen-action']")
+      ?.addEventListener("click", options.onRequestFullscreen ?? (() => undefined));
+    root.querySelector<HTMLButtonElement>("[data-hud='fullscreen-action']")
+      ?.addEventListener("click", options.onRequestFullscreen ?? (() => undefined));
   }
 
   public dispose(): void {
@@ -168,6 +174,7 @@ export class GameHud {
     scoped = false,
     leaderboardVisible = false,
     orientationBlocked = false,
+    fullscreenActionRequired = false,
   ): void {
     const weapon = getActiveWeapon(viewedActor);
     const config = weapon ? WEAPONS[weapon.weaponId] : undefined;
@@ -183,6 +190,11 @@ export class GameHud {
       "is-visible",
       inputActive && !orientationBlocked && player.alive && !this.resultVisible,
     );
+    const showFullscreenAction = fullscreenActionRequired && player.alive && !this.resultVisible;
+    const orientationFullscreenAction = this.elements.get("orientation-fullscreen-action") as HTMLButtonElement | undefined;
+    if (orientationFullscreenAction) orientationFullscreenAction.hidden = !showFullscreenAction || !orientationBlocked;
+    const fullscreenAction = this.elements.get("fullscreen-action") as HTMLButtonElement | undefined;
+    if (fullscreenAction) fullscreenAction.hidden = !showFullscreenAction || orientationBlocked;
     this.root.querySelector<HTMLElement>("[data-touch-action='scope']")?.classList.toggle("is-active", scoped);
     const leaderboardBecameVisible = leaderboardVisible && !this.leaderboardVisible;
     const leaderboard = this.requireElement("leaderboard");

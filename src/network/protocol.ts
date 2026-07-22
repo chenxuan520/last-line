@@ -13,7 +13,7 @@ import type {
   WeaponSlot,
 } from "../game/state/types";
 
-export const MULTIPLAYER_PROTOCOL_VERSION = 1;
+export const MULTIPLAYER_PROTOCOL_VERSION = 2;
 export const MIN_HUMAN_PLAYERS = 2;
 export const MAX_HUMAN_PLAYERS = 10;
 

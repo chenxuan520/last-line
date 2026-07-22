@@ -15,6 +15,7 @@ const BOT_COHORTS = 3;
 const TAKEOVER_TICKS = 150;
 const ACTOR_REPLICATION_RANGE = 400;
 const LOOT_REPLICATION_RANGE = 60;
+export const MATCH_CHECKPOINT_VERSION = 2;
 
 export interface MatchRuntimeOptions {
   humanActorIds: readonly EntityId[];
@@ -28,6 +29,7 @@ export interface MatchRuntimeOptions {
 }
 
 export interface MatchCheckpoint {
+  version: number;
   state: MatchState;
   tick: number;
   snapshotSequence: number;
@@ -192,6 +194,7 @@ export class MatchRuntime {
 
   public checkpoint(): MatchCheckpoint {
     return {
+      version: MATCH_CHECKPOINT_VERSION,
       state: JSON.parse(JSON.stringify(this.state)) as MatchState,
       tick: this.tickValue,
       snapshotSequence: this.snapshotSequenceValue,
@@ -270,6 +273,10 @@ export class MatchRuntime {
       ) <= LOOT_REPLICATION_RANGE
     );
   }
+}
+
+export function isMatchCheckpointCompatible(checkpoint: MatchCheckpoint | null | undefined): checkpoint is MatchCheckpoint {
+  return checkpoint?.version === MATCH_CHECKPOINT_VERSION;
 }
 
 function redactActor(actor: ActorState): ActorState {

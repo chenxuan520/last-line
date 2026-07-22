@@ -11,6 +11,7 @@ import {
   LANDING_ZONE_COUNT,
   MAP_POINT_COUNT,
   MAP_HALF_SIZE,
+  TREE_TRUNK_COUNT,
   TOTAL_LOOT_POINTS,
 } from "../../src/config/map";
 
@@ -121,6 +122,36 @@ describe("map layouts", () => {
       }
     }
   });
+
+  it("creates deterministic authoritative tree trunks clear of roads, structures, and loot", () => {
+    for (const seed of [1, 7, 19, 42, 99]) {
+      const layout = createMapLayout(seed);
+      const roads = createMapRoadSegments(layout.landingZones);
+      expect(layout.treeTrunks).toHaveLength(TREE_TRUNK_COUNT);
+      expect(new Set(layout.treeTrunks.map((tree) => tree.id)).size).toBe(TREE_TRUNK_COUNT);
+      for (const [index, tree] of layout.treeTrunks.entries()) {
+        expect(tree.id).toBe(`tree-trunk-${index}`);
+        expect(tree.center.y - tree.height / 2).toBeCloseTo(
+          getTerrainHeight(tree.center.x, tree.center.z, layout),
+          2,
+        );
+        expect(tree.width).toBeGreaterThan(0.9);
+        expect(tree.height).toBeGreaterThan(5.5);
+        expect(layout.lootSpawnPoints.every((loot) =>
+          Math.abs(loot.x - tree.center.x) > tree.width / 2 + 3 ||
+          Math.abs(loot.z - tree.center.z) > tree.depth / 2 + 3
+        )).toBe(true);
+        expect([...layout.obstacles, ...layout.rockObstacles, ...layout.coverObstacles].every((obstacle) =>
+          Math.abs(tree.center.x - obstacle.center.x) >= (tree.width + obstacle.width) / 2 + 5 ||
+          Math.abs(tree.center.z - obstacle.center.z) >= (tree.depth + obstacle.depth) / 2 + 5
+        )).toBe(true);
+        expect(roads.every(([startX, startZ, endX, endZ]) =>
+          segmentDistance(tree.center.x, tree.center.z, startX, startZ, endX, endZ) >
+            Math.max(tree.width, tree.depth) / 2 + 7
+        )).toBe(true);
+      }
+    }
+  }, 30_000);
 
   it("adds deterministic fence and hay cover around denser settlements", () => {
     for (const seed of [1, 7, 19, 42, 99]) {
@@ -490,3 +521,18 @@ describe("map layouts", () => {
     });
   });
 });
+
+function segmentDistance(
+  x: number,
+  z: number,
+  startX: number,
+  startZ: number,
+  endX: number,
+  endZ: number,
+): number {
+  const deltaX = endX - startX;
+  const deltaZ = endZ - startZ;
+  const lengthSquared = deltaX * deltaX + deltaZ * deltaZ;
+  const progress = Math.max(0, Math.min(1, ((x - startX) * deltaX + (z - startZ) * deltaZ) / lengthSquared));
+  return Math.hypot(x - (startX + deltaX * progress), z - (startZ + deltaZ * progress));
+}

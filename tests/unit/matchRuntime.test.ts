@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createIdleCommand } from "../../src/game/commands/ActorCommand";
-import { MatchRuntime } from "../../src/server/MatchRuntime";
+import { MATCH_CHECKPOINT_VERSION, MatchRuntime } from "../../src/server/MatchRuntime";
 
 describe("MatchRuntime", () => {
   it("runs a 10-human authoritative room with 40 bots", () => {
@@ -32,6 +32,7 @@ describe("MatchRuntime", () => {
     for (let tick = 0; tick < 151; tick += 1) runtime.step();
     expect(runtime.state.actors["human-2"]?.kind).toBe("player");
     const checkpoint = runtime.checkpoint();
+    expect(checkpoint.version).toBe(MATCH_CHECKPOINT_VERSION);
     const restored = new MatchRuntime({
       humanActorIds: ["human-1", "human-2"],
       seed: 7,

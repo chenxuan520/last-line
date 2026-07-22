@@ -1,6 +1,7 @@
 import { Engine } from "@babylonjs/core/Engines/engine";
 import { AssetCatalog } from "../assets/AssetCatalog";
 import { AudioFeedback } from "../client/audio/AudioFeedback";
+import { MobileFullscreenController } from "../client/ui/MobileFullscreenController";
 import { BATTLE_ROYALE_CONFIG } from "../config/battleRoyale";
 import { DEFAULT_SETTINGS, QUALITY_PROFILES, type GameSettings, type QualityLevel } from "../config/settings";
 import {
@@ -24,6 +25,7 @@ export class GameApp {
   private multiplayerConnection: MultiplayerConnection | null = null;
   private settings = loadSettings();
   private readonly menuAudio = new AudioFeedback(0);
+  private readonly mobileFullscreen = new MobileFullscreenController();
   private starting = false;
 
   public constructor(
@@ -57,6 +59,7 @@ export class GameApp {
     this.session?.dispose();
     this.multiplayerConnection?.close();
     this.menuAudio.dispose();
+    this.mobileFullscreen.dispose();
     this.engine.dispose();
   }
 
@@ -78,10 +81,12 @@ export class GameApp {
         this.assets,
         this.settings,
         this.menuAudio,
-        this.startMatch,
+        this.mobileFullscreen,
+        this.startSinglePlayerFromUserGesture,
       );
       this.session.start();
     } catch (error) {
+      this.mobileFullscreen.deactivate();
       this.renderError(error);
     } finally {
       this.starting = false;
@@ -90,6 +95,12 @@ export class GameApp {
 
   private readonly handleResize = (): void => this.engine.resize();
 
+  private readonly startSinglePlayerFromUserGesture = (): void => {
+    if (!this.assets || this.starting) return;
+    this.mobileFullscreen.activateFromUserGesture();
+    void this.startMatch();
+  };
+
   private renderLoading(progress: number, message = "正在加载资源"): void {
     this.uiRoot.className = "";
     this.uiRoot.innerHTML = `<section class="loading-panel" aria-live="polite"><p><span></span>${message}</p><strong>${Math.round(progress * 100)}%</strong><small>${message === "正在准备战场" ? "正在生成地图、建筑、物资与角色，请稍候" : "正在校验并载入战区资源"}</small><div><i style="width:${progress * 100}%"></i></div></section>`;
@@ -97,6 +108,7 @@ export class GameApp {
 
   private renderMenu(): void {
     if (!this.assets) return;
+    this.mobileFullscreen.deactivate();
     const multiplayerEnabled = getDefaultMultiplayerApiUrl() !== null;
     const logo = this.assets.resolve("ui.logo", "svg");
     const backdrop = this.assets.resolve("ui.menu.backdrop", "image");
@@ -166,7 +178,7 @@ export class GameApp {
       this.readSettings();
       this.menuAudio.setVolume(this.settings.volume);
       this.menuAudio.start();
-      void this.startMatch();
+      this.startSinglePlayerFromUserGesture();
     });
     this.uiRoot.querySelector<HTMLButtonElement>("[data-action='multiplayer']")?.addEventListener("click", () => {
       this.readSettings();
@@ -175,6 +187,7 @@ export class GameApp {
   }
 
   private renderMultiplayerMenu(): void {
+    this.mobileFullscreen.deactivate();
     const apiUrl = getDefaultMultiplayerApiUrl();
     const savedName = localStorage.getItem(MULTIPLAYER_NAME_KEY) ?? `幸存者-${Math.floor(Math.random() * 9_000 + 1_000)}`;
     this.uiRoot.className = "";
@@ -390,6 +403,7 @@ export class GameApp {
     this.multiplayerConnection = connection;
     this.renderLobbyShell(admission.code);
     connection.setStatusHandler((connectionStatus) => {
+      if (connectionStatus === "closed") this.mobileFullscreen.deactivate();
       const status = this.uiRoot.querySelector<HTMLElement>("[data-lobby='status']");
       if (status) status.textContent = connectionStatus === "connected"
         ? "已连接"
@@ -405,7 +419,9 @@ export class GameApp {
       if (message.type === "error") {
         const status = this.uiRoot.querySelector<HTMLElement>("[data-lobby='status']");
         if (status) status.textContent = message.message;
+        if (message.code === "cannot-start") this.mobileFullscreen.deactivate();
         if (message.code === "account-disabled" || message.code === "room-closed") {
+          this.mobileFullscreen.deactivate();
           connection.close();
           if (this.multiplayerConnection === connection) this.multiplayerConnection = null;
           this.renderMultiplayerMenu();
@@ -431,6 +447,7 @@ export class GameApp {
   }
 
   private renderLobby(client: MultiplayerClient, connection: MultiplayerConnection, lobby: LobbyView): void {
+    if (lobby.status === "waiting") this.mobileFullscreen.deactivate();
     const summary = this.uiRoot.querySelector<HTMLElement>("[data-lobby='summary']");
     if (!summary) return;
     const local = lobby.members.find((member) => member.playerId === client.playerId);
@@ -457,9 +474,13 @@ export class GameApp {
       }));
     }
     if (lobby.visibility === "private" && local?.host) {
-      actions.append(this.actionButton("开始对局", "DEPLOY", () => connection.send({ type: "lobby.start" })));
+      actions.append(this.actionButton("开始对局", "DEPLOY", () => {
+        this.mobileFullscreen.activateFromUserGesture();
+        connection.send({ type: "lobby.start" });
+      }));
     }
     actions.append(this.actionButton("退出房间", "LEAVE", () => {
+      this.mobileFullscreen.deactivate();
       connection.send({ type: "lobby.leave" });
       connection.close();
       this.multiplayerConnection = null;
@@ -486,7 +507,9 @@ export class GameApp {
   ): Promise<void> {
     if (!this.assets || this.starting) return;
     this.starting = true;
+    this.mobileFullscreen.activateWithoutUserGesture();
     connection.setMessageHandler(null);
+    connection.setStatusHandler(null);
     this.applyQuality();
     this.renderLoading(0.92, "正在准备战场");
     await waitForPaint();
@@ -498,6 +521,7 @@ export class GameApp {
         this.assets,
         this.settings,
         this.menuAudio,
+        this.mobileFullscreen,
         connection,
         initial,
         () => this.returnToMenu(),
@@ -508,6 +532,7 @@ export class GameApp {
       session.start();
     } catch (error) {
       connection.close();
+      this.mobileFullscreen.deactivate();
       this.renderError(error);
     } finally {
       this.starting = false;
@@ -515,6 +540,7 @@ export class GameApp {
   }
 
   private returnToMenu(): void {
+    this.mobileFullscreen.deactivate();
     this.session?.dispose();
     this.session = null;
     this.multiplayerConnection?.close();

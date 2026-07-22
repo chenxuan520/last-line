@@ -28,14 +28,17 @@ describe("FixedStepClock", () => {
     }
   });
 
-  it("defines increasing detail and 60/90/120 FPS quality profiles", () => {
+  it("defines increasing visual precision and 60/90/120 FPS quality profiles", () => {
     expect([
       QUALITY_PROFILES.low.maxFps,
       QUALITY_PROFILES.medium.maxFps,
       QUALITY_PROFILES.high.maxFps,
     ]).toEqual([60, 90, 120]);
-    expect(QUALITY_PROFILES.low.treeCount).toBeLessThan(QUALITY_PROFILES.medium.treeCount);
-    expect(QUALITY_PROFILES.medium.treeCount).toBeLessThan(QUALITY_PROFILES.high.treeCount);
+    expect([
+      QUALITY_PROFILES.low.foliageTessellation,
+      QUALITY_PROFILES.medium.foliageTessellation,
+      QUALITY_PROFILES.high.foliageTessellation,
+    ]).toEqual([5, 6, 7]);
     expect(QUALITY_PROFILES.low.shrubCount).toBeLessThan(QUALITY_PROFILES.high.shrubCount);
   });
 });

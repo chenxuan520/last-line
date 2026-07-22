@@ -30,6 +30,10 @@ export interface MapWallSegment extends MapObstacle {
 
 export interface MapRockObstacle extends MapObstacle {}
 
+export interface MapTreeTrunk extends MapObstacle {
+  kind: "tree-trunk";
+}
+
 export interface MapCoverObstacle extends MapObstacle {
   kind: "fence" | "hay";
 }
@@ -93,6 +97,7 @@ export interface MapLayout {
   readonly wallOpenings: readonly MapWallOpening[];
   readonly floorSlabs: readonly MapFloorSlab[];
   readonly rockObstacles: readonly MapRockObstacle[];
+  readonly treeTrunks: readonly MapTreeTrunk[];
   readonly coverObstacles: readonly MapCoverObstacle[];
   readonly roofRamps: readonly RoofRamp[];
   readonly hospital: HospitalPoi;
@@ -113,6 +118,7 @@ export const LANDING_ZONE_COUNT = 16;
 export const BASE_LOOT_POINTS = 240;
 export const ADDITIONAL_MEDICAL_LOOT_POINTS = 10;
 export const TOTAL_LOOT_POINTS = BASE_LOOT_POINTS + ADDITIONAL_MEDICAL_LOOT_POINTS;
+export const TREE_TRUNK_COUNT = 384;
 const HOSPITAL_MEDICAL_LOOT_POINTS = 2;
 const RANDOM_MEDICAL_LOOT_POINTS = ADDITIONAL_MEDICAL_LOOT_POINTS - HOSPITAL_MEDICAL_LOOT_POINTS;
 const POI_NAMES = ["北港", "灰脊镇", "旧仓区", "高地站", "南岸村", "雷达哨", "西风农场", "东岭营地"] as const;
@@ -160,6 +166,7 @@ const POINT_MAP_MARGIN = 210;
 const MOUNTAIN_COUNT = 16;
 const COVERAGE_COMPOUND_COUNT = 20;
 const COVER_ROCK_COUNT = 64;
+const MOUNTAIN_TREE_TRUNK_COUNT = 160;
 const FENCE_COVER_COUNT = 96;
 const HAY_COVER_COUNT = 72;
 const MULTI_STORY_BUILDING_RATIO = 0.2;
@@ -300,6 +307,16 @@ export function createMapLayout(seed: number): MapLayout {
     medkitLootIndex: baseLootSpawnPoints.length + 1,
   };
   const lootSpawnPoints = [...baseLootSpawnPoints, ...hospitalMedicalPoints];
+  const treeTrunks = createTreeTrunks(
+    terrainHills,
+    obstacles,
+    roofRamps,
+    rockObstacles,
+    coverObstacles,
+    landingZones,
+    lootSpawnPoints,
+    createSeededRandom(normalizedSeed ^ 0x68bc21eb),
+  );
   const layout: MapLayout = {
     seed: normalizedSeed,
     mapPoints,
@@ -310,6 +327,7 @@ export function createMapLayout(seed: number): MapLayout {
     wallOpenings,
     floorSlabs,
     rockObstacles,
+    treeTrunks,
     coverObstacles,
     roofRamps,
     hospital,
@@ -415,6 +433,7 @@ export const TERRAIN_HILLS: readonly TerrainHill[] = DEFAULT_MAP_LAYOUT.terrainH
 export const MAP_OBSTACLES: readonly MapObstacle[] = DEFAULT_MAP_LAYOUT.obstacles;
 export const MAP_WALL_SEGMENTS: readonly MapWallSegment[] = DEFAULT_MAP_LAYOUT.wallSegments;
 export const MAP_ROCK_OBSTACLES: readonly MapRockObstacle[] = DEFAULT_MAP_LAYOUT.rockObstacles;
+export const MAP_TREE_TRUNKS: readonly MapTreeTrunk[] = DEFAULT_MAP_LAYOUT.treeTrunks;
 export const MAP_COVER_OBSTACLES: readonly MapCoverObstacle[] = DEFAULT_MAP_LAYOUT.coverObstacles;
 export const MAP_ROOF_RAMPS: readonly RoofRamp[] = DEFAULT_MAP_LAYOUT.roofRamps;
 export const LOOT_SPAWN_POINTS: readonly Vector3State[] = DEFAULT_MAP_LAYOUT.lootSpawnPoints;
@@ -987,6 +1006,74 @@ function createCoverObstacles(
     covers.push(selected);
   }
   return covers;
+}
+
+function createTreeTrunks(
+  terrainHills: readonly TerrainHill[],
+  obstacles: readonly MapBuilding[],
+  roofRamps: readonly RoofRamp[],
+  rocks: readonly MapRockObstacle[],
+  covers: readonly MapCoverObstacle[],
+  landingZones: readonly MapPoint[],
+  lootSpawnPoints: readonly Vector3State[],
+  random: () => number,
+): MapTreeTrunk[] {
+  const trees: MapTreeTrunk[] = [];
+  const roads = createMapRoadSegments(landingZones);
+  const mountains = terrainHills.filter((hill) => hill.height >= 24);
+  const blockedFootprints = [...obstacles, ...rocks, ...covers];
+  const limit = MAP_HALF_SIZE - 35;
+  for (let index = 0; index < TREE_TRUNK_COUNT; index += 1) {
+    const treeScale = index % 11 === 0 ? 1.4 : 0.96 + (index % 4) * 0.025;
+    const width = round(1.1 * treeScale * (0.92 + (index % 3) * 0.04));
+    const height = round(5.8 * treeScale);
+    const depth = round(1.1 * treeScale * 0.96);
+    let selected: MapTreeTrunk | null = null;
+    const tryPosition = (x: number, z: number): boolean => {
+      if (Math.abs(x) + width / 2 > limit || Math.abs(z) + depth / 2 > limit) return false;
+      const terrainRange = getFootprintTerrainRange(x, z, width, depth, terrainHills);
+      if (terrainRange.maximum - terrainRange.minimum > 0.7) return false;
+      const terrainY = terrainHeightFromHills(x, z, terrainHills);
+      const candidate: MapTreeTrunk = {
+        id: `tree-trunk-${index}`,
+        kind: "tree-trunk",
+        center: { x: round(x), y: round(terrainY + height / 2), z: round(z) },
+        width,
+        height,
+        depth,
+        color: "#6f5135",
+      };
+      if (blockedFootprints.some((obstacle) => footprintsOverlap(candidate, obstacle, 5))) {
+        return false;
+      }
+      if (trees.some((tree) => footprintsOverlap(candidate, tree, 3))) return false;
+      if (roofRamps.some((ramp) => rampIntersectsBuilding(ramp, candidate, 5))) return false;
+      if (roads.some(([startX, startZ, endX, endZ]) =>
+        pointToSegmentDistance(x, z, startX, startZ, endX, endZ) <= Math.max(width, depth) / 2 + 7
+      )) return false;
+      if (lootSpawnPoints.some((loot) =>
+        Math.abs(loot.x - x) <= width / 2 + 3 && Math.abs(loot.z - z) <= depth / 2 + 3
+      )) return false;
+      selected = candidate;
+      return true;
+    };
+
+    if (index < MOUNTAIN_TREE_TRUNK_COUNT) {
+      for (let attempt = 0; attempt < 240 && !selected; attempt += 1) {
+        const mountain = mountains[Math.floor(random() * mountains.length)];
+        if (!mountain) break;
+        const angle = random() * Math.PI * 2;
+        const radius = mountain.radius * Math.sqrt(randomBetween(random, 0.02, 0.5));
+        tryPosition(mountain.x + Math.cos(angle) * radius, mountain.z + Math.sin(angle) * radius);
+      }
+    }
+    for (let attempt = 0; attempt < 1_200 && !selected; attempt += 1) {
+      tryPosition(randomBetween(random, -limit, limit), randomBetween(random, -limit, limit));
+    }
+    if (!selected) throw new Error(`Unable to place tree trunk ${index}`);
+    trees.push(selected);
+  }
+  return trees;
 }
 
 function footprintsOverlap(left: MapObstacle, right: MapObstacle, padding: number): boolean {

@@ -438,6 +438,27 @@ describe("InventorySystem", () => {
     }
   });
 
+  it("places dropped loot outside authoritative tree trunks", () => {
+    const state = createState();
+    const layout = createMapLayout(state.mapSeed);
+    const tree = layout.treeTrunks[0];
+    const actor = state.actors.player;
+    if (!tree || !actor) throw new Error("tree drop fixture missing");
+    actor.position = {
+      x: tree.center.x,
+      y: getTerrainHeight(tree.center.x, tree.center.z, layout) + 1.76,
+      z: tree.center.z,
+    };
+
+    new InventorySystem(layout).processCommand(state, actor.id, command({ dropItem: "weapon.rifle" }), []);
+
+    const drop = Object.values(state.groundLoot)[0];
+    if (!drop) throw new Error("tree drop missing");
+    const closestX = Math.max(tree.center.x - tree.width / 2, Math.min(drop.position.x, tree.center.x + tree.width / 2));
+    const closestZ = Math.max(tree.center.z - tree.depth / 2, Math.min(drop.position.z, tree.center.z + tree.depth / 2));
+    expect(Math.hypot(drop.position.x - closestX, drop.position.z - closestZ)).toBeGreaterThanOrEqual(0.25);
+  });
+
   it("keeps roof-edge death drops within the dead actor's 3m interaction range", () => {
     const state = createState();
     const actor = state.actors.player;

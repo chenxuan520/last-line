@@ -147,6 +147,11 @@ describe("IslandScene lifecycle", () => {
       expect(treeTrunks.every((mesh) => mesh instanceof InstancedMesh)).toBe(true);
       expect(treeFoliage.every((mesh) => mesh instanceof InstancedMesh)).toBe(true);
       expect(treeFoliage.every((mesh) => mesh.getTotalVertices() < 160)).toBe(true);
+      expect(layout.treeTrunks.every((tree) => {
+        const mesh = bundle.scene.getMeshByName(tree.id);
+        return mesh?.position.equalsToFloats(tree.center.x, tree.center.y, tree.center.z) === true &&
+          mesh.scaling.equalsToFloats(tree.width / 1.1, tree.height / 5.8, tree.depth / 1.1);
+      })).toBe(true);
       expect(hospitalCrosses).toHaveLength(1);
       expect(hospitalCrosses[0]).toMatchObject({ isPickable: false, checkCollisions: false });
       expect(hospitalCrosses[0]?.metadata).toMatchObject({ poiName: "医院", poiType: "hospital" });
@@ -559,7 +564,8 @@ describe("IslandScene lifecycle", () => {
     expect(bundle.scene.getMeshByName("body-human-2")).not.toBeNull();
     expect(bundle.actorRoots.get("human-2")?.getChildMeshes(false)
       .some((mesh) => mesh.metadata?.actorVisual === "parachute")).toBe(true);
-    expect(bundle.scene.meshes.filter((mesh) => /^tree-trunk-\d+$/.test(mesh.name))).toHaveLength(128);
+    expect(bundle.scene.meshes.filter((mesh) => /^tree-trunk-\d+$/.test(mesh.name))).toHaveLength(384);
+    expect(bundle.scene.meshes.filter((mesh) => /^tree-foliage-\d+$/.test(mesh.name))).toHaveLength(384);
     expect(bundle.scene.meshes.filter((mesh) => /^rock-\d+$/.test(mesh.name))).toHaveLength(32);
     expect(bundle.scene.meshes.filter((mesh) => /^shrub-\d+$/.test(mesh.name))).toHaveLength(60);
 

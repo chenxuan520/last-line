@@ -1,6 +1,7 @@
 import type { GameSettings } from "../config/settings";
 import {
   isServerMessage,
+  MULTIPLAYER_PROTOCOL_VERSION,
   type ClientMessage,
   type GuestSession,
   type PublicRoomSummary,
@@ -306,7 +307,7 @@ export class MultiplayerConnection {
     }
     if (!isServerMessage(value)) return;
     if (value.type === "welcome") {
-      if (value.protocolVersion !== 1) {
+      if (value.protocolVersion !== MULTIPLAYER_PROTOCOL_VERSION) {
         const error: ServerMessage = { type: "error", code: "protocol-mismatch", message: "联机协议版本不兼容，请刷新页面" };
         if (this.handler) this.handler(error);
         else this.queuedMessages.push(error);

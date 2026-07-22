@@ -11,6 +11,7 @@ import {
   setActorWeaponVisual,
 } from "../client/render/scenes/IslandScene";
 import { GameHud } from "../client/ui/GameHud";
+import type { MobileFullscreenController } from "../client/ui/MobileFullscreenController";
 import type { GameSettings } from "../config/settings";
 import { createMapLayout } from "../config/map";
 import { WEAPONS } from "../config/weapons";
@@ -79,6 +80,7 @@ export class BattleRoyaleSession {
     private readonly assets: AssetCatalog,
     settings: GameSettings,
     audio: AudioFeedback,
+    private readonly mobileFullscreen: MobileFullscreenController,
     private readonly onRestart: () => void,
     bundle: Awaited<ReturnType<typeof createIslandScene>>,
     state: MatchState,
@@ -114,6 +116,7 @@ export class BattleRoyaleSession {
     assets: AssetCatalog,
     settings: GameSettings,
     audio: AudioFeedback,
+    mobileFullscreen: MobileFullscreenController,
     onRestart: () => void,
   ): Promise<BattleRoyaleSession> {
     const state = createBattleRoyaleState(PLAYER_ID, undefined, Math.random, {
@@ -129,7 +132,7 @@ export class BattleRoyaleSession {
       undefined,
       settings.quality,
     );
-    return new BattleRoyaleSession(canvas, uiRoot, assets, settings, audio, onRestart, bundle, state);
+    return new BattleRoyaleSession(canvas, uiRoot, assets, settings, audio, mobileFullscreen, onRestart, bundle, state);
   }
 
   public start(): void {
@@ -141,7 +144,10 @@ export class BattleRoyaleSession {
       this.simulation.state.mapSeed,
       () => this.resumeInput(),
       this.onRestart,
-      { touchInput: this.humanController.usesTouchControls() },
+      {
+        touchInput: this.humanController.usesTouchControls(),
+        onRequestFullscreen: () => this.mobileFullscreen.requestFromUserGesture(),
+      },
     );
     this.audio.start();
     this.simulation.start();
@@ -170,6 +176,7 @@ export class BattleRoyaleSession {
     }
     this.effects.update(frameSeconds);
     this.syncVisuals();
+    const orientationBlocked = this.humanController.isOrientationBlocked();
     this.hud?.update(
       this.simulation.state,
       player,
@@ -179,7 +186,8 @@ export class BattleRoyaleSession {
       fps,
       this.humanController.isScoped(player),
       this.humanController.isLeaderboardVisible(),
-      this.humanController.isOrientationBlocked(),
+      orientationBlocked,
+      this.mobileFullscreen.needsAction(orientationBlocked),
     );
   }
 

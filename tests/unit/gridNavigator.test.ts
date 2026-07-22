@@ -3,6 +3,57 @@ import { GridNavigator } from "../../src/ai/navigation/GridNavigator";
 import { BUILDING_ROOF_CAP_HEIGHT, createMapLayout, getTerrainHeight, type MapLayout } from "../../src/config/map";
 
 describe("GridNavigator spatial index", () => {
+  it("routes grounded actors around authoritative tree trunks", () => {
+    const layout = createMapLayout(0);
+    const tree = layout.treeTrunks[0];
+    if (!tree) throw new Error("tree navigation fixture missing");
+    const start = {
+      x: tree.center.x - tree.width / 2 - 5,
+      y: getTerrainHeight(tree.center.x - tree.width / 2 - 5, tree.center.z, layout) + 1.76,
+      z: tree.center.z,
+    };
+    const target = {
+      x: tree.center.x + tree.width / 2 + 5,
+      y: getTerrainHeight(tree.center.x + tree.width / 2 + 5, tree.center.z, layout) + 1.76,
+      z: tree.center.z,
+    };
+
+    const path = new GridNavigator(layout).findPath(start, target);
+
+    expect(path[0]).toEqual(start);
+    expect(path.at(-1)).toEqual(target);
+    expect(path.length).toBeGreaterThan(2);
+  });
+
+  it("keeps elevated mountain trees blocking a path that starts far above their base", () => {
+    const layout = createMapLayout(0);
+    const tree = layout.treeTrunks[0];
+    const mountain = tree && layout.terrainHills.find((hill) =>
+      hill.height >= 24 && Math.hypot(tree.center.x - hill.x, tree.center.z - hill.z) < hill.radius
+    );
+    if (!tree || !mountain) throw new Error("mountain tree fixture missing");
+    const distance = Math.hypot(mountain.x - tree.center.x, mountain.z - tree.center.z);
+    const directionX = (mountain.x - tree.center.x) / distance;
+    const directionZ = (mountain.z - tree.center.z) / distance;
+    const start = {
+      x: tree.center.x + directionX * 30,
+      y: getTerrainHeight(tree.center.x + directionX * 30, tree.center.z + directionZ * 30, layout) + 1.76,
+      z: tree.center.z + directionZ * 30,
+    };
+    const target = {
+      x: tree.center.x - directionX * 30,
+      y: getTerrainHeight(tree.center.x - directionX * 30, tree.center.z - directionZ * 30, layout) + 1.76,
+      z: tree.center.z - directionZ * 30,
+    };
+
+    const path = new GridNavigator(layout).findPath(start, target);
+
+    expect(path.length).toBeGreaterThan(2);
+    expect(path.slice(1, -1).some((point) =>
+      Math.hypot(point.x - tree.center.x, point.z - tree.center.z) > Math.max(tree.width, tree.depth)
+    )).toBe(true);
+  });
+
   it("keeps deterministic ground paths identical to the complete blocker scan", () => {
     for (const seed of [0, 42]) {
       const layout = createMapLayout(seed);
@@ -56,7 +107,7 @@ function completeScanNavigator(layout: MapLayout): GridNavigator {
   return new GridNavigator(
     layout,
     layout.roofRamps,
-    [...layout.wallSegments, ...layout.rockObstacles, ...layout.coverObstacles],
+    [...layout.wallSegments, ...layout.rockObstacles, ...layout.coverObstacles, ...layout.treeTrunks],
     0.4,
     false,
   );

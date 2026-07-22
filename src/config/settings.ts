@@ -3,8 +3,7 @@ export type QualityLevel = "low" | "medium" | "high";
 export interface QualityProfile {
   hardwareScalingLevel: number;
   maxFps: number;
-  treeCount: number;
-  mountainTreeCount: number;
+  foliageTessellation: number;
   decorativeRockCount: number;
   mountainRockCount: number;
   shrubCount: number;
@@ -33,8 +32,7 @@ export const QUALITY_PROFILES: Readonly<Record<QualityLevel, QualityProfile>> = 
   low: {
     hardwareScalingLevel: 1.75,
     maxFps: 60,
-    treeCount: 128,
-    mountainTreeCount: 64,
+    foliageTessellation: 5,
     decorativeRockCount: 32,
     mountainRockCount: 16,
     shrubCount: 60,
@@ -43,8 +41,7 @@ export const QUALITY_PROFILES: Readonly<Record<QualityLevel, QualityProfile>> = 
   medium: {
     hardwareScalingLevel: 1.35,
     maxFps: 90,
-    treeCount: 256,
-    mountainTreeCount: 112,
+    foliageTessellation: 6,
     decorativeRockCount: 64,
     mountainRockCount: 32,
     shrubCount: 120,
@@ -53,8 +50,7 @@ export const QUALITY_PROFILES: Readonly<Record<QualityLevel, QualityProfile>> = 
   high: {
     hardwareScalingLevel: 1,
     maxFps: 120,
-    treeCount: 384,
-    mountainTreeCount: 160,
+    foliageTessellation: 7,
     decorativeRockCount: 96,
     mountainRockCount: 48,
     shrubCount: 180,

@@ -27,6 +27,7 @@ npm run preview
 - Movement, combat, inventory, damage, safe-zone, and result logic belong in rule systems or modes.
 - Use `SimulationCombatWorld` for authoritative hit tests and line of sight. Rendering meshes are never gameplay hitboxes.
 - Process simultaneous actions independently of command insertion order and actor kind.
+- Seeded tree-trunk positions and counts are authoritative and quality-independent. Movement, combat/LOS, navigation, dynamic drops, server authority, and client presentation must consume the same `MapLayout.treeTrunks`; foliage may vary in mesh precision but remains visual-only.
 - Keep `GameMode` generic. Battle royale behavior belongs in `BattleRoyaleMode`; do not speculate about future 5v5 rules.
 - Cloudflare and standalone multiplayer must share protocol, gateway, lobby, room, account, administrator, and match-domain logic. Platform-specific code is limited to storage, alarm, socket, HTTP, and process-lifecycle adapters; never fork gameplay or copy a second service implementation.
 - The browser selects a backend only by URL (`same-origin` for full-stack standalone). It must not branch on Cloudflare versus standalone gameplay semantics.
@@ -66,6 +67,7 @@ npm run preview
 - Use Babylon `NullEngine` for scene, GLB, and lifecycle tests.
 - Do not weaken multi-seed AI thresholds to hide navigation or looting failures.
 - Do not play audio during automated or manual verification.
+- Mobile fullscreen and orientation locking must originate from a real user activation. Never call `requestFullscreen()` from `orientationchange`; unsupported or rejected browsers must retain manual landscape gameplay and a usable retry path.
 - Run both Worker and standalone contract suites after changing shared multiplayer classes. Standalone regressions must cover real HTTP/WebSocket behavior, persistence/restart, process locking, alarm generations, reconnect grace, room eviction, and bounded shutdown; use deterministic barriers for races instead of timing-only assertions.
 
 ## Review and Delivery Rules
