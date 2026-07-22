@@ -1484,6 +1484,13 @@
 - 内部配图功能、14 种 AssetCatalog 映射、billboard/material/texture 缓存和 NullEngine 有界性回归全部保留，后续确定新设计后可重新开放，不需重写渲染链。
 - README 不再把配图作为公开功能或首页设置。标准 typecheck/test/build/diff 全通过；Vitest 20 files / 210 tests，完整约 78.06 秒。按用户约束未启动浏览器，MCP 当前仍不可用。
 
+#### 2026-07-22 10:45 +0800：README 玩家导向改版
+
+- 按用户要求将 `README.md` 从长篇项目说明改为玩家导向首页：首屏加入现有 `public/assets/ui/logo.svg`，并提供浅色 GitHub 主题专用的 `logo-readme-light.svg` 以保证文字对比度；同步加入游戏口号、正式服快捷入口和菜单战场背景图，集中展示单人/联机定位与 50 人战局卖点。
+- 重写“怎么玩”为落点、搜集、跑圈、交火和获胜五步流程，保留桌面键鼠、手机横屏操作、三个在线入口及最小本地启动方式；架构、部署和验证信息收进折叠区并改为文档入口。
+- 涉及文件：`README.md`、`public/assets/ui/logo-readme-light.svg`、本 plan。工作区既有 `.gitignore` 修改按用户确认保持原样，不触碰且不纳入本任务；验证结果见下条记录。
+- 2026-07-22 10:49：README 8 个本地资源/文档引用与浅色 logo SVG XML 检查通过；`npm run typecheck`、完整 `npm run test`（应用 30 files / 271 tests、Worker 3 / 27、standalone 2 / 15）和 `npm run build` 全部通过，新增浅色 logo 后再次执行生产 build 亦通过，构建仅保留既有大 chunk warning。本次只修改展示文档、README 专用视觉资源与 plan，不涉及游戏代码、协议或部署行为。
+
 ## Review
 
 ### 2026-07-19 20:35 +0800：origin/main 21cc420 撤退停滞与物资配图关闭审查（不通过）

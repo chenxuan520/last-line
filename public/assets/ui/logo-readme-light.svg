@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 84" role="img" aria-label="最后防线">
+  <path d="M8 12h62l18 30-18 30H8l18-30L8 12Z" fill="#739c45"/>
+  <circle cx="48" cy="42" r="14" fill="none" stroke="#10150f" stroke-width="6"/>
+  <path d="M48 18v12m0 24v12M24 42h12m24 0h12" stroke="#10150f" stroke-width="5"/>
+  <text x="104" y="51" fill="#10150f" font-family="system-ui,sans-serif" font-size="34" font-weight="900" letter-spacing="3">最后防线</text>
+  <text x="106" y="71" fill="#58763c" font-family="system-ui,sans-serif" font-size="11" font-weight="700" letter-spacing="4">LAST LINE</text>
+</svg>
