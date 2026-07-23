@@ -22,6 +22,7 @@
 - 2026-07-24 02:13 +0800：最终增量验证完成。App typecheck、`multiplayerClient` + `mobileFullscreenController` 定向 13 tests、最新 browser build、budgets、production multiplayer smoke 与 `git diff --check` 通过；此前同一最终改动链已完成完整 322 app + 30 Worker + 20 standalone tests、Worker/server build。移动触控 Chrome 桩实测创建私人联机房间时同步产生 1 次 fullscreen request 和 1 次 landscape lock，大厅 `S6VQHZ` 保持“已连接”；正常退出后页面回到唯一 `about:blank`，本地 preview 已停止。按用户要求 reviewer 后续只做静态复审，不重复外层验证。
 - 2026-07-24 02:13 +0800：排查用户补充的高空自然物件疑问。单机 `BattleRoyaleSession` 与联机 `MultiplayerSession` 对树、岩石、干草、围栏和建筑使用相同 `createIslandScene`、map seed、quality、fog `1560–2640m` 和 camera far plane `2880m`；未发现联机专属静态物件距离裁剪，故不做无证据改动。唯一真实模式差异是地面 loot 的 60m 服务端复制范围，不属于自然场景物件。
 - 2026-07-24 02:17 +0800：采纳静态 reviewer Round 3 Medium。`GameHud` 的普通结算按钮事件会传入 `MouseEvent`，不能直接复用新增的可选终止文案回调；现改为无参包装 `() => this.onExit()`，确保正常结算仍返回菜单，不会把事件对象误显示为终止原因。
+- 2026-07-24 02:23 +0800：`88c1a75` 推送后确认 Cloudflare Pages 已自动发布该 commit，但 Worker 仍停留在手工版本 `955f47ab`，证明 Workers Builds 自动部署未生效；按新规则立即启用 verified fallback。fallback 在部署前被既有 `serverMetrics.test` 顺序污染阻塞，未发生部署：无隔离 Worker suite 可能从已恢复的 1 个房间开始，测试错误硬编码 `[0,1]` 而实际正确增量为 `[1,2]`。现把断言改为“恰有两次观测且创建房间使 active count +1”，同时兼容生产 DO 从持久房间恢复的真实语义，不降低指标行为要求。待定向验证、静态复审、提交后重新执行完整 fallback。
 
 ## Review
 
@@ -81,3 +82,8 @@
 - 审查范围：仅静态复核 Round 3 callback 修复及其与既有终止消息链路的交互；未执行任何测试、构建、smoke、浏览器或部署命令。
 - Round 3 Medium disposition — **已解决**：`MultiplayerSession` 传给 `GameHud` 的普通退出回调已包装为 `() => this.onExit()`，DOM `MouseEvent` 不再进入 terminal message 参数；`processMessages()` 仍仅对 protocol mismatch、room closure、account revocation 显式调用 `this.onExit(message.message)`，明确终止原因继续进入最终 UI。
 - 审查结论：**通过。本次复审未发现 blocker/high/medium/low 问题。**
+
+### 2026-07-24 — Round 5（post-`88c1a75` 静态复审）
+
+- 审查范围：仅审查 `tests/worker/serverMetrics.test.ts:20-24` 在 `88c1a75` 后的断言改动及 Build 中记录的 `[1,2]` 失败原因；未执行任何测试、typecheck、build、smoke、浏览器、部署或项目命令。
+- 审查结论：**通过，未发现 blocker/high/medium/low 问题。** `active_rooms` 在无隔离套件及生产持久状态下允许非零起点；断言恰有两次观测且第二次严格为第一次 `+1`，仍约束一次房间创建只产生预期的基线/更新观测并将活跃房间数增加一。它仅移除了错误的零初始状态假设，不会掩盖本项测试负责覆盖的产品指标行为。

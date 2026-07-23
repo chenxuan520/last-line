@@ -17,9 +17,11 @@ describe("Cloudflare server metrics", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
     const guest = await post("/v1/guests", { displayName: "Metrics Host" });
     const admission = await post("/v1/rooms", { ...guest, visibility: "private" });
-    expect(metricRecords(log.mock.calls).flatMap((record) =>
+    const activeRoomValues = metricRecords(log.mock.calls).flatMap((record) =>
       record.metric === "active_rooms" ? [record.value] : []
-    )).toEqual([0, 1]);
+    );
+    expect(activeRoomValues).toHaveLength(2);
+    expect(activeRoomValues[1]).toBe(activeRoomValues[0] + 1);
 
     const socketUrl = new URL(String(admission.socketPath), "https://test");
     socketUrl.searchParams.set("playerId", String(admission.playerId));
