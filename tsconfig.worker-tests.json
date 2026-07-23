@@ -1,7 +1,7 @@
 {
   "extends": "./tsconfig.worker.json",
   "compilerOptions": {
-    "types": ["./worker-configuration.d.ts", "@cloudflare/vitest-pool-workers/types"]
+    "types": ["./types/worker-configuration.d.ts", "@cloudflare/vitest-pool-workers/types"]
   },
-  "include": ["tests/worker/**/*.ts", "worker/**/*.ts", "src/config/**/*.ts", "src/ai/**/*.ts", "src/controllers/BotController.ts", "src/game/**/*.ts", "src/network/protocol.ts", "src/server/**/*.ts", "worker-configuration.d.ts"]
+  "include": ["tests/worker/**/*.ts", "worker/**/*.ts", "src/config/**/*.ts", "src/ai/**/*.ts", "src/controllers/BotController.ts", "src/game/**/*.ts", "src/network/protocol.ts", "src/server/**/*.ts", "types/worker-configuration.d.ts"]
 }
