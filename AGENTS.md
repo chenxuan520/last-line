@@ -88,13 +88,12 @@ npm run preview
 
 1. Run `npm run typecheck`.
 2. Run `npm run test`.
-3. Run `npm run test:coverage`.
-4. Run `npm run build`.
-5. Run `npm run build:worker` and `npm run build:server` when multiplayer/shared server code changed; run `npm run build:standalone` when the self-hosted artifact or same-origin client selection changed.
-6. Run `npm run check:budgets` after producing the browser, Worker, and standalone artifacts.
-7. If presentation changed, open the production build in local Chrome/Edge with volume `0` and check the console.
-8. Complete the review/re-review loop with no unresolved blocker, high, or medium findings.
-9. Update `AGENTS.md`, README, and `docs/` when contracts, controls, commands, architecture, persistence, security, or deployment behavior change.
+3. Run `npm run build`.
+4. Run `npm run build:worker` and `npm run build:server` when multiplayer/shared server code changed; run `npm run build:standalone` when the self-hosted artifact or same-origin client selection changed.
+5. Run `npm run check:budgets` after producing the browser, Worker, and standalone artifacts.
+6. If presentation changed, open the production build in local Chrome/Edge with volume `0` and check the console.
+7. Complete the review/re-review loop with no unresolved blocker, high, or medium findings.
+8. Update `AGENTS.md`, README, and `docs/` when contracts, controls, commands, architecture, persistence, security, or deployment behavior change.
 
 ## Deployment Rules
 

@@ -29,6 +29,7 @@
 - 2026-07-23 21:14：从干净 `npm ci` 依赖安装完成最终门禁：`npm run typecheck`、普通 `npm run test`（317 app、30 Worker、20 standalone）、`npm run test:coverage`、browser build、Worker dry-run、standalone server bundle、全部产物预算、`git diff --check` 和 `npm audit --omit=dev` 均通过。Coverage provider 未改变任何 production artifact，预算仍为 entry `1,022,686`、最大异步块 `613,551`、全部 JS `3,719,341`、252 chunks、CSS `43,052`、dist `4,239,689`、Worker `385,045`、server `407,225`。尚待 reviewer 闭环、提交和远端 CI。
 - 2026-07-23 21:44：确认并修复 reviewer Round 1 Medium。Coverage 汇总器改为可测试的 TypeScript 模块，对每项 `covered/total` 强制非负整数且 `covered <= total`，缺失/非法结构继续失败；新增 5 项聚焦回归，覆盖正确加权、负数、小数、covered 超 total 和缺失 metric。修正后 typecheck、定向 5 tests 和完整 `npm run test:coverage` 均通过；应用现为 35 files / 322 tests，Worker 30、standalone 20（共 372 tests），覆盖率数值保持不变。待复审。
 - 2026-07-23 22:04：reviewer Round 2 返回 `No findings`，Round 1 Medium 已闭环；复审独立覆盖 Node 24/25、缺失/损坏 summary、threshold、ownership、依赖与产物隔离。复审后再次执行普通 `npm run test` 和 `git diff --check`，35 app files / 322 tests、Worker 30、standalone 20 全部通过。本次实现、文档、plan 与完整 review 记录将同一 commit 提交并推送；远端 CI 结果按既有约定在对话汇报，不另建 plan-only 小提交。
+- 2026-07-23 22:32：实现以 `f34203f test: add coverage baseline gates` 推送后，远端 run `30014194063` 证明在 GitHub 双核 runner 上用 coverage 替代普通 CI 测试会使重型 map/scene corpus 被 V8 插桩放大到 9 分钟并触发 5/120/240 秒 deadlock timeout。随后仅把 unit coverage 改成单 worker 的 `7d69335` 方向仍不正确：run `30015354806` 用 638 秒后仍有两个 map timeout。现恢复主 CI 为原 `npm run test`，coverage 与阈值保留为开发者按需执行的 `npm run test:coverage`，并恢复并行 coverage 命令；不放宽测试 timeout、不影响生产代码。本记录与实际 CI 修复同一 commit 交付，不创建独立文档 commit。
 
 ## Review
 
