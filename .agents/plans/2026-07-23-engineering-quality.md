@@ -29,6 +29,7 @@
 - 2026-07-23 14:40：新增 schema v1 结构化服务指标。`LobbyDirectory` 在持久目录变化后记录绝对 `active_rooms`；`GameRoom` 以 60 秒窗口汇总 `tick_delay_ms`、`websocket_buffered_bytes`、`checkpoint_duration_ms`，并在关闭/终局/失败路径刷新。standalone 记录真实 `ws.bufferedAmount` 到 stdout；Cloudflare 明确增加 `unavailableCount`，不伪造零值。指标不含房间、账号、IP、URL 或 token，不持久化、不增加公开端点，sink 同步/异步失败均不影响权威房间。Wrangler 开启自定义日志并关闭 invocation logs。
 - 2026-07-23 14:40：新增不依赖墙钟的固定回归预算：五个 seed 的 49 Bot 搜刮寻路次数、seed 2026 完整 49 Bot 战局的控制器/命令/寻路/LOS/射线/事件/loot 工作量、10 真人 50 actor 的 full/snapshot/450-event/checkpoint JSON 字节，以及真实 production GLB 中画质 50 actor NullEngine 场景的 mesh/node/material/geometry/vertex/index 上限。完整门禁通过：应用 34 files / 313 tests、Worker 4/29、standalone 3/20，`npm run typecheck`、应用 build、Worker dry-run、standalone server bundle、全部预算和 `git diff --check` 均通过。当前机器仍无 Docker 命令，因此本地容器 smoke 无法执行；原生真实 HTTP/WebSocket、优雅关闭和 SIGKILL 后锁恢复由 standalone 20 项测试覆盖，真实容器 smoke 将由本次新增 GitHub Actions 完成。尚待提交、推送和远端 CI 确认。
 - 2026-07-23 14:42：工程实现、CI、指标和回归测试已提交为 `6c56fb3 chore: add engineering quality gates`；AGENTS、README、架构、部署说明与本 plan 作为配套文档提交，随后与实现同批普通 push。远端 CI/Docker smoke 结果按用户既有要求仅在对话汇报，不再为监控结果创建 plan-only 小提交。
+- 2026-07-23 14:49：首轮远端 CI `29985918638` 的 typecheck、362 项测试、三套 build、预算检查和 Docker image build 均通过，但容器 smoke 暴露真实问题：只读容器上的 `/data` tmpfs 默认由 root 持有，非 root `node` 用户无法创建 SQLite lock database，健康检查因此未就绪。修正 CI tmpfs mount 为 `/tmp mode=1777`，并为 `/data` 显式设置 `uid=1000,gid=1000,mode=0700`，继续保留 `noexec/nosuid`、只读根目录和 `no-new-privileges`；待新一轮远端容器 smoke 确认。
 
 ## Review
 
@@ -36,5 +37,6 @@
 
 - 审查范围：本 plan 对应的 CI、预算脚本、共享 metrics 契约、Worker/standalone 接入、测试与文档；继续排除并未修改用户原有 `.gitignore`。
 - 审查修正：Docker smoke 补齐 `--init`、`no-new-privileges` 和受限 tmpfs；结构化日志补齐固定 `schemaVersion: 1`；移除单个 WebSocket error/send failure 触发的高频部分窗口 flush，仅在房间生命周期和 checkpoint/tick 失败边界刷新。
+- 远端验证修正：首轮真实容器 smoke 证明 root-owned `/data` tmpfs 与镜像的非 root 用户不兼容；该问题成立且阻塞容器启动，已用显式 UID/GID 和私有目录权限修复，而不是放宽为 root 容器或可写根目录。
 - 独立核对：指标只读取调度时间、socket 队列和 checkpoint 写入边界，不反馈到模拟、网络节流或持久状态；Cloudflare buffer 不可用语义与 standalone 真实值明确分离；无新增 `/metrics` 或内部路由暴露；预算只使用固定 seed、操作/资源/原始字节，不依赖运行器速度、FPS、GC、内存或压缩器版本。
 - 结论：**通过，未发现剩余 blocker/high/medium。** Docker 本机不可用是已记录的验证环境缺口，由 push 后的 GitHub Actions 容器构建与 smoke 关闭。

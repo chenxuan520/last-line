@@ -79,8 +79,8 @@ jobs:
             --init \
             --read-only \
             --security-opt no-new-privileges:true \
-            --tmpfs /tmp:rw,noexec,nosuid,size=64m \
-            --tmpfs /data:rw,noexec,nosuid,size=64m \
+            --tmpfs /tmp:rw,noexec,nosuid,size=64m,mode=1777 \
+            --tmpfs /data:rw,noexec,nosuid,size=64m,uid=1000,gid=1000,mode=0700 \
             --publish "127.0.0.1::8787" \
             "last-line-ci:${GITHUB_SHA}"
 
