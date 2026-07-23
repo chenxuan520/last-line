@@ -1375,7 +1375,7 @@ function createPlayerHitbox(
     scene,
   );
   hitbox.parent = root;
-  hitbox.position.y = -0.86;
+  hitbox.position.y = ACTOR_HEIGHT / 2 - ACTOR_EYE_HEIGHT;
   hitbox.material = hitboxMaterial;
   markActor(hitbox, actorId);
 }
@@ -1510,7 +1510,7 @@ function createCamera(scene: Scene, player: ActorState): UniversalCamera {
   camera.angularSensibility = 2_800;
   camera.checkCollisions = true;
   camera.ellipsoid = new Vector3(ACTOR_RADIUS, ACTOR_EYE_HEIGHT / 2, ACTOR_RADIUS);
-  camera.ellipsoidOffset = new Vector3(0, -0.88, 0);
+  camera.ellipsoidOffset = new Vector3(0, -ACTOR_EYE_HEIGHT / 2, 0);
   scene.activeCamera = camera;
   return camera;
 }

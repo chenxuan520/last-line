@@ -27,7 +27,7 @@ describe("BotController", () => {
     expect(target).toEqual(layout.lootSpawnPoints[4]);
   });
 
-  it("resets cached landing targets when the map seed changes", () => {
+  it("resets cached layout targets when the map seed changes", () => {
     const firstLayout = createMapLayout(42);
     const nextLayout = createMapLayout(43);
     const state = createBattleRoyaleState("player", undefined, seededRandom(42));
@@ -45,10 +45,17 @@ describe("BotController", () => {
     if (!bot) throw new Error("bot missing");
     bot.deployment = "parachuting";
     const controller = new BotController(1, () => 0.5, false, firstLayout);
-    const findLandingTarget = (controller as unknown as {
+    const controllerState = controller as unknown as {
       findLandingTarget(matchState: typeof state): Vector3State;
-    }).findLandingTarget.bind(controller);
+      forcedRelocationOrigin: Vector3State | null;
+      forcedRelocationTarget: Vector3State | null;
+      forcedRelocationUntilSeconds: number;
+    };
+    const findLandingTarget = controllerState.findLandingTarget.bind(controller);
     const firstTarget = findLandingTarget(state);
+    controllerState.forcedRelocationOrigin = { ...bot.position };
+    controllerState.forcedRelocationTarget = { ...firstLayout.lootSpawnPoints[1]! };
+    controllerState.forcedRelocationUntilSeconds = state.elapsedSeconds + 20;
 
     state.mapSeed = nextLayout.seed;
     state.groundLoot = {};
@@ -56,6 +63,9 @@ describe("BotController", () => {
 
     expect(firstTarget).toEqual(firstLayout.lootSpawnPoints[0]);
     expect(findLandingTarget(state)).toEqual(nextLayout.lootSpawnPoints[4]);
+    expect(controllerState.forcedRelocationOrigin).toBeNull();
+    expect(controllerState.forcedRelocationTarget).toBeNull();
+    expect(controllerState.forcedRelocationUntilSeconds).toBe(-1);
   });
 
   it("assigns parachuting bots to different weapon landing points", () => {

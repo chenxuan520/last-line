@@ -164,6 +164,7 @@ export class BotController {
       this.damageInvestigationUntilSeconds = -1;
       this.clearCombatMemory();
       this.clearRetreat();
+      this.clearForcedRelocation();
       this.resetNavigationProgress();
     }
     if (!actor.alive) {

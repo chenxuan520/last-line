@@ -162,11 +162,11 @@ export class GameHud {
     root.querySelector<HTMLButtonElement>("[data-hud='fullscreen-action']")
       ?.addEventListener("click", options.onRequestFullscreen ?? (() => undefined));
     root.querySelector<HTMLButtonElement>("[data-hud='inventory-toggle']")
-      ?.addEventListener("click", () => this.setMobileInventoryVisible(!this.mobileInventoryVisible));
+      ?.addEventListener("click", () => this.setMobileInventoryVisible(!this.mobileInventoryVisible, true));
     root.querySelector<HTMLButtonElement>("[data-hud='inventory-close']")
-      ?.addEventListener("click", () => this.setMobileInventoryVisible(false));
+      ?.addEventListener("click", () => this.setMobileInventoryVisible(false, true));
     root.querySelector<HTMLElement>("[data-hud='inventory-backdrop']")
-      ?.addEventListener("click", () => this.setMobileInventoryVisible(false));
+      ?.addEventListener("click", () => this.setMobileInventoryVisible(false, true));
   }
 
   public dispose(): void {
@@ -493,7 +493,7 @@ export class GameHud {
     return assetUrl(this.assets.resolve(id, "image").url);
   }
 
-  private setMobileInventoryVisible(visible: boolean): void {
+  private setMobileInventoryVisible(visible: boolean, restoreFocus = false): void {
     if (!this.options.touchInput || this.mobileInventoryVisible === visible) return;
     this.mobileInventoryVisible = visible;
     const inventory = this.requireElement("inventory");
@@ -505,7 +505,11 @@ export class GameHud {
     this.elements.get("inventory-backdrop")?.classList.toggle("is-visible", visible);
     const toggle = this.elements.get("inventory-toggle") as HTMLButtonElement | undefined;
     toggle?.setAttribute("aria-expanded", visible ? "true" : "false");
-    if (visible) (this.elements.get("inventory-close") as HTMLButtonElement | undefined)?.focus();
+    if (visible) {
+      (this.elements.get("inventory-close") as HTMLButtonElement | undefined)?.focus();
+    } else if (restoreFocus && this.elements.get("touch-controls")?.classList.contains("is-visible")) {
+      toggle?.focus();
+    }
   }
 
   private requireElement(name: string): HTMLElement {

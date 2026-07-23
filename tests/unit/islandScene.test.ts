@@ -23,6 +23,7 @@ import {
 import { createMapLayout, getTerrainHeight, HOSPITAL_WALL_COLOR, MAP_SIZE } from "../../src/config/map";
 import { createIdleCommand } from "../../src/game/commands/ActorCommand";
 import { createBattleRoyaleState, createBattleRoyaleStateForHumans } from "../../src/game/modes/BattleRoyaleMode";
+import { ACTOR_EYE_HEIGHT, ACTOR_HEIGHT, ACTOR_RADIUS } from "../../src/game/rules/actorGeometry";
 import { createWeaponState } from "../../src/game/state/types";
 import { InventorySystem } from "../../src/game/systems/InventorySystem";
 import { getSupportHeight } from "../../src/game/systems/MovementSystem";
@@ -81,6 +82,9 @@ describe("IslandScene lifecycle", () => {
       expect(bundle.lootMeshes.get("death")?.metadata?.lootSource).toBe("death");
       expect(bundle.viewWeaponRoot.isEnabled()).toBe(false);
       expect(bundle.camera.minZ).toBeGreaterThanOrEqual(0.1);
+      expect(bundle.camera.ellipsoid.asArray()).toEqual([ACTOR_RADIUS, ACTOR_EYE_HEIGHT / 2, ACTOR_RADIUS]);
+      expect(bundle.camera.ellipsoidOffset.y).toBe(-ACTOR_EYE_HEIGHT / 2);
+      expect(bundle.scene.getMeshByName("player-hitbox")?.position.y).toBe(ACTOR_HEIGHT / 2 - ACTOR_EYE_HEIGHT);
       expect(bundle.aircraftInteriorRoot.isEnabled()).toBe(true);
       expect(bundle.aircraftVisualRoot.isEnabled()).toBe(false);
       const sceneMeshCount = bundle.scene.meshes.length;
