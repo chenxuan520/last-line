@@ -21,6 +21,7 @@
 
 <p align="center">
   <a href="https://github.com/chenxuan520/last-line/actions/workflows/ci.yml"><img src="https://github.com/chenxuan520/last-line/actions/workflows/ci.yml/badge.svg" alt="CI and GitHub Pages"></a>
+  <a href="https://hub.docker.com/r/chenxuan520/last-line"><img src="https://img.shields.io/docker/pulls/chenxuan520/last-line?logo=docker&label=Docker%20Hub" alt="Docker Hub image"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-739c45.svg" alt="MIT License"></a>
 </p>
 
@@ -92,7 +93,7 @@ npm run dev
 npm run dev:worker
 ```
 
-如需运行 Node.js + SQLite 全栈自托管版本，请参阅 [部署指南](docs/deployment.md)。Cloudflare 与自托管后端的数据相互独立。
+如需运行 Node.js + SQLite 全栈自托管版本，可使用 [`chenxuan520/last-line`](https://hub.docker.com/r/chenxuan520/last-line) 多架构镜像，具体环境变量、持久卷和 HTTPS 配置请参阅 [部署指南](docs/deployment.md)。Cloudflare 与自托管后端的数据相互独立。
 
 </details>
 

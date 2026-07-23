@@ -147,9 +147,70 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v4
 
-  release:
+  publish-docker-image:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate Docker image metadata
+        id: metadata
+        uses: docker/metadata-action@v5
+        with:
+          images: docker.io/chenxuan520/last-line
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+          flavor: |
+            latest=auto
+
+      - name: Validate release tag
+        env:
+          RELEASE_TAGS: ${{ steps.metadata.outputs.tags }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF_NAME" == *+* ]]; then
+            printf 'Docker image release tags must not include SemVer build metadata: %s\n' "$GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+          if [[ -z "$RELEASE_TAGS" ]]; then
+            printf 'Docker image tags must use valid semantic version syntax: %s\n' "$GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          cache-from: type=gha,scope=docker-release
+          cache-to: type=gha,mode=max,scope=docker-release
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, publish-docker-image]
     runs-on: ubuntu-latest
     permissions:
       actions: read

@@ -33,6 +33,14 @@ git push origin v0.2.0
 
 The workflow packages the production `dist/` directory as `last-line-v0.2.0.zip`, creates a release with generated notes, and attaches the archive. Tag builds do not deploy GitHub Pages. The release job uses the workflow's short-lived `GITHUB_TOKEN`; no release secret is required.
 
+After the same typecheck, test, build, budget, production-image build, and container health gates pass, a valid semantic version tag also publishes the standalone image to:
+
+```text
+docker.io/chenxuan520/last-line
+```
+
+For a stable `v1.2.3` tag, GitHub Actions publishes `1.2.3`, `1.2`, `1`, and `latest` for both `linux/amd64` and `linux/arm64`. A prerelease such as `v1.2.3-rc.1` publishes only its prerelease version and does not move `latest`. SemVer build metadata such as `v1.2.3+build.7` is rejected because multiple Git tags would otherwise overwrite the same Docker aliases. Docker Hub publishing uses the repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`; the token requires read/write access and must never be committed or printed. The GitHub Release waits for the image push, so a registry failure cannot leave a successful release without its matching image.
+
 ## Cloudflare Pages Git Integration
 
 Create the Cloudflare project through the dashboard, not with Wrangler Direct Upload. Cloudflare does not allow a Direct Upload project to be converted to Git integration later.
@@ -208,7 +216,15 @@ docker compose -f docker-compose.standalone.yml up -d --build
 
 The image builds a same-origin browser artifact and the bundled Node service, runs as the unprivileged `node` user, and stores SQLite in the named `last-line-data` volume. `LAST_LINE_PORT` changes the host-side published port; the container continues to listen on 8787.
 
-GitHub Actions also performs a credential-free `docker build` and starts the resulting image with a read-only root filesystem, `no-new-privileges`, and temporary `/tmp` and `/data` mounts. Pages deployment and release packaging cannot continue unless the container returns the exact standalone health response. No image is pushed to a registry.
+Published releases can also be pulled directly. Pin a version in production instead of relying on `latest`:
+
+```bash
+docker pull chenxuan520/last-line:1.2.3
+```
+
+The published image has the same runtime contract as the Compose build: mount a persistent writable volume at `/data`, expose container port `8787`, set `SERVER_PUBLIC_ORIGIN` to the external HTTPS origin, and provide the required standalone environment values. The image runs as the unprivileged `node` user; do not replace it with a root runtime merely to avoid fixing volume permissions.
+
+GitHub Actions performs a credential-free `docker build` and starts the resulting image with a read-only root filesystem, `no-new-privileges`, and temporary `/tmp` and `/data` mounts. Pages deployment and release packaging cannot continue unless the container returns the exact standalone health response. On validated version tags only, a separate least-privilege job then logs in to Docker Hub and publishes the multi-architecture image.
 
 ### TLS reverse proxy
 

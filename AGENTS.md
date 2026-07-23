@@ -104,3 +104,4 @@ npm run preview
 - Never commit `.env.standalone`, administrator recovery/bootstrap values, SQLite data, WAL files, cookies, admission/reconnect tokens, or proxy credentials.
 - Docker/Compose changes require a container smoke when Docker is available. If it is unavailable, record that gap and still verify the native bundle, real HTTP/WebSocket flow, graceful shutdown, and crash-lock recovery.
 - CI must build the production Docker image without registry credentials and run the image read-only as a non-root user with temporary writable mounts, then require the exact `/health` response before Pages or release artifacts proceed.
+- Version tags must pass the complete build and container smoke before GitHub Actions may publish the multi-architecture standalone image to Docker Hub. Registry credentials belong only in `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` Actions Secrets; never print, persist, or pass them as Docker build arguments.
