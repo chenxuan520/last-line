@@ -106,6 +106,7 @@ describe("IslandScene lifecycle", () => {
       const layeredSurfaces = bundle.scene.meshes.filter((mesh) => mesh.metadata?.surfaceType);
       const decorations = bundle.scene.meshes.filter((mesh) => mesh.metadata?.decoration);
       const hospitalCrosses = decorations.filter((mesh) => mesh.metadata?.decoration === "hospital-cross");
+      const brandSigns = decorations.filter((mesh) => mesh.metadata?.decoration === "brand-sign");
       const collisionMeshes = bundle.scene.meshes.filter((mesh) => mesh.metadata?.collision);
       const ground = bundle.scene.getMeshByName("island-ground");
       const sky = bundle.scene.getMeshByName("island-sky-dome");
@@ -154,6 +155,14 @@ describe("IslandScene lifecycle", () => {
           mesh.scaling.equalsToFloats(tree.width / 1.1, tree.height / 5.8, tree.depth / 1.1);
       })).toBe(true);
       expect(hospitalCrosses).toHaveLength(1);
+      expect(brandSigns).toHaveLength(5);
+      expect(new Set(brandSigns.map((mesh) => mesh.name))).toEqual(new Set([
+        "decal.brand.drop-zone",
+        "decal.brand.island-operations",
+        "decal.brand.property-ll01",
+        "decal.brand.restricted-area",
+        "decal.brand.supply",
+      ]));
       expect(hospitalCrosses[0]).toMatchObject({ isPickable: false, checkCollisions: false });
       expect(hospitalCrosses[0]?.metadata).toMatchObject({ poiName: "医院", poiType: "hospital" });
       const hospitalWalls = layout.wallSegments.filter((wall) => wall.obstacleId === layout.hospital.buildingId);
@@ -192,6 +201,8 @@ describe("IslandScene lifecycle", () => {
       expect(coverMeshes.find((mesh) => mesh.metadata?.coverKind === "fence")?.metadata?.sourceCount).toBe(96 * 5);
       expect(coverMeshes.filter((mesh) => mesh.metadata?.coverKind === "hay")).toHaveLength(1);
       expect(coverMeshes.find((mesh) => mesh.metadata?.coverKind === "hay")?.metadata?.sourceCount).toBe(72 * 3);
+      expect((coverMeshes.find((mesh) => mesh.metadata?.coverKind === "hay")?.material as StandardMaterial)
+        .diffuseColor.toHexString()).toBe("#B86B22");
       const decorativeRocks = bundle.scene.meshes.filter((mesh) => /^rock-\d+$/.test(mesh.name));
       expect(decorativeRocks).toHaveLength(96);
       const mountainTrees = treeTrunks.filter((mesh) => layout.terrainHills.some((hill) =>
@@ -577,6 +588,8 @@ describe("IslandScene lifecycle", () => {
   it("loads and switches character LODs while keeping procedural held weapons", async () => {
     const assets = await createGlbAssets();
     const fetchMock = vi.mocked(fetch);
+    const removeItem = vi.fn();
+    vi.stubGlobal("sessionStorage", { removeItem });
     fetchMock.mockClear();
     const state = createBattleRoyaleStateForHumans(["player", "human-2"], {
       participantCount: 3,
@@ -610,6 +623,7 @@ describe("IslandScene lifecycle", () => {
       .every((mesh) => mesh.parent?.name.includes("weapon_socket") === true)).toBe(true);
     expect(fetchMock.mock.calls.some(([input]) => input.toString().includes("/weapon-") && input.toString().endsWith(".glb")))
       .toBe(false);
+    expect(removeItem).toHaveBeenCalledWith("last-line.dynamic-chunk-reloads.v1");
     const baseCharacter = bundle.scene.getTransformNodeByName(`${bot.id}-character-base`);
     const lodCharacter = bundle.scene.getTransformNodeByName(`${bot.id}-character-lod1`);
     expect(baseCharacter?.metadata?.visualModel).toBe("model.character.enemy");
@@ -893,6 +907,11 @@ function createAssets(): AssetCatalog {
     "texture.sky.clearing",
     "texture.sky.overcast",
     "texture.sky.storm",
+    "decal.brand.drop-zone",
+    "decal.brand.island-operations",
+    "decal.brand.property-ll01",
+    "decal.brand.restricted-area",
+    "decal.brand.supply",
   ];
   return new AssetCatalog({
     version: 1,
@@ -933,6 +952,11 @@ async function createGlbAssets(failedModelUrls: ReadonlySet<string> = new Set())
             "texture.sky.clearing",
             "texture.sky.overcast",
             "texture.sky.storm",
+            "decal.brand.drop-zone",
+            "decal.brand.island-operations",
+            "decal.brand.property-ll01",
+            "decal.brand.restricted-area",
+            "decal.brand.supply",
           ].map((id) => ({ id, type: "svg", url: `/${id}.svg`, fallback: "fallback.ui" })),
           ...["player", "enemy"].flatMap((kind) => [
             {
@@ -1019,6 +1043,11 @@ function createProductionGlbAssets(): AssetCatalog {
         "texture.sky.clearing",
         "texture.sky.overcast",
         "texture.sky.storm",
+        "decal.brand.drop-zone",
+        "decal.brand.island-operations",
+        "decal.brand.property-ll01",
+        "decal.brand.restricted-area",
+        "decal.brand.supply",
       ].map((id) => ({ id, type: "svg" as const, url: `/${id}.svg`, fallback: "fallback.ui" })),
       ...modelEntries,
       ...proceduralWeaponEntries,

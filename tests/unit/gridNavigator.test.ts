@@ -101,6 +101,32 @@ describe("GridNavigator spatial index", () => {
     expect(indexed.findPath(ground, roof)).toEqual(complete.findPath(ground, roof));
     expect(indexed.findPath(roof, ground)).toEqual(complete.findPath(roof, ground));
   });
+
+  it("continues from every internal ramp midpoint toward ground and roof", () => {
+    const layout = createMapLayout(0);
+    const building = layout.obstacles.find((candidate) => candidate.storyCount === 3);
+    const ramps = layout.roofRamps.filter((candidate) => candidate.obstacleId === building?.id);
+    if (!building || ramps.length !== 3) throw new Error("three-story ramp fixtures missing");
+    const groundRamp = ramps.find((ramp) => ramp.fromLevel === 0);
+    if (!groundRamp) throw new Error("ground ramp missing");
+    const ground = { x: groundRamp.centerX, y: groundRamp.bottomY + 1.76, z: groundRamp.startZ };
+    const roof = {
+      x: building.center.x,
+      y: building.baseY + building.storyHeight * building.storyCount + BUILDING_ROOF_CAP_HEIGHT + 1.76,
+      z: building.center.z,
+    };
+    const navigator = new GridNavigator(layout);
+
+    for (const ramp of ramps) {
+      const start = {
+        x: ramp.centerX,
+        y: (ramp.bottomY + ramp.topY) / 2 + 1.76,
+        z: (ramp.startZ + ramp.endZ) / 2,
+      };
+      expect(navigator.findPath(start, ground), `${ramp.id}:ground`).not.toHaveLength(0);
+      expect(navigator.findPath(start, roof), `${ramp.id}:roof`).not.toHaveLength(0);
+    }
+  });
 });
 
 function completeScanNavigator(layout: MapLayout): GridNavigator {

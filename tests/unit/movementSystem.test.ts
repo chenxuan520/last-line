@@ -317,7 +317,7 @@ describe("MovementSystem", () => {
     }
   });
 
-  it("walks through every internal ramp onto a multi-story roof", () => {
+  it("walks through every internal ramp in both directions", () => {
     const layout = createMapLayout(0);
     const building = layout.obstacles.find((entry) => entry.storyCount === 3);
     if (!building) throw new Error("three-story building missing");
@@ -327,29 +327,63 @@ describe("MovementSystem", () => {
     const firstRamp = ramps[0];
     if (!firstRamp) throw new Error("internal ramp missing");
     const state = createState(firstRamp.centerX, firstRamp.startZ, firstRamp.bottomY + GROUND_HEIGHT);
+    state.mapSeed = layout.seed;
     const actor = state.actors.actor;
     if (!actor) throw new Error("test actor missing");
+    const roof = {
+      x: building.center.x,
+      y: building.baseY + building.storyHeight * building.storyCount + BUILDING_ROOF_CAP_HEIGHT + GROUND_HEIGHT,
+      z: building.center.z,
+    };
+    const navigator = new GridNavigator(layout);
+    followPath(state, navigator.findPath(actor.position, roof), layout, 4_000);
+    expect(actor.position.y).toBeCloseTo(roof.y, 1);
 
-    for (const ramp of ramps) {
-      const direction = Math.sign(ramp.endZ - ramp.startZ) || 1;
-      for (let tick = 0; tick < 240 && direction * (ramp.endZ - actor.position.z) > 0.08; tick += 1) {
-        new MovementSystem().processCommand(state, actor.id, movingCommand(0, direction), 1 / 60);
-      }
-      new MovementSystem().processCommand(state, actor.id, createIdleCommand(), 1 / 60);
-      expect(actor.position.y, ramp.id).toBeCloseTo(
-        getSupportHeight(actor.position.x, actor.position.z, actor.position.y - GROUND_HEIGHT + 0.35, layout) + GROUND_HEIGHT,
-        1,
-      );
-      expect(actor.position.y, ramp.id).toBeGreaterThanOrEqual(ramp.topY + GROUND_HEIGHT - 0.2);
-    }
-
-    const horizontalDirection = Math.sign(building.center.x - actor.position.x) || 1;
-    advance(state, movingCommand(horizontalDirection, 0), 45, 1 / 60);
+    const ground = {
+      x: firstRamp.centerX,
+      y: getTerrainHeight(firstRamp.centerX, firstRamp.startZ, layout) + GROUND_HEIGHT,
+      z: firstRamp.startZ,
+    };
+    followPath(state, navigator.findPath(actor.position, ground), layout, 4_000);
     expect(actor.position.y).toBeCloseTo(
-      building.baseY + building.storyHeight * building.storyCount + BUILDING_ROOF_CAP_HEIGHT + GROUND_HEIGHT,
-      1,
+      getSupportHeight(actor.position.x, actor.position.z, actor.position.y - GROUND_HEIGHT + 0.35, layout) + GROUND_HEIGHT,
+      2,
     );
+    expect(actor.position.y).toBeLessThan(roof.y - building.storyHeight * 2);
+    expect(Math.hypot(actor.position.x - ground.x, actor.position.z - ground.z)).toBeLessThan(0.8);
   });
+
+  it("physically traverses every seed-zero internal staircase in both directions", () => {
+    const layout = createMapLayout(0);
+    const navigator = new GridNavigator(layout);
+    for (const building of layout.obstacles.filter((entry) => entry.storyCount > 1)) {
+      const groundRamp = layout.roofRamps.find((ramp) => ramp.obstacleId === building.id && ramp.fromLevel === 0);
+      if (!groundRamp) throw new Error(`ground ramp missing: ${building.id}`);
+      const state = createState(
+        groundRamp.centerX,
+        groundRamp.startZ,
+        getTerrainHeight(groundRamp.centerX, groundRamp.startZ, layout) + GROUND_HEIGHT,
+      );
+      const actor = state.actors.actor;
+      if (!actor) throw new Error("stair actor missing");
+      const roof = {
+        x: building.center.x,
+        y: building.baseY + building.storyHeight * building.storyCount + BUILDING_ROOF_CAP_HEIGHT + GROUND_HEIGHT,
+        z: building.center.z,
+      };
+      followPath(state, navigator.findPath(actor.position, roof), layout, 4_000);
+      expect(actor.position.y, `${building.id}:up`).toBeCloseTo(roof.y, 1);
+      const ground = {
+        x: groundRamp.centerX,
+        y: getTerrainHeight(groundRamp.centerX, groundRamp.startZ, layout) + GROUND_HEIGHT,
+        z: groundRamp.startZ,
+      };
+      followPath(state, navigator.findPath(actor.position, ground), layout, 4_000);
+      expect(actor.position.y, `${building.id}:down`).toBeLessThan(
+        building.baseY + building.storyHeight + BUILDING_ROOF_CAP_HEIGHT + GROUND_HEIGHT,
+      );
+    }
+  }, 30_000);
 });
 
 describe("GridNavigator", () => {
@@ -460,6 +494,42 @@ function advance(state: MatchState, command: ActorCommand, steps: number, deltaS
   for (let step = 0; step < steps; step += 1) {
     movement.processCommand(state, "actor", command, deltaSeconds);
   }
+}
+
+function followPath(
+  state: MatchState,
+  path: readonly { x: number; y: number; z: number }[],
+  layout: ReturnType<typeof createMapLayout>,
+  maximumTicks: number,
+): void {
+  const actor = state.actors.actor;
+  if (!actor || path.length === 0) throw new Error("path fixture missing");
+  const movement = new MovementSystem(layout);
+  let waypointIndex = 1;
+  for (let tick = 0; tick < maximumTicks && waypointIndex < path.length; tick += 1) {
+    const waypoint = path[waypointIndex];
+    if (!waypoint) break;
+    const distance = Math.hypot(
+      actor.position.x - waypoint.x,
+      actor.position.y - waypoint.y,
+      actor.position.z - waypoint.z,
+    );
+    if (distance < 0.5) {
+      waypointIndex += 1;
+      continue;
+    }
+    const horizontal = Math.hypot(waypoint.x - actor.position.x, waypoint.z - actor.position.z);
+    movement.processCommand(
+      state,
+      actor.id,
+      movingCommand(
+        horizontal > 0 ? (waypoint.x - actor.position.x) / horizontal : 0,
+        horizontal > 0 ? (waypoint.z - actor.position.z) / horizontal : 0,
+      ),
+      1 / 60,
+    );
+  }
+  expect(waypointIndex).toBe(path.length);
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {

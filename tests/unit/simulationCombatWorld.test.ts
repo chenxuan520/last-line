@@ -198,7 +198,7 @@ describe("SimulationCombatWorld", () => {
     expect(Math.abs(hit.normal.z)).toBeGreaterThan(0.1);
   });
 
-  it("blocks shots with upper floors while leaving stairwell openings clear", () => {
+  it("blocks shots with upper floors while exposing lower stairwell geometry", () => {
     const layout = createMapLayout(0);
     const building = layout.obstacles.find((entry) => entry.storyCount === 3);
     const stairwell = building?.stairwell;
@@ -214,15 +214,17 @@ describe("SimulationCombatWorld", () => {
     );
 
     expect(slabHit.point.y).toBeCloseTo(slabTop, 5);
-    const openingX = stairwell.centerX + stairwell.width / 2 - 0.15;
+    const openingX = stairwell.centerX;
+    const openingZ = stairwell.centerZ;
     const roofY = building.baseY + building.storyHeight * building.storyCount + 0.18;
-    const openingShooter = createActorState("shooter", "player", { x: openingX, y: roofY + 5, z: stairwell.centerZ });
+    const openingShooter = createActorState("shooter", "player", { x: openingX, y: roofY + 5, z: openingZ });
     const openingState = createState(openingShooter);
-    openingShooter.position = { x: openingX, y: roofY + 5, z: stairwell.centerZ };
+    openingShooter.position = { x: openingX, y: roofY + 5, z: openingZ };
     const openingHit = new SimulationCombatWorld(openingState).traceShotDetailed(
       trace(openingShooter.position, { x: 0, y: -1, z: 0 }),
     );
-    expect(openingHit.point.y).toBeCloseTo(getTerrainHeight(openingX, stairwell.centerZ, layout), 2);
+    expect(openingHit.point.y).toBeLessThan(roofY - 0.1);
+    expect(openingHit.point.y).toBeGreaterThan(getTerrainHeight(openingX, openingZ, layout));
   });
 
   it("allows line of sight through upper-story windows and blocks the adjacent wall", () => {

@@ -15,7 +15,7 @@ const BOT_COHORTS = 3;
 const TAKEOVER_TICKS = 150;
 const ACTOR_REPLICATION_RANGE = 400;
 const LOOT_REPLICATION_RANGE = 60;
-export const MATCH_CHECKPOINT_VERSION = 2;
+export const MATCH_CHECKPOINT_VERSION = 3;
 
 export interface MatchRuntimeOptions {
   humanActorIds: readonly EntityId[];

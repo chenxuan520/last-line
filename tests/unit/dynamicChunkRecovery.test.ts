@@ -9,11 +9,11 @@ describe("dynamic chunk recovery", () => {
     const dispose = installDynamicChunkRecovery({
       addEventListener: (type, listener) => target.addEventListener(type, listener),
       removeEventListener: (type, listener) => target.removeEventListener(type, listener),
-      sessionStorage: {
+      getSessionStorage: () => ({
         getItem: (key) => values.get(key) ?? null,
         setItem: (key, value) => values.set(key, value),
         removeItem: (key) => values.delete(key),
-      },
+      }),
       reload,
     });
 
@@ -24,8 +24,8 @@ describe("dynamic chunk recovery", () => {
     target.dispatchEvent(second);
     target.dispatchEvent(third);
 
-    expect(first.defaultPrevented).toBe(false);
-    expect(second.defaultPrevented).toBe(false);
+    expect(first.defaultPrevented).toBe(true);
+    expect(second.defaultPrevented).toBe(true);
     expect(third.defaultPrevented).toBe(false);
     expect(reload).toHaveBeenCalledTimes(2);
     dispose();
@@ -33,7 +33,28 @@ describe("dynamic chunk recovery", () => {
 
   it("clears the retry budget after the chunk loads", () => {
     const removeItem = vi.fn();
-    clearDynamicChunkRecoveryAttempts({ removeItem });
+    clearDynamicChunkRecoveryAttempts(() => ({ removeItem }));
     expect(removeItem).toHaveBeenCalledWith("last-line.dynamic-chunk-reloads.v1");
+  });
+
+  it("keeps recovery best-effort when storage access is denied", () => {
+    const target = new EventTarget();
+    const reload = vi.fn();
+    installDynamicChunkRecovery({
+      addEventListener: (type, listener) => target.addEventListener(type, listener),
+      removeEventListener: (type, listener) => target.removeEventListener(type, listener),
+      getSessionStorage: () => {
+        throw new DOMException("denied", "SecurityError");
+      },
+      reload,
+    });
+
+    expect(() => target.dispatchEvent(new Event("vite:preloadError"))).not.toThrow();
+    expect(reload).not.toHaveBeenCalled();
+    expect(() => clearDynamicChunkRecoveryAttempts(() => ({
+      removeItem: () => {
+        throw new DOMException("denied", "SecurityError");
+      },
+    }))).not.toThrow();
   });
 });

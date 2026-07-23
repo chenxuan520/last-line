@@ -170,7 +170,6 @@ const MOUNTAIN_TREE_TRUNK_COUNT = 160;
 const FENCE_COVER_COUNT = 96;
 const HAY_COVER_COUNT = 72;
 const MULTI_STORY_BUILDING_RATIO = 0.2;
-const STAIR_RAMP_WIDTH = 3.6;
 const STAIRWELL_WIDTH = 4.8;
 const STAIRWELL_LANDING_DEPTH = 1.2;
 const STAIRWELL_FLOOR_BORDER = 0.3;
@@ -763,8 +762,10 @@ function createInternalRamps(building: MapBuilding, terrainHills: readonly Terra
   const stairwell = building.stairwell;
   if (!stairwell) return [];
   const runLength = stairwell.depth - STAIRWELL_LANDING_DEPTH * 2;
+  const rampWidth = stairwell.width / 2;
   return Array.from({ length: building.storyCount }, (_, level) => {
     const direction = level % 2 === 0 ? 1 : -1;
+    const lane = level % 2 === 0 ? -1 : 1;
     const startZ = stairwell.centerZ - direction * runLength / 2;
     const endZ = stairwell.centerZ + direction * runLength / 2;
     const bottomY = level === 0
@@ -776,8 +777,8 @@ function createInternalRamps(building: MapBuilding, terrainHills: readonly Terra
       kind: "interior",
       fromLevel: level,
       toLevel: level + 1,
-      centerX: stairwell.centerX,
-      width: STAIR_RAMP_WIDTH,
+      centerX: round(stairwell.centerX + lane * rampWidth / 2),
+      width: round(rampWidth),
       startZ: round(startZ),
       endZ: round(endZ),
       bottomY: round(bottomY),
@@ -814,11 +815,26 @@ function createBuildingFloorSlabs(building: MapBuilding): MapFloorSlab[] {
     const levelMaximumX = maximumX - wallInset;
     const levelMinimumZ = minimumZ + wallInset;
     const levelMaximumZ = maximumZ - wallInset;
+    const landingDirection = (level - 1) % 2 === 0 ? 1 : -1;
+    const rampRunLength = building.stairwell?.depth
+      ? building.stairwell.depth - STAIRWELL_LANDING_DEPTH * 2
+      : 0;
+    const landingZ = (building.stairwell?.centerZ ?? building.center.z) + landingDirection * rampRunLength / 2;
     return [
       floorSlab(building, level, kind, "left", (levelMinimumX + openingMinimumX) / 2, building.center.z, openingMinimumX - levelMinimumX, levelMaximumZ - levelMinimumZ),
       floorSlab(building, level, kind, "right", (openingMaximumX + levelMaximumX) / 2, building.center.z, levelMaximumX - openingMaximumX, levelMaximumZ - levelMinimumZ),
       floorSlab(building, level, kind, "front", building.stairwell?.centerX ?? building.center.x, (levelMinimumZ + openingMinimumZ) / 2, building.stairwell?.width ?? 0, openingMinimumZ - levelMinimumZ),
       floorSlab(building, level, kind, "back", building.stairwell?.centerX ?? building.center.x, (openingMaximumZ + levelMaximumZ) / 2, building.stairwell?.width ?? 0, levelMaximumZ - openingMaximumZ),
+      floorSlab(
+        building,
+        level,
+        kind,
+        "stair-landing",
+        building.stairwell?.centerX ?? building.center.x,
+        landingZ,
+        building.stairwell?.width ?? 0,
+        STAIRWELL_LANDING_DEPTH * 2,
+      ),
     ].filter((slab) => slab.width > 0.1 && slab.depth > 0.1);
   });
 }
@@ -991,7 +1007,7 @@ function createCoverObstacles(
         width: round(width),
         height: round(height),
         depth: round(depth),
-        color: kind === "fence" ? "#655443" : "#a28a4f",
+        color: kind === "fence" ? "#655443" : "#b86b22",
       };
       if (obstacles.some((obstacle) => footprintsOverlap(candidate, obstacle, 3))) continue;
       if (rocks.some((rock) => footprintsOverlap(candidate, rock, 4))) continue;

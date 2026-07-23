@@ -337,7 +337,8 @@ describe("map layouts", () => {
         expect(slabs).toHaveLength(1);
       } else {
         expect(obstacle.stairwell).not.toBeNull();
-        expect(slabs).toHaveLength(obstacle.storyCount * 4);
+        expect(slabs).toHaveLength(obstacle.storyCount * 5);
+        expect(slabs.filter((slab) => slab.id.endsWith("-stair-landing"))).toHaveLength(obstacle.storyCount);
         for (const slab of slabs.filter((entry) => entry.kind === "floor")) {
           expect(slab.center.x - slab.width / 2).toBeGreaterThanOrEqual(obstacle.center.x - obstacle.width / 2 + 0.3);
           expect(slab.center.x + slab.width / 2).toBeLessThanOrEqual(obstacle.center.x + obstacle.width / 2 - 0.3);
@@ -519,6 +520,27 @@ describe("map layouts", () => {
       expect(navigator.findPath(ground, roof), ramp.id).not.toHaveLength(0);
       expect(navigator.findPath(roof, ground), ramp.id).not.toHaveLength(0);
     });
+  });
+
+  it("keeps every seed-zero internal staircase connected in both directions", () => {
+    const layout = createMapLayout(0);
+    const navigator = new GridNavigator(layout);
+    for (const building of layout.obstacles.filter((entry) => entry.storyCount > 1)) {
+      const groundRamp = layout.roofRamps.find((ramp) => ramp.obstacleId === building.id && ramp.fromLevel === 0);
+      if (!groundRamp) throw new Error(`ground ramp missing: ${building.id}`);
+      const ground = {
+        x: groundRamp.centerX,
+        y: getTerrainHeight(groundRamp.centerX, groundRamp.startZ, layout) + 1.76,
+        z: groundRamp.startZ,
+      };
+      const roof = {
+        x: building.center.x,
+        y: building.baseY + building.storyHeight * building.storyCount + BUILDING_ROOF_CAP_HEIGHT + 1.76,
+        z: building.center.z,
+      };
+      expect(navigator.findPath(ground, roof), `${building.id}:up`).not.toHaveLength(0);
+      expect(navigator.findPath(roof, ground), `${building.id}:down`).not.toHaveLength(0);
+    }
   });
 });
 

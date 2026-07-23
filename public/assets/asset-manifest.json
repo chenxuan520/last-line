@@ -174,6 +174,36 @@
       "fallback": "fallback.ui"
     },
     {
+      "id": "decal.brand.drop-zone",
+      "type": "image",
+      "url": "./assets/decals/brand-drop-zone.webp",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "decal.brand.island-operations",
+      "type": "image",
+      "url": "./assets/decals/brand-island-operations.webp",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "decal.brand.property-ll01",
+      "type": "image",
+      "url": "./assets/decals/brand-property-ll01.webp",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "decal.brand.restricted-area",
+      "type": "image",
+      "url": "./assets/decals/brand-restricted-area.webp",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "decal.brand.supply",
+      "type": "image",
+      "url": "./assets/decals/brand-supply.webp",
+      "fallback": "fallback.ui"
+    },
+    {
       "id": "texture.sky.clearing",
       "type": "image",
       "url": "./assets/sky/sky-clearing.webp",

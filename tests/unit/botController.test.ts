@@ -466,6 +466,82 @@ describe("BotController", () => {
     expect(maximumY).toBeCloseTo(player.position.y, 1);
   });
 
+  it("replans downstairs when a visible target drops from a three-story roof", () => {
+    const state = groundedState();
+    state.safeZone.radius = 2_000;
+    const layout = createMapLayout(state.mapSeed);
+    const building = layout.obstacles.find((entry) => entry.storyCount === 3);
+    const groundRamp = layout.roofRamps.find((entry) => entry.obstacleId === building?.id && entry.fromLevel === 0);
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!building || !groundRamp || !bot || !player) throw new Error("downstairs pursuit setup missing");
+    for (const actor of Object.values(state.actors)) actor.alive = actor.id === bot.id || actor.id === player.id;
+    bot.position = {
+      x: building.center.x,
+      y: building.baseY + building.storyHeight * building.storyCount + BUILDING_ROOF_CAP_HEIGHT + 1.76,
+      z: building.center.z,
+    };
+    player.position = {
+      x: building.center.x + 8,
+      y: bot.position.y,
+      z: building.center.z,
+    };
+    bot.yaw = Math.atan2(player.position.x - bot.position.x, player.position.z - bot.position.z);
+    const controller = new BotController(1, () => 0.5, false, layout);
+    const navigation = controller as unknown as { navigationTarget: Vector3State | null; navigationPath: Vector3State[] };
+
+    controller.update(bot, state, miss, 1, player.id);
+    expect(navigation.navigationTarget?.y).toBeCloseTo(player.position.y);
+
+    player.position = {
+      x: building.center.x,
+      y: getTerrainHeight(building.center.x, building.center.z - building.depth / 2 - 4, layout) + 1.76,
+      z: building.center.z - building.depth / 2 - 4,
+    };
+    bot.yaw = Math.atan2(player.position.x - bot.position.x, player.position.z - bot.position.z);
+    state.elapsedSeconds += 1;
+    controller.update(bot, state, miss, 1, player.id);
+
+    expect(navigation.navigationTarget).toEqual(player.position);
+    expect(navigation.navigationPath.length).toBeGreaterThan(2);
+  });
+
+  it("descends from a three-story roof before the safe zone can strand it", () => {
+    const state = groundedState();
+    const layout = createMapLayout(state.mapSeed);
+    const building = layout.obstacles.find((entry) => entry.storyCount === 3);
+    const groundRamp = layout.roofRamps.find((entry) => entry.obstacleId === building?.id && entry.fromLevel === 0);
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!building || !groundRamp || !bot || !player) throw new Error("zone descent setup missing");
+    for (const actor of Object.values(state.actors)) actor.alive = actor.id === bot.id;
+    bot.position = {
+      x: building.center.x,
+      y: building.baseY + building.storyHeight * building.storyCount + BUILDING_ROOF_CAP_HEIGHT + 1.76,
+      z: building.center.z,
+    };
+    const exitDirection = Math.sign(groundRamp.startZ - groundRamp.endZ) || -1;
+    const center = { x: groundRamp.centerX, y: 0, z: groundRamp.startZ + exitDirection * 30 };
+    state.safeZone.center = center;
+    state.safeZone.targetCenter = center;
+    state.safeZone.radius = 5;
+    state.safeZone.targetRadius = 5;
+    const controller = new BotController(1, () => 0.5, false, layout);
+    const movement = new MovementSystem(layout);
+
+    for (let tick = 0; tick < 3_600; tick += 1) {
+      const command = controller.update(bot, state, miss, 1 / 30, player.id);
+      movement.processCommand(state, bot.id, command, 1 / 30);
+      state.elapsedSeconds += 1 / 30;
+      if (Math.hypot(bot.position.x - center.x, bot.position.z - center.z) <= 5) break;
+    }
+
+    expect(Math.hypot(bot.position.x - center.x, bot.position.z - center.z)).toBeLessThanOrEqual(5);
+    expect(bot.position.y).toBeLessThan(
+      building.baseY + building.storyHeight + BUILDING_ROOF_CAP_HEIGHT + 1.76,
+    );
+  });
+
   it("keeps pursuing the last visible rooftop position through a temporary LOS loss", () => {
     const state = groundedState();
     const layout = createMapLayout(state.mapSeed);

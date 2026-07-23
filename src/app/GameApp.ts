@@ -132,6 +132,7 @@ export class GameApp {
         <div class="menu-actions">
           <button class="primary-button" data-action="start"><span>开始游戏</span><b>DEPLOY</b></button>
           ${multiplayerEnabled ? '<button class="secondary-button" data-action="multiplayer"><span>联机模式</span><b>ONLINE</b></button>' : ""}
+          <button class="secondary-button about-button" data-action="about"><span>游戏介绍</span><b>ABOUT</b></button>
         </div>
         <footer class="menu-footer">
           <p class="build-label">PRE-ALPHA 0.2 <span></span> SINGLE PLAYER / ${BATTLE_ROYALE_CONFIG.participantCount - 1} AI</p>
@@ -141,6 +142,40 @@ export class GameApp {
           </a>
         </footer>
       </section>
+      <div class="about-overlay" data-about-overlay hidden>
+        <section class="about-panel" role="dialog" aria-modal="true" aria-labelledby="about-title">
+          <header class="about-header">
+            <div><span>FIELD MANUAL // LL-01</span><h2 id="about-title">关于《最后防线》</h2></div>
+            <button type="button" data-action="close-about" aria-label="关闭游戏介绍">×</button>
+          </header>
+          <p class="about-lead">一款无需安装、打开浏览器即可进入的 50 人第一人称大逃杀。单人挑战 49 名 AI，或与 2–10 名真人联机，其余席位由 AI 补满。</p>
+          <div class="about-grid">
+            <article>
+              <span class="about-index">01 // CREATOR</span>
+              <h3>创建者与源码</h3>
+              <p>由 <a href="https://github.com/chenxuan520" target="_blank" rel="noreferrer">chenxuan520</a> 创建并以 MIT License 开源。</p>
+              <a class="about-repository" href="https://github.com/chenxuan520/last-line" target="_blank" rel="noreferrer">github.com/chenxuan520/last-line <b>↗</b></a>
+            </article>
+            <article>
+              <span class="about-index">02 // MISSION</span>
+              <h3>怎么玩</h3>
+              <ol><li>观察航线并选择落点</li><li>搜集枪械、弹药、护甲和药品</li><li>利用建筑、树干与岩石交火</li><li>跟随安全区持续转移</li><li>活到最后，成为唯一胜者</li></ol>
+            </article>
+            <article>
+              <span class="about-index">03 // CONTROLS</span>
+              <h3>桌面操作</h3>
+              <dl><div><dt>WASD / Shift</dt><dd>移动 / 冲刺</dd></div><div><dt>鼠标</dt><dd>视角 / 开火 / 瞄准</dd></div><div><dt>Space / F / R</dt><dd>跳跃 / 拾取 / 换弹</dd></div><div><dt>1·2 / Q·H</dt><dd>切枪 / 治疗</dd></div></dl>
+            </article>
+            <article>
+              <span class="about-index">04 // MOBILE</span>
+              <h3>手机横屏</h3>
+              <p>左侧摇杆移动，右侧滑动视角；屏幕按钮支持开火、瞄准、跳跃、拾取、换弹、切枪、治疗和暂停。</p>
+              <small>建议使用最新版 Chrome 或 Edge，并允许全屏横屏以获得完整操作空间。</small>
+            </article>
+          </div>
+          <footer><span>50 ACTORS</span><span>~10 MIN MATCH</span><span>DESKTOP + MOBILE</span><span>OPEN SOURCE</span></footer>
+        </section>
+      </div>
     `;
     const quality = this.uiRoot.querySelector<HTMLSelectElement>("[data-setting='quality']");
     if (quality) quality.value = this.settings.quality;
@@ -183,6 +218,45 @@ export class GameApp {
     this.uiRoot.querySelector<HTMLButtonElement>("[data-action='multiplayer']")?.addEventListener("click", () => {
       this.readSettings();
       this.renderMultiplayerMenu();
+    });
+    const aboutOverlay = this.uiRoot.querySelector<HTMLElement>("[data-about-overlay]");
+    const aboutTrigger = this.uiRoot.querySelector<HTMLButtonElement>("[data-action='about']");
+    const menuPanel = this.uiRoot.querySelector<HTMLElement>(".menu-panel");
+    const closeAbout = (): void => {
+      if (!aboutOverlay || aboutOverlay.hidden) return;
+      aboutOverlay.hidden = true;
+      if (menuPanel) menuPanel.inert = false;
+      aboutTrigger?.focus();
+    };
+    aboutTrigger?.addEventListener("click", () => {
+      if (!aboutOverlay) return;
+      if (menuPanel) menuPanel.inert = true;
+      aboutOverlay.hidden = false;
+      aboutOverlay.querySelector<HTMLButtonElement>("[data-action='close-about']")?.focus();
+    });
+    aboutOverlay?.querySelector<HTMLButtonElement>("[data-action='close-about']")?.addEventListener("click", closeAbout);
+    aboutOverlay?.addEventListener("click", (event) => {
+      if (event.target === aboutOverlay) closeAbout();
+    });
+    aboutOverlay?.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeAbout();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = [...aboutOverlay.querySelectorAll<HTMLElement>("button, a[href]")]
+        .filter((element) => !element.hidden && element.tabIndex >= 0);
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     });
   }
 

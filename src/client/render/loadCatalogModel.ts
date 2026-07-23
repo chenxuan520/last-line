@@ -2,7 +2,6 @@ import type { AssetContainer } from "@babylonjs/core/assetContainer";
 import type { Scene } from "@babylonjs/core/scene";
 import type { AssetCatalog } from "../../assets/AssetCatalog";
 import type { AssetEntry } from "../../assets/types";
-import { clearDynamicChunkRecoveryAttempts } from "../dynamicChunkRecovery";
 
 let gltfLoaderRequest: Promise<void> | null = null;
 
@@ -40,9 +39,7 @@ export async function loadCatalogModel(
 
 async function loadGltfLoader(): Promise<void> {
   if (gltfLoaderRequest) return gltfLoaderRequest;
-  gltfLoaderRequest = import("@babylonjs/loaders/glTF").then(() => {
-    if (typeof sessionStorage !== "undefined") clearDynamicChunkRecoveryAttempts(sessionStorage);
-  }).catch((error) => {
+  gltfLoaderRequest = import("@babylonjs/loaders/glTF").then(() => undefined).catch((error) => {
     gltfLoaderRequest = null;
     throw error;
   });

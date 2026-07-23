@@ -2,6 +2,7 @@ import { GridNavigator } from "../ai/navigation/GridNavigator";
 import { ITEMS } from "../config/items";
 import {
   createMapLayout,
+  BUILDING_ROOF_CAP_HEIGHT,
   getTerrainHeight,
   LANDING_ZONE_COUNT,
   LOOT_SPAWN_POINTS,
@@ -487,7 +488,7 @@ export class BotController {
       !target &&
       this.combatLastKnownPosition &&
       state.elapsedSeconds <= this.combatMemoryUntilSeconds &&
-      horizontalDistance(actor.position, this.combatLastKnownPosition) > 2
+      spatialDistance(actor.position, this.combatLastKnownPosition) > 2
     ) {
       command.aimDirection = normalize(subtract(this.combatLastKnownPosition, actor.position));
       return this.cache(this.navigate(actor, this.combatLastKnownPosition, command, undefined, true));
@@ -495,7 +496,7 @@ export class BotController {
     if (
       !target &&
       (state.elapsedSeconds > this.combatMemoryUntilSeconds ||
-        (this.combatLastKnownPosition && horizontalDistance(actor.position, this.combatLastKnownPosition) <= 2))
+        (this.combatLastKnownPosition && spatialDistance(actor.position, this.combatLastKnownPosition) <= 2))
     ) {
       this.clearCombatMemory();
     }
@@ -897,8 +898,15 @@ export class BotController {
     const targetChanged = this.navigationTarget?.x !== target.x ||
       this.navigationTarget.z !== target.z ||
       Math.abs((this.navigationTarget?.y ?? target.y) - target.y) > 0.2;
+    const targetSurfaceChanged = Boolean(
+      this.navigationTarget && navigationSurfaceKey(this.navigationTarget, this.layout) !== navigationSurfaceKey(target, this.layout)
+    );
     const navigationModeChanged = this.navigationPreservesAim !== preserveAim;
-    if (this.navigationPath.length === 0 || navigationModeChanged || (targetChanged && !preserveAim)) {
+    if (
+      this.navigationPath.length === 0 ||
+      navigationModeChanged ||
+      (targetChanged && (!preserveAim || targetSurfaceChanged))
+    ) {
       const path = validatedPath ?? this.navigator.findPath(actor.position, target);
       this.navigationTarget = { ...target };
       this.navigationPreservesAim = preserveAim;
@@ -1128,6 +1136,7 @@ export class BotController {
   ): ActorCommand {
     if (
       this.navigationPath.length > 0 &&
+      !this.navigationPreservesAim &&
       this.navigationTarget &&
       horizontalDistance(this.navigationTarget, center) <= Math.max(2, radius)
     ) {
@@ -1259,6 +1268,21 @@ function horizontalDistance(a: Vector3State, b: Vector3State): number {
 
 function spatialDistance(a: Vector3State, b: Vector3State): number {
   return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+}
+
+function navigationSurfaceKey(point: Vector3State, layout: MapLayout): string {
+  for (const building of layout.obstacles) {
+    if (
+      Math.abs(point.x - building.center.x) > building.width / 2 ||
+      Math.abs(point.z - building.center.z) > building.depth / 2
+    ) continue;
+    for (let level = building.storyCount; level >= 1; level -= 1) {
+      const supportY = building.baseY + level * building.storyHeight + BUILDING_ROOF_CAP_HEIGHT;
+      if (point.y >= supportY + 0.15) return `${building.id}:${level}`;
+    }
+    return `${building.id}:0`;
+  }
+  return "ground";
 }
 
 function vectorDistance(a: Vector3State, b: Vector3State): number {

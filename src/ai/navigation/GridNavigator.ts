@@ -1,6 +1,7 @@
 import {
   BUILDING_ROOF_CAP_HEIGHT,
   createMapLayout,
+  getRampHeight,
   getTerrainHeight,
   MAP_COVER_OBSTACLES,
   MAP_HALF_SIZE,
@@ -76,6 +77,9 @@ export class GridNavigator {
     const normalizedStart = this.normalizePoint(start, startLocation);
     const normalizedTarget = this.normalizePoint(target, targetLocation);
     if (sameLocation(startLocation, targetLocation)) {
+      if (startLocation.ramp && targetLocation.ramp?.id === startLocation.ramp.id) {
+        return [{ ...normalizedStart }, { ...normalizedTarget }];
+      }
       const directPath = this.findSurfacePath(normalizedStart, normalizedTarget, startLocation);
       if (directPath.length > 0) return directPath;
       if (startLocation.level === 0) {
@@ -192,11 +196,23 @@ export class GridNavigator {
   }
 
   private findLocation(point: Vector3State): SurfaceLocation {
+    if (this.layout) {
+      for (const ramp of this.roofRamps) {
+        const supportY = getRampHeight(ramp, point.x, point.z);
+        if (supportY === null || Math.abs(point.y - (supportY + ACTOR_EYE_HEIGHT)) > 0.6) continue;
+        return {
+          building: this.buildings.find((building) => building.id === ramp.obstacleId) ?? null,
+          level: ramp.fromLevel,
+          supportY,
+          ramp,
+        };
+      }
+    }
     for (const building of this.buildings) {
       if (!pointInsideObstacle(point, building, 0)) continue;
       for (let level = building.storyCount; level >= 1; level -= 1) {
         const supportY = building.baseY + level * building.storyHeight + BUILDING_ROOF_CAP_HEIGHT;
-        if (point.y >= supportY + 0.15) return { building, level, supportY };
+        if (point.y >= supportY + 0.15) return { building, level, supportY, ramp: null };
       }
     }
     return { ...GROUND_LOCATION, supportY: this.groundSupport(point) };
@@ -207,6 +223,19 @@ export class GridNavigator {
   }
 
   private pathToGround(start: Vector3State, location: SurfaceLocation): GroundTransition | null {
+    if (location.ramp) {
+      const path = [{ ...start }];
+      appendPoint(path, rampPoint(location.ramp, false));
+      for (let level = location.ramp.fromLevel - 1; level >= 0; level -= 1) {
+        if (!location.building) return null;
+        const ramp = this.rampForLevel(location.building, level);
+        if (!ramp) return null;
+        appendPoint(path, rampPoint(ramp, true));
+        appendPoint(path, rampPoint(ramp, false));
+      }
+      const ground = path.at(-1);
+      return ground ? { path, ground } : null;
+    }
     if (!location.building || location.level === 0) return { path: [{ ...start }], ground: { ...start } };
     const path = [{ ...start }];
     const firstRamp = this.rampForLevel(location.building, location.level - 1);
@@ -227,6 +256,22 @@ export class GridNavigator {
   }
 
   private pathFromGround(target: Vector3State, location: SurfaceLocation): GroundTransition | null {
+    if (location.ramp) {
+      const ramp = location.ramp;
+      const path: Vector3State[] = [];
+      if (location.building) {
+        for (let level = 0; level < ramp.fromLevel; level += 1) {
+          const preceding = this.rampForLevel(location.building, level);
+          if (!preceding) return null;
+          appendPoint(path, rampPoint(preceding, false));
+          appendPoint(path, rampPoint(preceding, true));
+        }
+      }
+      appendPoint(path, rampPoint(ramp, false));
+      appendPoint(path, target);
+      const ground = path[0];
+      return ground ? { path, ground } : null;
+    }
     if (!location.building || location.level === 0) return { path: [{ ...target }], ground: { ...target } };
     const ramps: RoofRamp[] = [];
     for (let level = 0; level < location.level; level += 1) {
@@ -353,6 +398,7 @@ interface SurfaceLocation {
   building: MapBuilding | null;
   level: number;
   supportY: number;
+  ramp: RoofRamp | null;
 }
 
 interface GroundTransition {
@@ -367,10 +413,12 @@ interface SurfaceBlockers {
   stairwell: MapObstacle | null;
 }
 
-const GROUND_LOCATION: SurfaceLocation = { building: null, level: 0, supportY: 0 };
+const GROUND_LOCATION: SurfaceLocation = { building: null, level: 0, supportY: 0, ramp: null };
 
 function sameLocation(left: SurfaceLocation, right: SurfaceLocation): boolean {
-  return left.level === right.level && left.building?.id === right.building?.id;
+  return left.level === right.level &&
+    left.building?.id === right.building?.id &&
+    left.ramp?.id === right.ramp?.id;
 }
 
 function rampPoint(ramp: RoofRamp, top: boolean): Vector3State {

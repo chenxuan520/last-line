@@ -5,7 +5,7 @@ import { installDynamicChunkRecovery } from "./client/dynamicChunkRecovery";
 const disposeChunkRecovery = installDynamicChunkRecovery({
   addEventListener: (type, listener) => window.addEventListener(type, listener),
   removeEventListener: (type, listener) => window.removeEventListener(type, listener),
-  sessionStorage,
+  getSessionStorage: () => window.sessionStorage,
   reload: () => window.location.reload(),
 });
 

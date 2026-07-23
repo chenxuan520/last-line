@@ -14,6 +14,7 @@ import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import { CreateCapsule } from "@babylonjs/core/Meshes/Builders/capsuleBuilder";
 import { CreateCylinder } from "@babylonjs/core/Meshes/Builders/cylinderBuilder";
 import { CreateGround } from "@babylonjs/core/Meshes/Builders/groundBuilder";
+import { CreatePlane } from "@babylonjs/core/Meshes/Builders/planeBuilder";
 import { CreateSphere } from "@babylonjs/core/Meshes/Builders/sphereBuilder";
 import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
 import "@babylonjs/core/Meshes/instancedMesh";
@@ -39,8 +40,10 @@ import {
 import { getActiveWeapon, type ActorState, type EntityId, type FlightState, type GroundLootState } from "../../../game/state/types";
 import { QUALITY_PROFILES, type QualityLevel, type QualityProfile } from "../../../config/settings";
 import { syncLootMarkerViews, type LootMarkerViewAdapter } from "../LootMarkerViewAdapter";
+import { clearDynamicChunkRecoveryAttempts } from "../../dynamicChunkRecovery";
 import { loadCatalogModel } from "../loadCatalogModel";
 import { getPoiVisualType } from "../../poiVisuals";
+import { getBrandSignPlacements } from "../../brandSigns";
 
 const INITIAL_SAFE_ZONE_RADIUS = MAP_SIZE * 0.36;
 const SKY_ASSET_IDS = ["texture.sky.clearing", "texture.sky.overcast", "texture.sky.storm"] as const;
@@ -168,6 +171,7 @@ export async function createIslandScene(
   const qualityProfile = QUALITY_PROFILES[quality];
   createIslandEnvironment(scene, materials, layout, qualityProfile);
   createPois(scene, materials, layout);
+  createBrandSigns(scene, assets, layout);
 
   const { actorRoots, actorVisualRoots } = createActors(scene, actors, materials, player.id);
   const camera = createCamera(scene, player);
@@ -255,6 +259,11 @@ async function replaceCatalogModels(
     loadIfDeclared(`model.character.${kind}`),
     loadIfDeclared(`model.character.${kind}.lod1`),
   ]));
+  if (loadedCharacters.length > 0 && loadedCharacters.every((loaded) => loaded !== null)) {
+    clearDynamicChunkRecoveryAttempts(() =>
+      typeof sessionStorage === "undefined" ? null : sessionStorage
+    );
+  }
   const characterModels = new Map(requiredCharacterIds.map((kind, index) => [kind, {
     base: loadedCharacters[index * 2] ?? null,
     lod1: loadedCharacters[index * 2 + 1] ?? null,
@@ -539,7 +548,7 @@ function createMaterials(scene: Scene, assets: AssetCatalog): IslandMaterials {
     shrub: material(scene, "shrub-material", "#496545"),
     rock: material(scene, "rock-material", "#65685e"),
     fence: material(scene, "fence-material", "#655443"),
-    hay: material(scene, "hay-material", "#a28a4f"),
+    hay: material(scene, "hay-material", "#b86b22"),
     poiAccent: material(scene, "poi-accent-material", "#a37848"),
     poiDark: material(scene, "poi-dark-material", "#434b4f"),
     floor: material(scene, "building-floor-material", "#343b3b"),
@@ -1249,6 +1258,49 @@ function createPois(scene: Scene, materials: IslandMaterials, layout: MapLayout)
       markPoiDecoration(beacon, point.name, poiType);
     }
   });
+}
+
+function createBrandSigns(scene: Scene, assets: AssetCatalog, layout: MapLayout): void {
+  const postMaterial = material(scene, "brand-sign-post-material", "#343a31");
+  for (const placement of getBrandSignPlacements(layout)) {
+    const texture = catalogTexture(scene, assets, placement.assetId, 1);
+    if (!texture) continue;
+    texture.hasAlpha = true;
+    const signMaterial = new StandardMaterial(`${placement.assetId}-material`, scene);
+    signMaterial.diffuseTexture = texture;
+    signMaterial.useAlphaFromDiffuseTexture = true;
+    signMaterial.emissiveColor = Color3.White().scale(0.16);
+    signMaterial.specularColor = Color3.Black();
+    signMaterial.backFaceCulling = false;
+    const x = placement.x;
+    const z = placement.z;
+    const terrainY = getTerrainHeight(x, z, layout);
+    const sign = CreatePlane(
+      placement.assetId,
+      { width: placement.width, height: placement.height, sideOrientation: Mesh.DOUBLESIDE },
+      scene,
+    );
+    sign.position.set(x, terrainY + 3.1, z);
+    sign.rotation.y = placement.yaw;
+    sign.material = signMaterial;
+    markDecoration(sign, "brand-sign");
+    for (const side of [-1, 1]) {
+      const post = CreateBox(
+        `${placement.assetId}-post-${side < 0 ? "left" : "right"}`,
+        { width: 0.14, height: 3.2, depth: 0.14 },
+        scene,
+      );
+      const localX = side * placement.width * 0.36;
+      post.position.set(
+        x + Math.cos(placement.yaw) * localX,
+        terrainY + 1.6,
+        z - Math.sin(placement.yaw) * localX,
+      );
+      post.rotation.y = placement.yaw;
+      post.material = postMaterial;
+      markDecoration(post, "brand-sign-post");
+    }
+  }
 }
 
 function createCrane(

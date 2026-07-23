@@ -40,6 +40,8 @@ The enemy character palette uses a dark blue-gray uniform while preserving autho
 
 `IslandScene` receives an explicit local actor ID for multiplayer. Only that actor uses the first-person hitbox representation; remote human actors use the same third-person presentation contract as AI while retaining `kind: "player"` in authoritative state.
 
+Multi-story buildings use deterministic two-lane switchback ramps with authoritative cross-lane landings. Movement, combat, and navigation consume the same ramp/floor geometry, including paths that begin midway along a ramp. Decorative brand signs resolve deterministic clear positions near selected POIs but remain non-pickable, non-colliding presentation meshes. The menu's responsive ABOUT field manual exposes creator, repository, gameplay, desktop controls, and mobile controls without changing session state.
+
 ## Multiplayer Services
 
 `LobbyDirectory` owns temporary guest sessions, public room summaries, quick matching, and private room-code lookup. Every room has a separate `GameRoom` service that owns lobby readiness, WebSockets, actor assignment, checkpoints, and one `MatchRuntime`.
