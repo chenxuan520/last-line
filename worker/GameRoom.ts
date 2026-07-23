@@ -16,6 +16,10 @@ import {
   MatchRuntime,
   type MatchCheckpoint,
 } from "../src/server/MatchRuntime";
+import {
+  consoleServerMetricSink,
+  RoomMetricCollector,
+} from "../src/server/ServerMetrics";
 import { SnapshotThrottle } from "../src/server/SnapshotThrottle";
 import {
   DurableService,
@@ -51,6 +55,11 @@ interface SocketAttachment {
   connectionEpoch: number;
   usedAdmission: boolean;
   issuedReconnectToken?: string;
+}
+
+interface PendingCheckpoint {
+  checkpoint: MatchCheckpoint;
+  startedAt: number;
 }
 
 export type RoomSocketPreflight =
@@ -91,9 +100,11 @@ export class GameRoom extends DurableService<WorkerEnv> {
   private readonly visibleLootByPlayer = new Map<string, Set<EntityId>>();
   private readonly messageRates = new Map<string, { startedAt: number; count: number }>();
   private readonly accountStatusCache = new Map<string, { checkedAt: number; status: "active" | "revoked" }>();
+  private readonly metrics: RoomMetricCollector;
 
   public constructor(ctx: PlatformDurableObjectState, env: WorkerEnv) {
     super(ctx, env);
+    this.metrics = new RoomMetricCollector(ctx.metricSink ?? consoleServerMetricSink, () => performance.now());
     this.ctx.blockConcurrencyWhile(async () => {
       const [room, checkpoint] = await Promise.all([
         this.ctx.storage.get<PersistedRoom>(STORAGE_KEY),
@@ -115,6 +126,7 @@ export class GameRoom extends DurableService<WorkerEnv> {
             this.send(socket, { type: "error", code: "room-closed", message: "房间版本已过期，请创建新对局" });
             socket.close(4010, "room version expired");
           }
+          this.metrics.flush();
           await this.updateDirectory();
           await this.ctx.storage.deleteAll();
           this.data = null;
@@ -153,6 +165,7 @@ export class GameRoom extends DurableService<WorkerEnv> {
           this.send(socket, { type: "error", code: "room-closed", message: "房间已过期" });
           socket.close(4010, "room expired");
         }
+        this.metrics.flush();
         await this.updateDirectory();
         await this.ctx.storage.deleteAll();
         this.data = null;
@@ -305,13 +318,20 @@ export class GameRoom extends DurableService<WorkerEnv> {
   public async prepareForShutdown(): Promise<void> {
     const data = this.data;
     this.loopRunning = false;
-    if (!data || data.status !== "running" || !this.runtime) return;
-    data.checkpoint = this.runtime.checkpoint();
-    await Promise.all([
-      this.persist(),
-      this.persistCheckpoint(),
-      this.ctx.storage.setAlarm(Date.now() + WATCHDOG_MS),
-    ]);
+    try {
+      if (!data || data.status !== "running" || !this.runtime) return;
+      const pendingCheckpoint = this.captureCheckpoint(this.runtime);
+      const roomPersistence = this.persist();
+      const checkpointPersistence = this.persistCheckpoint(pendingCheckpoint)
+        .finally(() => this.metrics.flush());
+      await Promise.all([
+        roomPersistence,
+        checkpointPersistence,
+        this.ctx.storage.setAlarm(Date.now() + WATCHDOG_MS),
+      ]);
+    } finally {
+      this.metrics.flush();
+    }
   }
 
   public async webSocketMessage(socket: PlatformSocket, message: string | ArrayBuffer): Promise<void> {
@@ -515,14 +535,15 @@ export class GameRoom extends DurableService<WorkerEnv> {
     data.status = "running";
     data.countdownEndsAt = null;
     data.revision += 1;
-    this.runtime = new MatchRuntime({
+    const runtime = new MatchRuntime({
       humanActorIds: members.map((member) => member.actorId as EntityId),
       seed: data.seed,
       startWithBandage: data.options.startWithBandage,
       disableAiSnipers: data.options.disableAiSnipers,
     });
-    data.checkpoint = this.runtime.checkpoint();
-    await Promise.all([this.persist(), this.persistCheckpoint()]);
+    this.runtime = runtime;
+    const pendingCheckpoint = this.captureCheckpoint(runtime);
+    await Promise.all([this.persist(), this.persistCheckpoint(pendingCheckpoint)]);
     await this.ctx.storage.setAlarm(Date.now() + WATCHDOG_MS);
     await this.updateDirectory();
     for (const socket of this.ctx.getWebSockets()) {
@@ -539,9 +560,13 @@ export class GameRoom extends DurableService<WorkerEnv> {
       if (!force || Date.now() - this.lastTickAt < 1_000) return;
       this.loopRunning = false;
       this.runtime = null;
+      this.metrics.flush();
     }
     const restored = this.runtime === null && this.data.checkpoint !== null;
-    if (!this.ensureRuntime()) return;
+    if (!this.ensureRuntime()) {
+      this.metrics.flush();
+      return;
+    }
     if (restored) {
       this.visibleLootByPlayer.clear();
       for (const socket of this.ctx.getWebSockets()) {
@@ -567,29 +592,35 @@ export class GameRoom extends DurableService<WorkerEnv> {
     const runtime = this.runtime;
     if (!this.loopRunning || !data || data.status !== "running" || !runtime) return;
     try {
+      this.metrics.observeTickDelay(Math.max(0, performance.now() - this.nextTickAt));
       runtime.step();
       this.lastTickAt = Date.now();
     } catch {
       this.loopRunning = false;
       this.runtime = null;
+      this.metrics.flush();
       this.ctx.waitUntil(this.ctx.storage.setAlarm(Date.now() + 1_000));
       return;
     }
+    this.metrics.flushDue();
     const frameBroadcast = runtime.tick % 3 === 0 && this.snapshotThrottle.consume(performance.now());
     if (frameBroadcast) this.broadcastFrame();
-    if (runtime.tick % 30 === 0) {
-      data.checkpoint = runtime.checkpoint();
-      this.ctx.waitUntil(this.persistCheckpoint());
-      this.ctx.waitUntil(this.ctx.storage.setAlarm(Date.now() + WATCHDOG_MS));
-    }
     if (runtime.tick % 150 === 0) this.ctx.waitUntil(this.validateConnectedAccounts());
     if (runtime.state.phase === "finished") {
       if (!frameBroadcast) this.broadcastFrame();
       data.status = "finished";
-      data.checkpoint = runtime.checkpoint();
       this.loopRunning = false;
-      this.ctx.waitUntil(this.persistFinishedState(Date.now() + 60 * 60 * 1_000));
+      const pendingCheckpoint = this.captureCheckpoint(runtime);
+      this.ctx.waitUntil(
+        this.persistFinishedState(Date.now() + 60 * 60 * 1_000, pendingCheckpoint)
+          .finally(() => this.metrics.flush()),
+      );
       return;
+    }
+    if (runtime.tick % 30 === 0) {
+      const pendingCheckpoint = this.captureCheckpoint(runtime);
+      this.ctx.waitUntil(this.persistCheckpoint(pendingCheckpoint));
+      this.ctx.waitUntil(this.ctx.storage.setAlarm(Date.now() + WATCHDOG_MS));
     }
     this.nextTickAt += TICK_MS;
     if (performance.now() - this.nextTickAt > 5_000) this.nextTickAt = performance.now();
@@ -681,6 +712,7 @@ export class GameRoom extends DurableService<WorkerEnv> {
       this.send(socket, { type: "error", code: "room-closed", message: "房间已由管理员关闭" });
       socket.close(4010, "room closed by administrator");
     }
+    this.metrics.flush();
     this.data = null;
     await this.ctx.storage.deleteAll();
     return Response.json(result);
@@ -816,14 +848,50 @@ export class GameRoom extends DurableService<WorkerEnv> {
     return this.ctx.storage.put(STORAGE_KEY, this.requireData());
   }
 
-  private persistCheckpoint(): Promise<void> {
-    const checkpoint = this.data?.checkpoint;
-    return checkpoint ? this.ctx.storage.put(CHECKPOINT_KEY, checkpoint) : Promise.resolve();
+  private async persistFinishedState(deleteAt: number, pendingCheckpoint: PendingCheckpoint): Promise<void> {
+    await this.ctx.storage.setAlarm(deleteAt);
+    const roomPersistence = this.persist();
+    const checkpointPersistence = this.persistCheckpoint(pendingCheckpoint)
+      .finally(() => this.metrics.flush());
+    await Promise.all([roomPersistence, checkpointPersistence, this.updateDirectory()]);
   }
 
-  private async persistFinishedState(deleteAt: number): Promise<void> {
-    await this.ctx.storage.setAlarm(deleteAt);
-    await Promise.all([this.persist(), this.persistCheckpoint(), this.updateDirectory()]);
+  private captureCheckpoint(runtime: MatchRuntime): PendingCheckpoint {
+    const startedAt = performance.now();
+    try {
+      const checkpoint = runtime.checkpoint();
+      this.requireData().checkpoint = checkpoint;
+      return { checkpoint, startedAt };
+    } catch (error) {
+      this.metrics.observeCheckpointDuration(Math.max(0, performance.now() - startedAt));
+      this.metrics.flush();
+      throw error;
+    }
+  }
+
+  private persistCheckpoint(pending: PendingCheckpoint): Promise<void> {
+    let persistence: Promise<void>;
+    try {
+      persistence = this.ctx.storage.put(CHECKPOINT_KEY, pending.checkpoint);
+    } catch (error) {
+      this.finishCheckpointMeasurement(pending.startedAt, true);
+      throw error;
+    }
+    return persistence.then(
+      () => {
+        this.finishCheckpointMeasurement(pending.startedAt, false);
+      },
+      (error: unknown) => {
+        this.finishCheckpointMeasurement(pending.startedAt, true);
+        throw error;
+      },
+    );
+  }
+
+  private finishCheckpointMeasurement(startedAt: number, failed: boolean): void {
+    this.metrics.observeCheckpointDuration(Math.max(0, performance.now() - startedAt));
+    if (failed) this.metrics.flush();
+    else this.metrics.flushDue();
   }
 
   private releaseRuntime(): void {
@@ -832,6 +900,7 @@ export class GameRoom extends DurableService<WorkerEnv> {
     this.visibleLootByPlayer.clear();
     this.messageRates.clear();
     this.accountStatusCache.clear();
+    this.metrics.flush();
   }
 
   private send(socket: PlatformSocket, message: ServerMessage): void {
@@ -839,7 +908,11 @@ export class GameRoom extends DurableService<WorkerEnv> {
       socket.send(JSON.stringify(message));
     } catch {
       socket.close(1011, "send failed");
+      return;
     }
+    this.metrics.observeWebSocketBufferedBytes(
+      this.env.SERVER_PLATFORM === "standalone" ? socketBufferedAmount(socket) : undefined,
+    );
   }
 
   private requireData(): PersistedRoom {
@@ -881,4 +954,12 @@ function createMember(guest: GuestRecord, host: boolean, ready: boolean): RoomMe
 
 function randomUint32(): number {
   return crypto.getRandomValues(new Uint32Array(1))[0] ?? 0;
+}
+
+function socketBufferedAmount(socket: PlatformSocket): number | undefined {
+  try {
+    return socket.bufferedAmount;
+  } catch {
+    return undefined;
+  }
 }

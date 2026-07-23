@@ -6,6 +6,7 @@ import { extname, relative, resolve, sep } from "node:path";
 import type { Duplex } from "node:stream";
 import { DatabaseSync } from "node:sqlite";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
+import type { ServerMetricSink } from "../src/server/ServerMetrics";
 import type { PlatformSocket } from "../src/server/platform/DurableService";
 import worker, { isOriginAllowed } from "../worker/index";
 import { createStandaloneEnvironment, type StandaloneEnvironment } from "./StandaloneEnvironment";
@@ -23,6 +24,7 @@ export interface StandaloneServerHandle {
 
 export interface StandaloneServerHooks {
   beforeWebSocketAccept?(): Promise<void>;
+  metricSink?: ServerMetricSink;
 }
 
 export async function startStandaloneServer(
@@ -38,6 +40,7 @@ export async function startStandaloneServer(
   try {
     environment = await createStandaloneEnvironment({
       databasePath: config.databasePath,
+      metricSink: hooks.metricSink,
       allowedOrigins: config.allowedOrigins,
       adminBootstrapToken: config.adminBootstrapToken,
       adminResetToken: config.adminResetToken,
@@ -240,6 +243,10 @@ class NodeRoomSocket implements PlatformSocket {
   private attachment: unknown = null;
 
   public constructor(private readonly socket: WebSocket) {}
+
+  public get bufferedAmount(): number {
+    return this.socket.bufferedAmount;
+  }
 
   public send(message: string): void {
     if (this.socket.readyState === WebSocket.OPEN) this.socket.send(message);

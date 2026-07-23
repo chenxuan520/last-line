@@ -1,4 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
+import {
+  createJsonLineServerMetricSink,
+  type ServerMetricSink,
+} from "../src/server/ServerMetrics";
 import { AccountDirectory } from "../worker/AccountDirectory";
 import { AdminDirectory } from "../worker/AdminDirectory";
 import type { WorkerEnv } from "../worker/env";
@@ -11,6 +15,7 @@ import {
 
 export interface StandaloneEnvironmentOptions {
   databasePath: string;
+  metricSink?: ServerMetricSink;
   allowedOrigins?: string;
   adminBootstrapToken?: string;
   adminResetToken?: string;
@@ -29,7 +34,10 @@ export async function createStandaloneEnvironment(
   options: StandaloneEnvironmentOptions,
 ): Promise<StandaloneEnvironment> {
   installTimingSafeEqual();
-  const runtime = new LocalDurableObjectRuntime(options.databasePath);
+  const metricSink = options.metricSink ?? createJsonLineServerMetricSink((line) => {
+    process.stdout.write(`${line}\n`);
+  });
+  const runtime = new LocalDurableObjectRuntime(options.databasePath, metricSink);
   const env = {} as WorkerEnv;
   const environment = (): WorkerEnv => env;
   const lobby = runtime.createNamespace("lobby", LobbyDirectory, environment);

@@ -1,4 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
+import type { ServerMetricSink } from "../src/server/ServerMetrics";
 import type {
   PlatformDurableObjectNamespace,
   PlatformDurableObjectState,
@@ -46,7 +47,10 @@ export class LocalDurableObjectRuntime {
   private transactionDepth = 0;
   private closed = false;
 
-  public constructor(databasePath: string) {
+  public constructor(
+    databasePath: string,
+    public readonly metricSink?: ServerMetricSink,
+  ) {
     this.database = new DatabaseSync(databasePath);
     this.database.exec("PRAGMA journal_mode = WAL");
     this.database.exec("PRAGMA synchronous = NORMAL");
@@ -352,6 +356,7 @@ export class LocalDurableObjectNamespace<
 
 export class LocalDurableObjectState implements PlatformDurableObjectState {
   public readonly storage: PlatformObjectStorage;
+  public readonly metricSink: ServerMetricSink | undefined;
   private readonly sockets = new Set<PlatformSocket>();
   private readonly initializationTasks: Promise<unknown>[] = [];
 
@@ -361,6 +366,7 @@ export class LocalDurableObjectState implements PlatformDurableObjectState {
     private readonly objectName: string,
   ) {
     this.storage = new LocalObjectStorage(runtime, namespace, objectName);
+    this.metricSink = runtime.metricSink;
   }
 
   public blockConcurrencyWhile(callback: () => Promise<unknown>): void {

@@ -15,6 +15,7 @@
     "build:worker": "wrangler deploy --config wrangler.worker.jsonc --dry-run --outdir dist-worker",
     "build:server": "tsc -p tsconfig.server.json --pretty false && esbuild standalone/index.ts --bundle --platform=node --format=esm --target=node24 --external:ws --outfile=dist-server/server.js",
     "build:standalone": "VITE_MULTIPLAYER_ENABLED=true VITE_MULTIPLAYER_URL=same-origin npm run build && npm run build:server",
+    "check:budgets": "node scripts/check-performance-budgets.mjs",
     "start:server": "node --env-file-if-exists=.env.standalone dist-server/server.js",
     "types:worker": "wrangler types --config wrangler.worker.jsonc",
     "typecheck:app": "tsc -b --pretty false",

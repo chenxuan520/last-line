@@ -1,3 +1,5 @@
+import type { ServerMetricSink } from "../ServerMetrics";
+
 export type PlatformSqlValue = ArrayBuffer | string | number | null;
 
 export interface PlatformSqlCursor<Row extends Record<string, PlatformSqlValue>> {
@@ -23,6 +25,7 @@ export interface PlatformObjectStorage {
 }
 
 export interface PlatformSocket {
+  readonly bufferedAmount?: number;
   send(message: string): void;
   close(code?: number, reason?: string): void;
   serializeAttachment(attachment: unknown): void;
@@ -31,6 +34,7 @@ export interface PlatformSocket {
 
 export interface PlatformDurableObjectState {
   readonly storage: PlatformObjectStorage;
+  readonly metricSink?: ServerMetricSink;
   blockConcurrencyWhile(callback: () => Promise<unknown>): void;
   waitUntil(promise: Promise<unknown>): void;
   getWebSockets(): PlatformSocket[];

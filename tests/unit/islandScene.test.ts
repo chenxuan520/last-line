@@ -706,6 +706,66 @@ describe("IslandScene lifecycle", () => {
     engine.dispose();
   }, 30_000);
 
+  it("keeps a medium production 50-actor scene within resource budgets", async () => {
+    const assets = createProductionGlbAssets();
+    const state = createBattleRoyaleState("player", undefined, () => 0.5);
+    const engine = new NullEngine();
+
+    expect(Object.values(state.actors).filter((actor) => actor.kind === "player")).toHaveLength(1);
+    expect(Object.values(state.actors).filter((actor) => actor.kind === "bot")).toHaveLength(49);
+
+    try {
+      const bundle = await createIslandScene(
+        engine,
+        assets,
+        state.actors,
+        state.groundLoot,
+        state.mapSeed,
+        true,
+        "player",
+        "medium",
+      );
+      try {
+        expect(bundle.scene.transformNodes.filter((node) =>
+          node.metadata?.visualModel === "model.character.enemy"
+        )).toHaveLength(49);
+        expect(bundle.scene.transformNodes.filter((node) =>
+          node.metadata?.visualModel === "model.character.enemy.lod1"
+        )).toHaveLength(49);
+        const aggregateMeshVertices = bundle.scene.meshes.reduce(
+          (total, mesh) => total + mesh.getTotalVertices(),
+          0,
+        );
+        const aggregateMeshIndices = bundle.scene.meshes.reduce(
+          (total, mesh) => total + mesh.getTotalIndices(),
+          0,
+        );
+        const uniqueGeometryVertices = bundle.scene.geometries.reduce(
+          (total, geometry) => total + geometry.getTotalVertices(),
+          0,
+        );
+        const uniqueGeometryIndices = bundle.scene.geometries.reduce(
+          (total, geometry) => total + geometry.getTotalIndices(),
+          0,
+        );
+
+        expect(bundle.scene.meshes.length).toBeLessThanOrEqual(4_600);
+        expect(bundle.scene.transformNodes.length).toBeLessThanOrEqual(520);
+        expect(bundle.scene.materials.length).toBeLessThanOrEqual(75);
+        expect(bundle.scene.geometries.length).toBeLessThanOrEqual(2_500);
+        expect(aggregateMeshVertices).toBeLessThanOrEqual(580_000);
+        expect(aggregateMeshIndices).toBeLessThanOrEqual(1_550_000);
+        expect(uniqueGeometryVertices).toBeLessThanOrEqual(400_000);
+        expect(uniqueGeometryIndices).toBeLessThanOrEqual(950_000);
+      } finally {
+        bundle.scene.dispose();
+      }
+    } finally {
+      engine.dispose();
+    }
+    expect(engine.scenes).toHaveLength(0);
+  }, 60_000);
+
   it("keeps procedural base models when only LOD1 GLBs load", async () => {
     const assets = await createGlbAssets(new Set(["/enemy.glb"]));
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);

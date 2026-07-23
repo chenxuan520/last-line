@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { GridNavigator } from "../../src/ai/navigation/GridNavigator";
 import type { BattleRoyaleConfig } from "../../src/config/battleRoyale";
 import { createMapLayout, LOOT_SPAWN_POINTS, MAP_WALL_SEGMENTS, TOTAL_LOOT_POINTS } from "../../src/config/map";
@@ -21,6 +21,10 @@ const NO_COMBAT_WORLD: CombatWorld = { traceShot: () => null, hasLineOfSight: ()
 const SEEDS = [1, 7, 19, 42, 99] as const;
 
 describe("AI loot reachability", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("keeps every generated loot point standable and interactable", () => {
     const navigator = new GridNavigator();
     const state = createBattleRoyaleState("player", TEST_CONFIG, seededRandom(1));
@@ -58,6 +62,7 @@ describe("AI loot reachability", () => {
   });
 
   it.each(SEEDS)("arms at least 42 of 49 bots after landing with seed %i", (seed) => {
+    const findPath = vi.spyOn(GridNavigator.prototype, "findPath");
     const random = seededRandom(seed);
     const state = createBattleRoyaleState("player", TEST_CONFIG, random);
     const simulation = new GameSimulation(state, new BattleRoyaleMode(TEST_CONFIG, random), WEAPONS);
@@ -120,6 +125,7 @@ describe("AI loot reachability", () => {
       armedBots.length,
       `${armedBots.length} bots armed, ${heldWeapons} weapons held, ${availableWeapons.length} available for seed ${seed}: ${JSON.stringify(unarmedPositions)}`,
     ).toBeGreaterThanOrEqual(42);
+    expect(findPath.mock.calls.length, `findPath calls for seed ${seed}`).toBeLessThanOrEqual(5_500);
     expect(bots.flatMap((bot) => bot.inventory.weaponSlots).some((weapon) => weapon?.weaponId === "sniper")).toBe(false);
     expect(bots.some((bot) => bot.inventory.backpack.some((stack) => stack.itemId === "ammo.sniper"))).toBe(false);
   }, 120_000);
@@ -134,6 +140,8 @@ describe("AI loot reachability", () => {
         { waitSeconds: 8, shrinkSeconds: 18, radius: 0, damagePerSecond: 80 },
       ],
     };
+    vi.spyOn(Math, "random").mockImplementation(seededRandom(2026));
+    const findPath = vi.spyOn(GridNavigator.prototype, "findPath");
     const random = seededRandom(2026);
     const state = createBattleRoyaleState("player", config, random);
     const simulation = new GameSimulation(state, new BattleRoyaleMode(config, random), WEAPONS);
@@ -142,17 +150,29 @@ describe("AI loot reachability", () => {
       bots.map((bot, index) => [bot.id, new BotController(index + 1, seededRandom(20_260 + index), true)]),
     );
     const world = new SimulationCombatWorld(state);
+    const hasLineOfSight = vi.spyOn(world, "hasLineOfSight");
+    const traceShotDetailed = vi.spyOn(world, "traceShotDetailed");
     simulation.start();
     const allEvents = simulation.drainEvents();
+    let controllerUpdates = 0;
+    let actorCommands = 0;
+    let steps = 0;
+    let peakGroundLoot = Object.keys(state.groundLoot).length;
 
     for (let tick = 0; tick < 1_200 && state.phase !== "finished"; tick += 1) {
       const commands = new Map<EntityId, ActorCommand>([["player", createIdleCommand()]]);
       for (const bot of bots) {
         const controller = controllers.get(bot.id);
-        if (controller && bot.alive) commands.set(bot.id, controller.update(bot, state, world, 0.25, "player"));
+        if (controller && bot.alive) {
+          commands.set(bot.id, controller.update(bot, state, world, 0.25, "player"));
+          controllerUpdates += 1;
+        }
       }
+      actorCommands += commands.size;
       simulation.step(0.25, commands, world);
+      steps += 1;
       allEvents.push(...simulation.drainEvents());
+      peakGroundLoot = Math.max(peakGroundLoot, Object.keys(state.groundLoot).length);
     }
 
     const living = Object.values(state.actors).filter((actor) => actor.alive);
@@ -182,6 +202,14 @@ describe("AI loot reachability", () => {
       event.type === "shot-fired" && event.actorId.startsWith("bot-") && event.weaponId === "sniper"
     )).toBe(false);
     expect(allEvents.some((event) => event.type === "actor-died" && event.sourceId?.startsWith("bot-"))).toBe(true);
+    expect(controllerUpdates).toBeLessThanOrEqual(47_000);
+    expect(actorCommands).toBeLessThanOrEqual(48_000);
+    expect(findPath.mock.calls.length).toBeLessThanOrEqual(17_500);
+    expect(hasLineOfSight.mock.calls.length).toBeLessThanOrEqual(20_000);
+    expect(traceShotDetailed.mock.calls.length).toBeLessThanOrEqual(23_500);
+    expect(allEvents.length).toBeLessThanOrEqual(7_000);
+    expect(peakGroundLoot).toBeLessThanOrEqual(300);
+    expect(steps).toBeLessThanOrEqual(1_200);
   }, 180_000);
 });
 

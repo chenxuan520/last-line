@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createIdleCommand } from "../../src/game/commands/ActorCommand";
+import { createWeaponState } from "../../src/game/state/types";
+import type { SequencedGameEvent, ServerMessage } from "../../src/network/protocol";
 import { MATCH_CHECKPOINT_VERSION, MatchRuntime } from "../../src/server/MatchRuntime";
 
 describe("MatchRuntime", () => {
@@ -70,4 +72,80 @@ describe("MatchRuntime", () => {
       Math.hypot(entry.position.x - viewer.position.x, entry.position.z - viewer.position.z) <= 60
     )).toBe(true);
   });
+
+  it("keeps hot full, snapshot, event burst, and checkpoint payloads bounded", () => {
+    const humanActorIds = Array.from({ length: 10 }, (_, index) => `human-${index + 1}`);
+    const runtime = new MatchRuntime({
+      humanActorIds,
+      seed: 2026,
+      startWithBandage: true,
+      disableAiSnipers: true,
+    });
+    for (const actor of Object.values(runtime.state.actors)) {
+      actor.deployment = "grounded";
+      actor.position = { x: 0, y: 1.76, z: 0 };
+      actor.inventory.weaponSlots = [createWeaponState("shotgun"), createWeaponState("sniper")];
+      actor.inventory.activeWeaponSlot = 1;
+      actor.inventory.backpack = [
+        { itemId: "ammo.rifle", quantity: 120 },
+        { itemId: "ammo.light", quantity: 180 },
+        { itemId: "ammo.shell", quantity: 30 },
+        { itemId: "ammo.sniper", quantity: 30 },
+        { itemId: "bandage", quantity: 5 },
+        { itemId: "medkit", quantity: 2 },
+      ];
+      actor.inventory.armorLevel = 2;
+      actor.inventory.helmetLevel = 2;
+      actor.inventory.usingItem = { itemId: "bandage", remainingSeconds: 3.5 };
+    }
+
+    expect(humanActorIds).toHaveLength(10);
+    expect(Object.keys(runtime.state.actors)).toHaveLength(50);
+    expect(Object.keys(runtime.state.groundLoot)).toHaveLength(250);
+
+    const localActorId = humanActorIds[0] ?? "human-1";
+    const fullMessage = {
+      type: "match.full",
+      snapshotSequence: 0,
+      tick: runtime.tick,
+      localActorId,
+      state: runtime.projectState(localActorId),
+      displayNames: Object.fromEntries(humanActorIds.map((actorId, index) => [actorId, `Human ${index + 1}`])),
+      events: [],
+    } satisfies ServerMessage;
+
+    runtime.takeFrame(0);
+    const steadyFrame = runtime.projectFrame(runtime.takeFrame(123_456), localActorId, new Set()).frame;
+    const steadyMessage = {
+      type: "match.snapshot",
+      ackSequence: runtime.acknowledge(localActorId),
+      frame: steadyFrame,
+    } satisfies ServerMessage;
+    const burstEvents: SequencedGameEvent[] = Array.from({ length: 450 }, (_, index) => ({
+      sequence: index + 1,
+      event: {
+        type: "shot-traced",
+        actorId: `bot-${index % 40 + 1}`,
+        origin: { x: 100.125, y: 12.25, z: -99.75 },
+        end: { x: -100.5, y: 1.125, z: 250.875 },
+        normal: { x: 0, y: 1, z: 0 },
+        hitType: "environment",
+        targetId: null,
+      },
+    }));
+    const burstMessage = {
+      ...steadyMessage,
+      frame: { ...steadyFrame, events: burstEvents },
+    } satisfies ServerMessage;
+
+    expect(jsonBytes(fullMessage)).toBeLessThanOrEqual(50_000);
+    expect(jsonBytes(steadyMessage)).toBeLessThanOrEqual(50_000);
+    expect(burstEvents).toHaveLength(450);
+    expect(jsonBytes(burstMessage)).toBeLessThanOrEqual(150_000);
+    expect(jsonBytes(runtime.checkpoint())).toBeLessThanOrEqual(100_000);
+  });
 });
+
+function jsonBytes(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength;
+}

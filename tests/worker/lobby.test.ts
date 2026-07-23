@@ -17,6 +17,7 @@ describe("multiplayer worker", () => {
     const response = await worker.fetch(new Request("https://test/health"), env);
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true, service: "lastlinep2p" });
+    expect((await worker.fetch(new Request("https://test/metrics"), env)).status).toBe(404);
   });
 
   it("keeps private rooms out of the public lobby", async () => {

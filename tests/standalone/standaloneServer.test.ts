@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import type { RoomAdmission, ServerMessage } from "../../src/network/protocol";
+import type { ServerMetricRecord } from "../../src/server/ServerMetrics";
 import { loadStandaloneConfig, type StandaloneServerConfig } from "../../standalone/config";
 import {
   startStandaloneServer,
@@ -55,6 +56,7 @@ describe("standalone multiplayer server", () => {
       ok: true,
       service: "lastlinep2p",
     });
+    expect((await fetch(`${server.origin}/metrics`)).status).toBe(404);
 
     const administrator = await post(server.origin, "/v1/admin/bootstrap", {
       username: "operator",
@@ -86,6 +88,30 @@ describe("standalone multiplayer server", () => {
     });
     expect(session.response.status).toBe(200);
     expect(session.value).toMatchObject({ user: { username: "player_one", displayName: "Player One" } });
+  });
+
+  it("observes the real Node WebSocket buffered amount", async () => {
+    const fixture = await createFixture();
+    const records: ServerMetricRecord[] = [];
+    const server = await start(fixture.config, {
+      metricSink: { emit: (record) => { records.push(record); } },
+    });
+    const guest = await createGuest(server.origin, "Buffered Socket");
+    const admission = await createPrivateRoom(server.origin, guest);
+    const connection = connect(server.origin, admission);
+    await connection.waitFor("welcome");
+
+    await server.close();
+    servers.splice(servers.indexOf(server), 1);
+    await connection.waitForClose();
+
+    const buffered = records.find((record) => record.metric === "websocket_buffered_bytes");
+    expect(buffered).toMatchObject({
+      type: "server_metric",
+      metric: "websocket_buffered_bytes",
+      count: 2,
+      unavailableCount: 0,
+    });
   });
 
   it("rejects network-path request targets before administrator same-origin checks", async () => {

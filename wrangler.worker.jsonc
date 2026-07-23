@@ -11,6 +11,13 @@
       "custom_domain": true
     }
   ],
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": false
+    }
+  },
   "durable_objects": {
     "bindings": [
       {

@@ -4,6 +4,11 @@ import {
   type PublicRoomSummary,
   type RoomVisibility,
 } from "../src/network/protocol";
+import {
+  consoleServerMetricSink,
+  safeEmitServerMetric,
+  type ServerMetricSink,
+} from "../src/server/ServerMetrics";
 import { DurableService, type PlatformDurableObjectState } from "../src/server/platform/DurableService";
 import type { WorkerEnv } from "./env";
 import type {
@@ -28,11 +33,16 @@ const MAX_ROOM_RECORDS = 1_000;
 export class LobbyDirectory extends DurableService<WorkerEnv> {
   private data: LobbyData = { guests: {}, rooms: {} };
   private readonly rateLimits = new Map<string, { startedAt: number; count: number }>();
+  private readonly metricSink: ServerMetricSink;
+  private lastActiveRoomCount: number | null = null;
 
   public constructor(ctx: PlatformDurableObjectState, env: WorkerEnv) {
     super(ctx, env);
+    this.metricSink = ctx.metricSink ?? consoleServerMetricSink;
     this.ctx.blockConcurrencyWhile(async () => {
       this.data = await this.ctx.storage.get<LobbyData>(STORAGE_KEY) ?? this.data;
+      if (this.removeExpiredRecords()) await this.persist();
+      else this.emitActiveRoomCount();
     });
   }
 
@@ -239,8 +249,24 @@ export class LobbyDirectory extends DurableService<WorkerEnv> {
     throw new Error("room code allocation failed");
   }
 
-  private persist(): Promise<void> {
-    return this.ctx.storage.put(STORAGE_KEY, this.data);
+  private async persist(): Promise<void> {
+    await this.ctx.storage.put(STORAGE_KEY, this.data);
+    this.emitActiveRoomCount();
+  }
+
+  private emitActiveRoomCount(): void {
+    const now = Date.now();
+    const activeRoomCount = Object.values(this.data.rooms).filter((room) =>
+      room.status !== "finished" && now - (room.updatedAt ?? 0) <= ROOM_TTL_MS
+    ).length;
+    if (activeRoomCount === this.lastActiveRoomCount) return;
+    this.lastActiveRoomCount = activeRoomCount;
+    safeEmitServerMetric(this.metricSink, {
+      type: "server_metric",
+      schemaVersion: 1,
+      metric: "active_rooms",
+      value: activeRoomCount,
+    });
   }
 
   private removeExpiredRecords(): boolean {

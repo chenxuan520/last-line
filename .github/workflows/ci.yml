@@ -40,7 +40,7 @@ jobs:
       - name: Build
         env:
           VITE_MULTIPLAYER_ENABLED: "false"
-          VITE_MULTIPLAYER_URL: ${{ vars.VITE_MULTIPLAYER_URL }}
+          VITE_MULTIPLAYER_URL: ""
         run: npm run build
 
       - name: Build Worker
@@ -48,6 +48,70 @@ jobs:
 
       - name: Build standalone server
         run: npm run build:server
+
+      - name: Check performance budgets
+        run: npm run check:budgets
+
+      - name: Build Docker image
+        run: docker build --tag "last-line-ci:${GITHUB_SHA}" .
+
+      - name: Smoke test Docker image
+        env:
+          CONTAINER_NAME: last-line-ci-${{ github.run_id }}-${{ github.run_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cleanup() {
+            status=$?
+            trap - EXIT
+            if [[ "$status" -ne 0 ]]; then
+              printf 'Docker smoke test failed; container logs:\n' >&2
+              docker logs "$CONTAINER_NAME" >&2 || true
+            fi
+            docker rm --force "$CONTAINER_NAME" >/dev/null 2>&1 || true
+            exit "$status"
+          }
+          trap cleanup EXIT
+
+          docker run --detach \
+            --name "$CONTAINER_NAME" \
+            --init \
+            --read-only \
+            --security-opt no-new-privileges:true \
+            --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --tmpfs /data:rw,noexec,nosuid,size=64m \
+            --publish "127.0.0.1::8787" \
+            "last-line-ci:${GITHUB_SHA}"
+
+          port_binding="$(docker port "$CONTAINER_NAME" 8787/tcp)"
+          [[ "$port_binding" == 127.0.0.1:* ]]
+          host_port="${port_binding##*:}"
+          [[ "$host_port" =~ ^[0-9]+$ ]]
+
+          health_json=""
+          health_ready=false
+          for attempt in {1..30}; do
+            if health_json="$(curl --fail --silent --show-error "http://127.0.0.1:${host_port}/health" 2>/dev/null)"; then
+              health_ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [[ "$health_ready" != true ]]; then
+            printf 'Health endpoint did not become ready\n' >&2
+            exit 1
+          fi
+          if [[ "$health_json" != '{"ok":true,"service":"lastlinep2p"}' ]]; then
+            printf 'Unexpected health response: %s\n' "$health_json" >&2
+            exit 1
+          fi
+
+      - name: Clean up Docker smoke container
+        if: always()
+        env:
+          CONTAINER_NAME: last-line-ci-${{ github.run_id }}-${{ github.run_attempt }}
+        run: docker rm --force "$CONTAINER_NAME" >/dev/null 2>&1 || true
 
       - name: Upload GitHub Pages artifact
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
