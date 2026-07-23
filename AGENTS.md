@@ -14,6 +14,7 @@ npm run build
 npm run build:worker
 npm run build:server
 npm run build:standalone
+npm run check:budgets
 npm run preview
 ```
 
@@ -41,6 +42,7 @@ npm run preview
 - Close expired/finished rooms, release sockets and runtime state, and evict dormant local room services. Do not retain completed 50-actor matches indefinitely.
 - Reconstruct standalone requests only under `SERVER_PUBLIC_ORIGIN`; reject absolute/network-path targets before auth or same-origin checks. Trust forwarded client IPs only when every direct peer is a trusted proxy.
 - On shutdown, stop room loops and checkpoint before bounded HTTP/WebSocket draining. Database and process-lock cleanup belongs in `finally`, including startup-failure paths.
+- Keep operational metrics observational and low-cardinality. `active_rooms`, `tick_delay_ms`, `websocket_buffered_bytes`, and `checkpoint_duration_ms` use versioned structured logs only; never add room/account/IP/token labels, persist metrics into checkpoints, or expose a public metrics route. Cloudflare buffering must be reported as unavailable when the platform does not expose it.
 
 ## Asset Rules
 
@@ -69,6 +71,7 @@ npm run preview
 - Do not play audio during automated or manual verification.
 - Mobile fullscreen and orientation locking must originate from a real user activation. Never call `requestFullscreen()` from `orientationchange`; unsupported or rejected browsers must retain manual landscape gameplay and a usable retry path.
 - Run both Worker and standalone contract suites after changing shared multiplayer classes. Standalone regressions must cover real HTTP/WebSocket behavior, persistence/restart, process locking, alarm generations, reconnect grace, room eviction, and bounded shutdown; use deterministic barriers for races instead of timing-only assertions.
+- Performance gates must use deterministic operation, protocol-byte, scene-resource, and raw-artifact counts. Do not hard-gate wall-clock duration, FPS, heap usage, or compressed sizes; changing a checked-in budget requires an explicit architecture/resource review.
 
 ## Review and Delivery Rules
 
@@ -85,9 +88,10 @@ npm run preview
 2. Run `npm run test`.
 3. Run `npm run build`.
 4. Run `npm run build:worker` and `npm run build:server` when multiplayer/shared server code changed; run `npm run build:standalone` when the self-hosted artifact or same-origin client selection changed.
-5. If presentation changed, open the production build in local Chrome/Edge with volume `0` and check the console.
-6. Complete the review/re-review loop with no unresolved blocker, high, or medium findings.
-7. Update `AGENTS.md`, README, and `docs/` when contracts, controls, commands, architecture, persistence, security, or deployment behavior change.
+5. Run `npm run check:budgets` after producing the browser, Worker, and standalone artifacts.
+6. If presentation changed, open the production build in local Chrome/Edge with volume `0` and check the console.
+7. Complete the review/re-review loop with no unresolved blocker, high, or medium findings.
+8. Update `AGENTS.md`, README, and `docs/` when contracts, controls, commands, architecture, persistence, security, or deployment behavior change.
 
 ## Deployment Rules
 
@@ -99,3 +103,4 @@ npm run preview
 - Standalone production uses Node.js 24, a same-origin browser build, HTTPS reverse proxying with WebSocket support, and a persistent data volume. Keep Cloudflare and standalone data independent unless an explicit migration is designed.
 - Never commit `.env.standalone`, administrator recovery/bootstrap values, SQLite data, WAL files, cookies, admission/reconnect tokens, or proxy credentials.
 - Docker/Compose changes require a container smoke when Docker is available. If it is unavailable, record that gap and still verify the native bundle, real HTTP/WebSocket flow, graceful shutdown, and crash-lock recovery.
+- CI must build the production Docker image without registry credentials and run the image read-only as a non-root user with temporary writable mounts, then require the exact `/health` response before Pages or release artifacts proceed.

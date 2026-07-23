@@ -68,6 +68,8 @@ Standalone stores guests, room metadata, admissions, reconnect credentials, acco
 
 Reconnect rotation is two-phase: the previous token remains valid while a replacement is pending, and `connection.ack` promotes only the token issued to that connection. Losing the socket before `welcome` or its acknowledgement therefore cannot strand a client. Graceful SIGINT/SIGTERM stops room loops and writes an early checkpoint before bounded network draining, then writes again after sockets settle; the current checkpoint contract can still lose at most the interval since the last crash-safe write after an ungraceful kill and does not promise bit-for-bit restoration of transient Bot/controller memory.
 
+Server telemetry is deliberately observational. `LobbyDirectory` emits an absolute `active_rooms` gauge after persisted room-directory changes; each `GameRoom` emits 60-second count/sum/max summaries for scheduler `tick_delay_ms`, outbound `websocket_buffered_bytes`, and serialization-through-storage `checkpoint_duration_ms`. Records use the fixed `server_metric` schema version 1 and contain no room, account, IP, URL, admission, or reconnect identifiers. Standalone writes JSON lines to stdout and reports the real `ws.bufferedAmount`; Cloudflare writes the same structured records to Workers Logs but marks buffering samples unavailable because its server WebSocket API exposes no queue size. Metrics are never stored in room state or checkpoints, sink failures are contained, `/health` remains liveness-only, and no public metrics endpoint exists.
+
 ## Performance Strategy
 
 - Fixed 30 Hz rules with decoupled rendering
@@ -82,6 +84,7 @@ Reconnect rotation is two-phase: the previous token remains valid while a replac
 - Active multiplayer rooms use one single-threaded room authority—one Durable Object or one standalone in-process service—with 30 Hz rules, 10 Hz snapshots, and one-second checkpoints
 - Multiplayer snapshot smoothing is presentation-only; authoritative movement, combat, inventory, safe-zone, and result state are never interpolated or rewound
 - Cloudflare sockets may hibernate through the Durable Object API; standalone sockets remain in the single Node process and recover through reconnect after a restart
+- CI budgets raw browser/Worker/server bytes and deterministic AI operations, snapshot bytes, and production-scene resources. These gates avoid machine-dependent timing, FPS, memory, and compression assertions.
 
 ## Boundaries
 
