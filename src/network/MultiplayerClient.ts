@@ -222,6 +222,7 @@ export class MultiplayerConnection {
   private socketListeners: AbortController | null = null;
   private closed = false;
   private opened = false;
+  private terminalMessage: Extract<ServerMessage, { type: "error" }> | null = null;
 
   public constructor(
     private readonly apiUrl: string,
@@ -306,14 +307,19 @@ export class MultiplayerConnection {
       return;
     }
     if (!isServerMessage(value)) return;
+    if (
+      value.type === "error"
+      && (value.code === "protocol-mismatch" || value.code === "room-closed" || value.code === "account-disabled")
+    ) this.terminalMessage = value;
     if (value.type === "welcome") {
       if (value.protocolVersion !== MULTIPLAYER_PROTOCOL_VERSION) {
         const error: ServerMessage = { type: "error", code: "protocol-mismatch", message: "联机协议版本不兼容，请刷新页面" };
-        if (this.handler) this.handler(error);
-        else this.queuedMessages.push(error);
+        const handler = this.handler;
+        this.terminalMessage = error;
         const socket = this.socket;
         this.finishClosed();
         socket?.close(4002, "protocol mismatch");
+        if (handler) handler(error);
         return;
       }
       this.reconnectToken = value.reconnectToken;
@@ -341,6 +347,7 @@ export class MultiplayerConnection {
   private finishClosed(): void {
     if (this.closed) return;
     this.closed = true;
+    const preserveTerminalMessage = this.handler === null ? this.terminalMessage : null;
     this.statusHandler?.("closed");
     if (this.reconnectTimer !== null) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
@@ -350,6 +357,7 @@ export class MultiplayerConnection {
     this.handler = null;
     this.statusHandler = null;
     this.queuedMessages.length = 0;
+    if (preserveTerminalMessage) this.queuedMessages.push(preserveTerminalMessage);
     this.reconnectToken = null;
   }
 }

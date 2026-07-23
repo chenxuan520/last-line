@@ -6,6 +6,7 @@ import {
   runInDurableObject,
 } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
+import { MULTIPLAYER_PROTOCOL_VERSION, type ServerMessage } from "../../src/network/protocol";
 import worker from "../../worker/index";
 
 describe("multiplayer worker", () => {
@@ -91,14 +92,19 @@ describe("multiplayer worker", () => {
     expect(first.status).toBe(101);
     const socket = first.webSocket;
     if (!socket) throw new Error("WebSocket missing");
-    const welcome = new Promise<void>((resolve) => {
+    const welcome = new Promise<Extract<ServerMessage, { type: "welcome" }>>((resolve) => {
       socket.addEventListener("message", (event) => {
-        const message = JSON.parse(String(event.data)) as { type?: string };
-        if (message.type === "welcome") resolve();
+        const message = JSON.parse(String(event.data)) as ServerMessage;
+        if (message.type === "welcome") resolve(message);
       });
     });
     socket.accept();
-    await welcome;
+    await expect(welcome).resolves.toMatchObject({
+      type: "welcome",
+      protocolVersion: MULTIPLAYER_PROTOCOL_VERSION,
+      roomId: admission.roomId,
+      playerId: admission.playerId,
+    });
     socket.send(JSON.stringify({ type: "connection.ack" }));
     await waitForAdmissionConsumption(String(admission.roomId), String(admission.playerId));
     const replay = await worker.fetch(request(), env);

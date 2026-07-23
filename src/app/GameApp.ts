@@ -328,12 +328,14 @@ export class GameApp {
         if (status) status.textContent = "请先完成账号验证";
         return;
       }
+      this.mobileFullscreen.activateFromUserGesture();
       try {
         if (status) status.textContent = "正在建立联机身份…";
         const client = createClient();
         const admission = await action(client);
         await this.enterLobby(client, admission);
       } catch (error) {
+        this.mobileFullscreen.deactivate();
         if (status) status.textContent = error instanceof Error ? error.message : "联机请求失败";
       }
     };
@@ -456,11 +458,13 @@ export class GameApp {
         count.textContent = `${room.playerCount}/${room.capacity}`;
         button.append(label, count);
         button.addEventListener("click", async () => {
+          this.mobileFullscreen.activateFromUserGesture();
           try {
             if (status) status.textContent = "正在加入房间…";
             const admission = await client.joinRoom(room.code);
             await this.enterLobby(client, admission);
           } catch (error) {
+            this.mobileFullscreen.deactivate();
             if (status) status.textContent = error instanceof Error ? error.message : "加入失败";
           }
         });
@@ -491,14 +495,22 @@ export class GameApp {
       if (message.type === "lobby.state") this.renderLobby(client, connection, message.lobby);
       if (message.type === "match.full") void this.startMultiplayerSession(connection, message);
       if (message.type === "error") {
-        const status = this.uiRoot.querySelector<HTMLElement>("[data-lobby='status']");
-        if (status) status.textContent = message.message;
-        if (message.code === "cannot-start") this.mobileFullscreen.deactivate();
-        if (message.code === "account-disabled" || message.code === "room-closed") {
+        const terminal = message.code === "protocol-mismatch"
+          || message.code === "account-disabled"
+          || message.code === "room-closed";
+        if (terminal) {
           this.mobileFullscreen.deactivate();
           connection.close();
           if (this.multiplayerConnection === connection) this.multiplayerConnection = null;
-          this.renderMultiplayerMenu();
+        }
+        const status = this.uiRoot.querySelector<HTMLElement>("[data-lobby='status']");
+        if (status) status.textContent = message.message;
+        if (message.code === "cannot-start") this.mobileFullscreen.deactivate();
+        if (terminal) {
+          const actions = this.uiRoot.querySelector<HTMLElement>("[data-lobby='actions']");
+          actions?.replaceChildren(this.actionButton("返回联机大厅", "BACK", () => {
+            this.renderMultiplayerMenu();
+          }, true));
         }
       }
     });
@@ -521,7 +533,6 @@ export class GameApp {
   }
 
   private renderLobby(client: MultiplayerClient, connection: MultiplayerConnection, lobby: LobbyView): void {
-    if (lobby.status === "waiting") this.mobileFullscreen.deactivate();
     const summary = this.uiRoot.querySelector<HTMLElement>("[data-lobby='summary']");
     if (!summary) return;
     const local = lobby.members.find((member) => member.playerId === client.playerId);
@@ -598,7 +609,7 @@ export class GameApp {
         this.mobileFullscreen,
         connection,
         initial,
-        () => this.returnToMenu(),
+        (terminalMessage) => this.returnToMenu(terminalMessage),
       );
       this.session?.dispose();
       this.session = session;
@@ -613,13 +624,28 @@ export class GameApp {
     }
   }
 
-  private returnToMenu(): void {
+  private returnToMenu(terminalMessage?: string): void {
     this.mobileFullscreen.deactivate();
     this.session?.dispose();
     this.session = null;
     this.multiplayerConnection?.close();
     this.multiplayerConnection = null;
-    this.renderMenu();
+    if (terminalMessage) this.renderMultiplayerTerminal(terminalMessage);
+    else this.renderMenu();
+  }
+
+  private renderMultiplayerTerminal(message: string): void {
+    this.renderLobbyShell("CLOSED");
+    const heading = this.uiRoot.querySelector<HTMLElement>("h1");
+    if (heading) heading.textContent = "联机已结束";
+    const summary = this.uiRoot.querySelector<HTMLElement>("[data-lobby='summary']");
+    if (summary) summary.textContent = "服务器已终止当前联机连接";
+    const status = this.uiRoot.querySelector<HTMLElement>("[data-lobby='status']");
+    if (status) status.textContent = message;
+    const actions = this.uiRoot.querySelector<HTMLElement>("[data-lobby='actions']");
+    actions?.replaceChildren(this.actionButton("返回联机大厅", "BACK", () => {
+      this.renderMultiplayerMenu();
+    }, true));
   }
 
   private readSettings(): void {

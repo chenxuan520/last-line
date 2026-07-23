@@ -101,7 +101,7 @@ export class MultiplayerSession implements GameSession {
     private readonly mobileFullscreen: MobileFullscreenController,
     private readonly connection: MultiplayerConnection,
     private readonly localActorId: EntityId,
-    private readonly onExit: () => void,
+    private readonly onExit: (terminalMessage?: string) => void,
     bundle: Awaited<ReturnType<typeof createIslandScene>>,
     initial: FullMessage,
   ) {
@@ -140,7 +140,7 @@ export class MultiplayerSession implements GameSession {
     mobileFullscreen: MobileFullscreenController,
     connection: MultiplayerConnection,
     initial: FullMessage,
-    onExit: () => void,
+    onExit: (terminalMessage?: string) => void,
   ): Promise<MultiplayerSession> {
     const bundle = await createIslandScene(
       engine,
@@ -175,7 +175,7 @@ export class MultiplayerSession implements GameSession {
       this.assets,
       this.state.mapSeed,
       () => this.resumeInput(),
-      this.onExit,
+      () => this.onExit(),
       {
         online: true,
         actorLabels: this.displayNames,
@@ -251,8 +251,11 @@ export class MultiplayerSession implements GameSession {
 
   private processMessages(): boolean {
     for (const message of this.queuedMessages.splice(0)) {
-      if (message.type === "error" && (message.code === "room-closed" || message.code === "account-disabled")) {
-        this.onExit();
+      if (
+        message.type === "error"
+        && (message.code === "protocol-mismatch" || message.code === "room-closed" || message.code === "account-disabled")
+      ) {
+        this.onExit(message.message);
         return false;
       }
       if (message.type === "match.full") this.applyFull(message);

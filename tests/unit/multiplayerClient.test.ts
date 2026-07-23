@@ -53,7 +53,12 @@ describe("MultiplayerConnection lifecycle", () => {
       },
     );
     const messages = vi.fn();
-    connection.setMessageHandler(messages);
+    const events: string[] = [];
+    connection.setStatusHandler((status) => events.push(`status:${status}`));
+    connection.setMessageHandler((message) => {
+      events.push(`message:${message.type === "error" ? message.code : message.type}`);
+      messages(message);
+    });
     const opened = connection.open();
     sockets[0]?.open();
     await opened;
@@ -69,6 +74,30 @@ describe("MultiplayerConnection lifecycle", () => {
     }));
 
     expect(messages).toHaveBeenCalledWith(expect.objectContaining({ code: "protocol-mismatch" }));
+    expect(events.slice(-2)).toEqual(["status:closed", "message:protocol-mismatch"]);
+  });
+
+  it.each([
+    ["room-closed", "房间已由管理员关闭"],
+    ["account-disabled", "账号已被禁用"],
+  ])("preserves %s across the lobby-to-match handler gap", async (code, message) => {
+    const socket = new FakeWebSocket();
+    const connection = new MultiplayerConnection(
+      "https://example.test",
+      admission(),
+      () => socket as unknown as WebSocket,
+    );
+    const opened = connection.open();
+    socket.open();
+    await opened;
+
+    socket.serverMessage(JSON.stringify({ type: "error", code, message }));
+    socket.serverClose(code === "room-closed" ? 4010 : 4011);
+    const messages = vi.fn();
+    connection.setMessageHandler(messages);
+
+    expect(messages).toHaveBeenCalledOnce();
+    expect(messages).toHaveBeenCalledWith({ type: "error", code, message });
   });
 });
 

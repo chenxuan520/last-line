@@ -5,7 +5,11 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
-import type { RoomAdmission, ServerMessage } from "../../src/network/protocol";
+import {
+  MULTIPLAYER_PROTOCOL_VERSION,
+  type RoomAdmission,
+  type ServerMessage,
+} from "../../src/network/protocol";
 import type { ServerMetricRecord } from "../../src/server/ServerMetrics";
 import { loadStandaloneConfig, type StandaloneServerConfig } from "../../standalone/config";
 import {
@@ -156,6 +160,16 @@ describe("standalone multiplayer server", () => {
     const second = connect(server.origin, secondAdmission);
     const firstWelcome = await first.waitFor("welcome");
     const secondWelcome = await second.waitFor("welcome");
+    expect(firstWelcome).toMatchObject({
+      protocolVersion: MULTIPLAYER_PROTOCOL_VERSION,
+      roomId: firstAdmission.roomId,
+      playerId: firstAdmission.playerId,
+    });
+    expect(secondWelcome).toMatchObject({
+      protocolVersion: MULTIPLAYER_PROTOCOL_VERSION,
+      roomId: secondAdmission.roomId,
+      playerId: secondAdmission.playerId,
+    });
     first.socket.send(JSON.stringify({ type: "connection.ack" }));
     second.socket.send(JSON.stringify({ type: "connection.ack" }));
     second.socket.send(JSON.stringify({ type: "lobby.ready", ready: true }));

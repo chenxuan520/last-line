@@ -10,6 +10,7 @@ Maintain a browser battle royale with one human and 49 AI actors in single-playe
 npm ci
 npm run typecheck
 npm run test
+npm run test:multiplayer:production
 npm run test:coverage
 npm run build
 npm run build:worker
@@ -72,12 +73,15 @@ npm run preview
 - Do not play audio during automated or manual verification.
 - Mobile fullscreen and orientation locking must originate from a real user activation. Never call `requestFullscreen()` from `orientationchange`; unsupported or rejected browsers must retain manual landscape gameplay and a usable retry path.
 - Run both Worker and standalone contract suites after changing shared multiplayer classes. Standalone regressions must cover real HTTP/WebSocket behavior, persistence/restart, process locking, alarm generations, reconnect grace, room eviction, and bounded shutdown; use deterministic barriers for races instead of timing-only assertions.
+- Keep `test:multiplayer:production` as a real public HTTP/WebSocket smoke, separate from coverage. It must create a private room, validate the deployed welcome protocol and lobby state, then leave; run it after every production Worker or Pages deployment. The scheduled production-smoke workflow is drift detection, not an atomic deployment gate.
+- Never let a generic WebSocket `closed` status overwrite a specific terminal multiplayer error. Protocol mismatch, room closure, account revocation, and similar terminal causes must remain the final visible message and provide a usable path back to the multiplayer menu.
 - Performance gates must use deterministic operation, protocol-byte, scene-resource, and raw-artifact counts. Do not hard-gate wall-clock duration, FPS, heap usage, or compressed sizes; changing a checked-in budget requires an explicit architecture/resource review.
 - Coverage is measured separately by source ownership: V8 for `src/` and `standalone/`, Istanbul for the Cloudflare `worker/` runtime. Keep all business source files in scope, write reports only under the ignored `node_modules/.cache/coverage/`, and treat lowering a checked-in threshold as a reviewed quality decision rather than hiding uncovered code.
 
 ## Review and Delivery Rules
 
 - Every non-trivial code change must pass a final code review after implementation and required tests are complete. Do not treat passing tests as a substitute for review.
+- Reviewers must not repeat test, typecheck, build, budget, smoke, or browser commands that the outer implementation agent already completed and recorded in the active plan. Reviewer work defaults to static diff/contract analysis; it may run only the smallest targeted verification for a specific uncovered risk, and must state why existing evidence is insufficient. Never rerun full suites merely for independent confirmation.
 - Re-read the current plan before evaluating findings. Treat reviewer feedback as input to verify against requirements, compatibility, existing semantics, and code; do not apply it mechanically.
 - Resolve every blocker, high, and medium finding, then request re-review. Do not commit, push, deploy, or report completion while any such finding remains, unless the plan records a specific, evidence-backed reason that no code change is required.
 - Record each review round and the disposition of every finding in the current plan's `## Review`; record implementation, validation, commit, and deployment results incrementally under `## Build`.
@@ -100,6 +104,10 @@ npm run preview
 - Keep `.github/workflows/ci.yml` on Node.js 24 and lockfile installs.
 - Pull requests run checks only; `main` deploys the verified `dist/` artifact to GitHub Pages.
 - Cloudflare Pages uses dashboard Git integration with `main`, `npm run build`, and output directory `dist`.
+- Cloudflare Workers Builds must also track `main` and run the documented Worker build and deploy commands. A successful repository push or Pages deployment never proves that the Worker deployed.
+- Any change touching `worker/`, shared multiplayer server code, or `MULTIPLAYER_PROTOCOL_VERSION` is incomplete until `wrangler deployments status` shows a new production Worker version created for that release and `npm run test:multiplayer:production` passes against the public endpoint. Record both the Worker version ID and smoke result in the active plan. If automatic Worker deployment did not occur, report it as a blocker and use the verified `npm run deploy:worker` fallback; never silently leave Pages and Worker on different revisions.
+- Keep `npm run deploy:worker` as the verified fallback chain: Worker typecheck, Worker tests, dry-run bundle, deployment, then the real production HTTP/WebSocket smoke. Do not replace it with a bare `wrangler deploy` for normal releases.
+- Worker and Pages deployments are not atomic. A protocol-version change requires a documented maintenance rollout: disable new multiplayer entry, drain or close rooms, deploy and smoke the Worker, deploy the matching Pages client, then re-enable entry and smoke again. Never independently roll strict protocol versions and assume CI ordering makes them compatible.
 - Do not add Cloudflare long-lived credentials to the repository when Git integration is available.
 - Keep Vite asset URLs compatible with both the GitHub `/last-line/` subpath and the Cloudflare root domain.
 - Standalone production uses Node.js 24, a same-origin browser build, HTTPS reverse proxying with WebSocket support, and a persistent data volume. Keep Cloudflare and standalone data independent unless an explicit migration is designed.

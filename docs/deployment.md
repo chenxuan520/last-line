@@ -101,7 +101,20 @@ Worker verification:
 npm run types:worker
 npm run typecheck:worker
 npm run build:worker
+npm run test:multiplayer:production
 ```
+
+`test:multiplayer:production` uses the public Pages origin to create one private production room, opens the returned WebSocket, requires a `welcome` with the source `MULTIPLAYER_PROTOCOL_VERSION` followed by the matching waiting-room member state, and then acknowledges and leaves the room. `MULTIPLAYER_SMOKE_URL` and `MULTIPLAYER_SMOKE_ORIGIN` may override the production defaults. A bounded scheduled GitHub Actions workflow detects persistent production drift; it is an alert, not a deployment-order gate.
+
+Worker and Pages deployments are independent, and strict protocol versions do not support a mixed rolling release. For a protocol-version change, use a maintenance rollout instead of choosing either component first:
+
+1. Disable new multiplayer entry in the production Pages build and wait for that deployment to finish.
+2. Use the administrator room list to drain or close active rooms; announce that already-open old tabs must refresh after maintenance.
+3. Deploy the Worker, then run `npm run test:multiplayer:production` against it.
+4. Deploy the matching Pages client and wait for the production deployment to finish.
+5. Re-enable multiplayer entry, run the production smoke again, and verify room entry in Chrome/Edge with volume `0`.
+
+Do not describe the scheduled smoke or the repository CI as an atomic gate between Cloudflare deployments. Old tabs that survive the maintenance window must receive the explicit protocol-mismatch refresh message; the generic connection-closed label must not replace it.
 
 Create a separate Cloudflare Workers Builds project from the same repository:
 
@@ -109,13 +122,21 @@ Create a separate Cloudflare Workers Builds project from the same repository:
 | --- | --- |
 | Worker name | `lastlinep2p` |
 | Production branch | `main` |
-| Build command | `npm run typecheck:worker && npm run build:worker` |
-| Deploy command | `npx wrangler deploy --config wrangler.worker.jsonc` |
+| Build command | `npm ci && npm run typecheck:worker && npm run test:worker && npm run build:worker` |
+| Deploy command | `npx wrangler deploy --config wrangler.worker.jsonc && npm run test:multiplayer:production` |
 | Node version | `24` |
 
 The deployed Worker uses `https://lastlinep2p.011203.xyz`; do not reuse the existing Pages CNAME. The public, non-secret endpoint and `VITE_MULTIPLAYER_ENABLED=true` are committed in `.env.production`. GitHub Actions overrides the flag to `false`, so GitHub Pages remains a single-player static demo with no multiplayer button. The local browser falls back to `http://127.0.0.1:8787` only on localhost.
 
 Workers Builds manages deployment access, so no long-lived Cloudflare token is added to the repository or GitHub Actions.
+
+Workers Builds is required for every `main` push, including commits that only appear to change the client: shared protocol imports can still require a matching Worker artifact. A Pages deployment is not evidence of a Worker deployment. After each release that touches Worker/shared multiplayer/protocol code:
+
+1. Run `npx wrangler deployments status --config wrangler.worker.jsonc` and confirm a new production version timestamp/ID for the release.
+2. Run `npm run test:multiplayer:production` and require the real room admission, WebSocket welcome, protocol, lobby member state, and leave flow to pass.
+3. Record the Worker version ID and smoke result in the active plan or release record.
+
+If Workers Builds is unavailable or failed, use `npm run deploy:worker`. That command intentionally runs Worker typecheck, Worker tests, a dry-run bundle, the production deployment, and the public multiplayer smoke as one verified fallback. Do not use a bare `wrangler deploy` for a normal release and do not report completion while the public Worker is still on the preceding version.
 
 ### Management terminal secrets
 
