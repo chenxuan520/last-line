@@ -103,13 +103,14 @@ npm run dev:worker
 ```bash
 npm run typecheck
 npm run test
+npm run test:coverage
 npm run build
 npm run build:worker
 npm run build:server
 npm run check:budgets
 ```
 
-测试仅使用 Vitest，不会下载浏览器。`check:budgets` 会检查前端、Worker、standalone 的产物体积和分块预算；GitHub Actions 还会实际构建 Docker 镜像并启动容器验证 `/health`。手动验收前请将游戏音量设为 `0`。
+测试仅使用 Vitest，不会下载浏览器。`test:coverage` 会分别检查应用、Cloudflare Worker 和 standalone 的覆盖率基线并输出加权总值；`check:budgets` 会检查三套产物的体积和分块预算。GitHub Actions 还会实际构建 Docker 镜像并启动容器验证 `/health`。手动验收前请将游戏音量设为 `0`。
 
 - [架构说明](docs/architecture.md)
 - [素材替换](docs/asset-manifest.md)

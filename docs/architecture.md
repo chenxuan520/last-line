@@ -88,6 +88,21 @@ Server telemetry is deliberately observational. `LobbyDirectory` emits an absolu
 - Cloudflare sockets may hibernate through the Durable Object API; standalone sockets remain in the single Node process and recover through reconnect after a restart
 - CI budgets raw browser/Worker/server bytes and deterministic AI operations, snapshot bytes, and production-scene resources. These gates avoid machine-dependent timing, FPS, memory, and compression assertions.
 
+## Coverage Baseline
+
+Coverage follows source ownership so every production TypeScript file is counted once: unit tests measure `src/`, Cloudflare integration tests measure `worker/`, and standalone integration tests measure `standalone/`. Node-based suites use V8 coverage; the Workers Vitest pool uses Istanbul instrumentation because `workerd` does not expose native V8 inspector coverage. Declaration files are the only source-pattern exclusion.
+
+`npm run test:coverage` runs all three suites, stores transient JSON summaries under `node_modules/.cache/coverage/`, enforces each suite's checked-in statements/branches/functions/lines thresholds, and prints a count-weighted overall result. The initial measured percentages are:
+
+| Scope | Statements | Branches | Functions | Lines |
+| --- | ---: | ---: | ---: | ---: |
+| `src/` | 73.93% | 67.33% | 75.86% | 76.14% |
+| `worker/` | 76.31% | 69.27% | 91.38% | 82.21% |
+| `standalone/` | 76.61% | 61.48% | 86.30% | 79.84% |
+| Weighted total | 74.48% | 67.47% | 79.38% | 77.32% |
+
+The gates intentionally round down from those measurements instead of claiming an arbitrary target. Coverage is a regression signal, not a substitute for deterministic behavior/resource budgets, real Worker/standalone contracts, browser acceptance, or code review. Raising thresholds should accompany real tests; lowering them requires an explicit review and must not be achieved by excluding difficult business modules.
+
 ## Boundaries
 
 Single-player never opens a network connection and pauses when desktop pointer lock or touch input is inactive. Multiplayer is server-authoritative and continues while a touch client is paused, hidden, or portrait-oriented; that client settles to idle input. Mobile gameplay requires landscape orientation. Fullscreen and orientation lock are best-effort browser capabilities and always retain a manual fallback. Standalone deployment is intentionally limited to one server and one Node process; running several processes against one database is rejected rather than risking duplicate room authorities. There are no social features, rankings, server-side lag-compensated hit rewind, or speculative future 5v5 rules.

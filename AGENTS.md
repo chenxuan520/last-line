@@ -10,6 +10,7 @@ Maintain a browser battle royale with one human and 49 AI actors in single-playe
 npm ci
 npm run typecheck
 npm run test
+npm run test:coverage
 npm run build
 npm run build:worker
 npm run build:server
@@ -72,6 +73,7 @@ npm run preview
 - Mobile fullscreen and orientation locking must originate from a real user activation. Never call `requestFullscreen()` from `orientationchange`; unsupported or rejected browsers must retain manual landscape gameplay and a usable retry path.
 - Run both Worker and standalone contract suites after changing shared multiplayer classes. Standalone regressions must cover real HTTP/WebSocket behavior, persistence/restart, process locking, alarm generations, reconnect grace, room eviction, and bounded shutdown; use deterministic barriers for races instead of timing-only assertions.
 - Performance gates must use deterministic operation, protocol-byte, scene-resource, and raw-artifact counts. Do not hard-gate wall-clock duration, FPS, heap usage, or compressed sizes; changing a checked-in budget requires an explicit architecture/resource review.
+- Coverage is measured separately by source ownership: V8 for `src/` and `standalone/`, Istanbul for the Cloudflare `worker/` runtime. Keep all business source files in scope, write reports only under the ignored `node_modules/.cache/coverage/`, and treat lowering a checked-in threshold as a reviewed quality decision rather than hiding uncovered code.
 
 ## Review and Delivery Rules
 
@@ -86,12 +88,13 @@ npm run preview
 
 1. Run `npm run typecheck`.
 2. Run `npm run test`.
-3. Run `npm run build`.
-4. Run `npm run build:worker` and `npm run build:server` when multiplayer/shared server code changed; run `npm run build:standalone` when the self-hosted artifact or same-origin client selection changed.
-5. Run `npm run check:budgets` after producing the browser, Worker, and standalone artifacts.
-6. If presentation changed, open the production build in local Chrome/Edge with volume `0` and check the console.
-7. Complete the review/re-review loop with no unresolved blocker, high, or medium findings.
-8. Update `AGENTS.md`, README, and `docs/` when contracts, controls, commands, architecture, persistence, security, or deployment behavior change.
+3. Run `npm run test:coverage`.
+4. Run `npm run build`.
+5. Run `npm run build:worker` and `npm run build:server` when multiplayer/shared server code changed; run `npm run build:standalone` when the self-hosted artifact or same-origin client selection changed.
+6. Run `npm run check:budgets` after producing the browser, Worker, and standalone artifacts.
+7. If presentation changed, open the production build in local Chrome/Edge with volume `0` and check the console.
+8. Complete the review/re-review loop with no unresolved blocker, high, or medium findings.
+9. Update `AGENTS.md`, README, and `docs/` when contracts, controls, commands, architecture, persistence, security, or deployment behavior change.
 
 ## Deployment Rules
 

@@ -16,5 +16,17 @@ export default defineConfig({
   ],
   test: {
     include: ["tests/worker/**/*.test.ts"],
+    coverage: {
+      provider: "istanbul",
+      include: ["worker/**/*.ts"],
+      reportsDirectory: "node_modules/.cache/coverage/worker",
+      reporter: ["text", "json-summary"],
+      thresholds: {
+        statements: 76,
+        branches: 69,
+        functions: 91,
+        lines: 82,
+      },
+    },
   },
 });
