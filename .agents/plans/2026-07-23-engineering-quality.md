@@ -40,3 +40,11 @@
 - 远端验证修正：首轮真实容器 smoke 证明 root-owned `/data` tmpfs 与镜像的非 root 用户不兼容；该问题成立且阻塞容器启动，已用显式 UID/GID 和私有目录权限修复，而不是放宽为 root 容器或可写根目录。
 - 独立核对：指标只读取调度时间、socket 队列和 checkpoint 写入边界，不反馈到模拟、网络节流或持久状态；Cloudflare buffer 不可用语义与 standalone 真实值明确分离；无新增 `/metrics` 或内部路由暴露；预算只使用固定 seed、操作/资源/原始字节，不依赖运行器速度、FPS、GC、内存或压缩器版本。
 - 结论：**通过，未发现剩余 blocker/high/medium。** Docker 本机不可用是已记录的验证环境缺口，由 push 后的 GitHub Actions 容器构建与 smoke 关闭。
+
+### 2026-07-23 15:08 +0800 — Final range review
+
+- 审查范围：以本 plan 为基线，完整复核 `aa4d496..32c1488` 的 3 个提交和全部 24 个改动文件，并对照 `main@aa4d496`；用户原有 `.gitignore` 修改继续排除且未触碰。
+- 结论：**通过。No findings（blocker/high/medium/low 均无）。** CI 固定 Pages production 环境并构建 browser/Worker/server；原始字节及固定操作、协议、场景资源预算均为确定性门禁；Docker 使用实际 production image、非 root image user、只读根目录、`no-new-privileges`、受限临时 `/tmp`/`/data`，严格匹配 `/health` 且失败/成功路径均清理容器。
+- 指标核对：`active_rooms` 取持久 room directory 的 fresh waiting/countdown/running 绝对数；tick delay 在权威 step 前相对计划 tick 采样；checkpoint 从 `runtime.checkpoint()` 序列化前计时至 `checkpoint-v1` storage 完成/失败；standalone 读取真实 `ws.bufferedAmount`，Cloudflare 只增加 `unavailableCount`。记录为低基数 schema v1 JSON line，不持久化、不公开 endpoint、不反馈权威逻辑，sink 同步/异步失败被隔离；Worker/standalone 共用实现与协议边界未分叉。
+- 验证证据：独立执行 `npm run typecheck`；定向 4 个 unit budget/metrics 文件（26 tests）、Worker metrics（1 test）、standalone metrics/lifecycle（14 tests）；重新执行 browser、Worker、server builds 与 `npm run check:budgets`，全部通过，预算值与 Build 记录一致；`git diff --check aa4d496..32c1488` 通过。另核验 GitHub Actions run `29986319176` 对 `32c1488` 全部成功，包含 362 项完整测试、三套 build、budgets、无凭证 Docker build、真实 image smoke、cleanup 与后续 Pages deploy。
+- 残余风险：本机仍无 Docker，未重复本地容器 smoke；远端最终 run 已实际覆盖并关闭此前 root-owned `/data` tmpfs 问题。改动业务源码未出现 `context.Background()`。
