@@ -26,7 +26,7 @@
     "test:worker": "vitest run --config vitest.worker.config.ts --max-workers=1 --no-isolate",
     "test:server": "vitest run --config vitest.standalone.config.ts --max-workers=1",
     "test": "npm run test:unit && npm run test:worker && npm run test:server",
-    "test:coverage:unit": "vitest run --config vitest.config.ts --coverage",
+    "test:coverage:unit": "vitest run --config vitest.config.ts --max-workers=1 --coverage",
     "test:coverage:worker": "vitest run --config vitest.worker.config.ts --max-workers=1 --no-isolate --coverage",
     "test:coverage:server": "vitest run --config vitest.standalone.config.ts --max-workers=1 --coverage",
     "test:coverage": "npm run test:coverage:unit && npm run test:coverage:worker && npm run test:coverage:server && tsx scripts/report-coverage-baseline.ts",
