@@ -14,6 +14,7 @@ import {
   type MapObstacle,
   type RoofRamp,
 } from "../../config/map";
+import { ACTOR_EYE_HEIGHT, ACTOR_HEIGHT } from "../../game/rules/actorGeometry";
 import type { Vector3State } from "../../game/state/types";
 import { StaticGridIndex } from "../../game/spatial/StaticGridIndex";
 
@@ -21,8 +22,6 @@ const DEFAULT_CLEARANCE = 0.4;
 const PATH_CLEARANCE = 0.64;
 const WAYPOINT_PADDING = 0.13;
 const MAX_PATH_SEARCH_NODES = 256;
-const ACTOR_EYE_HEIGHT = 1.76;
-const ACTOR_HEIGHT = 1.8;
 const NAVIGATION_GRID_CELL_SIZE = 32;
 const DEFAULT_BLOCKING_OBSTACLES = [
   ...MAP_WALL_SEGMENTS,

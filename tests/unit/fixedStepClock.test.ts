@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { FixedStepClock } from "../../src/game/FixedStepClock";
+import { SIMULATION_STEP_SECONDS, SIMULATION_TICK_RATE } from "../../src/game/simulationTiming";
 import { QUALITY_PROFILES } from "../../src/config/settings";
 
 describe("FixedStepClock", () => {
+  it("uses the shared 30 Hz simulation contract", () => {
+    expect(SIMULATION_TICK_RATE).toBe(30);
+    expect(SIMULATION_STEP_SECONDS).toBe(1 / 30);
+  });
+
   it("advances in fixed-size steps", () => {
     const clock = new FixedStepClock(0.1);
     const deltas: number[] = [];

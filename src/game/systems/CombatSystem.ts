@@ -1,5 +1,6 @@
 import type { WeaponConfig } from "../../config/weapons";
 import type { ActorCommand } from "../commands/ActorCommand";
+import { calculateProtectedDamage } from "../rules/damage";
 import { selectSimultaneousSurvivor } from "../rules/resolveSimultaneous";
 import {
   getActiveWeapon,
@@ -288,11 +289,7 @@ function wouldBeLethal(actor: ActorState, rawDamage: number): boolean {
   if (rawDamage <= 0) {
     return false;
   }
-  const helmetReduction = actor.inventory.helmetLevel === 2 ? 0.2 : actor.inventory.helmetLevel === 1 ? 0.1 : 0;
-  const reducedDamage = rawDamage * (1 - helmetReduction);
-  const armorRate = actor.inventory.armorLevel === 2 ? 0.55 : 0.45;
-  const armorAbsorption = Math.min(actor.armor, reducedDamage * armorRate);
-  return reducedDamage - armorAbsorption >= actor.health;
+  return calculateProtectedDamage(actor, rawDamage).healthDamage >= actor.health;
 }
 
 function normalize(value: Vector3State): Vector3State {

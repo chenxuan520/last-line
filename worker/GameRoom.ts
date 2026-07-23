@@ -1,4 +1,5 @@
 import type { EntityId } from "../src/game/state/types";
+import { SIMULATION_TICK_MS, SIMULATION_TICK_RATE } from "../src/game/simulationTiming";
 import {
   MAX_HUMAN_PLAYERS,
   MIN_HUMAN_PLAYERS,
@@ -62,6 +63,12 @@ interface PendingCheckpoint {
   startedAt: number;
 }
 
+interface CachedAccountStatus {
+  checkedAt: number;
+  enabled: unknown;
+  sessionRevision: unknown;
+}
+
 export type RoomSocketPreflight =
   | {
       kind: "accept";
@@ -84,7 +91,6 @@ export type RoomSocketPreflight =
 
 const STORAGE_KEY = "room-v1";
 const CHECKPOINT_KEY = "checkpoint-v1";
-const TICK_MS = 1_000 / 30;
 const COUNTDOWN_MS = 3_000;
 const WAITING_TTL_MS = 60 * 60 * 1_000;
 const WATCHDOG_MS = 15_000;
@@ -99,7 +105,7 @@ export class GameRoom extends DurableService<WorkerEnv> {
   private readonly snapshotThrottle = new SnapshotThrottle(SNAPSHOT_MINIMUM_INTERVAL_MS);
   private readonly visibleLootByPlayer = new Map<string, Set<EntityId>>();
   private readonly messageRates = new Map<string, { startedAt: number; count: number }>();
-  private readonly accountStatusCache = new Map<string, { checkedAt: number; status: "active" | "revoked" }>();
+  private readonly accountStatusCache = new Map<string, CachedAccountStatus>();
   private readonly metrics: RoomMetricCollector;
 
   public constructor(ctx: PlatformDurableObjectState, env: WorkerEnv) {
@@ -605,7 +611,7 @@ export class GameRoom extends DurableService<WorkerEnv> {
     this.metrics.flushDue();
     const frameBroadcast = runtime.tick % 3 === 0 && this.snapshotThrottle.consume(performance.now());
     if (frameBroadcast) this.broadcastFrame();
-    if (runtime.tick % 150 === 0) this.ctx.waitUntil(this.validateConnectedAccounts());
+    if (runtime.tick % (SIMULATION_TICK_RATE * 5) === 0) this.ctx.waitUntil(this.validateConnectedAccounts());
     if (runtime.state.phase === "finished") {
       if (!frameBroadcast) this.broadcastFrame();
       data.status = "finished";
@@ -617,12 +623,12 @@ export class GameRoom extends DurableService<WorkerEnv> {
       );
       return;
     }
-    if (runtime.tick % 30 === 0) {
+    if (runtime.tick % SIMULATION_TICK_RATE === 0) {
       const pendingCheckpoint = this.captureCheckpoint(runtime);
       this.ctx.waitUntil(this.persistCheckpoint(pendingCheckpoint));
       this.ctx.waitUntil(this.ctx.storage.setAlarm(Date.now() + WATCHDOG_MS));
     }
-    this.nextTickAt += TICK_MS;
+    this.nextTickAt += SIMULATION_TICK_MS;
     if (performance.now() - this.nextTickAt > 5_000) this.nextTickAt = performance.now();
     this.scheduleTick();
   }
@@ -724,7 +730,9 @@ export class GameRoom extends DurableService<WorkerEnv> {
   ): Promise<"active" | "revoked" | "unknown"> {
     if (!member.accountId) return "active";
     const cached = this.accountStatusCache.get(member.accountId);
-    if (!force && cached && Date.now() - cached.checkedAt < 5_000) return cached.status;
+    if (!force && cached && Date.now() - cached.checkedAt < 5_000) {
+      return accountStatusForMember(cached, member);
+    }
     const headers = new Headers();
     if (this.env.INTERNAL_ADMIN_TOKEN) headers.set("X-Admin-Capability", this.env.INTERNAL_ADMIN_TOKEN);
     const response = await this.env.ACCOUNTS.getByName("global").fetch(new Request(
@@ -732,7 +740,11 @@ export class GameRoom extends DurableService<WorkerEnv> {
       { headers },
     ));
     if (response.status === 404) {
-      this.accountStatusCache.set(member.accountId, { checkedAt: Date.now(), status: "revoked" });
+      this.accountStatusCache.set(member.accountId, {
+        checkedAt: Date.now(),
+        enabled: false,
+        sessionRevision: undefined,
+      });
       return "revoked";
     }
     if (!response.ok) return "unknown";
@@ -740,11 +752,13 @@ export class GameRoom extends DurableService<WorkerEnv> {
       enabled?: unknown;
       sessionRevision?: unknown;
     }>();
-    const status = value.enabled === true && value.sessionRevision === member.accountSessionRevision
-      ? "active"
-      : "revoked";
-    this.accountStatusCache.set(member.accountId, { checkedAt: Date.now(), status });
-    return status;
+    const accountStatus = {
+      checkedAt: Date.now(),
+      enabled: value.enabled,
+      sessionRevision: value.sessionRevision,
+    };
+    this.accountStatusCache.set(member.accountId, accountStatus);
+    return accountStatusForMember(accountStatus, member);
   }
 
   private async rejectAccountSocket(socket: PlatformSocket, member: RoomMemberRecord): Promise<void> {
@@ -962,4 +976,13 @@ function socketBufferedAmount(socket: PlatformSocket): number | undefined {
   } catch {
     return undefined;
   }
+}
+
+function accountStatusForMember(
+  account: CachedAccountStatus,
+  member: Pick<RoomMemberRecord, "accountSessionRevision">,
+): "active" | "revoked" {
+  return account.enabled === true && account.sessionRevision === member.accountSessionRevision
+    ? "active"
+    : "revoked";
 }

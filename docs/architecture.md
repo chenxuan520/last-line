@@ -22,11 +22,13 @@ In multiplayer, the same steps run inside one platform-hosted `GameRoom` at 30 H
 
 `SimulationCombatWorld` performs hitscan and line-of-sight tests against fixed actor capsules, generated wall segments, roof caps, ramps, authoritative tree trunks, and shared terrain data. Tree-trunk positions and dimensions are regenerated from `mapSeed`, shared by single-player, server authority, and every client, and are also consumed by movement, Bot navigation, retreat-cover selection, and dynamic-loot placement. Babylon meshes only present the state and never decide a hit; foliage remains visual-only.
 
+Actor dimensions, protected-damage calculation, ground-loot interaction/placement values, and the 30 Hz simulation cadence each have one shared game-domain definition. Movement, combat, navigation, AI, prediction, server scheduling, map generation, and presentation consume those contracts instead of carrying independent numeric copies.
+
 Simultaneous lethal damage uses a deterministic tick-based selector. The selected survivor still receives normal damage, armor reduction, and events, with health clamped to 1 only when every remaining actor would otherwise die in the same tick.
 
 ## Controllers
 
-`HumanController` maps keyboard, mouse, and touch state to the same `ActorCommand`. `TouchInputAdapter` only tracks bounded Pointer Event state for the movement joystick, look region, fire hold, and one-shot HUD actions; it never reads or mutates authoritative match state. Portrait rotation, page hiding, pause, healing, and disposal clear held touch state to prevent stuck movement or fire. `MobileFullscreenController` requests fullscreen synchronously from a real start/retry click, then attempts a landscape orientation lock when supported. It never requests from `orientationchange`; rejected, unsupported, or exited fullscreen falls back to manual rotation and a non-blocking HUD retry action.
+`HumanController` maps keyboard, mouse, and touch state to the same `ActorCommand`. `TouchInputAdapter` only tracks bounded Pointer Event state for the movement joystick, look region, fire hold, and one-shot HUD actions; it never reads or mutates authoritative match state. The mobile backpack action only opens the existing HUD inventory view and never creates a second inventory model. Portrait rotation, page hiding, pause, healing, and disposal clear held touch state to prevent stuck movement or fire. `MobileFullscreenController` requests fullscreen synchronously from a real start/retry click, then attempts a landscape orientation lock when supported. It never requests from `orientationchange`; rejected, unsupported, or exited fullscreen falls back to manual rotation and a non-blocking HUD retry action.
 
 Each `BotController` has independent decision timers and memory. Bots use the same commands and systems as the player for movement, looting, firing, reloading, switching weapons, and healing.
 

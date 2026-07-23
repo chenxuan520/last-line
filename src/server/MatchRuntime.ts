@@ -5,14 +5,14 @@ import { BotController } from "../controllers/BotController";
 import { createIdleCommand, type ActorCommand } from "../game/commands/ActorCommand";
 import { GameSimulation } from "../game/GameSimulation";
 import { BattleRoyaleMode, createBattleRoyaleStateForHumans } from "../game/modes/BattleRoyaleMode";
+import { SIMULATION_STEP_SECONDS, SIMULATION_TICK_RATE } from "../game/simulationTiming";
 import type { ActorState, EntityId, GameEvent, GroundLootState, MatchState } from "../game/state/types";
 import { SimulationCombatWorld } from "../game/systems/SimulationCombatWorld";
 import type { MatchFrame, SequencedGameEvent } from "../network/protocol";
 import { CommandInbox } from "./CommandInbox";
 
-const TICK_RATE = 30;
 const BOT_COHORTS = 3;
-const TAKEOVER_TICKS = 150;
+const TAKEOVER_TICKS = SIMULATION_TICK_RATE * 5;
 const ACTOR_REPLICATION_RANGE = 400;
 const LOOT_REPLICATION_RANGE = 60;
 export const MATCH_CHECKPOINT_VERSION = 3;
@@ -134,7 +134,7 @@ export class MatchRuntime {
           actor,
           this.state,
           this.world,
-          1 / TICK_RATE,
+          SIMULATION_STEP_SECONDS,
           actorId,
           actor.deployment === "grounded" ? getLivingActorCount() : undefined,
         ));
@@ -151,7 +151,7 @@ export class MatchRuntime {
             actor,
             this.state,
             this.world,
-            BOT_COHORTS / TICK_RATE,
+            BOT_COHORTS * SIMULATION_STEP_SECONDS,
             this.options.humanActorIds[0] ?? actorId,
             actor.deployment === "grounded" ? getLivingActorCount() : undefined,
           );
@@ -163,7 +163,7 @@ export class MatchRuntime {
       }
       botIndex += 1;
     }
-    this.simulation.step(1 / TICK_RATE, commands, this.world);
+    this.simulation.step(SIMULATION_STEP_SECONDS, commands, this.world);
     this.tickValue += 1;
     this.recordEvents(this.simulation.drainEvents());
   }

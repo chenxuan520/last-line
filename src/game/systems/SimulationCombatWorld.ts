@@ -7,13 +7,11 @@ import {
   type MapObstacle,
   type RoofRamp,
 } from "../../config/map";
+import { ACTOR_EYE_HEIGHT, ACTOR_HEIGHT, ACTOR_RADIUS } from "../rules/actorGeometry";
 import type { ActorState, EntityId, MatchState, Vector3State } from "../state/types";
 import { StaticGridIndex } from "../spatial/StaticGridIndex";
 import type { CombatWorld, ShotResult, ShotTrace } from "./CombatSystem";
 
-const ACTOR_HIT_HEIGHT = 1.8;
-const ACTOR_HIT_RADIUS = 0.42;
-const ACTOR_EYE_TO_FEET = 1.76;
 const GEOMETRY_EPSILON = 1e-9;
 const COMBAT_GRID_CELL_SIZE = 32;
 
@@ -190,15 +188,15 @@ function intersectActor(
   range: number,
   actor: ActorState,
 ): ActorSurfaceHit | null {
-  const feetY = actor.position.y - ACTOR_EYE_TO_FEET;
-  const segmentMinY = feetY + ACTOR_HIT_RADIUS;
-  const segmentMaxY = feetY + ACTOR_HIT_HEIGHT - ACTOR_HIT_RADIUS;
+    const feetY = actor.position.y - ACTOR_EYE_HEIGHT;
+    const segmentMinY = feetY + ACTOR_RADIUS;
+    const segmentMaxY = feetY + ACTOR_HEIGHT - ACTOR_RADIUS;
   const closestY = clamp(origin.y, segmentMinY, segmentMaxY);
   const originDistanceSquared =
     (origin.x - actor.position.x) ** 2 +
     (origin.y - closestY) ** 2 +
     (origin.z - actor.position.z) ** 2;
-  if (originDistanceSquared <= ACTOR_HIT_RADIUS ** 2) {
+    if (originDistanceSquared <= ACTOR_RADIUS ** 2) {
     return { distance: 0, normal: { x: -direction.x, y: -direction.y, z: -direction.z } };
   }
 
@@ -211,7 +209,7 @@ function intersectActor(
     const offsetX = origin.x - actor.position.x;
     const offsetZ = origin.z - actor.position.z;
     const radialB = 2 * (offsetX * direction.x + offsetZ * direction.z);
-    const radialC = offsetX ** 2 + offsetZ ** 2 - ACTOR_HIT_RADIUS ** 2;
+    const radialC = offsetX ** 2 + offsetZ ** 2 - ACTOR_RADIUS ** 2;
     const discriminant = radialB ** 2 - 4 * radialA * radialC;
     if (discriminant >= 0) {
       const root = Math.sqrt(discriminant);
@@ -246,7 +244,7 @@ function intersectActor(
       actor.position.x,
       centerY,
       actor.position.z,
-      ACTOR_HIT_RADIUS,
+      ACTOR_RADIUS,
     );
     if (distance !== null) {
       if (distance < nearest) {

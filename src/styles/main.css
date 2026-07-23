@@ -2013,6 +2013,88 @@ h1 {
   font-size: 15px;
 }
 
+.touch-inventory {
+  top: max(62px, calc(env(safe-area-inset-top) + 50px));
+  right: max(132px, calc(env(safe-area-inset-right) + 120px));
+  width: 58px;
+  height: 44px;
+  border-radius: 4px;
+}
+
+.mobile-inventory-heading,
+.mobile-inventory-backdrop {
+  display: none;
+}
+
+#ui-root.is-touch-input .inventory-card {
+  display: none;
+}
+
+@media (orientation: landscape) {
+  #ui-root.is-touch-input .mobile-inventory-backdrop.is-visible {
+    position: absolute;
+    inset: 0;
+    z-index: 17;
+    display: block;
+    background: rgb(3 7 6 / 52%);
+    pointer-events: auto;
+    touch-action: manipulation;
+  }
+
+  #ui-root.is-touch-input .inventory-card.is-mobile-visible {
+    position: absolute;
+    top: 50%;
+    right: auto;
+    bottom: auto;
+    left: 50%;
+    z-index: 18;
+    display: grid;
+    width: min(520px, calc(100vw - 40px));
+    max-width: none;
+    max-height: calc(100dvh - 40px);
+    gap: 8px;
+    padding: 14px;
+    overflow: auto;
+    border: 1px solid var(--line-strong);
+    background: linear-gradient(145deg, rgb(25 33 27 / 98%), rgb(9 14 12 / 97%));
+    box-shadow: 0 24px 70px rgb(0 0 0 / 58%);
+    color: #d5dccf;
+    translate: -50% -50%;
+    pointer-events: auto;
+    touch-action: manipulation;
+  }
+
+  #ui-root.is-touch-input .mobile-inventory-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: var(--signal-bright);
+    font: 700 11px/1 var(--tactical-font);
+    letter-spacing: 0.1em;
+  }
+
+  #ui-root.is-touch-input .mobile-inventory-heading button {
+    display: grid;
+    width: 44px;
+    height: 44px;
+    place-items: center;
+    padding: 0;
+    border: 1px solid rgb(213 224 192 / 28%);
+    color: #e9eee1;
+    background: rgb(12 19 15 / 72%);
+    font-size: 22px;
+    pointer-events: auto;
+    touch-action: manipulation;
+  }
+
+  #ui-root.is-touch-input .inventory-card .weapon-slots,
+  #ui-root.is-touch-input .inventory-card .backpack {
+    justify-content: flex-start;
+    background: rgb(10 15 13 / 58%);
+    text-align: left;
+  }
+}
+
 .pause-card,
 .result-card,
 .orientation-card {
@@ -2468,7 +2550,6 @@ h1 {
   }
 
   #ui-root.is-touch-input .controls-card,
-  #ui-root.is-touch-input .inventory-card,
   #ui-root.is-touch-input .kill-feed,
   #ui-root.is-touch-input .performance,
   #ui-root.is-touch-input .helmet-vital {

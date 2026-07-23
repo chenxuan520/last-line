@@ -1,9 +1,13 @@
 import { env, reset, runInDurableObject } from "cloudflare:test";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ServerMetricRecord } from "../../src/server/ServerMetrics";
 import worker from "../../worker/index";
 
 describe("Cloudflare server metrics", () => {
+  beforeEach(async () => {
+    await reset();
+  });
+
   afterEach(async () => {
     vi.restoreAllMocks();
     await reset();

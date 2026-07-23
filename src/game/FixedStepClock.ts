@@ -1,8 +1,10 @@
+import { SIMULATION_STEP_SECONDS } from "./simulationTiming";
+
 export class FixedStepClock {
   private accumulatorSeconds = 0;
 
   public constructor(
-    private readonly stepSeconds = 1 / 30,
+    private readonly stepSeconds = SIMULATION_STEP_SECONDS,
     private readonly maxFrameSeconds = 0.25,
   ) {}
 

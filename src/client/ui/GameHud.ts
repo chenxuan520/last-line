@@ -30,6 +30,7 @@ export class GameHud {
   private promptSignature = "";
   private leaderboardSignature = "";
   private leaderboardVisible = false;
+  private mobileInventoryVisible = false;
   private refreshSeconds = 0.1;
 
   public constructor(
@@ -113,9 +114,12 @@ export class GameHud {
             <button class="touch-action touch-bandage" type="button" data-touch-action="bandage">绷带</button>
             <button class="touch-action touch-medkit" type="button" data-touch-action="medkit">急救</button>
             <button class="touch-action touch-pause" type="button" data-touch-action="pause" aria-label="暂停">Ⅱ</button>
+            <button class="touch-action touch-inventory" type="button" data-hud="inventory-toggle" aria-controls="hud-inventory" aria-expanded="false">背包</button>
           </div>
         ` : ""}
-        <aside class="inventory-card">
+        ${options.touchInput ? '<div class="mobile-inventory-backdrop" data-hud="inventory-backdrop"></div>' : ""}
+        <aside class="inventory-card" id="hud-inventory" data-hud="inventory"${options.touchInput ? ' role="dialog" aria-label="背包" aria-hidden="true"' : ""}>
+          <header class="mobile-inventory-heading"><strong>装备与背包</strong><button type="button" data-hud="inventory-close" aria-label="关闭背包">×</button></header>
           <div class="weapon-slots" data-hud="weapon-slots"></div>
           <div class="backpack" data-hud="backpack"></div>
         </aside>
@@ -157,6 +161,12 @@ export class GameHud {
       ?.addEventListener("click", options.onRequestFullscreen ?? (() => undefined));
     root.querySelector<HTMLButtonElement>("[data-hud='fullscreen-action']")
       ?.addEventListener("click", options.onRequestFullscreen ?? (() => undefined));
+    root.querySelector<HTMLButtonElement>("[data-hud='inventory-toggle']")
+      ?.addEventListener("click", () => this.setMobileInventoryVisible(!this.mobileInventoryVisible));
+    root.querySelector<HTMLButtonElement>("[data-hud='inventory-close']")
+      ?.addEventListener("click", () => this.setMobileInventoryVisible(false));
+    root.querySelector<HTMLElement>("[data-hud='inventory-backdrop']")
+      ?.addEventListener("click", () => this.setMobileInventoryVisible(false));
   }
 
   public dispose(): void {
@@ -186,10 +196,9 @@ export class GameHud {
       !inputActive && !orientationBlocked && player.alive && !this.resultVisible,
     );
     this.requireElement("orientation").classList.toggle("is-visible", orientationBlocked && player.alive && !this.resultVisible);
-    this.elements.get("touch-controls")?.classList.toggle(
-      "is-visible",
-      inputActive && !orientationBlocked && player.alive && !this.resultVisible,
-    );
+    const touchGameplayVisible = inputActive && !orientationBlocked && player.alive && !this.resultVisible;
+    this.elements.get("touch-controls")?.classList.toggle("is-visible", touchGameplayVisible);
+    if (!touchGameplayVisible) this.setMobileInventoryVisible(false);
     const showFullscreenAction = fullscreenActionRequired && player.alive && !this.resultVisible;
     const orientationFullscreenAction = this.elements.get("orientation-fullscreen-action") as HTMLButtonElement | undefined;
     if (orientationFullscreenAction) orientationFullscreenAction.hidden = !showFullscreenAction || !orientationBlocked;
@@ -346,6 +355,7 @@ export class GameHud {
 
   private showResultCard(title: string, detail: string, buttonLabel: string, hint?: string): void {
     if (this.resultVisible) return;
+    this.setMobileInventoryVisible(false);
     this.resultVisible = true;
     const result = this.requireElement("result");
     result.hidden = false;
@@ -481,6 +491,21 @@ export class GameHud {
 
   private resolveIconUrl(id: string): string {
     return assetUrl(this.assets.resolve(id, "image").url);
+  }
+
+  private setMobileInventoryVisible(visible: boolean): void {
+    if (!this.options.touchInput || this.mobileInventoryVisible === visible) return;
+    this.mobileInventoryVisible = visible;
+    const inventory = this.requireElement("inventory");
+    if (!visible && document.activeElement instanceof HTMLElement && inventory.contains(document.activeElement)) {
+      document.activeElement.blur();
+    }
+    inventory.classList.toggle("is-mobile-visible", visible);
+    inventory.setAttribute("aria-hidden", visible ? "false" : "true");
+    this.elements.get("inventory-backdrop")?.classList.toggle("is-visible", visible);
+    const toggle = this.elements.get("inventory-toggle") as HTMLButtonElement | undefined;
+    toggle?.setAttribute("aria-expanded", visible ? "true" : "false");
+    if (visible) (this.elements.get("inventory-close") as HTMLButtonElement | undefined)?.focus();
   }
 
   private requireElement(name: string): HTMLElement {

@@ -5,12 +5,13 @@ import {
   BUILDING_ROOF_CAP_HEIGHT,
   getTerrainHeight,
   LANDING_ZONE_COUNT,
-  LOOT_SPAWN_POINTS,
   type MapLayout,
 } from "../config/map";
 import { WEAPONS } from "../config/weapons";
 import type { ActorCommand } from "../game/commands/ActorCommand";
 import { createIdleCommand } from "../game/commands/ActorCommand";
+import { ACTOR_EYE_HEIGHT, ACTOR_HEIGHT } from "../game/rules/actorGeometry";
+import { LOOT_INTERACTION_DISTANCE } from "../game/rules/loot";
 import {
   getActiveWeapon,
   getItemQuantity,
@@ -23,7 +24,6 @@ import type { CombatWorld } from "../game/systems/CombatSystem";
 import { SPRINT_SPEED } from "../game/systems/MovementSystem";
 
 const WAYPOINT_REACHED_DISTANCE = 0.5;
-const LOOT_INTERACTION_DISTANCE = 3;
 const LATE_GAME_PATROL_RADIUS = 350;
 const LATE_GAME_PATROL_ACTORS = 12;
 const DAMAGE_INVESTIGATION_SECONDS = 2.5;
@@ -46,8 +46,6 @@ const FORCED_RELOCATION_PATH_CHECKS = 1;
 const ZONE_PATH_RETRY_SECONDS = 2;
 const PARACHUTE_TARGET_DEAD_ZONE = 0.75;
 const PARACHUTE_APPROACH_DISTANCE = 12;
-const ACTOR_EYE_HEIGHT = 1.76;
-const ACTOR_HEIGHT = 1.8;
 const SNIPER_WEAPON_ITEM_ID = "weapon.sniper";
 const SNIPER_AMMO_ITEM_ID = "ammo.sniper";
 type LootPurpose = "general" | "medical" | "compatible-ammo";
@@ -67,7 +65,8 @@ export class BotController {
   private readonly dropProgressJitter: number;
   private readonly landingPoiSlot: number;
   private readonly landingPoiWave: number;
-  private readonly landingTarget: Vector3State;
+  private readonly landingFallbackIndex: number;
+  private landingTarget: Vector3State;
   private weaponLandingTarget: Vector3State | null = null;
   private decisionSeconds = 0;
   private fireSeconds = 0;
@@ -128,7 +127,8 @@ export class BotController {
     this.dropProgressJitter = randomBetween(this.random, -0.045, 0.045);
     this.landingPoiSlot = Math.max(0, index - 1) % LANDING_ZONE_COUNT;
     this.landingPoiWave = Math.floor(Math.max(0, index - 1) / LANDING_ZONE_COUNT);
-    this.landingTarget = { ...(LOOT_SPAWN_POINTS[(index * 4) % LOOT_SPAWN_POINTS.length] ?? { x: 0, y: 1.76, z: 0 }) };
+    this.landingFallbackIndex = index * 4;
+    this.landingTarget = fallbackLandingTarget(initialLayout, this.landingFallbackIndex);
   }
 
   public update(
@@ -150,6 +150,9 @@ export class BotController {
       this.layout = layout;
       this.navigator = new GridNavigator(layout);
       this.navigatorSeed = state.mapSeed;
+      this.landingTarget = fallbackLandingTarget(layout, this.landingFallbackIndex);
+      this.weaponLandingTarget = null;
+      this.dropProgress = null;
       this.waypoint = null;
       this.navigationPath = [];
       this.navigationTarget = null;
@@ -185,7 +188,7 @@ export class BotController {
       const horizontalDirection = normalizeFlat(actor.lastDamageDirection);
       const x = actor.position.x + horizontalDirection.x * DAMAGE_INVESTIGATION_DISTANCE;
       const z = actor.position.z + horizontalDirection.z * DAMAGE_INVESTIGATION_DISTANCE;
-      this.damageInvestigationTarget = { x, y: getTerrainHeight(x, z, layout) + 1.76, z };
+      this.damageInvestigationTarget = { x, y: getTerrainHeight(x, z, layout) + ACTOR_EYE_HEIGHT, z };
       this.damageInvestigationUntilSeconds = state.elapsedSeconds + DAMAGE_INVESTIGATION_SECONDS;
       this.decisionSeconds = 0;
       this.lootTargetId = null;
@@ -602,7 +605,7 @@ export class BotController {
       const radius = usableRadius * radiusScale;
       const x = patrolCenter.x + Math.cos(angle) * radius;
       const z = patrolCenter.z + Math.sin(angle) * radius;
-      const candidate = { x, y: getTerrainHeight(x, z, layout) + 1.76, z };
+      const candidate = { x, y: getTerrainHeight(x, z, layout) + ACTOR_EYE_HEIGHT, z };
       const path = this.navigator.findPath(actor.position, candidate);
       if (path.length === 0 || horizontalDistance(actor.position, candidate) < 2) continue;
       this.patrolTarget = candidate;
@@ -696,7 +699,7 @@ export class BotController {
       );
       const x = obstacle.center.x + away.x * (edgeDistance + 1.15);
       const z = obstacle.center.z + away.z * (edgeDistance + 1.15);
-      const target = { x, y: getTerrainHeight(x, z, layout) + 1.76, z };
+      const target = { x, y: getTerrainHeight(x, z, layout) + ACTOR_EYE_HEIGHT, z };
       if (horizontalDistance(actor.position, target) < 3) continue;
       if (
         state.safeZone.radius > 2 &&
@@ -1089,7 +1092,7 @@ export class BotController {
     for (const candidate of candidates) {
       const target = {
         x: candidate.x,
-        y: getTerrainHeight(candidate.x, candidate.z, this.layout) + 1.76,
+        y: getTerrainHeight(candidate.x, candidate.z, this.layout) + ACTOR_EYE_HEIGHT,
         z: candidate.z,
       };
       if (horizontalDistance(actor.position, target) < 8) continue;
@@ -1317,6 +1320,13 @@ function lootZoneIndex(lootIndex: number, counts: readonly number[]): number {
 function numericId(id: string): number {
   const match = /\d+$/.exec(id);
   return match ? Number(match[0]) : 0;
+}
+
+function fallbackLandingTarget(layout: MapLayout, index: number): Vector3State {
+  const point = layout.lootSpawnPoints.length > 0
+    ? layout.lootSpawnPoints[index % layout.lootSpawnPoints.length]
+    : undefined;
+  return { ...(point ?? { x: 0, y: ACTOR_EYE_HEIGHT, z: 0 }) };
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {

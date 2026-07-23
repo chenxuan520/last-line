@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { calculateProtectedDamage } from "../../src/game/rules/damage";
 import { createActorState, type GameEvent, type MatchState } from "../../src/game/state/types";
 import { DamageSystem } from "../../src/game/systems/DamageSystem";
 
@@ -33,6 +34,20 @@ function createState(): MatchState {
 }
 
 describe("DamageSystem", () => {
+  it("applies the same armor and health damage returned by the shared calculation", () => {
+    const state = createState();
+    const target = state.actors.target;
+    target.inventory.helmetLevel = 2;
+    target.inventory.armorLevel = 2;
+    target.armor = 35;
+    const preview = calculateProtectedDamage(target, 80);
+
+    new DamageSystem().applyDamage(state, target.id, 80, null, []);
+
+    expect(target.armor).toBeCloseTo(35 - preview.armorDamage);
+    expect(target.health).toBeCloseTo(100 - preview.healthDamage);
+  });
+
   it.each([
     { helmetLevel: 0 as const, expectedHealthDamage: 80 },
     { helmetLevel: 1 as const, expectedHealthDamage: 70 },

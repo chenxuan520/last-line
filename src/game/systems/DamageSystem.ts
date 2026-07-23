@@ -1,3 +1,4 @@
+import { calculateProtectedDamage } from "../rules/damage";
 import type { EntityId, GameEvent, MatchState } from "../state/types";
 
 export class DamageSystem {
@@ -29,12 +30,9 @@ export class DamageSystem {
       }
     }
     if (!bypassArmor) {
-      const helmetReduction = target.inventory.helmetLevel === 2 ? 0.2 : target.inventory.helmetLevel === 1 ? 0.1 : 0;
-      amount *= 1 - helmetReduction;
-      const armorRate = target.inventory.armorLevel === 2 ? 0.55 : 0.45;
-      const armorAbsorption = Math.min(target.armor, amount * armorRate);
-      target.armor -= armorAbsorption;
-      amount -= armorAbsorption;
+      const protectedDamage = calculateProtectedDamage(target, amount);
+      target.armor -= protectedDamage.armorDamage;
+      amount = protectedDamage.healthDamage;
     }
 
     const healthFloor = Math.min(target.health, Math.max(0, minimumHealth));

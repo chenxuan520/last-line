@@ -21,6 +21,7 @@ import type { ActorCommand } from "../game/commands/ActorCommand";
 import { FixedStepClock } from "../game/FixedStepClock";
 import { GameSimulation } from "../game/GameSimulation";
 import { BattleRoyaleMode, createBattleRoyaleState } from "../game/modes/BattleRoyaleMode";
+import { SIMULATION_STEP_SECONDS } from "../game/simulationTiming";
 import {
   getActiveWeapon,
   type ActorState,
@@ -299,7 +300,7 @@ export class BattleRoyaleSession {
       this.lastVisualActorId !== cameraActor.id
     ) {
       const visualDeltaSeconds = this.lastVisualElapsedSeconds < 0
-        ? 1 / 30
+        ? SIMULATION_STEP_SECONDS
         : Math.min(0.1, Math.max(0, this.simulation.state.elapsedSeconds - this.lastVisualElapsedSeconds));
       this.lastVisualElapsedSeconds = this.simulation.state.elapsedSeconds;
       this.lastVisualActorId = cameraActor.id;

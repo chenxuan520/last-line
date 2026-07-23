@@ -1,6 +1,6 @@
 import type { ActorState, Vector3State } from "../game/state/types";
+import { SIMULATION_STEP_SECONDS } from "../game/simulationTiming";
 
-const SERVER_TICK_SECONDS = 1 / 30;
 const MIN_INTERPOLATION_SECONDS = 0.12;
 const MAX_INTERPOLATION_SECONDS = 0.25;
 const MAX_GROUNDED_TRANSITION_DISTANCE = 6;
@@ -58,7 +58,7 @@ export function snapshotInterpolationSeconds(previousTick: number, nextTick: num
 
 export function snapshotElapsedSeconds(previousTick: number, nextTick: number): number {
   const tickDelta = previousTick >= 0 ? Math.max(1, nextTick - previousTick) : 3;
-  return tickDelta * SERVER_TICK_SECONDS;
+  return tickDelta * SIMULATION_STEP_SECONDS;
 }
 
 export function createCorrectionTransition(

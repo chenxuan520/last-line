@@ -11,6 +11,7 @@ import {
   type RoofRamp,
 } from "../../config/map";
 import type { ActorCommand } from "../commands/ActorCommand";
+import { ACTOR_EYE_HEIGHT, ACTOR_HEIGHT, ACTOR_RADIUS } from "../rules/actorGeometry";
 import type { ActorState, EntityId, MatchState, Vector3State } from "../state/types";
 
 const WALK_SPEED = 8.7;
@@ -23,10 +24,7 @@ export const PARACHUTE_DESCENT_SPEED = 5;
 const GRAVITY = 18;
 const JUMP_APEX_HEIGHT = 1.7;
 const JUMP_SPEED = Math.sqrt(2 * GRAVITY * JUMP_APEX_HEIGHT);
-const EYE_HEIGHT = 1.76;
-const ACTOR_HEIGHT = 1.8;
-const ACTOR_HEAD_ABOVE_EYE = ACTOR_HEIGHT - EYE_HEIGHT;
-const ACTOR_RADIUS = 0.42;
+const ACTOR_HEAD_ABOVE_EYE = ACTOR_HEIGHT - ACTOR_EYE_HEIGHT;
 const MAX_COLLISION_STEP = ACTOR_RADIUS / 2;
 const MAX_STEP_UP = 0.35;
 const SURFACE_EPSILON = 0.08;
@@ -83,7 +81,7 @@ export class MovementSystem {
     }
 
     if (actor.deployment === "parachuting") {
-      const terrainEyeY = getTerrainHeight(actor.position.x, actor.position.z, layout) + EYE_HEIGHT;
+      const terrainEyeY = getTerrainHeight(actor.position.x, actor.position.z, layout) + ACTOR_EYE_HEIGHT;
       const altitude = Math.max(0, actor.position.y - terrainEyeY);
       const glideSpeed = clamp(
         MIN_GLIDE_SPEED + Math.max(0, altitude - GLIDE_ACCELERATION_ALTITUDE) * GLIDE_SPEED_PER_METER,
@@ -93,7 +91,7 @@ export class MovementSystem {
       this.moveHorizontally(actor, command.move, glideSpeed, deltaSeconds, layout);
       actor.velocity.y = -PARACHUTE_DESCENT_SPEED;
       actor.position.y += actor.velocity.y * deltaSeconds;
-      const supportEyeY = getSupportHeight(actor.position.x, actor.position.z, Number.POSITIVE_INFINITY, layout) + EYE_HEIGHT;
+      const supportEyeY = getSupportHeight(actor.position.x, actor.position.z, Number.POSITIVE_INFINITY, layout) + ACTOR_EYE_HEIGHT;
       if (actor.position.y <= supportEyeY) {
         actor.position.y = supportEyeY;
         actor.velocity = { x: 0, y: 0, z: 0 };
@@ -126,17 +124,17 @@ export class MovementSystem {
     const startingSupport = getSupportHeight(
       actor.position.x,
       actor.position.z,
-      actor.position.y - EYE_HEIGHT + SURFACE_EPSILON,
+      actor.position.y - ACTOR_EYE_HEIGHT + SURFACE_EPSILON,
       layout,
     );
-    const wasSupported = actor.velocity.y <= 0 && Math.abs(actor.position.y - (startingSupport + EYE_HEIGHT)) <= SURFACE_EPSILON;
+    const wasSupported = actor.velocity.y <= 0 && Math.abs(actor.position.y - (startingSupport + ACTOR_EYE_HEIGHT)) <= SURFACE_EPSILON;
     const deltaX = actor.velocity.x * deltaSeconds;
     const deltaZ = actor.velocity.z * deltaSeconds;
     const stepCount = Math.max(1, Math.ceil(Math.hypot(deltaX, deltaZ) / MAX_COLLISION_STEP));
     for (let step = 0; step < stepCount; step += 1) {
       actor.position.x = moveAxis(actor, actor.position.x, actor.position.z, deltaX / stepCount, "x", layout);
       actor.position.z = moveAxis(actor, actor.position.z, actor.position.x, deltaZ / stepCount, "z", layout);
-      const feetY = actor.position.y - EYE_HEIGHT;
+      const feetY = actor.position.y - ACTOR_EYE_HEIGHT;
       const support = getSupportHeight(
         actor.position.x,
         actor.position.z,
@@ -150,16 +148,16 @@ export class MovementSystem {
         supportDelta <= MAX_STEP_UP &&
         (wasSupported || supportDelta >= 0)
       ) {
-        actor.position.y = support + EYE_HEIGHT;
+        actor.position.y = support + ACTOR_EYE_HEIGHT;
         actor.velocity.y = 0;
       }
     }
   }
 
   private moveVertically(actor: ActorState, jump: boolean, deltaSeconds: number, layout: MapLayout): void {
-    const feetY = actor.position.y - EYE_HEIGHT;
+    const feetY = actor.position.y - ACTOR_EYE_HEIGHT;
     const support = getSupportHeight(actor.position.x, actor.position.z, feetY + SURFACE_EPSILON, layout);
-    const supportEyeY = support + EYE_HEIGHT;
+    const supportEyeY = support + ACTOR_EYE_HEIGHT;
     const onSurface = actor.velocity.y <= 0 && Math.abs(actor.position.y - supportEyeY) <= SURFACE_EPSILON;
     if (onSurface) {
       actor.position.y = supportEyeY;
@@ -190,9 +188,9 @@ export class MovementSystem {
     const landingSupport = getSupportHeight(
       actor.position.x,
       actor.position.z,
-      previousY - EYE_HEIGHT + SURFACE_EPSILON,
+      previousY - ACTOR_EYE_HEIGHT + SURFACE_EPSILON,
       layout,
-    ) + EYE_HEIGHT;
+    ) + ACTOR_EYE_HEIGHT;
     if (actor.velocity.y <= 0 && previousY >= landingSupport - SURFACE_EPSILON && actor.position.y <= landingSupport) {
       actor.position.y = landingSupport;
       actor.velocity.y = 0;
@@ -246,7 +244,7 @@ function moveAxis(
 }
 
 function collides(x: number, z: number, eyeY: number, layout: MapLayout): boolean {
-  const feetY = eyeY - EYE_HEIGHT;
+  const feetY = eyeY - ACTOR_EYE_HEIGHT;
   const candidateSupport = getSupportHeight(x, z, feetY + MAX_STEP_UP, layout);
   const effectiveFeetY = Math.max(feetY, candidateSupport);
   for (const obstacle of getNearbyWalls(x, z, layout)) {
@@ -276,7 +274,7 @@ function collidesWithBlocker(
 }
 
 function resolveWallOverlap(actor: ActorState, layout: MapLayout): void {
-  const feetY = actor.position.y - EYE_HEIGHT;
+  const feetY = actor.position.y - ACTOR_EYE_HEIGHT;
   const limit = MAP_HALF_SIZE - ACTOR_RADIUS;
   const padding = ACTOR_RADIUS + 0.001;
   for (let iteration = 0; iteration < 8 && collides(actor.position.x, actor.position.z, actor.position.y, layout); iteration += 1) {

@@ -6,6 +6,7 @@ import {
 import { ITEMS } from "../../config/items";
 import { createMapLayout, MAP_HALF_SIZE } from "../../config/map";
 import type { GameMode } from "./GameMode";
+import { ACTOR_RADIUS } from "../rules/actorGeometry";
 import { selectSimultaneousSurvivor } from "../rules/resolveSimultaneous";
 import {
   createActorState,
@@ -26,7 +27,6 @@ const FLIGHT_ALTITUDE = 180;
 const FLIGHT_HALF_LENGTH = MAP_HALF_SIZE * 1.3;
 const MAX_FLIGHT_OFFSET = MAP_HALF_SIZE * 0.55;
 const AUTO_EJECT_PROGRESS = 0.92;
-const FLIGHT_ACTOR_RADIUS = 0.42;
 const INDOOR_LOOT_POINTS_PER_ZONE = 1;
 
 type LootCategory = "weapon" | "ammo" | "medical" | "equipment";
@@ -272,7 +272,7 @@ export class BattleRoyaleMode implements GameMode {
 }
 
 function getLastIslandFlightProgress(flight: FlightState): number {
-  const limit = MAP_HALF_SIZE - FLIGHT_ACTOR_RADIUS;
+  const limit = MAP_HALF_SIZE - ACTOR_RADIUS;
   let entry = 0;
   let exit = 1;
   for (const [start, end] of [

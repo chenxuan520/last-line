@@ -19,14 +19,17 @@ import {
   type WeaponSlot,
   type WeaponState,
 } from "../state/types";
+import { ACTOR_EYE_HEIGHT } from "../rules/actorGeometry";
+import {
+  GROUND_LOOT_POSITION_HEIGHT,
+  LOOT_INTERACTION_DISTANCE,
+  LOOT_INTERACTION_DISTANCE_SQUARED,
+} from "../rules/loot";
 import { getSupportHeight } from "./MovementSystem";
 
-const INTERACTION_DISTANCE_SQUARED = 3 * 3;
 const TIMER_EPSILON_SECONDS = 1e-9;
-const DROP_MARKER_HEIGHT = 0.45;
 const DROP_MINIMUM_SPACING = 0.62;
 const DROP_WALL_CLEARANCE = 0.25;
-const ACTOR_EYE_HEIGHT = 1.76;
 const DROP_OBSTACLE_CELL_SIZE = 32;
 const DROP_LOOT_GRID_KEY_OFFSET = 4_096;
 const DROP_LOOT_GRID_KEY_STRIDE = 8_192;
@@ -133,7 +136,7 @@ export class InventorySystem {
       (loot.generation ?? 0) !== generation ||
       loot.quantity <= 0 ||
       !item ||
-      lootDistanceSquared(actor, loot) > INTERACTION_DISTANCE_SQUARED
+      lootDistanceSquared(actor, loot) > LOOT_INTERACTION_DISTANCE_SQUARED
     ) return;
 
     if (replacementItemId !== null) {
@@ -510,7 +513,7 @@ export function findPickupCandidate(
     const loot = groundLoot[lootId];
     if (!loot?.available || loot.quantity <= 0 || !canActorPickLoot(actor, loot)) continue;
     const distanceSquared = lootDistanceSquared(actor, loot);
-    if (distanceSquared > INTERACTION_DISTANCE_SQUARED) continue;
+    if (distanceSquared > LOOT_INTERACTION_DISTANCE_SQUARED) continue;
     if (
       distanceSquared < nearestDistanceSquared ||
       (distanceSquared === nearestDistanceSquared && nearest && loot.id.localeCompare(nearest.id) < 0)
@@ -533,7 +536,7 @@ export function findNearbyLootCandidate(
     const loot = groundLoot[lootId];
     if (!loot?.available || loot.quantity <= 0) continue;
     const distanceSquared = lootDistanceSquared(actor, loot);
-    if (distanceSquared > INTERACTION_DISTANCE_SQUARED) continue;
+    if (distanceSquared > LOOT_INTERACTION_DISTANCE_SQUARED) continue;
     if (
       distanceSquared < nearestDistanceSquared ||
       (distanceSquared === nearestDistanceSquared && nearest && loot.id.localeCompare(nearest.id) < 0)
@@ -561,7 +564,7 @@ function getPickupCandidates(
       loot,
       distanceSquared: lootDistanceSquared(actor, loot),
     }))
-    .filter((candidate) => candidate.distanceSquared <= INTERACTION_DISTANCE_SQUARED)
+    .filter((candidate) => candidate.distanceSquared <= LOOT_INTERACTION_DISTANCE_SQUARED)
     .sort((left, right) => left.distanceSquared - right.distanceSquared || left.loot.id.localeCompare(right.loot.id))
     .map((candidate) => candidate.loot);
 }
@@ -611,11 +614,11 @@ function findDynamicDropPosition(
       actor.position.y - ACTOR_EYE_HEIGHT + 0.35,
       layout,
     );
-    const candidate = { x, y: support + DROP_MARKER_HEIGHT, z };
+    const candidate = { x, y: support + GROUND_LOOT_POSITION_HEIGHT, z };
     if (
       Math.abs(x) > MAP_HALF_SIZE - DROP_WALL_CLEARANCE ||
       Math.abs(z) > MAP_HALF_SIZE - DROP_WALL_CLEARANCE ||
-      vectorDistance(candidate, actor.position) > 3 ||
+      vectorDistance(candidate, actor.position) > LOOT_INTERACTION_DISTANCE ||
       !isDropClearOfWalls(candidate, support, layout)
     ) continue;
     const clearance = lootIndex.minimumHorizontalDistance(x, z);
@@ -629,7 +632,7 @@ function findDynamicDropPosition(
     actor.position.y - ACTOR_EYE_HEIGHT + 0.35,
     layout,
   );
-  return { x: actor.position.x, y: support + DROP_MARKER_HEIGHT, z: actor.position.z };
+  return { x: actor.position.x, y: support + GROUND_LOOT_POSITION_HEIGHT, z: actor.position.z };
 }
 
 function dropRing(radius: number, count: number, angleOffset: number): { x: number; z: number }[] {
@@ -658,7 +661,7 @@ function blocksDrop(
 ): boolean {
   const bottom = obstacle.center.y - obstacle.height / 2;
   const top = obstacle.center.y + obstacle.height / 2 + topPadding;
-  return support < top - 0.08 && support + DROP_MARKER_HEIGHT > bottom - 0.08 &&
+  return support < top - 0.08 && support + GROUND_LOOT_POSITION_HEIGHT > bottom - 0.08 &&
     pointNearWall(candidate.x, candidate.z, obstacle);
 }
 

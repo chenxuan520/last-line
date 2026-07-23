@@ -46,6 +46,37 @@ describe("multiplayer worker", () => {
     });
   });
 
+  it("evaluates cached account status against each member session revision", async () => {
+    const guest = await createGuest("Revision Host");
+    const admission = await post("/v1/rooms", { ...guest, visibility: "private" });
+    const stub = env.GAME_ROOMS.getByName(String(admission.roomId));
+
+    const statuses = await runInDurableObject(stub, async (instance) => {
+      const room = instance as unknown as {
+        accountStatusCache: Map<string, {
+          checkedAt: number;
+          enabled: unknown;
+          sessionRevision: unknown;
+        }>;
+        memberAccountStatus(member: {
+          accountId: string;
+          accountSessionRevision: number;
+        }): Promise<"active" | "revoked" | "unknown">;
+      };
+      room.accountStatusCache.set("account-shared", {
+        checkedAt: Date.now(),
+        enabled: true,
+        sessionRevision: 2,
+      });
+      return {
+        current: await room.memberAccountStatus({ accountId: "account-shared", accountSessionRevision: 2 }),
+        stale: await room.memberAccountStatus({ accountId: "account-shared", accountSessionRevision: 1 }),
+      };
+    });
+
+    expect(statuses).toEqual({ current: "active", stale: "revoked" });
+  });
+
   it("consumes an admission token after its first WebSocket upgrade", async () => {
     const guest = await createGuest("Token Owner");
     const admission = await post("/v1/rooms", { ...guest, visibility: "private" });

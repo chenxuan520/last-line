@@ -13,6 +13,51 @@ import { SimulationCombatWorld } from "../../src/game/systems/SimulationCombatWo
 const miss: CombatWorld = { traceShot: () => null, hasLineOfSight: () => true };
 
 describe("BotController", () => {
+  it("uses the current map layout for its fallback landing target", () => {
+    const layout = createMapLayout(42);
+    const state = createBattleRoyaleState("player", undefined, seededRandom(42));
+    state.mapSeed = layout.seed;
+    state.groundLoot = {};
+    const controller = new BotController(1, () => 0.5, false, layout);
+
+    const target = (controller as unknown as {
+      findLandingTarget(matchState: typeof state): Vector3State;
+    }).findLandingTarget(state);
+
+    expect(target).toEqual(layout.lootSpawnPoints[4]);
+  });
+
+  it("resets cached landing targets when the map seed changes", () => {
+    const firstLayout = createMapLayout(42);
+    const nextLayout = createMapLayout(43);
+    const state = createBattleRoyaleState("player", undefined, seededRandom(42));
+    state.mapSeed = firstLayout.seed;
+    state.groundLoot = {
+      weapon: {
+        id: "weapon",
+        itemId: "weapon.rifle",
+        quantity: 1,
+        position: { ...firstLayout.lootSpawnPoints[0]! },
+        available: true,
+      },
+    };
+    const bot = state.actors["bot-1"];
+    if (!bot) throw new Error("bot missing");
+    bot.deployment = "parachuting";
+    const controller = new BotController(1, () => 0.5, false, firstLayout);
+    const findLandingTarget = (controller as unknown as {
+      findLandingTarget(matchState: typeof state): Vector3State;
+    }).findLandingTarget.bind(controller);
+    const firstTarget = findLandingTarget(state);
+
+    state.mapSeed = nextLayout.seed;
+    state.groundLoot = {};
+    controller.update(bot, state, miss, 1 / 30, "player");
+
+    expect(firstTarget).toEqual(firstLayout.lootSpawnPoints[0]);
+    expect(findLandingTarget(state)).toEqual(nextLayout.lootSpawnPoints[4]);
+  });
+
   it("assigns parachuting bots to different weapon landing points", () => {
     const state = createBattleRoyaleState("player", undefined, () => 0.5);
     const first = state.actors["bot-1"];
@@ -47,7 +92,7 @@ describe("BotController", () => {
     const state = createBattleRoyaleState("player", undefined, seededRandom(77));
     const bot = state.actors["bot-1"];
     if (!bot) throw new Error("bot missing");
-    const controller = new BotController(1, seededRandom(901));
+    const controller = new BotController(1, seededRandom(901), false, createMapLayout(state.mapSeed));
     const target = (controller as unknown as {
       findLandingTarget(matchState: typeof state): Vector3State;
     }).findLandingTarget(state);

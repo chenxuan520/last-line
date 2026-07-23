@@ -38,6 +38,8 @@ import {
   type MapWallOpening,
 } from "../../../config/map";
 import { getActiveWeapon, type ActorState, type EntityId, type FlightState, type GroundLootState } from "../../../game/state/types";
+import { ACTOR_EYE_HEIGHT, ACTOR_HEIGHT, ACTOR_RADIUS } from "../../../game/rules/actorGeometry";
+import { GROUND_LOOT_POSITION_HEIGHT } from "../../../game/rules/loot";
 import { QUALITY_PROFILES, type QualityLevel, type QualityProfile } from "../../../config/settings";
 import { syncLootMarkerViews, type LootMarkerViewAdapter } from "../LootMarkerViewAdapter";
 import { clearDynamicChunkRecoveryAttempts } from "../../dynamicChunkRecovery";
@@ -446,7 +448,7 @@ function attachModel(
 ): void {
   const scale = numberMetadata(descriptor, "scale", 1);
   const x = numberMetadata(descriptor, "offsetX", 0);
-  const y = numberMetadata(descriptor, "offsetY", -1.76);
+  const y = numberMetadata(descriptor, "offsetY", -ACTOR_EYE_HEIGHT);
   const z = numberMetadata(descriptor, "offsetZ", 0);
   for (const node of nodes) {
     if (!(node instanceof TransformNode)) continue;
@@ -1369,7 +1371,7 @@ function createPlayerHitbox(
 ): void {
   const hitbox = CreateCapsule(
     "player-hitbox",
-    { height: 1.8, radius: 0.42, tessellation: 8, subdivisions: 1 },
+    { height: ACTOR_HEIGHT, radius: ACTOR_RADIUS, tessellation: 8, subdivisions: 1 },
     scene,
   );
   hitbox.parent = root;
@@ -1507,7 +1509,7 @@ function createCamera(scene: Scene, player: ActorState): UniversalCamera {
   camera.speed = 0.78;
   camera.angularSensibility = 2_800;
   camera.checkCollisions = true;
-  camera.ellipsoid = new Vector3(0.42, 0.88, 0.42);
+  camera.ellipsoid = new Vector3(ACTOR_RADIUS, ACTOR_EYE_HEIGHT / 2, ACTOR_RADIUS);
   camera.ellipsoidOffset = new Vector3(0, -0.88, 0);
   scene.activeCamera = camera;
   return camera;
@@ -1704,7 +1706,6 @@ function weaponMaterial(materials: IslandMaterials, weaponId: WeaponVisualId): S
 }
 
 const CLASSIC_LOOT_MARKER_SIZE = 0.62;
-const GROUND_LOOT_POSITION_HEIGHT = 0.45;
 const GROUND_LOOT_MODEL_SCALE = 1.45;
 const GROUND_LOOT_WEAPON_MODEL_SCALE = 2;
 const GROUND_LOOT_MODEL_CLEARANCE = 0.04;

@@ -1,4 +1,6 @@
 import type { Vector3State } from "../game/state/types";
+import { ACTOR_EYE_HEIGHT } from "../game/rules/actorGeometry";
+import { GROUND_LOOT_POSITION_HEIGHT } from "../game/rules/loot";
 
 export interface MapObstacle {
   id: string;
@@ -444,7 +446,7 @@ export const BOT_SPAWN_POINTS: readonly Vector3State[] = Array.from({ length: 49
   const radius = 380 + (index % 4) * 70;
   const x = Math.cos(angle) * radius;
   const z = Math.sin(angle) * radius;
-  return { x, y: getTerrainHeight(x, z) + 1.76, z };
+  return { x, y: getTerrainHeight(x, z) + ACTOR_EYE_HEIGHT, z };
 });
 
 function createSeededMapPoints(
@@ -1314,7 +1316,7 @@ function createLootSpawnPoints(
         const z = round(point.position.z + Math.sin(angle) * radius);
         const candidate = {
           x,
-          y: round(terrainHeightFromHills(x, z, terrainHills) + 0.45),
+          y: round(terrainHeightFromHills(x, z, terrainHills) + GROUND_LOOT_POSITION_HEIGHT),
           z,
         };
         if (
@@ -1333,7 +1335,7 @@ function createLootSpawnPoints(
       if (selected.length >= zoneCount) break;
       const candidate = {
         x: round(obstacle.center.x),
-        y: round(terrainHeightFromHills(obstacle.center.x, obstacle.center.z, terrainHills) + 0.45),
+        y: round(terrainHeightFromHills(obstacle.center.x, obstacle.center.z, terrainHills) + GROUND_LOOT_POSITION_HEIGHT),
         z: round(obstacle.center.z),
       };
       if (
@@ -1349,7 +1351,7 @@ function createLootSpawnPoints(
       const radius = Math.sqrt(randomBetween(random, 120 ** 2, 380 ** 2));
       const x = round(point.position.x + Math.cos(angle) * radius);
       const z = round(point.position.z + Math.sin(angle) * radius);
-      const candidate = { x, y: round(terrainHeightFromHills(x, z, terrainHills) + 0.45), z };
+      const candidate = { x, y: round(terrainHeightFromHills(x, z, terrainHills) + GROUND_LOOT_POSITION_HEIGHT), z };
       if (
         isClearLootPoint(candidate, wallSegments, roofRamps, selected, outdoorBlockers, minimumSpacing) &&
         hasGlobalLootClearance(candidate, allSelected)
@@ -1373,7 +1375,7 @@ function createLootSpawnPoints(
       const radius = Math.sqrt(randomBetween(medicalRandom, 90 ** 2, 420 ** 2));
       const x = round(landingZone.position.x + Math.cos(angle) * radius);
       const z = round(landingZone.position.z + Math.sin(angle) * radius);
-      const candidate = { x, y: round(terrainHeightFromHills(x, z, terrainHills) + 0.45), z };
+      const candidate = { x, y: round(terrainHeightFromHills(x, z, terrainHills) + GROUND_LOOT_POSITION_HEIGHT), z };
       if (!isClearLootPoint(candidate, wallSegments, roofRamps, allSelected, outdoorBlockers, 12)) continue;
       medicalPoints.push(candidate);
       allSelected.push(candidate);
@@ -1397,7 +1399,7 @@ function createHospitalMedicalPoints(
   const candidates = xOffsets.flatMap((xOffset) => zOffsets.map((zOffset) => {
     const x = round(hospital.center.x + xOffset);
     const z = round(hospital.center.z + zOffset);
-    return { x, y: round(terrainHeightFromHills(x, z, terrainHills) + 0.45), z };
+    return { x, y: round(terrainHeightFromHills(x, z, terrainHills) + GROUND_LOOT_POSITION_HEIGHT), z };
   })).filter((candidate) =>
     isClearLootPoint(candidate, wallSegments, roofRamps, existingLoot, [], 3)
   );

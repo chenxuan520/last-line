@@ -17,6 +17,7 @@ import type { GameSettings } from "../config/settings";
 import { WEAPONS } from "../config/weapons";
 import { HumanController } from "../controllers/HumanController";
 import { FixedStepClock } from "../game/FixedStepClock";
+import { SIMULATION_STEP_SECONDS } from "../game/simulationTiming";
 import {
   getActiveWeapon,
   type ActorState,
@@ -319,7 +320,7 @@ export class MultiplayerSession implements GameSession {
     else this.pendingInputs.splice(0, firstUnacknowledged);
     if (player) {
       for (const input of this.pendingInputs) {
-        this.movement.processCommand(this.state, this.localActorId, input.command, 1 / 30);
+        this.movement.processCommand(this.state, this.localActorId, input.command, SIMULATION_STEP_SECONDS);
       }
       this.beginLocalCorrection(
         renderedPositions.get(this.localActorId) ?? player.position,
