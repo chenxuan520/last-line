@@ -21,6 +21,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -31,6 +33,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Resolve application version
+        id: app-version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            version="$GITHUB_REF_NAME"
+          else
+            version="$(git describe --tags --always)"
+          fi
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
       - name: Typecheck
         run: npm run typecheck
 
@@ -39,6 +52,7 @@ jobs:
 
       - name: Build
         env:
+          APP_VERSION: ${{ steps.app-version.outputs.version }}
           VITE_MULTIPLAYER_ENABLED: "false"
           VITE_MULTIPLAYER_URL: ""
         run: npm run build
@@ -53,7 +67,9 @@ jobs:
         run: npm run check:budgets
 
       - name: Build Docker image
-        run: docker build --tag "last-line-ci:${GITHUB_SHA}" .
+        env:
+          APP_VERSION: ${{ steps.app-version.outputs.version }}
+        run: docker build --build-arg "APP_VERSION=$APP_VERSION" --tag "last-line-ci:${GITHUB_SHA}" .
 
       - name: Smoke test Docker image
         env:
@@ -156,6 +172,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Generate Docker image metadata
         id: metadata
@@ -203,6 +221,8 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
+          build-args: |
+            APP_VERSION=${{ github.ref_name }}
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
           cache-from: type=gha,scope=docker-release

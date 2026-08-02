@@ -4,7 +4,8 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
-RUN VITE_MULTIPLAYER_ENABLED=true VITE_MULTIPLAYER_URL=same-origin npm run build \
+ARG APP_VERSION=dev
+RUN APP_VERSION="${APP_VERSION}" VITE_MULTIPLAYER_ENABLED=true VITE_MULTIPLAYER_URL=same-origin npm run build \
   && npm run build:server
 
 FROM node:24-bookworm-slim AS runtime
