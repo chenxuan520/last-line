@@ -30,6 +30,9 @@
 - 2026-08-02 20:13：最终验证通过：`npm run typecheck` 三段通过；`npm run test` 单次全绿（unit 40 files / 361 tests、Worker 4 files / 31 tests、standalone 3 files / 20 tests）；Worker/standalone/browser/server build 与全部预算通过。production standalone 双人联机、音量 0，飞机阶段 5 秒 RAF 取样 601 帧、平均 8.33ms、最大 9.4ms、0 个 >25ms 帧；控制台最终无 error/warn。浏览器验收结束后已关闭额外 context、保留唯一 `about:blank` 并停止/删除临时 server 数据。
 - 2026-08-02 20:30：实现 commit `4da0c78`（`fix: smooth airborne multiplayer and improve match UX`）已推送 `main`。用户随后要求明确独立审查门禁；已实际启动独立 `code-reviewer` 对 `350711a..4da0c78` 做最终静态审查，无 blocker/high/medium/low finding。生产 Worker 部署与 smoke 待规则文档 follow-up 提交后执行。
 - 2026-08-02 20:35：独立 reviewer 通过后，规则 follow-up commit `5d826b5` 已推送。自动 Worker 部署状态仍停留旧版本，按仓库 fallback 执行 `npm run deploy:worker`；Worker typecheck、31 项 Worker tests、dry-run bundle、正式部署及 production HTTP/WebSocket smoke 全链通过。生产 Worker 当前版本 `577b4e09-15b9-45dd-bcf2-b86257c017fb`，protocol 3 smoke 通过。
+- 2026-08-02 22:57：用户生产复验确认水平 60m 高空 footprint 仍几乎看不到物资，并补充开局飞机阶段会闪现。重新核对正式站已部署 `4da0c78` 客户端；生产探针确认 `match.full` 在航线起点包含 0 件物资，60m 方案沿航线同屏仅约 3–5 件，未达到实际可见性目标。开局闪现根因确认为地图加载期间服务端已推进、客户端却先渲染旧 full 后再应用合并后的最新 snapshot，加载越久首帧追赶距离越大并触发 24m snap。当前修正为 session 首帧前吸收积压快照并重置展示时间线；飞机/跳伞物资 footprint 扩至与 actor replication 相同的水平 400m，落地仍保持 60m，steady frame 仍只发 transition delta。seed 2026 全航线确定性探针峰值 47 件、累计 116 件、单步最多 5 件进入或 2 件离开；代表初始投影约 31KB，仍低于现有 50KB full-state 上限。针对性 3 files / 32 tests 与 app typecheck 已通过，尚待完整门禁和最终浏览器验收。
+- 2026-08-02 23:17：完整自动门禁通过：`npm run typecheck`；unit 40 files / 362 tests、Worker 4/31、standalone 3/20；Worker dry-run、browser/standalone server builds、YAML 解析和 `git diff --check`。预算最终为 browser entry 1,036,163/1,075,000、CSS 44,894/45,000、Worker 395,454/400,000、standalone 417,300/425,000，全部通过；首次 CSS 超限 35 bytes 后未调高预算，改为复用既有双按钮布局并重新构建通过。本地 production standalone 双客户端确认高空物资通过真实 WebSocket 以 transition delta 持续进入，快照稳态仍约 10Hz；5 秒 RAF 窗口平均 8.33ms、最大 10.3ms、0 个 >25ms，console 无 error/warn。浏览器页/context、standalone 与临时数据均已清理，仅保留 `about:blank`。本机无 Docker，真实 image smoke 留给推送后的 GitHub runner。
+- 2026-08-02 23:26：采纳 Round 7 Medium。HUD 现在于同一个同步 `start()` 调用中先创建，再消费加载期积压消息，随后才重置 correction/remote pose/render tick；因此浏览器仍不会在中间绘制旧 full，但积压的本地死亡、赛果和 connection feed 事件已有展示目标，不再被静默消费。针对性 app typecheck 与 3 files / 17 tests 通过，等待独立复审。
 
 ## Review
 
@@ -45,3 +48,27 @@
 - 结论：通过，本轮未发现明确问题；无 blocker/high/medium finding，Round 1 无待处置 finding。实现仍保持 grounded 6m 阈值，aircraft/parachuting 使用速度、tick gap 与硬上限组合预算，生命周期和超预算位移立即 snap；物资 full/增量/隐藏 tombstone 链路与客户端 generation 更新一致。
 - 验证依据：仅使用 plan 已记录的 typecheck、单次完整测试、Worker/standalone/browser/server builds、budgets 与双人 production standalone 浏览器证据；按要求未复跑测试、构建或浏览器检查。
 - 残余事项：本轮是静态代码审查，不包含生产 Worker 部署状态或正式 production smoke 的确认；该发布门禁仍需按仓库交付规则另行记录。
+
+### 2026-08-02 — Independent gameplay/UX static review (Round 7)
+
+- 审查范围：相对 `main@3f17b4a` 的 `MultiplayerSession` 首帧积压快照吸收、`MatchRuntime` 空中 400m/落地 60m 物资投影、transition delta/tombstone、关联测试及架构文档；排除 staged `.gitignore` 和暂停中的 version-injection 文件。仅采用已记录的 typecheck、unit 40/362、Worker 4/31、standalone 3/20、构建、预算、浏览器及 standalone 探针证据，未复跑门禁。
+- 结论：不通过；发现 1 项 medium，需 builder 处理后复审。400m/60m 水平 footprint、权威 3D 交互、full/delta/tombstone 计算和有界数量本轮静态复核未见其他明确问题。
+- **Medium — `src/app/MultiplayerSession.ts:193-203, 527-540`：** `start()` 在创建 HUD 前消费加载期积压消息；sequenced 事件因此在 `hud === null` 时被提交。若本地角色在重连/地图加载期间死亡，`processEvents()` 会先把 `playerEliminated` 置为 `true`，却无法展示淘汰卡；HUD 创建后的 `synchronizeOutcome()` 又因该标志跳过补偿，导致淘汰卡及返回/观战操作一直缺失。同期 connection/feed 事件也会静默丢失。
+- 待 builder 处理：在不恢复首帧旧状态渲染的前提下，将积压事件的展示/淘汰状态提交延后到 HUD 可用之后，或提供等价的无事件丢失初始化顺序；补充“start 前积压本地 `actor-died`/connection event”的针对性回归，确认首帧仍直接使用最新 snapshot。此项为阻塞复审的 medium，不是仅风险提示。
+
+### 2026-08-02 23:26 — Round 7 disposition
+
+- **采纳并修复 Medium：** `MultiplayerSession.start()` 将 HUD 创建移动到积压消息消费之前；两步仍处于同一个同步调用栈，首帧绘制前 state 已更新到最新 snapshot。随后明确清空 bootstrap correction、以最新 actor positions 重建零时长 remote poses，并把 rendered server tick 重置到最新 tick，保持消除开局追帧闪现的目标。
+- **验证：** app typecheck 与 `gameAppActions` / `matchRuntime` / `positionSmoothing` 共 17 项针对性测试通过；完整门禁和浏览器证据继续沿用 23:17 记录，待最终复审通过后再做提交前最小重验。
+
+### 2026-08-02 — Independent static re-review (Round 8)
+
+- 审查范围：沿用 Round 7 的 `main@3f17b4a` gameplay/UX 范围与排除项，重点复核 `MultiplayerSession.start()` 初始化顺序、积压事件和首帧 presentation reset，并再次静态核对空中 400m/落地 60m 物资生命周期与有界性；未重复运行测试、构建、预算或浏览器检查。
+- 结论：通过；Round 7 的 `MultiplayerSession` Medium 已关闭，本范围未发现新增 blocker/high/medium。HUD 在 `processMessages()` 前同步创建，因此积压的 `actor-died`、`match-finished` 和 `human-connection` 均有展示目标；随后在同一调用栈内清空 correction、以最新 state 重建零时长 poses、重置最新 render tick，并在返回浏览器事件循环前执行首次 `syncVisuals()`，不会恢复旧 full 首帧。
+- 关联复核：400m airborne/60m grounded 水平 footprint、权威 3D 交互、full/delta/tombstone 和数量/载荷边界未因本轮修正改变。验证依据沿用 plan 已记录的完整门禁、浏览器/standalone 探针及 23:26 针对性结果；残余验证缺口是当前没有直接构造 start 前积压事件的专用 session 单测，但静态调用顺序不存在未决中高风险。
+
+### 2026-08-02 — Final independent static re-review (Round 9)
+
+- 审查范围：沿用 Round 7/8 的 `main@3f17b4a` gameplay/UX 范围与排除项；复核最终 pointer-lock follow-up 未影响 `MultiplayerSession` bootstrap，并再次对照 400m airborne/60m grounded loot、transition lifecycle、交互距离与性能边界。未重复运行完整门禁。
+- 结论：通过，本次审查未发现 blocker/high/medium。Round 7 的积压事件/首帧 finding 继续保持关闭：HUD、消息消费、bootstrap pose/correction/render-tick reset 和首次视觉同步仍处于同一同步调用栈，最新 snapshot 在任何浏览器帧前生效；pointer-lock helper 改动不进入该联机状态链路。
+- 验证依据：沿用已记录的完整 typecheck/tests/build/budgets、浏览器/standalone 探针，以及 23:31 的 app typecheck、17 项 targeted tests、browser build、预算和 diff check；本轮仅做静态复审。

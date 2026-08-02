@@ -206,6 +206,16 @@ export class MultiplayerSession implements GameSession {
         onExit: () => this.onExit(),
       },
     );
+    if (!this.processMessages()) {
+      this.active = false;
+      return;
+    }
+    this.localCorrection = null;
+    this.remotePoses.clear();
+    for (const actor of Object.values(this.state.actors)) {
+      this.remotePoses.set(actor.id, createPositionTransition(actor.position, actor.position, 0));
+    }
+    this.resetRenderedServerTick(this.lastSnapshotTick);
     this.audio.start();
     this.syncVisuals(0);
     this.synchronizeOutcome();

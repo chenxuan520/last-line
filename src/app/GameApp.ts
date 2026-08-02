@@ -12,6 +12,8 @@ import {
   type GameSettings,
   type QualityLevel,
 } from "../config/settings";
+import { supportsTouchInput } from "../controllers/HumanController";
+import { requestPointerLockSafely } from "../controllers/pointerLock";
 import {
   getDefaultMultiplayerApiUrl,
   MultiplayerAuthClient,
@@ -106,6 +108,9 @@ export class GameApp {
 
   private readonly startSinglePlayerFromUserGesture = (): void => {
     if (!this.assets || this.starting) return;
+    if (!supportsTouchInput() && document.pointerLockElement !== this.canvas) {
+      requestPointerLockSafely(this.canvas);
+    }
     this.mobileFullscreen.activateFromUserGesture();
     void this.startMatch();
   };

@@ -35,7 +35,7 @@ npm run preview
 - Cloudflare and standalone multiplayer must share protocol, gateway, lobby, room, account, administrator, and match-domain logic. Platform-specific code is limited to storage, alarm, socket, HTTP, and process-lifecycle adapters; never fork gameplay or copy a second service implementation.
 - The browser selects a backend only by URL (`same-origin` for full-stack standalone). It must not branch on Cloudflare versus standalone gameplay semantics.
 - Multiplayer may predict only reversible local firing presentation. Hits, ammunition, damage, and death stay server-authoritative; human hitscan rewind must use monotonic server-issued render ticks, retain at most the documented 200ms actor-capsule window, and keep current authoritative map occlusion. Single-player and Bot shots remain current-state queries.
-- Multiplayer airborne presentation must use deployment-aware correction budgets and interpolate the external aircraft between snapshots; do not apply the grounded 6m snap threshold to valid aircraft/parachute motion. Ground-loot replication uses a horizontal 60m footprint with transition-only deltas, while interaction remains authoritative 3D distance.
+- Multiplayer airborne presentation must use deployment-aware correction budgets and interpolate the external aircraft between snapshots; do not apply the grounded 6m snap threshold to valid aircraft/parachute motion. Ground-loot replication uses a horizontal 400m footprint while airborne and 60m while grounded, with transition-only deltas; interaction remains authoritative 3D distance.
 
 ## Server Rules
 

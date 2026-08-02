@@ -2346,10 +2346,6 @@ h1 {
   background: rgb(30 39 33 / 82%);
 }
 
-.result-card > button {
-  margin-top: 12px;
-}
-
 .pause-card button:hover,
 .result-card button:hover {
   filter: brightness(1.1);

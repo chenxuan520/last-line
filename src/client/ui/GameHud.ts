@@ -375,6 +375,9 @@ export class GameHud {
       this.options.touchInput
         ? `${spectatingKiller ? "正在观察击杀者" : "正在观察存活角色"} · 使用箭头切换目标`
         : `${spectatingKiller ? "正在观察击杀者" : "正在观察存活角色"} · 空格或滚轮切换目标`,
+      this.options.online || !this.options.onExit
+        ? undefined
+        : { label: "返回大厅", action: this.options.onExit },
     );
     this.requireElement("result").classList.add("is-eliminated");
   }
@@ -396,7 +399,13 @@ export class GameHud {
     result.replaceChildren();
   }
 
-  private showResultCard(title: string, detail: string, buttonLabel: string, hint?: string): void {
+  private showResultCard(
+    title: string,
+    detail: string,
+    buttonLabel: string,
+    hint?: string,
+    secondaryAction?: { label: string; action: () => void },
+  ): void {
     if (this.resultVisible) return;
     this.setMobileInventoryVisible(false);
     this.resultVisible = true;
@@ -411,6 +420,18 @@ export class GameHud {
     button.dataset.action = "restart";
     button.textContent = buttonLabel;
     button.addEventListener("click", this.onRestart);
+    const actions = document.createElement("div");
+    actions.className = "pause-actions";
+    actions.append(button);
+    if (secondaryAction) {
+      const secondaryButton = document.createElement("button");
+      secondaryButton.type = "button";
+      secondaryButton.className = "is-secondary";
+      secondaryButton.dataset.action = "exit";
+      secondaryButton.textContent = secondaryAction.label;
+      secondaryButton.addEventListener("click", secondaryAction.action);
+      actions.append(secondaryButton);
+    }
     const hintElement = document.createElement("small");
     hintElement.textContent = hint ?? "";
     const spectatorControls = document.createElement("div");
@@ -427,7 +448,7 @@ export class GameHud {
       body,
       ...(hint ? [hintElement] : []),
       ...(hint && this.options.touchInput ? [spectatorControls] : []),
-      button,
+      actions,
     );
   }
 

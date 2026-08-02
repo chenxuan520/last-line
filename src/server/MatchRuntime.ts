@@ -16,6 +16,7 @@ const BOT_COHORTS = 3;
 const TAKEOVER_TICKS = SIMULATION_TICK_RATE * 5;
 const ACTOR_REPLICATION_RANGE = 400;
 const LOOT_REPLICATION_RANGE = 60;
+const AIRBORNE_LOOT_REPLICATION_RANGE = ACTOR_REPLICATION_RANGE;
 export const MATCH_CHECKPOINT_VERSION = 3;
 
 export interface MatchRuntimeOptions {
@@ -329,11 +330,14 @@ export class MatchRuntime {
   }
 
   private visibleLoot(viewer: ActorState): GroundLootState[] {
+    const replicationRange = viewer.deployment === "grounded"
+      ? LOOT_REPLICATION_RANGE
+      : AIRBORNE_LOOT_REPLICATION_RANGE;
     return Object.values(this.state.groundLoot).filter((loot) =>
       loot.available && Math.hypot(
         loot.position.x - viewer.position.x,
         loot.position.z - viewer.position.z,
-      ) <= LOOT_REPLICATION_RANGE
+      ) <= replicationRange
     );
   }
 }

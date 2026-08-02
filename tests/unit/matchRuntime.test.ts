@@ -47,7 +47,7 @@ describe("MatchRuntime", () => {
     expect(restored.state).toEqual(checkpoint.state);
   });
 
-  it("redacts distant actors and only replicates nearby loot", () => {
+  it("redacts distant actors and expands only airborne loot replication", () => {
     const runtime = new MatchRuntime({
       humanActorIds: ["human-1", "human-2"],
       seed: 11,
@@ -62,18 +62,31 @@ describe("MatchRuntime", () => {
     viewer.position = { x: 0, y: 180, z: 0 };
     distant.deployment = "grounded";
     distant.position = { x: 1_000, y: 1.76, z: 1_000 };
-    loot.position = { x: 2, y: 0.45, z: 2 };
+    loot.position = { x: 400, y: 0.45, z: 0 };
 
     const projected = runtime.projectState(viewer.id);
+    const airborneLootCount = Object.keys(projected.groundLoot).length;
 
     expect(projected.actors[distant.id]?.position.y).toBe(-10_000);
     expect(projected.actors[distant.id]?.inventory.weaponSlots).toEqual([null, null]);
     expect(projected.groundLoot[loot.id]).toEqual(loot);
+    expect(airborneLootCount).toBeGreaterThan(5);
+    expect(airborneLootCount).toBeLessThan(Object.keys(runtime.state.groundLoot).length / 2);
+    expect(jsonBytes(projected)).toBeLessThanOrEqual(50_000);
     expect(Object.values(projected.groundLoot).every((entry) =>
-      Math.hypot(entry.position.x - viewer.position.x, entry.position.z - viewer.position.z) <= 60
+      Math.hypot(entry.position.x - viewer.position.x, entry.position.z - viewer.position.z) <= 400
     )).toBe(true);
+    loot.position.x = 400.01;
+    expect(runtime.projectState(viewer.id).groundLoot[loot.id]).toBeUndefined();
+
+    viewer.deployment = "parachuting";
+    loot.position.x = 400;
+    expect(runtime.projectState(viewer.id).groundLoot[loot.id]).toEqual(loot);
+
+    viewer.deployment = "grounded";
+    loot.position.x = 60;
+    expect(runtime.projectState(viewer.id).groundLoot[loot.id]).toEqual(loot);
     loot.position.x = 60.01;
-    loot.position.z = 0;
     expect(runtime.projectState(viewer.id).groundLoot[loot.id]).toBeUndefined();
   });
 
@@ -100,6 +113,45 @@ describe("MatchRuntime", () => {
     viewer.position.x = 0;
     const reentered = runtime.projectFrame(runtime.takeFrame(2), viewer.id, exited.visibleLootIds);
     expect(reentered.frame.lootChanges).toContainEqual(loot);
+  });
+
+  it("bounds airborne loot visibility and transition deltas across a full flight", () => {
+    const runtime = new MatchRuntime({
+      humanActorIds: ["human-1", "human-2"],
+      seed: 2026,
+      startWithBandage: false,
+      disableAiSnipers: true,
+    });
+    const viewer = runtime.state.actors["human-1"];
+    if (!viewer) throw new Error("test viewer missing");
+    viewer.deployment = "aircraft";
+    const uniqueLootIds = new Set<string>();
+    let previousLootIds = new Set<string>();
+    let maximumVisible = 0;
+    let maximumTransition = 0;
+
+    for (let snapshot = 0; snapshot <= 600; snapshot += 1) {
+      const progress = snapshot / 600;
+      viewer.position = {
+        x: runtime.state.flight.start.x + (runtime.state.flight.end.x - runtime.state.flight.start.x) * progress,
+        y: runtime.state.flight.start.y + (runtime.state.flight.end.y - runtime.state.flight.start.y) * progress,
+        z: runtime.state.flight.start.z + (runtime.state.flight.end.z - runtime.state.flight.start.z) * progress,
+      };
+      const visibleLootIds = new Set(Object.keys(runtime.projectState(viewer.id).groundLoot));
+      for (const id of visibleLootIds) uniqueLootIds.add(id);
+      maximumVisible = Math.max(maximumVisible, visibleLootIds.size);
+      maximumTransition = Math.max(
+        maximumTransition,
+        [...visibleLootIds].filter((id) => !previousLootIds.has(id)).length,
+        [...previousLootIds].filter((id) => !visibleLootIds.has(id)).length,
+      );
+      previousLootIds = visibleLootIds;
+    }
+
+    expect(maximumVisible).toBeGreaterThanOrEqual(20);
+    expect(maximumVisible).toBeLessThanOrEqual(60);
+    expect(uniqueLootIds.size).toBeLessThanOrEqual(150);
+    expect(maximumTransition).toBeLessThanOrEqual(8);
   });
 
   it("emits one globally visible sequenced event per real human connection transition", () => {

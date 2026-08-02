@@ -30,6 +30,10 @@
 - 2026-08-02 20:28：采纳独立 reviewer Round 3 的两项 medium：根规则补齐 review 必须发生在 commit/push/deploy/completion report 之前；Completion Checklist 的 review gate 同步增加“仅用户逐任务明确跳过”例外，消除规则冲突。等待独立复审通过后再提交本 follow-up。
 - 2026-08-02 20:30：独立 reviewer Round 4 已通过，Round 3 两项 medium 均关闭，无 blocker/high/medium 遗留。实现 commit `4da0c78` 已在独立代码审查中通过；当前仅提交经独立审查通过的 reviewer 强制规则与 plan 记录，随后执行生产部署门禁。
 - 2026-08-02 20:35：规则 follow-up `5d826b5` 已推送；生产 Worker fallback 部署成功，版本 `577b4e09-15b9-45dd-bcf2-b86257c017fb`，`test:multiplayer:production` 通过。代码、独立 reviewer、提交/推送、服务端部署和正式 smoke 均已完成。
+- 2026-08-02 22:57：用户补充桌面单机点击开始并完成地图加载后会因未持有 pointer lock 立即显示暂停卡；修复限定为在“开始游戏”的真实点击回调内同步请求 pointer lock，场景加载期间保持锁定，浏览器拒绝时仍保留原继续按钮兜底。浏览器静音生产构建实测加载后 `pointerLockElement === canvas` 且暂停卡 `display:none`。用户进一步明确只给单机死亡结果卡增加“返回大厅”按钮，保留现有“重新部署”，联机死亡流程完全不改；当前已按该边界完成 UI 接线，尚待完整门禁和最终验收。
+- 2026-08-02 23:17：完整门禁与浏览器验收通过。桌面单机从真实“开始游戏”点击进入后，加载结束仍保持 pointer lock 且暂停卡未显示。单机淘汰结果卡静音浏览器注入验收得到按钮 `重新部署` / `返回大厅`，点击后仅触发各自 callback、无横向溢出；同一验证确认联机淘汰结果仍只有原有 `返回联机大厅`，未改变联机死亡语义。自动验证、构建与预算结果同关联性能 plan；浏览器 console 无 error/warn，页面和服务已立即清理。
+- 2026-08-02 23:26：采纳 Round 7 pointer-lock Medium。新增安全调用边界：API 缺失、同步抛错、旧式 void 返回和异步 reject 均被包含，且无论请求结果如何都会继续执行 fullscreen 激活与 `startMatch()`，由原暂停卡承担失败兜底。新增 2 项纯函数回归并与相关投影/平滑测试共 17 项通过，等待独立复审。
+- 2026-08-02 23:31：采纳 Round 8 对第二次 pointer-lock 请求的补充 finding。安全实现移入共享 `controllers/pointerLock.ts`，开始点击与 `BattleRoyaleSession.resumeInput()` 均复用；session 仅在 canvas 尚未锁定时请求，任何 unsupported/sync throw/void/reject 均不再冒泡至加载失败分支。app typecheck、3 files / 17 targeted tests、browser build、预算和 diff check 通过；最新 browser entry 1,036,268 bytes、CSS 44,894 bytes，均未放宽预算。等待独立复审。
 
 ## Review
 
@@ -71,3 +75,34 @@
 - 审查范围：相对 `5d826b5` 的两份 active plan 未提交部署记录，排除 `.gitignore`；仅做静态事实一致性复核。
 - 结论：通过，本次审查未发现明确问题，无 blocker/high/medium。`4da0c78` 与规则 follow-up `5d826b5` 均已推送；自动 Worker 状态仍旧后启用 fallback，`npm run deploy:worker` 的 Worker typecheck、31 项测试、dry-run、生产部署与 protocol 3 smoke 均通过，当前版本为 `577b4e09-15b9-45dd-bcf2-b86257c017fb`。
 - 验证依据：两份 plan 的部署记录、`main`/`origin/main` 均指向 `5d826b5` 的 Git 引用及已提供的发布证据；按要求未运行任何命令或重复验证。
+
+### 2026-08-02 — Independent gameplay/UX static review (Round 7)
+
+- 审查范围：相对 `main@3f17b4a` 的桌面单机 start/redeploy pointer-lock 手势、单机淘汰双操作、联机淘汰单操作及关联 CSS/文档；排除 staged `.gitignore` 和暂停中的 version-injection 文件。仅参考已记录的自动门禁与静音浏览器验收，未复跑测试、构建或浏览器检查。
+- 结论：不通过；发现 1 项 medium，需 builder 处理后复审。单机淘汰卡静态确认仅新增 `返回大厅`，联机淘汰卡仍只有一个 `返回联机大厅`，触控分支未被 pointer-lock 路径触发。
+- **Medium — `src/app/GameApp.ts:110-116`：** 新的真实手势路径直接调用 `this.canvas.requestPointerLock().catch(...)`。当 API 不存在，或浏览器以同步异常/旧式非 Promise 返回报告不支持时，异常发生在 `mobileFullscreen.activateFromUserGesture()` 和 `startMatch()` 之前，单机启动/重新部署会被整个中止，无法落到已约定的局内 resume 兜底；现有浏览器验收只覆盖了支持且成功的路径。
+- 待 builder 处理：对 pointer-lock 能力和同步异常/非 Promise 返回做保护，并无论请求是否受支持或成功都继续启动战局，使失败后由暂停卡提供重试；补充 unsupported/rejected 路径的针对性验证。此项为阻塞复审的 medium，不是仅风险提示。
+
+### 2026-08-02 23:26 — Round 7 disposition
+
+- **采纳并修复 Medium：** `requestPointerLockFromUserGesture` 对 optional API、同步异常、void 返回和 catchable Promise 分别安全处理；调用方在 helper 返回后无条件继续 mobile fullscreen 激活与单机启动，未改变触控分支。
+- **验证：** 新增 `tests/unit/gameAppActions.test.ts`，覆盖 API 缺失、同步异常、legacy void 和 reject containment；app typecheck 与相关 17 项测试通过。单机死亡双按钮与联机单按钮实现未因本轮修正改变。
+
+### 2026-08-02 — Independent static re-review (Round 8)
+
+- 审查范围：沿用 Round 7 的 `main@3f17b4a` gameplay/UX 范围与排除项，独立复核 pointer-lock helper、真实 start/redeploy 调用链、新增 `gameAppActions` 测试及单机/联机结果卡边界；未重复运行既有门禁。
+- 结论：不通过；Round 7 pointer-lock Medium 仅在首次手势 helper 层修复，端到端启动链仍有 1 项 medium，需 builder 继续处理后复审。单机淘汰双操作、联机淘汰单操作和触控分支本轮未发现新增问题。
+- **Medium — `src/app/BattleRoyaleSession.ts:407-415`（调用自 `src/app/GameApp.ts:86-100`）：** 安全 helper 返回并启动地图加载后，`BattleRoyaleSession.start()` 仍会在 `resumeInput()` 中再次直接执行 `this.canvas.requestPointerLock().catch(...)`。API 缺失、同步异常或 legacy void 返回仍会在这里同步抛出，并被 `GameApp.startMatch()` 当成加载失败捕获；因此实际 start/redeploy 仍无法落到暂停卡 fallback。新增 `tests/unit/gameAppActions.test.ts:5-24` 只覆盖 helper 本身，没有覆盖这次第二次请求。
+- 待 builder 处理：让单机 session 的初始/恢复 pointer-lock 请求复用同一安全边界（或等价包含 missing/sync/void/reject），并验证第二次请求失败不会从 `session.start()` 冒泡到 `GameApp` 的加载失败分支。此项为 Round 7 finding 的未完全关闭部分，阻塞通过，不是仅风险提示。
+
+### 2026-08-02 23:31 — Round 8 disposition
+
+- **采纳并修复 Medium：** 安全请求逻辑从 `GameApp` 移到共享 `src/controllers/pointerLock.ts`；真实开始/重新部署点击和 `BattleRoyaleSession.resumeInput()` 都调用同一实现。session 先检查 `document.pointerLockElement`，已锁定时不重复请求；未锁定时所有失败形态均被包含，`session.start()` 继续完成并由暂停卡兜底。
+- **验证：** app typecheck、pointer-lock/物资/平滑 17 项 targeted tests、browser build、预算和 diff check 全部通过。Round 8 finding 等待独立复审确认关闭。
+
+### 2026-08-02 — Final independent static re-review (Round 9)
+
+- 审查范围：沿用 Round 7/8 的 `main@3f17b4a` gameplay/UX 范围与排除项，重点复核共享 `controllers/pointerLock.ts`、真实 start/redeploy 手势、`BattleRoyaleSession.resumeInput()`、触控分支、结果卡边界及 import 依赖；未重复运行完整门禁。
+- 结论：通过，本次审查未发现 blocker/high/medium；Round 8 pointer-lock Medium 已关闭。共享 helper 对 API 缺失、同步异常、legacy void 和可 catch rejection 均不向调用方冒泡；GameApp 仍在真实用户手势内同步请求并无条件继续启动，session 已持锁时不重复请求，未持锁时同样使用安全 helper，因此失败后能够完成 start/redeploy 并显示既有 resume fallback。
+- 兼容性复核：触控路径仍由 `supportsTouchInput()`/`HumanController.usesTouchControls()` 隔离，不触发 pointer lock；新 helper 无 imports，是 GameApp 与 BattleRoyaleSession 共同依赖的叶子模块，不形成循环依赖或新增启动副作用。单机淘汰仍为 `重新部署` + `返回大厅`，联机淘汰仍只有 `返回联机大厅`。
+- 验证依据：接受 23:31 已记录的 app typecheck、17 项 targeted tests、browser build、预算和 diff check，以及此前完整门禁与浏览器证据；本轮仅做静态复审。
