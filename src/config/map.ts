@@ -2,7 +2,13 @@ import type { Vector3State } from "../game/state/types";
 import { ACTOR_EYE_HEIGHT } from "../game/rules/actorGeometry";
 import { GROUND_LOOT_POSITION_HEIGHT } from "../game/rules/loot";
 import { DEFAULT_MAP_ID, mapDisplayName, type MapId } from "./maps";
-import { createTownMapBlueprint, type TownBuildingKind } from "./townMap";
+import {
+  createTownMapBlueprint,
+  type TownBuildingKind,
+  TOWN_POINT_HALF_DEPTH,
+  TOWN_POINT_HALF_WIDTH,
+  TOWN_POINT_OBSTACLE_CLEARANCE,
+} from "./townMap";
 
 export interface MapObstacle {
   id: string;
@@ -428,7 +434,14 @@ function createTownMapLayout(seed: number): MapLayout {
     ...createTownSkybridgeFloorSlabs(skybridges),
   ];
   const rockObstacles = createTownRockObstacles(seed, terrainHills);
-  const coverObstacles = createTownCoverObstacles(seed, terrainHills);
+  const coverObstacles = createTownCoverObstacles(
+    seed,
+    terrainHills,
+    blueprint.roadSegments,
+    blueprint.landingZones,
+    obstacles,
+    roofRamps,
+  );
   const lootZoneCounts = createTownLootZoneCounts(blueprint.landingZones.length);
   const baseLootSpawnPoints = createTownLootSpawnPoints(
     blueprint.landingZones,
@@ -470,7 +483,13 @@ function createTownMapLayout(seed: number): MapLayout {
       z: point.z,
     },
   }));
-  const treeTrunks = createTownTreeTrunks(seed, terrainHills, obstacles, lootSpawnPoints);
+  const treeTrunks = createTownTreeTrunks(
+    seed,
+    terrainHills,
+    obstacles,
+    lootSpawnPoints,
+    blueprint.landingZones,
+  );
   return {
     mapId: "town",
     displayName: mapDisplayName("town"),
@@ -542,7 +561,18 @@ function createTownSkybridges(
     const toX = to.center.x + (spec.toSide === "right" ? to.width / 2 : -to.width / 2);
     const minimumX = Math.min(fromX, toX);
     const maximumX = Math.max(fromX, toX);
-    const centerZ = round((from.center.z + to.center.z) / 2);
+    const overlapMinimumZ = Math.max(
+      from.center.z - from.depth / 2 + 4,
+      to.center.z - to.depth / 2 + 4,
+    );
+    const overlapMaximumZ = Math.min(
+      from.center.z + from.depth / 2 - 4,
+      to.center.z + to.depth / 2 - 4,
+    );
+    if (overlapMaximumZ <= overlapMinimumZ) {
+      throw new Error(`Town skybridge endpoints do not overlap: ${spec.id}`);
+    }
+    const centerZ = round((overlapMinimumZ + overlapMaximumZ) / 2);
     return {
       id: spec.id,
       fromBuildingId: from.id,
@@ -593,7 +623,12 @@ function createTownSkybridgeWallGeometry(
   );
   for (const { building, side } of replacements) {
     if (!building) throw new Error("Town skybridge opening building missing");
-    const geometry = createFacadeGeometry(building, 1, side, "door", terrainHills);
+    const bridge = skybridges.find((candidate) =>
+      (candidate.fromBuildingId === building.id && candidate.fromSide === side) ||
+      (candidate.toBuildingId === building.id && candidate.toSide === side)
+    );
+    if (!bridge) throw new Error("Town skybridge opening record missing");
+    const geometry = createFacadeGeometry(building, 1, side, "door", terrainHills, bridge.center.z);
     wallSegments.push(...geometry.wallSegments);
     wallOpenings.push(geometry.opening);
   }
@@ -660,16 +695,27 @@ function createTownRockObstacles(seed: number, terrainHills: readonly TerrainHil
   });
 }
 
-function createTownCoverObstacles(seed: number, terrainHills: readonly TerrainHill[]): MapCoverObstacle[] {
+function createTownCoverObstacles(
+  seed: number,
+  terrainHills: readonly TerrainHill[],
+  roads: readonly (readonly [number, number, number, number])[],
+  reservedPoints: readonly { x: number; z: number }[],
+  buildings: readonly MapBuilding[],
+  ramps: readonly RoofRamp[],
+): MapCoverObstacle[] {
   const random = createSeededRandom(seed ^ 0xa24baed5);
-  return Array.from({ length: 168 }, (_, index) => {
-    const street = Math.floor(index / 21) % 8;
-    const slot = index % 21;
-    const horizontal = index % 2 === 0;
-    const fixed = -630 + street * 180 + (horizontal ? 84 : -84);
-    const variable = -850 + slot * 85;
-    const x = round(horizontal ? variable : fixed);
-    const z = round(horizontal ? fixed : variable);
+  const covers: MapCoverObstacle[] = [];
+  for (let attempt = 0; attempt < 50_000 && covers.length < 168; attempt += 1) {
+    const index = covers.length;
+    const road = roads[(index * 7 + attempt) % roads.length];
+    if (!road) continue;
+    const [startX, startZ, endX, endZ] = road;
+    const horizontal = startZ === endZ;
+    const progress = randomBetween(random, 0.03, 0.97);
+    const side = random() < 0.5 ? -1 : 1;
+    const edgeOffset = randomBetween(random, 8.5, 11.5);
+    const x = round(startX + (endX - startX) * progress + (horizontal ? 0 : side * edgeOffset));
+    const z = round(startZ + (endZ - startZ) * progress + (horizontal ? side * edgeOffset : 0));
     const kind = index % 3 === 0 ? "hay" as const : "fence" as const;
     const longSize = round(randomBetween(random, 7, 12));
     const width = kind === "fence"
@@ -680,7 +726,7 @@ function createTownCoverObstacles(seed: number, terrainHills: readonly TerrainHi
       : round(randomBetween(random, 3, 5));
     const height = kind === "fence" ? 2.2 : round(randomBetween(random, 2.4, 3.6));
     const ground = terrainHeightFromHills(x, z, terrainHills);
-    return {
+    const candidate: MapCoverObstacle = {
       id: `town-cover-${index}`,
       kind,
       center: { x, y: round(ground + height / 2), z },
@@ -689,7 +735,19 @@ function createTownCoverObstacles(seed: number, terrainHills: readonly TerrainHi
       depth,
       color: kind === "fence" ? "#5c615e" : "#6d5f4b",
     };
-  });
+    if (buildings.some((building) => buildingsOverlap(candidate, building, 1.2))) continue;
+    if (ramps.some((ramp) => rampIntersectsBuilding(ramp, candidate, 1.2))) continue;
+    if (reservedPoints.some((point) =>
+      Math.abs(candidate.center.x - point.x) <=
+        candidate.width / 2 + TOWN_POINT_HALF_WIDTH + TOWN_POINT_OBSTACLE_CLEARANCE &&
+      Math.abs(candidate.center.z - point.z) <=
+        candidate.depth / 2 + TOWN_POINT_HALF_DEPTH + TOWN_POINT_OBSTACLE_CLEARANCE
+    )) continue;
+    if (covers.some((cover) => buildingsOverlap(candidate, cover, 3))) continue;
+    covers.push(candidate);
+  }
+  if (covers.length !== 168) throw new Error("Not enough random town cover obstacles");
+  return covers;
 }
 
 function createTownLootZoneCounts(zoneCount: number): number[] {
@@ -769,6 +827,7 @@ function createTownTreeTrunks(
   terrainHills: readonly TerrainHill[],
   buildings: readonly MapBuilding[],
   loot: readonly Vector3State[],
+  reservedPoints: readonly { x: number; z: number }[],
 ): MapTreeTrunk[] {
   const random = createSeededRandom(seed ^ 0x68bc21eb);
   const trees: MapTreeTrunk[] = [];
@@ -783,6 +842,10 @@ function createTownTreeTrunks(
         6,
       )) ||
       loot.some((point) => Math.hypot(point.x - x, point.z - z) < 5) ||
+      reservedPoints.some((point) =>
+        Math.abs(point.x - x) <= TOWN_POINT_HALF_WIDTH + 4 &&
+        Math.abs(point.z - z) <= TOWN_POINT_HALF_DEPTH + 4
+      ) ||
       trees.some((tree) => Math.hypot(tree.center.x - x, tree.center.z - z) < 12)
     ) continue;
     const width = round(randomBetween(random, 2.2, 3.2));
@@ -1660,6 +1723,7 @@ function createFacadeGeometry(
   side: MapWallOpening["side"],
   kind: MapWallOpening["kind"],
   terrainHills: readonly TerrainHill[],
+  openingCoordinate?: number,
 ): { wallSegments: MapWallSegment[]; opening: MapWallOpening } {
   const horizontalAlongX = side === "front" || side === "back";
   const span = horizontalAlongX ? building.width : building.depth;
@@ -1669,6 +1733,17 @@ function createFacadeGeometry(
   const storyBottom = building.baseY + storyIndex * building.storyHeight;
   const storyTop = storyBottom + building.storyHeight;
   const position = facadePosition(building, side);
+  const requestedOffset = openingCoordinate === undefined
+    ? 0
+    : openingCoordinate - (horizontalAlongX ? building.center.x : building.center.z);
+  const maximumOpeningOffset = Math.max(
+    0,
+    span / 2 - openingWidth / 2 - BUILDING_WALL_THICKNESS - 0.8,
+  );
+  const openingOffset = Math.max(
+    -maximumOpeningOffset,
+    Math.min(maximumOpeningOffset, requestedOffset),
+  );
   const localSupport = storyIndex === 0
     ? Math.max(storyBottom, terrainHeightFromHills(position.x, position.z, terrainHills))
     : storyBottom + BUILDING_ROOF_CAP_HEIGHT;
@@ -1684,14 +1759,17 @@ function createFacadeGeometry(
     side,
     kind,
     center: {
-      x: position.x,
+      x: openingCoordinate === undefined
+        ? position.x
+        : horizontalAlongX ? round(building.center.x + openingOffset) : position.x,
       y: round((openingBottom + openingTop) / 2),
-      z: position.z,
+      z: openingCoordinate === undefined
+        ? position.z
+        : horizontalAlongX ? position.z : round(building.center.z + openingOffset),
     },
     width: round(openingWidth),
     height: round(openingHeight),
   };
-  const sidePieceSpan = (span - openingWidth) / 2;
   const segments: MapWallSegment[] = [];
   const addHorizontalPiece = (suffix: string, offset: number, width: number, centerY: number, height: number): void => {
     if (width <= 0.05 || height <= 0.05) return;
@@ -1708,10 +1786,44 @@ function createFacadeGeometry(
       height,
     ));
   };
-  addHorizontalPiece("left", -(openingWidth + sidePieceSpan) / 2, sidePieceSpan, storyBottom + building.storyHeight / 2, building.storyHeight);
-  addHorizontalPiece("right", (openingWidth + sidePieceSpan) / 2, sidePieceSpan, storyBottom + building.storyHeight / 2, building.storyHeight);
-  addHorizontalPiece("sill", 0, openingWidth, (storyBottom + openingBottom) / 2, openingBottom - storyBottom);
-  addHorizontalPiece("lintel", 0, openingWidth, (openingTop + storyTop) / 2, storyTop - openingTop);
+  if (openingCoordinate === undefined) {
+    const sidePieceSpan = (span - openingWidth) / 2;
+    addHorizontalPiece("left", -(openingWidth + sidePieceSpan) / 2, sidePieceSpan, storyBottom + building.storyHeight / 2, building.storyHeight);
+    addHorizontalPiece("right", (openingWidth + sidePieceSpan) / 2, sidePieceSpan, storyBottom + building.storyHeight / 2, building.storyHeight);
+    addHorizontalPiece("sill", 0, openingWidth, (storyBottom + openingBottom) / 2, openingBottom - storyBottom);
+    addHorizontalPiece("lintel", 0, openingWidth, (openingTop + storyTop) / 2, storyTop - openingTop);
+  } else {
+    const leftPieceSpan = span / 2 + openingOffset - openingWidth / 2;
+    const rightPieceSpan = span / 2 - openingOffset - openingWidth / 2;
+    addHorizontalPiece(
+      "left",
+      -span / 2 + leftPieceSpan / 2,
+      leftPieceSpan,
+      storyBottom + building.storyHeight / 2,
+      building.storyHeight,
+    );
+    addHorizontalPiece(
+      "right",
+      openingOffset + openingWidth / 2 + rightPieceSpan / 2,
+      rightPieceSpan,
+      storyBottom + building.storyHeight / 2,
+      building.storyHeight,
+    );
+    addHorizontalPiece(
+      "sill",
+      openingOffset,
+      openingWidth,
+      (storyBottom + openingBottom) / 2,
+      openingBottom - storyBottom,
+    );
+    addHorizontalPiece(
+      "lintel",
+      openingOffset,
+      openingWidth,
+      (openingTop + storyTop) / 2,
+      storyTop - openingTop,
+    );
+  }
   return { wallSegments: segments, opening };
 }
 

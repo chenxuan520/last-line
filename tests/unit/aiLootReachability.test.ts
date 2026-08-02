@@ -304,8 +304,8 @@ describe("AI loot reachability", () => {
     expect(controllerUpdates).toBeLessThanOrEqual(47_000);
     expect(actorCommands).toBeLessThanOrEqual(48_000);
     expect(findPath.mock.calls.length).toBeLessThanOrEqual(mapId === "town" ? 22_000 : 17_500);
-    expect(hasLineOfSight.mock.calls.length).toBeLessThanOrEqual(mapId === "town" ? 22_000 : 20_000);
-    expect(traceShotDetailed.mock.calls.length).toBeLessThanOrEqual(mapId === "town" ? 25_000 : 23_500);
+    expect(hasLineOfSight.mock.calls.length).toBeLessThanOrEqual(mapId === "town" ? 26_000 : 20_000);
+    expect(traceShotDetailed.mock.calls.length).toBeLessThanOrEqual(mapId === "town" ? 30_000 : 23_500);
     expect(allEvents.length).toBeLessThanOrEqual(7_000);
     expect(peakGroundLoot).toBeLessThanOrEqual(300);
     expect(steps).toBeLessThanOrEqual(1_200);

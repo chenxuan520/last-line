@@ -1,5 +1,6 @@
 import { env, evictDurableObject, reset, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
+import { MATCH_CHECKPOINT_VERSION } from "../../src/server/MatchRuntime";
 import worker from "../../worker/index";
 
 const ADMIN_PASSWORD = "Correct admin battery staple 1";
@@ -401,7 +402,7 @@ describe("admin control plane", () => {
     secondSocket.close(1000, "done");
   }, 60_000);
 
-  it("expires a running room restored from a pre-tree checkpoint", async () => {
+  it("expires a running room restored from the previous authoritative-map checkpoint", async () => {
     const guest = await publicPost("/v1/guests", { displayName: "Legacy One" });
     const admission = await publicPost("/v1/matchmaking/quick", guest);
     const roomId = String(admission.roomId);
@@ -410,6 +411,7 @@ describe("admin control plane", () => {
       const room = await state.storage.get<Record<string, unknown>>("room-v1");
       if (!room) throw new Error("legacy room state missing");
       const legacy = {
+        version: MATCH_CHECKPOINT_VERSION - 1,
         state: {},
         tick: 0,
         snapshotSequence: 0,

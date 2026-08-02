@@ -15,12 +15,19 @@ import { AssetCatalog } from "../../src/assets/AssetCatalog";
 import type { AssetEntry } from "../../src/assets/types";
 import {
   applyActorVisualPose,
+  createNaturalDetailPlacements,
   createIslandScene,
   getSkyAssetId,
   setActorEquipmentVisual,
   setActorWeaponVisual,
 } from "../../src/client/render/scenes/IslandScene";
 import { createMapLayout, getTerrainHeight, HOSPITAL_WALL_COLOR, MAP_SIZE } from "../../src/config/map";
+import { QUALITY_PROFILES } from "../../src/config/settings";
+import {
+  TOWN_POINT_HALF_DEPTH,
+  TOWN_POINT_HALF_WIDTH,
+  TOWN_POINT_OBSTACLE_CLEARANCE,
+} from "../../src/config/townMap";
 import { createIdleCommand } from "../../src/game/commands/ActorCommand";
 import { createBattleRoyaleState, createBattleRoyaleStateForHumans } from "../../src/game/modes/BattleRoyaleMode";
 import { ACTOR_EYE_HEIGHT, ACTOR_HEIGHT, ACTOR_RADIUS } from "../../src/game/rules/actorGeometry";
@@ -947,6 +954,35 @@ describe("IslandScene lifecycle", () => {
       .map((mesh) => mesh.metadata?.poiName)
       .filter((name): name is string => typeof name === "string")))
       .toEqual(new Set(layout.mapPoints.map((point) => point.name)));
+    const poiPaving = bundle.scene.meshes.filter((mesh) =>
+      mesh.metadata?.decoration === "town-poi-paving"
+    );
+    expect(poiPaving).toHaveLength(layout.mapPoints.length);
+    for (const [index, point] of layout.mapPoints.entries()) {
+      const paving = poiPaving.find((mesh) => mesh.name === `town-poi-paving-${index}`);
+      expect(paving?.position.x).toBe(point.position.x);
+      expect(paving?.position.z).toBe(point.position.z);
+      expect(paving?.getBoundingInfo().boundingBox.extendSizeWorld.x).toBeCloseTo(
+        TOWN_POINT_HALF_WIDTH,
+        2,
+      );
+      expect(paving?.getBoundingInfo().boundingBox.extendSizeWorld.z).toBeCloseTo(
+        TOWN_POINT_HALF_DEPTH,
+        2,
+      );
+    }
+    const naturalDetails = bundle.scene.meshes.filter((mesh) =>
+      mesh.metadata?.decoration === "natural-detail"
+    );
+    for (const detail of naturalDetails) {
+      const bounds = detail.getBoundingInfo().boundingBox.extendSizeWorld;
+      expect(layout.landingZones.every((point) =>
+        Math.abs(detail.position.x - point.position.x) >
+          bounds.x + TOWN_POINT_HALF_WIDTH + TOWN_POINT_OBSTACLE_CLEARANCE ||
+        Math.abs(detail.position.z - point.position.z) >
+          bounds.z + TOWN_POINT_HALF_DEPTH + TOWN_POINT_OBSTACLE_CLEARANCE
+      ), detail.name).toBe(true);
+    }
     const doorSillIds = new Set(
       layout.wallOpenings
         .filter((opening) => opening.kind === "door")
@@ -961,6 +997,31 @@ describe("IslandScene lifecycle", () => {
     bundle.scene.dispose();
     engine.dispose();
   }, 60_000);
+
+  it.each([
+    [1, "low"],
+    [1, "medium"],
+    [1, "high"],
+    [2, "low"],
+    [2, "medium"],
+    [2, "high"],
+  ] as const)(
+    "keeps town natural details outside every public space for seed %i at %s quality",
+    (seed, quality) => {
+      const layout = createMapLayout("town", seed);
+      const placements = createNaturalDetailPlacements(layout, QUALITY_PROFILES[quality]);
+      expect(placements.length).toBeGreaterThan(0);
+      for (const placement of placements) {
+        const horizontalRadius = Math.max(placement.scaleX, placement.scaleZ) / 2;
+        expect(layout.landingZones.every((point) =>
+          Math.abs(placement.x - point.position.x) >
+            horizontalRadius + TOWN_POINT_HALF_WIDTH + TOWN_POINT_OBSTACLE_CLEARANCE ||
+          Math.abs(placement.z - point.position.z) >
+            horizontalRadius + TOWN_POINT_HALF_DEPTH + TOWN_POINT_OBSTACLE_CLEARANCE
+        ), `${seed}:${quality}:${placement.name}`).toBe(true);
+      }
+    },
+  );
 
   it("keeps the clearing sky poles stable while lifting the sun into the upper hemisphere", async () => {
     const engine = new NullEngine();

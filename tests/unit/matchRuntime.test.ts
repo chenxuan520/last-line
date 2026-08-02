@@ -3,7 +3,11 @@ import { getTerrainHeight } from "../../src/config/map";
 import { createIdleCommand } from "../../src/game/commands/ActorCommand";
 import { createWeaponState } from "../../src/game/state/types";
 import type { SequencedGameEvent, ServerMessage } from "../../src/network/protocol";
-import { MATCH_CHECKPOINT_VERSION, MatchRuntime } from "../../src/server/MatchRuntime";
+import {
+  isMatchCheckpointCompatible,
+  MATCH_CHECKPOINT_VERSION,
+  MatchRuntime,
+} from "../../src/server/MatchRuntime";
 
 describe("MatchRuntime", () => {
   it("creates town matches explicitly and restores legacy states as island", () => {
@@ -68,6 +72,24 @@ describe("MatchRuntime", () => {
     });
     expect(restored.tick).toBe(runtime.tick);
     expect(restored.state).toEqual(checkpoint.state);
+  });
+
+  it("rejects checkpoints from the pre-random-town map contract", () => {
+    const runtime = new MatchRuntime({
+      humanActorIds: ["human-1", "human-2"],
+      seed: 42,
+      mapId: "town",
+      startWithBandage: false,
+      disableAiSnipers: true,
+    });
+    const checkpoint = runtime.checkpoint();
+
+    expect(MATCH_CHECKPOINT_VERSION).toBe(4);
+    expect(isMatchCheckpointCompatible(checkpoint)).toBe(true);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      version: MATCH_CHECKPOINT_VERSION - 1,
+    })).toBe(false);
   });
 
   it("redacts distant actors and expands only airborne loot replication", () => {

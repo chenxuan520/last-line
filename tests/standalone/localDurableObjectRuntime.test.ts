@@ -7,6 +7,7 @@ import {
   DurableService,
   type PlatformDurableObjectState,
 } from "../../src/server/platform/DurableService";
+import { MATCH_CHECKPOINT_VERSION, MatchRuntime } from "../../src/server/MatchRuntime";
 import { createStandaloneEnvironment } from "../../standalone/StandaloneEnvironment";
 import { LocalDurableObjectRuntime } from "../../standalone/LocalDurableObjectRuntime";
 import worker from "../../worker/index";
@@ -225,6 +226,51 @@ describe("LocalDurableObjectRuntime", () => {
       expect(environment.rooms.instantiatedCount()).toBe(0);
     } finally {
       vi.useRealTimers();
+      await environment.close();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("deletes a running room restored from the previous authoritative-map checkpoint", async () => {
+    const directory = await mkdtemp(resolve(tmpdir(), "last-line-checkpoint-version-"));
+    const databasePath = resolve(directory, "rooms.sqlite");
+    const roomId = "room-00000000-0000-4000-8000-000000000002";
+    let environment = await createStandaloneEnvironment({ databasePath });
+    try {
+      const state = await environment.rooms.getState(roomId);
+      const runtime = new MatchRuntime({
+        humanActorIds: ["human-1", "human-2"],
+        seed: 42,
+        mapId: "town",
+        startWithBandage: true,
+        disableAiSnipers: true,
+      });
+      const legacyCheckpoint = {
+        ...runtime.checkpoint(),
+        version: MATCH_CHECKPOINT_VERSION - 1,
+      };
+      await state.storage.put("room-v1", {
+        roomId,
+        code: "OLD234",
+        visibility: "private",
+        status: "running",
+        revision: 1,
+        countdownEndsAt: null,
+        options: { mapId: "town", startWithBandage: true, disableAiSnipers: true },
+        seed: 42,
+        expiresAt: Date.now() + 60_000,
+        members: {},
+        checkpoint: legacyCheckpoint,
+      });
+      await state.storage.put("checkpoint-v1", legacyCheckpoint);
+      await state.storage.setAlarm(Date.now() + 60_000);
+      await environment.close();
+
+      environment = await createStandaloneEnvironment({ databasePath });
+      const restoredState = await environment.rooms.getState(roomId);
+      expect(await restoredState.storage.get("room-v1")).toBeUndefined();
+      expect(await restoredState.storage.get("checkpoint-v1")).toBeUndefined();
+    } finally {
       await environment.close();
       await rm(directory, { force: true, recursive: true });
     }

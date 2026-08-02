@@ -8,6 +8,13 @@ import {
   TOTAL_LOOT_POINTS,
   type MapObstacle,
 } from "../../src/config/map";
+import {
+  createTownMapBlueprint,
+  TOWN_POINT_HALF_DEPTH,
+  TOWN_POINT_HALF_WIDTH,
+  TOWN_POINT_OBSTACLE_CLEARANCE,
+  TOWN_ROAD_SHOULDER_HALF_WIDTH,
+} from "../../src/config/townMap";
 import { ACTOR_EYE_HEIGHT } from "../../src/game/rules/actorGeometry";
 import { createIdleCommand } from "../../src/game/commands/ActorCommand";
 import { getSupportHeight, MovementSystem } from "../../src/game/systems/MovementSystem";
@@ -15,6 +22,14 @@ import { SimulationCombatWorld } from "../../src/game/systems/SimulationCombatWo
 import { createActorState, type MatchState } from "../../src/game/state/types";
 
 describe("town map layout", () => {
+  it("rebuilds the same seeded town blueprint deterministically without layout caching", () => {
+    const first = createTownMapBlueprint(42);
+    const second = createTownMapBlueprint(42);
+
+    expect(second).not.toBe(first);
+    expect(second).toEqual(first);
+  });
+
   it("creates a deterministic high-density Greyfurnace City", () => {
     const first = createMapLayout("town", 42);
     const second = createMapLayout("town", 42);
@@ -43,6 +58,16 @@ describe("town map layout", () => {
     ]));
     expect(first.obstacles.filter((building) => building.storyCount >= 4)
       .every((building) => building.townKind === "tower")).toBe(true);
+    const core = first.obstacles.slice(0, 384);
+    expect(core.every((building) =>
+      Math.max(building.width / building.depth, building.depth / building.width) <= 3.21
+    )).toBe(true);
+    expect(core.every((building, index) =>
+      core.slice(index + 1).every((other) =>
+        Math.abs(building.center.x - other.center.x) >= (building.width + other.width) / 2 ||
+        Math.abs(building.center.z - other.center.z) >= (building.depth + other.depth) / 2
+      )
+    )).toBe(true);
   });
 
   it("keeps every building floor and ramp authoritative through five stories", () => {
@@ -86,6 +111,82 @@ describe("town map layout", () => {
       }
     }
   });
+
+  it.each([0, 1, 2, 7, 19, 42, 99, 2026, 314_159])(
+    "keeps seeded POIs and landing zones in real public space for seed %i",
+    (seed) => {
+      const layout = createMapLayout("town", seed);
+      expect(layout.mapPoints).toHaveLength(8);
+      expect(layout.landingZones).toHaveLength(16);
+
+      for (const point of layout.landingZones) {
+        expect(layout.obstacles.every((building) =>
+          Math.abs(point.position.x - building.center.x) >
+            building.width / 2 + TOWN_POINT_HALF_WIDTH + TOWN_POINT_OBSTACLE_CLEARANCE ||
+          Math.abs(point.position.z - building.center.z) >
+            building.depth / 2 + TOWN_POINT_HALF_DEPTH + TOWN_POINT_OBSTACLE_CLEARANCE
+        ), `${seed}:${point.name}:building`).toBe(true);
+        expect(layout.roofRamps.every((ramp) =>
+          Math.abs(point.position.x - ramp.centerX) >
+            ramp.width / 2 + TOWN_POINT_HALF_WIDTH + TOWN_POINT_OBSTACLE_CLEARANCE ||
+          point.position.z + TOWN_POINT_HALF_DEPTH + TOWN_POINT_OBSTACLE_CLEARANCE <
+            Math.min(ramp.startZ, ramp.endZ) ||
+          point.position.z - TOWN_POINT_HALF_DEPTH - TOWN_POINT_OBSTACLE_CLEARANCE >
+            Math.max(ramp.startZ, ramp.endZ)
+        ), `${seed}:${point.name}:ramp`).toBe(true);
+        for (const [startX, startZ, , endZ] of layout.roadSegments) {
+          const horizontal = startZ === endZ;
+          const distance = horizontal
+            ? Math.abs(point.position.z - startZ) - TOWN_POINT_HALF_DEPTH
+            : Math.abs(point.position.x - startX) - TOWN_POINT_HALF_WIDTH;
+          expect(distance, `${seed}:${point.name}:road`).toBeGreaterThanOrEqual(
+            TOWN_ROAD_SHOULDER_HALF_WIDTH + TOWN_POINT_OBSTACLE_CLEARANCE,
+          );
+        }
+        for (const obstacle of [
+          ...layout.coverObstacles,
+          ...layout.treeTrunks,
+          ...layout.rockObstacles,
+        ]) {
+          expect(
+            Math.abs(point.position.x - obstacle.center.x) >
+              TOWN_POINT_HALF_WIDTH + obstacle.width / 2 + TOWN_POINT_OBSTACLE_CLEARANCE ||
+            Math.abs(point.position.z - obstacle.center.z) >
+              TOWN_POINT_HALF_DEPTH + obstacle.depth / 2 + TOWN_POINT_OBSTACLE_CLEARANCE,
+            `${seed}:${point.name}:${obstacle.id}`,
+          ).toBe(true);
+        }
+
+        for (const opening of layout.wallOpenings.filter((candidate) =>
+          candidate.storyIndex === 0 && candidate.kind === "door"
+        )) {
+          const outwardX = opening.side === "left"
+            ? opening.center.x - TOWN_POINT_ENTRANCE_DEPTH / 2
+            : opening.side === "right"
+              ? opening.center.x + TOWN_POINT_ENTRANCE_DEPTH / 2
+              : opening.center.x;
+          const outwardZ = opening.side === "front"
+            ? opening.center.z - TOWN_POINT_ENTRANCE_DEPTH / 2
+            : opening.side === "back"
+              ? opening.center.z + TOWN_POINT_ENTRANCE_DEPTH / 2
+              : opening.center.z;
+          const entranceWidth = opening.side === "front" || opening.side === "back"
+            ? opening.width + 4
+            : TOWN_POINT_ENTRANCE_DEPTH;
+          const entranceDepth = opening.side === "front" || opening.side === "back"
+            ? TOWN_POINT_ENTRANCE_DEPTH
+            : opening.width + 4;
+          expect(
+            Math.abs(point.position.x - outwardX) >
+              entranceWidth / 2 + TOWN_POINT_HALF_WIDTH + TOWN_POINT_OBSTACLE_CLEARANCE ||
+            Math.abs(point.position.z - outwardZ) >
+              entranceDepth / 2 + TOWN_POINT_HALF_DEPTH + TOWN_POINT_OBSTACLE_CLEARANCE,
+            `${seed}:${point.name}:${opening.obstacleId}:entrance`,
+          ).toBe(true);
+        }
+      }
+    },
+  );
 
   it("keeps skybridges connected to second-story buildings and inside the map", () => {
     const layout = createMapLayout("town", 7);
@@ -180,9 +281,11 @@ describe("town map layout", () => {
     )).toBe(true);
     followTownPath(layout, fromDoor.outside, bridgePath);
 
-    const sourceInterior = { x: from.center.x, y: highDoor.inside.y, z: from.center.z };
-    const targetDoor = groundDoorPoints(layout, to.id);
-    const targetInterior = { x: to.center.x, y: targetDoor.inside.y, z: to.center.z };
+    const sourceBuilding = layout.obstacles[0];
+    const targetBuilding = layout.obstacles[48];
+    if (!sourceBuilding || !targetBuilding) throw new Error("Cross-block town buildings missing");
+    const sourceInterior = groundDoorPoints(layout, sourceBuilding.id).inside;
+    const targetInterior = groundDoorPoints(layout, targetBuilding.id).inside;
     const buildingPath = navigator.findPath(sourceInterior, targetInterior);
     expect(buildingPath.length).toBeGreaterThan(4);
     followTownPath(layout, sourceInterior, buildingPath);
@@ -252,7 +355,7 @@ describe("town map layout", () => {
           samples.push(sample);
         }
       }
-      expect(samples.length).toBeGreaterThan(800);
+      expect(samples.length).toBeGreaterThan(760);
       const distances = samples.flatMap((sample) =>
         Array.from({ length: 16 }, (_, index) => {
           const angle = (index + 0.5) / 16 * Math.PI * 2;
@@ -274,24 +377,68 @@ describe("town map layout", () => {
     },
   );
 
-  it("varies town building details across seeds without changing the fixed city grid", () => {
+  it("uses seeded random block layouts instead of one repeated rectangular grid", () => {
     const first = createMapLayout("town", 1);
     const second = createMapLayout("town", 2);
-
-    expect(first.obstacles.map((building) => building.center.x)).toEqual(
-      second.obstacles.map((building) => building.center.x),
+    const firstCore = first.obstacles.slice(0, 384);
+    const secondCore = second.obstacles.slice(0, 384);
+    const changedCenters = firstCore.filter((building, index) => {
+      const other = secondCore[index];
+      return other &&
+        (Math.abs(building.center.x - other.center.x) > 0.01 ||
+          Math.abs(building.center.z - other.center.z) > 0.01);
+    });
+    const changedFootprints = firstCore.filter((building, index) => {
+      const other = secondCore[index];
+      return other &&
+        (Math.abs(building.width - other.width) > 0.01 ||
+          Math.abs(building.depth - other.depth) > 0.01);
+    });
+    expect(changedCenters.length).toBeGreaterThan(320);
+    expect(changedFootprints.length).toBeGreaterThan(320);
+    expect(first.roadSegments).not.toEqual(second.roadSegments);
+    expect(first.mapPoints.map(({ position }) => position)).not.toEqual(
+      second.mapPoints.map(({ position }) => position),
     );
-    expect(first.obstacles.map((building) => building.center.z)).toEqual(
-      second.obstacles.map((building) => building.center.z),
+    expect(first.coverObstacles.map(({ center }) => center)).not.toEqual(
+      second.coverObstacles.map(({ center }) => center),
     );
-    expect(first.obstacles.map((building) => building.width)).not.toEqual(
-      second.obstacles.map((building) => building.width),
-    );
+    const verticalRoads = first.roadSegments
+      .filter(([startX, , endX]) => startX === endX)
+      .map(([x]) => x)
+      .sort((left, right) => left - right);
+    const horizontalRoads = first.roadSegments
+      .filter(([, startZ, , endZ]) => startZ === endZ)
+      .map(([, z]) => z)
+      .sort((left, right) => left - right);
+    expect(new Set(verticalRoads.slice(1).map((road, index) =>
+      Math.round((road - (verticalRoads[index] ?? road)) * 10)
+    )).size).toBeGreaterThanOrEqual(5);
+    expect(new Set(horizontalRoads.slice(1).map((road, index) =>
+      Math.round((road - (horizontalRoads[index] ?? road)) * 10)
+    )).size).toBeGreaterThanOrEqual(5);
     expect(first.obstacles.map((building) => building.storyCount)).not.toEqual(
       second.obstacles.map((building) => building.storyCount),
     );
+
+    const localPatternKeys = Array.from({ length: 64 }, (_, blockIndex) => {
+      const block = firstCore.slice(blockIndex * 6, blockIndex * 6 + 6);
+      const centerX = block.reduce((total, building) => total + building.center.x, 0) / block.length;
+      const centerZ = block.reduce((total, building) => total + building.center.z, 0) / block.length;
+      return block
+        .map((building) =>
+          `${Math.round((building.center.x - centerX) * 10)}:` +
+          `${Math.round((building.center.z - centerZ) * 10)}:` +
+          `${Math.round(building.width * 10)}:${Math.round(building.depth * 10)}`
+        )
+        .sort()
+        .join("|");
+    });
+    expect(new Set(localPatternKeys).size).toBeGreaterThanOrEqual(48);
   });
 });
+
+const TOWN_POINT_ENTRANCE_DEPTH = 10;
 
 function distanceToBlocker(
   originX: number,

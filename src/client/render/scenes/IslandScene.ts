@@ -43,6 +43,13 @@ import { ACTOR_EYE_HEIGHT, ACTOR_HEIGHT, ACTOR_RADIUS } from "../../../game/rule
 import { GROUND_LOOT_POSITION_HEIGHT } from "../../../game/rules/loot";
 import { QUALITY_PROFILES, type QualityLevel, type QualityProfile } from "../../../config/settings";
 import type { MapId } from "../../../config/maps";
+import {
+  TOWN_POINT_HALF_DEPTH,
+  TOWN_POINT_HALF_WIDTH,
+  TOWN_POINT_OBSTACLE_CLEARANCE,
+  TOWN_ROAD_HALF_WIDTH,
+  TOWN_ROAD_SHOULDER_HALF_WIDTH,
+} from "../../../config/townMap";
 import { syncLootMarkerViews, type LootMarkerViewAdapter } from "../LootMarkerViewAdapter";
 import { clearDynamicChunkRecoveryAttempts } from "../../dynamicChunkRecovery";
 import { loadCatalogModel } from "../loadCatalogModel";
@@ -594,6 +601,7 @@ function createIslandEnvironment(
   applyTerrainSurface(ground, layout, materials.ground);
   ground.material = materials.ground;
   markEnvironment(ground, "island-ground");
+  if (layout.mapId === "town") createTownPoiPaving(scene, materials, layout);
 
   const buildingMaterials = new Map<string, StandardMaterial>();
   const buildingWallMeshes = new Map<string, Mesh[]>();
@@ -796,7 +804,15 @@ function applyTerrainSurface(ground: Mesh, layout: MapLayout, groundMaterial: Mu
     const x = positions[index] ?? 0;
     const z = positions[index + 2] ?? 0;
     const height = getTerrainHeight(x, z, layout);
-    const surface = getTerrainSurface(x, z, height, layout.seed, layout.mapPoints, roadSegments);
+    const surface = getTerrainSurface(
+      x,
+      z,
+      height,
+      layout.mapId,
+      layout.seed,
+      layout.mapPoints,
+      roadSegments,
+    );
     positions[index + 1] = height;
     const materialIndex = terrainMaterialIndex(surface.kind);
     const surfaceMaterial = groundMaterial.subMaterials[materialIndex];
@@ -840,6 +856,23 @@ function createIslandPerimeter(scene: Scene, materials: IslandMaterials): void {
   createSquareBand(scene, "island-wet-shore", islandHalfSize + 10, islandHalfSize + 20, -0.34, materials.shoreWet);
 }
 
+function createTownPoiPaving(scene: Scene, materials: IslandMaterials, layout: MapLayout): void {
+  for (const [index, point] of layout.mapPoints.entries()) {
+    const paving = CreateGround(
+      `town-poi-paving-${index}`,
+      { width: TOWN_POINT_HALF_WIDTH * 2, height: TOWN_POINT_HALF_DEPTH * 2 },
+      scene,
+    );
+    paving.position.set(
+      point.position.x,
+      getTerrainHeight(point.position.x, point.position.z, layout) + 0.015,
+      point.position.z,
+    );
+    paving.material = index % 2 === 0 ? materials.poiDark : materials.poiAccent;
+    markDecoration(paving, "town-poi-paving");
+  }
+}
+
 function createSquareBand(
   scene: Scene,
   name: string,
@@ -873,6 +906,7 @@ function getTerrainSurface(
   x: number,
   z: number,
   height: number,
+  mapId: MapId,
   seed: number,
   mapPoints: MapLayout["mapPoints"],
   roadSegments: ReadonlyArray<readonly [number, number, number, number]>,
@@ -893,34 +927,42 @@ function getTerrainSurface(
       break;
     }
   }
-  if (roadSegments.some(([startX, startZ, endX, endZ]) => pointToSegmentDistance(x, z, startX, startZ, endX, endZ) <= 6)) {
+  if (roadSegments.some(([startX, startZ, endX, endZ]) =>
+    pointToSegmentDistance(x, z, startX, startZ, endX, endZ) <= TOWN_ROAD_SHOULDER_HALF_WIDTH
+  )) {
     color = TERRAIN_COLORS.roadShoulder;
     kind = "road";
     naturalSurface = false;
   }
-  mapPoints.forEach((point, index) => {
-    const poiType = getPoiVisualType(point.name);
-    if (!poiType) return;
-    const width = poiType === "harbor" ? 138 : 126;
-    const depth = poiType === "town" ? 118 : 106;
-    if (Math.abs(x - point.position.x) <= width / 2 && Math.abs(z - point.position.z) <= depth / 2) {
-      color = index % 2 === 0 ? TERRAIN_COLORS.paving : TERRAIN_COLORS.roadShoulder;
-      kind = "road";
-      naturalSurface = false;
-    }
-  });
-  if (roadSegments.some(([startX, startZ, endX, endZ]) => pointToSegmentDistance(x, z, startX, startZ, endX, endZ) <= 3.75)) {
+  if (mapId === "island") {
+    mapPoints.forEach((point, index) => {
+      const poiType = getPoiVisualType(point.name);
+      if (!poiType) return;
+      const width = poiType === "harbor" ? 138 : 126;
+      const depth = poiType === "town" ? 118 : 106;
+      if (Math.abs(x - point.position.x) <= width / 2 && Math.abs(z - point.position.z) <= depth / 2) {
+        color = index % 2 === 0 ? TERRAIN_COLORS.paving : TERRAIN_COLORS.roadShoulder;
+        kind = "road";
+        naturalSurface = false;
+      }
+    });
+  }
+  if (roadSegments.some(([startX, startZ, endX, endZ]) =>
+    pointToSegmentDistance(x, z, startX, startZ, endX, endZ) <= TOWN_ROAD_HALF_WIDTH
+  )) {
     color = TERRAIN_COLORS.road;
     kind = "road";
     naturalSurface = false;
   }
-  mapPoints.forEach((point, index) => {
-    if (Math.hypot(x - point.position.x, z - point.position.z) <= 15) {
-      color = index % 2 === 0 ? TERRAIN_COLORS.poiDark : TERRAIN_COLORS.poiAccent;
-      kind = "road";
-      naturalSurface = false;
-    }
-  });
+  if (mapId === "island") {
+    mapPoints.forEach((point, index) => {
+      if (Math.hypot(x - point.position.x, z - point.position.z) <= 15) {
+        color = index % 2 === 0 ? TERRAIN_COLORS.poiDark : TERRAIN_COLORS.poiAccent;
+        kind = "road";
+        naturalSurface = false;
+      }
+    });
+  }
   const shade = naturalSurface ? terrainSurfaceShade(x, z, height, seed) : 1;
   return {
     color: naturalSurface ? color.scale(shade) : color,
@@ -1228,10 +1270,6 @@ function createNaturalDetails(
   layout: MapLayout,
   quality: QualityProfile,
 ): void {
-  const rockCount = quality.decorativeRockCount;
-  const mountainRockCount = quality.mountainRockCount;
-  const shrubCount = quality.shrubCount;
-  const random = createVisualRandom(layout.seed ^ 0x02e5be93);
   const rockTemplate = CreateSphere("rock-template", { diameter: 1, segments: 5 }, scene);
   rockTemplate.material = rockMaterial;
   rockTemplate.isVisible = false;
@@ -1247,16 +1285,16 @@ function createNaturalDetails(
     mesh.freezeWorldMatrix();
   }
 
-  for (let index = 0; index < rockCount; index += 1) {
-    const rock = rockTemplate.createInstance(`rock-${index}`);
-    const position = index < mountainRockCount
-      ? randomMountainPosition(random, layout, 3)
-      : randomNaturalPosition(random, layout, 3);
-    if (!position) continue;
-    const { x, z } = position;
-    rock.position.set(x, getTerrainHeight(x, z, layout) + 0.42 + (index % 3) * 0.12, z);
-    rock.scaling.set(1.2 + (index % 4) * 0.38, 0.72 + (index % 3) * 0.18, 1 + ((index + 2) % 4) * 0.31);
-    rock.rotation.y = random() * Math.PI * 2;
+  const placements = createNaturalDetailPlacements(layout, quality);
+  for (const placement of placements.filter((candidate) => candidate.detailType === "rock")) {
+    const rock = rockTemplate.createInstance(placement.name);
+    rock.position.set(
+      placement.x,
+      getTerrainHeight(placement.x, placement.z, layout) + placement.yOffset,
+      placement.z,
+    );
+    rock.scaling.set(placement.scaleX, placement.scaleY, placement.scaleZ);
+    rock.rotation.y = placement.rotationY;
     markNaturalDetail(rock, "rock");
   }
 
@@ -1264,16 +1302,68 @@ function createNaturalDetails(
   shrubTemplate.material = shrubMaterial;
   shrubTemplate.isVisible = false;
   shrubTemplate.isPickable = false;
-  for (let index = 0; index < shrubCount; index += 1) {
-    const shrub = shrubTemplate.createInstance(`shrub-${index}`);
-    const position = randomNaturalPosition(random, layout, 2);
-    if (!position) continue;
-    const { x, z } = position;
-    shrub.position.set(x, getTerrainHeight(x, z, layout) + 0.68, z);
-    shrub.scaling.set(2.1 + (index % 3) * 0.42, 1.05 + (index % 2) * 0.24, 1.8 + ((index + 1) % 3) * 0.36);
-    shrub.rotation.y = random() * Math.PI * 2;
+  for (const placement of placements.filter((candidate) => candidate.detailType === "shrub")) {
+    const shrub = shrubTemplate.createInstance(placement.name);
+    shrub.position.set(
+      placement.x,
+      getTerrainHeight(placement.x, placement.z, layout) + placement.yOffset,
+      placement.z,
+    );
+    shrub.scaling.set(placement.scaleX, placement.scaleY, placement.scaleZ);
+    shrub.rotation.y = placement.rotationY;
     markNaturalDetail(shrub, "shrub");
   }
+}
+
+export interface NaturalDetailPlacement {
+  name: string;
+  detailType: "rock" | "shrub";
+  x: number;
+  z: number;
+  yOffset: number;
+  scaleX: number;
+  scaleY: number;
+  scaleZ: number;
+  rotationY: number;
+}
+
+export function createNaturalDetailPlacements(
+  layout: MapLayout,
+  quality: QualityProfile,
+): NaturalDetailPlacement[] {
+  const placements: NaturalDetailPlacement[] = [];
+  const random = createVisualRandom(layout.seed ^ 0x02e5be93);
+  for (let index = 0; index < quality.decorativeRockCount; index += 1) {
+    const position = index < quality.mountainRockCount
+      ? randomMountainPosition(random, layout, 3)
+      : randomNaturalPosition(random, layout, 3);
+    if (!position) continue;
+    placements.push({
+      name: `rock-${index}`,
+      detailType: "rock",
+      ...position,
+      yOffset: 0.42 + (index % 3) * 0.12,
+      scaleX: 1.2 + (index % 4) * 0.38,
+      scaleY: 0.72 + (index % 3) * 0.18,
+      scaleZ: 1 + ((index + 2) % 4) * 0.31,
+      rotationY: random() * Math.PI * 2,
+    });
+  }
+  for (let index = 0; index < quality.shrubCount; index += 1) {
+    const position = randomNaturalPosition(random, layout, 2);
+    if (!position) continue;
+    placements.push({
+      name: `shrub-${index}`,
+      detailType: "shrub",
+      ...position,
+      yOffset: 0.68,
+      scaleX: 2.1 + (index % 3) * 0.42,
+      scaleY: 1.05 + (index % 2) * 0.24,
+      scaleZ: 1.8 + ((index + 1) % 3) * 0.36,
+      rotationY: random() * Math.PI * 2,
+    });
+  }
+  return placements;
 }
 
 function createPois(scene: Scene, materials: IslandMaterials, layout: MapLayout): void {
@@ -2272,8 +2362,16 @@ function randomMountainPosition(
 }
 
 function isNaturalPositionBlocked(x: number, z: number, layout: MapLayout, clearance: number): boolean {
-  return [...layout.obstacles, ...layout.rockObstacles, ...layout.coverObstacles, ...layout.treeTrunks].some((obstacle) =>
-    Math.abs(x - obstacle.center.x) <= obstacle.width / 2 + clearance &&
-    Math.abs(z - obstacle.center.z) <= obstacle.depth / 2 + clearance
+  return (
+    [...layout.obstacles, ...layout.rockObstacles, ...layout.coverObstacles, ...layout.treeTrunks].some((obstacle) =>
+      Math.abs(x - obstacle.center.x) <= obstacle.width / 2 + clearance &&
+      Math.abs(z - obstacle.center.z) <= obstacle.depth / 2 + clearance
+    ) ||
+    layout.mapId === "town" && layout.landingZones.some((point) =>
+      Math.abs(x - point.position.x) <=
+        TOWN_POINT_HALF_WIDTH + clearance + TOWN_POINT_OBSTACLE_CLEARANCE &&
+      Math.abs(z - point.position.z) <=
+        TOWN_POINT_HALF_DEPTH + clearance + TOWN_POINT_OBSTACLE_CLEARANCE
+    )
   );
 }

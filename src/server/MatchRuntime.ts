@@ -18,7 +18,7 @@ const TAKEOVER_TICKS = SIMULATION_TICK_RATE * 5;
 const ACTOR_REPLICATION_RANGE = 400;
 const LOOT_REPLICATION_RANGE = 60;
 const AIRBORNE_LOOT_REPLICATION_RANGE = ACTOR_REPLICATION_RANGE;
-export const MATCH_CHECKPOINT_VERSION = 3;
+export const MATCH_CHECKPOINT_VERSION = 4;
 
 export interface MatchRuntimeOptions {
   humanActorIds: readonly EntityId[];
