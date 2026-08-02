@@ -464,6 +464,13 @@ export class GameHud {
     player.inventory.backpack.forEach((stack, index) => {
       const item = document.createElement("span");
       item.className = "item-stack";
+      if (canManageBackpack && this.options.onDropBackpackItem && !this.options.touchInput) {
+        const shortcut = document.createElement("kbd");
+        shortcut.className = "backpack-drop";
+        shortcut.classList.toggle("is-disabled", !canDropBackpack);
+        shortcut.textContent = `${index + 4}`;
+        item.append(shortcut);
+      }
       const icon = document.createElement("img");
       icon.src = this.resolveIconUrl(getItemIconAssetId(stack.itemId));
       icon.alt = "";
@@ -481,12 +488,6 @@ export class GameHud {
         drop.textContent = "丢弃";
         drop.disabled = !canDropBackpack;
         item.append(drop);
-      } else if (canManageBackpack && this.options.onDropBackpackItem) {
-        const shortcut = document.createElement("kbd");
-        shortcut.className = "backpack-drop";
-        shortcut.classList.toggle("is-disabled", !canDropBackpack);
-        shortcut.textContent = `${index + 4} 丢弃`;
-        item.append(shortcut);
       }
       fragment.append(item);
     });

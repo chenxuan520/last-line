@@ -1584,7 +1584,8 @@ h1 {
   right: clamp(18px, 1.8vw, 34px);
   bottom: 108px;
   display: grid;
-  max-width: min(560px, 52vw);
+  width: min(760px, calc(100vw - 36px));
+  max-width: none;
   gap: 4px;
   color: #bdc5ba;
   font: 600 9px/1.2 var(--tactical-font);
@@ -1596,13 +1597,21 @@ h1 {
   position: relative;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  flex-wrap: wrap;
+  justify-content: flex-start;
+  flex-wrap: nowrap;
   gap: 7px;
   min-height: 35px;
   padding: 6px 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
   border-right: 1px solid rgb(183 197 139 / 28%);
   background: linear-gradient(90deg, transparent, rgb(10 15 13 / 62%) 18%);
+  scrollbar-width: thin;
+}
+
+.weapon-slots > :first-child,
+.backpack > :first-child {
+  margin-inline-start: auto;
 }
 
 .weapon-slots::after,
@@ -2118,8 +2127,16 @@ h1 {
   #ui-root.is-touch-input .inventory-card .weapon-slots,
   #ui-root.is-touch-input .inventory-card .backpack {
     justify-content: flex-start;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
     background: rgb(10 15 13 / 58%);
     text-align: left;
+  }
+
+  #ui-root.is-touch-input .inventory-card .weapon-slots > :first-child,
+  #ui-root.is-touch-input .inventory-card .backpack > :first-child {
+    margin-inline-start: 0;
   }
 
   #ui-root.is-touch-input .backpack-drop {
