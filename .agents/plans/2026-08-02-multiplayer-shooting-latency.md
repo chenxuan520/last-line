@@ -37,6 +37,7 @@
 - 2026-08-02 17:39：按用户要求同步远端。首次 `git pull` 因任务工作区与远端重叠而安全中止；经用户明确授权后使用临时 stash，`main` 已 fast-forward 从 `f2af65d` 到 `4932b95`（上游 mobile controls / inventory management 更新），随后恢复任务改动。仅 `tests/unit/networkProtocol.test.ts` 发生内容冲突，已保留上游 backpack drop sanitization 用例与本任务 render/shot token 用例完成最小解冲突；其余代码和文档自动合并。待在新基线上重新执行完整验证和 reviewer。
 - 2026-08-02 17:46：新基线完整验证通过：针对性 6 files / 30 tests；`npm run typecheck` 三段通过；`npm run test` 为 unit 38 files / 352 tests、Worker 4 files / 30 tests、standalone 3 files / 20 tests；`npm run build:worker` 与 `npm run build:standalone`（含 browser/server）通过。预算全通过：browser entry 1,033,183/1,075,000 bytes，Worker 394,028/400,000 bytes，standalone server 415,874/425,000 bytes。
 - 2026-08-02 17:46：新基线 production standalone 浏览器复验通过：音量保持 `0`，两个隔离身份快速匹配进入同一 50 actor 权威联机战局，房间、倒计时、HUD 与联机状态正常，控制台无 error/warn。验证后已关闭额外 context、唯一页面恢复 `about:blank`、停止 server 并删除临时数据。
+- 2026-08-02 17:52：实现已提交并推送到 `main`，commit `455ff9c`（`feat: add multiplayer shot prediction and rewind`）；提交明确排除用户既有 `.gitignore` 改动。push 后 `wrangler deployments status` 仍显示 2026-07-23 旧版本，未观察到自动 Workers Build，按发布规则执行 `npm run deploy:worker` fallback；Worker typecheck、30 项 Worker tests、dry-run bundle、正式部署和生产 HTTP/WebSocket smoke 全链通过。生产 Worker 当前版本 `4efd863c-bbe7-4756-9d23-a670c65bc820`，`test:multiplayer:production` 通过（protocol 3）。
 
 ## Review
 
