@@ -1584,8 +1584,8 @@ h1 {
   right: clamp(18px, 1.8vw, 34px);
   bottom: 108px;
   display: grid;
-  width: min(760px, calc(100vw - 36px));
-  max-width: none;
+  width: max-content;
+  max-width: calc(100vw - 36px);
   gap: 4px;
   color: #bdc5ba;
   font: 600 9px/1.2 var(--tactical-font);
