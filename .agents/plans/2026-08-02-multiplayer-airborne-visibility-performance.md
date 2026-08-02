@@ -29,6 +29,7 @@
 - 2026-08-02 18:45：完成核心实现。新增 deployment-aware 本地 correction：grounded 保留 6m，aircraft/parachuting 按 snapshot/interpolation 时间与权威速度预算平滑并保留硬上限；外部飞机 progress 改由 rendered server tick 推导。物资复制改为水平 60m，full state 重置可见 ID，增量帧只发 newly-visible、dirty-visible、hidden tombstone，不再每 100ms 重发全部可见物资。新增隔次 6.07m 飞机 correction、高速跳伞、外部飞机 progress、高空物资边界及 loot 生命周期回归；针对性测试通过，等待完整验证。
 - 2026-08-02 20:13：最终验证通过：`npm run typecheck` 三段通过；`npm run test` 单次全绿（unit 40 files / 361 tests、Worker 4 files / 31 tests、standalone 3 files / 20 tests）；Worker/standalone/browser/server build 与全部预算通过。production standalone 双人联机、音量 0，飞机阶段 5 秒 RAF 取样 601 帧、平均 8.33ms、最大 9.4ms、0 个 >25ms 帧；控制台最终无 error/warn。浏览器验收结束后已关闭额外 context、保留唯一 `about:blank` 并停止/删除临时 server 数据。
 - 2026-08-02 20:30：实现 commit `4da0c78`（`fix: smooth airborne multiplayer and improve match UX`）已推送 `main`。用户随后要求明确独立审查门禁；已实际启动独立 `code-reviewer` 对 `350711a..4da0c78` 做最终静态审查，无 blocker/high/medium/low finding。生产 Worker 部署与 smoke 待规则文档 follow-up 提交后执行。
+- 2026-08-02 20:35：独立 reviewer 通过后，规则 follow-up commit `5d826b5` 已推送。自动 Worker 部署状态仍停留旧版本，按仓库 fallback 执行 `npm run deploy:worker`；Worker typecheck、31 项 Worker tests、dry-run bundle、正式部署及 production HTTP/WebSocket smoke 全链通过。生产 Worker 当前版本 `577b4e09-15b9-45dd-bcf2-b86257c017fb`，protocol 3 smoke 通过。
 
 ## Review
 

@@ -29,6 +29,7 @@
 - 2026-08-02 20:25：用户明确强化仓库交付规则：除非用户逐任务明确要求跳过，否则所有代码改动提交前必须启动独立 `code-reviewer` subagent；自审和测试通过都不能替代。已同步更新根 `AGENTS.md`，并对本轮最终 diff 实际启动独立 reviewer；`350711a..4da0c78` 审查无 blocker/high/medium/low finding。规则文档改动本身继续交由独立 reviewer 复审后再提交。
 - 2026-08-02 20:28：采纳独立 reviewer Round 3 的两项 medium：根规则补齐 review 必须发生在 commit/push/deploy/completion report 之前；Completion Checklist 的 review gate 同步增加“仅用户逐任务明确跳过”例外，消除规则冲突。等待独立复审通过后再提交本 follow-up。
 - 2026-08-02 20:30：独立 reviewer Round 4 已通过，Round 3 两项 medium 均关闭，无 blocker/high/medium 遗留。实现 commit `4da0c78` 已在独立代码审查中通过；当前仅提交经独立审查通过的 reviewer 强制规则与 plan 记录，随后执行生产部署门禁。
+- 2026-08-02 20:35：规则 follow-up `5d826b5` 已推送；生产 Worker fallback 部署成功，版本 `577b4e09-15b9-45dd-bcf2-b86257c017fb`，`test:multiplayer:production` 通过。代码、独立 reviewer、提交/推送、服务端部署和正式 smoke 均已完成。
 
 ## Review
 
@@ -64,3 +65,9 @@
 - 审查范围：相对 `4da0c78` 的完整未提交文档 diff（根 `AGENTS.md` 与两份 active plan），排除 `.gitignore`；对照两份 plan 复核独立 review 门禁及新增 20:30 Build 记录。
 - 结论：通过，本次审查未发现明确问题；Round 3 的两项 medium 已由 Round 4 关闭，无 blocker/high/medium 遗留。`HEAD`、`main` 与 `origin/main` 均指向 `4da0c78`，当前纳入范围的改动仅为上述三份文档；两条 20:30 记录与既有独立审查、尚待执行的生产 Worker 部署及 smoke 状态一致。
 - 验证依据：仅做静态 diff、Git 引用与 plan 记录对照；按要求未运行 test、typecheck、build、budget、smoke 或浏览器检查。生产部署门禁仍待本次文档提交后执行。
+
+### 2026-08-02 — Final deployment-record review (Round 6)
+
+- 审查范围：相对 `5d826b5` 的两份 active plan 未提交部署记录，排除 `.gitignore`；仅做静态事实一致性复核。
+- 结论：通过，本次审查未发现明确问题，无 blocker/high/medium。`4da0c78` 与规则 follow-up `5d826b5` 均已推送；自动 Worker 状态仍旧后启用 fallback，`npm run deploy:worker` 的 Worker typecheck、31 项测试、dry-run、生产部署与 protocol 3 smoke 均通过，当前版本为 `577b4e09-15b9-45dd-bcf2-b86257c017fb`。
+- 验证依据：两份 plan 的部署记录、`main`/`origin/main` 均指向 `5d826b5` 的 Git 引用及已提供的发布证据；按要求未运行任何命令或重复验证。
