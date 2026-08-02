@@ -38,6 +38,8 @@
 - 2026-08-02 20:41：按用户要求在 commit 前将全部工作区改动（含 plan）暂存到 stash，执行 `git pull --ff-only origin main`。线上从 `7ffb5c2` 快进到 `490e0f6 fix: compact menu settings layout`，仅修改 `.gitignore` 与 `src/styles/main.css`；`git stash pop` 无冲突，地图、场景、协议、checkpoint、测试和文档文件均未被线上提交触碰。
 - 2026-08-02 20:41：基于新基线 `490e0f6` 重新完成 browser/Worker/server build 和 budgets：browser entry 1,060,362/1,075,000，CSS 44,804/45,000，Worker 449,977/450,000，standalone 469,510/470,000，均 PASS。最新 `dist/` 再次通过 Chrome MCP：14320 墙批次、8 POI、8 独立铺装，console 无 error/issue；页面关闭到只剩 `about:blank`，8798 preview 与 Chrome/MCP 进程无残留。
 - 2026-08-02 20:43：post-pull reviewer 复核通过，未解决 blocker/high/medium 均为 0。已在 `main@490e0f6` 提交功能、测试与工程文档，commit 为 `643b5bb feat: generate realistic random town blocks`；本 plan 的最终审查与交付记录单独提交。
+- 2026-08-02 20:54：交付完成。审查/验证 plan 提交为 `9fc05bb docs: record random town validation`，两项提交已推送到 `origin/main`。GitHub Actions run `30766391067` 成功：Node 24 typecheck、完整 unit/Worker/standalone 测试、browser/Worker/server build、budgets、Docker image 与只读非 root 容器 `/health` smoke、GitHub Pages deploy 全部通过；非 tag 的 release 与 Docker publish 正常跳过。
+- 2026-08-02 20:54：Cloudflare Pages 对 commit `9fc05bb` 部署成功；Workers Build ID `09884ab5-677e-4b47-886c-6d559f4e1838` 成功，实际 production Worker Version ID 为 `716a0321-87c5-4ca5-a217-c4dd0e7130b3`。`npm run test:multiplayer:production` 已对 `https://lastlinep2p.011203.xyz` 通过真实 HTTP/WebSocket smoke，确认 welcome 使用 protocol 5。记录提交前已再次 `git pull --ff-only origin main`，结果 `Already up to date`。
 
 ## Review
 
