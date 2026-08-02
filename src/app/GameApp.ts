@@ -157,7 +157,7 @@ export class GameApp {
             <div><span>FIELD MANUAL // LL-01</span><h2 id="about-title">关于《最后防线》</h2></div>
             <button type="button" data-action="close-about" aria-label="关闭游戏介绍">×</button>
           </header>
-          <p class="about-lead">一款无需安装、打开浏览器即可进入的 50 人第一人称大逃杀。单人挑战 49 名 AI，或与 2–10 名真人联机，其余席位由 AI 补满。</p>
+          <p class="about-lead">一款打开浏览器即可开战的 50 人第一人称大逃杀。选择单人战局，或与 2–10 名玩家联机；从观察航线、跳伞搜集一路战至最终安全区。</p>
           <div class="about-grid">
             <article>
               <span class="about-index">01 // CREATOR</span>
