@@ -84,7 +84,7 @@ npm run preview
 
 ## Review and Delivery Rules
 
-- Every non-trivial code change must pass a final code review after implementation and required tests are complete. Do not treat passing tests as a substitute for review.
+- Every code change must pass a final review by an independent `code-reviewer` subagent after implementation and required tests are complete, and before any commit, push, deployment, or completion report, unless the user explicitly instructs the agent to skip review for that task. Self-review and passing tests are never substitutes for launching the reviewer subagent.
 - Reviewers must not repeat test, typecheck, build, budget, smoke, or browser commands that the outer implementation agent already completed and recorded in the active plan. Reviewer work defaults to static diff/contract analysis; it may run only the smallest targeted verification for a specific uncovered risk, and must state why existing evidence is insufficient. Never rerun full suites merely for independent confirmation.
 - Re-read the current plan before evaluating findings. Treat reviewer feedback as input to verify against requirements, compatibility, existing semantics, and code; do not apply it mechanically.
 - Resolve every blocker, high, and medium finding, then request re-review. Do not commit, push, deploy, or report completion while any such finding remains, unless the plan records a specific, evidence-backed reason that no code change is required.
@@ -100,7 +100,7 @@ npm run preview
 4. Run `npm run build:worker` and `npm run build:server` when multiplayer/shared server code changed; run `npm run build:standalone` when the self-hosted artifact or same-origin client selection changed.
 5. Run `npm run check:budgets` after producing the browser, Worker, and standalone artifacts.
 6. If presentation changed, open the production build in local Chrome/Edge with volume `0` and check the console.
-7. Complete the review/re-review loop with no unresolved blocker, high, or medium findings.
+7. Complete the review/re-review loop with no unresolved blocker, high, or medium findings, unless the user explicitly instructed the agent to skip review for that task.
 8. Update `AGENTS.md`, README, and `docs/` when contracts, controls, commands, architecture, persistence, security, or deployment behavior change.
 
 ## Deployment Rules
