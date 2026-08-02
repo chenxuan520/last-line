@@ -160,6 +160,48 @@ describe("multiplayer worker", () => {
     firstSocket.close(1000, "done");
     secondSocket.close(1000, "done");
   });
+
+  it("broadcasts one sequenced disconnect and reconnect event to other match players", async () => {
+    const firstGuest = await createGuest("Presence Alpha");
+    const secondGuest = await createGuest("Presence Bravo");
+    const firstAdmission = await post("/v1/matchmaking/quick", firstGuest);
+    const secondAdmission = await post("/v1/matchmaking/quick", secondGuest);
+    const first = await connectWithToken(firstAdmission, String(firstAdmission.admissionToken));
+    const second = await connectWithToken(secondAdmission, String(secondAdmission.admissionToken));
+    const messages: ServerMessage[] = [];
+    first.socket.addEventListener("message", (event) => {
+      messages.push(JSON.parse(String(event.data)) as ServerMessage);
+    });
+    const roomId = String(firstAdmission.roomId);
+    const stub = env.GAME_ROOMS.getByName(roomId);
+    await runInDurableObject(stub, async (_instance, state) => {
+      const room = await state.storage.get<Record<string, unknown>>("room-v1");
+      if (!room) throw new Error("room state missing");
+      room.countdownEndsAt = Date.now() - 1;
+      await state.storage.put("room-v1", room);
+      await state.storage.setAlarm(Date.now() - 1);
+    });
+    await evictDurableObject(stub);
+    await runDurableObjectAlarm(stub);
+    await waitForRoomStatus(roomId, "running");
+
+    second.socket.close(1000, "network lost");
+    await waitForMemberConnection(roomId, String(secondAdmission.playerId), false);
+    await broadcastRoomFrame(stub);
+    const disconnected = await waitForConnectionEvent(messages, "human-2", "disconnected");
+    await broadcastRoomFrame(stub);
+    expect(connectionEvents(messages, "human-2", "disconnected")).toHaveLength(1);
+
+    const reconnected = await connectWithToken(secondAdmission, second.reconnectToken);
+    await waitForMemberConnection(roomId, String(secondAdmission.playerId), true);
+    await broadcastRoomFrame(stub);
+    const reconnectedEvent = await waitForConnectionEvent(messages, "human-2", "reconnected");
+    expect(reconnectedEvent.sequence).toBeGreaterThan(disconnected.sequence);
+    expect(JSON.stringify([disconnected, reconnectedEvent])).not.toContain(String(secondAdmission.playerId));
+
+    first.socket.close(1000, "done");
+    reconnected.socket.close(1000, "done");
+  });
 });
 
 async function createGuest(displayName: string): Promise<Record<string, unknown>> {
@@ -232,4 +274,66 @@ async function waitForAdmissionConsumption(roomId: string, playerId: string): Pr
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
   throw new Error("Admission acknowledgement was not persisted");
+}
+
+async function waitForRoomStatus(roomId: string, expected: string): Promise<void> {
+  const stub = env.GAME_ROOMS.getByName(roomId);
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const status = await runInDurableObject(stub, async (_instance, state) =>
+      (await state.storage.get<{ status?: string }>("room-v1"))?.status
+    );
+    if (status === expected) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`Room did not reach ${expected}`);
+}
+
+async function waitForMemberConnection(roomId: string, playerId: string, connected: boolean): Promise<void> {
+  const stub = env.GAME_ROOMS.getByName(roomId);
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const actual = await runInDurableObject(stub, async (_instance, state) => {
+      const room = await state.storage.get<{
+        members?: Record<string, { connected?: boolean }>;
+      }>("room-v1");
+      return room?.members?.[playerId]?.connected;
+    });
+    if (actual === connected) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`Member connection did not become ${connected}`);
+}
+
+async function broadcastRoomFrame(stub: ReturnType<typeof env.GAME_ROOMS.getByName>): Promise<void> {
+  await runInDurableObject(stub, (instance) => {
+    const room = instance as unknown as { broadcastFrame(): void };
+    room.broadcastFrame();
+  });
+}
+
+async function waitForConnectionEvent(
+  messages: readonly ServerMessage[],
+  actorId: string,
+  status: "disconnected" | "reconnected",
+): Promise<{ sequence: number }> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const event = connectionEvents(messages, actorId, status)[0];
+    if (event) return event;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`Connection event ${actorId}:${status} missing`);
+}
+
+function connectionEvents(
+  messages: readonly ServerMessage[],
+  actorId: string,
+  status: "disconnected" | "reconnected",
+): Array<{ sequence: number }> {
+  return messages.flatMap((message) => message.type === "match.snapshot"
+    ? message.frame.events.filter((entry) =>
+      entry.event.type === "human-connection"
+      && entry.event.actorId === actorId
+      && entry.event.status === status
+    )
+    : []
+  );
 }

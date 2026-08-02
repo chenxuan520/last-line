@@ -17,6 +17,7 @@ export type SpectatorSwitchDirection = -1 | 1;
 export interface HumanControllerOptions {
   touchRoot?: HTMLElement;
   touchEnabled?: boolean;
+  onLeaderboardScroll?: (deltaY: number, deltaMode: number) => void;
 }
 
 export class HumanController implements TouchInputSink {
@@ -45,7 +46,7 @@ export class HumanController implements TouchInputSink {
   public constructor(
     private readonly canvas: HTMLCanvasElement,
     private sensitivity = 1,
-    options: HumanControllerOptions = {},
+    private readonly options: HumanControllerOptions = {},
   ) {
     this.touchEnabled = options.touchEnabled ?? supportsTouchInput();
     this.touchAdapter = this.touchEnabled && options.touchRoot
@@ -325,6 +326,11 @@ export class HumanController implements TouchInputSink {
 
   private readonly handleWheel = (event: WheelEvent): void => {
     if (event.deltaY === 0) {
+      return;
+    }
+    if (this.leaderboardHeld) {
+      event.preventDefault();
+      this.options.onLeaderboardScroll?.(event.deltaY, event.deltaMode);
       return;
     }
     if (this.lastActor && !this.lastActor.alive) {

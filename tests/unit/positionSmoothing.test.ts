@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   advancePositionTransition,
   createCorrectionTransition,
+  createLocalPositionCorrection,
   createPositionTransition,
   createRemotePositionTransition,
+  interpolatedFlightProgress,
   positionTransitionComplete,
   samplePositionTransition,
   snapshotElapsedSeconds,
@@ -94,5 +96,72 @@ describe("multiplayer position smoothing", () => {
 
     next.position = { x: 19, y: 119.5, z: 0 };
     expect(createRemotePositionTransition(previous.position, previous, next, 0.25, 0.3, 65, false).durationSeconds).toBe(0);
+  });
+
+  it("keeps normal aircraft and local parachute corrections smooth without hiding teleports", () => {
+    const previousAircraft = createActorState("local", "player", { x: 0, y: 180, z: 0 });
+    const nextAircraft = createActorState("local", "player", { x: 5.2, y: 180, z: 0 });
+    previousAircraft.deployment = "aircraft";
+    nextAircraft.deployment = "aircraft";
+
+    const first = createLocalPositionCorrection(
+      previousAircraft.position,
+      previousAircraft,
+      nextAircraft,
+      0.12,
+      0.1,
+      65,
+      52,
+    );
+    if (!first) throw new Error("aircraft correction missing");
+    advancePositionTransition(first, 0.1);
+    const previousVisual = {
+      x: nextAircraft.position.x + samplePositionTransition(first).x,
+      y: nextAircraft.position.y,
+      z: nextAircraft.position.z,
+    };
+    const followingAircraft = createActorState("local", "player", { x: 10.4, y: 180, z: 0 });
+    followingAircraft.deployment = "aircraft";
+    expect(Math.abs(previousVisual.x - followingAircraft.position.x)).toBeGreaterThan(6);
+    expect(createLocalPositionCorrection(
+      previousVisual,
+      nextAircraft,
+      followingAircraft,
+      0.12,
+      0.1,
+      65,
+      52,
+    )).not.toBeNull();
+
+    followingAircraft.position.x = 40;
+    expect(createLocalPositionCorrection(
+      previousVisual,
+      nextAircraft,
+      followingAircraft,
+      0.12,
+      0.1,
+      65,
+      52,
+    )).toBeNull();
+
+    const previousParachute = createActorState("local", "player", { x: 0, y: 100, z: 0 });
+    const nextParachute = createActorState("local", "player", { x: 7, y: 99.5, z: 0 });
+    previousParachute.deployment = "parachuting";
+    nextParachute.deployment = "parachuting";
+    expect(createLocalPositionCorrection(
+      previousParachute.position,
+      previousParachute,
+      nextParachute,
+      0.12,
+      0.1,
+      65,
+      52,
+    )).not.toBeNull();
+  });
+
+  it("interpolates external aircraft progress from the rendered server tick", () => {
+    expect(interpolatedFlightProgress(0.5, 60, 300, 297)).toBeCloseTo(0.5 - 0.1 / 60);
+    expect(interpolatedFlightProgress(0.5, 60, 300, 300)).toBe(0.5);
+    expect(interpolatedFlightProgress(0.002, 60, 300, 294)).toBe(0);
   });
 });

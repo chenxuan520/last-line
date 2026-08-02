@@ -5,6 +5,7 @@ const MIN_INTERPOLATION_SECONDS = 0.12;
 const MAX_INTERPOLATION_SECONDS = 0.25;
 const MAX_GROUNDED_TRANSITION_DISTANCE = 6;
 const MAX_PARACHUTING_TRANSITION_DISTANCE = 18;
+const MAX_AIRCRAFT_TRANSITION_DISTANCE = 24;
 const PARACHUTING_DISTANCE_TOLERANCE = 0.35;
 
 export interface PositionTransition {
@@ -78,6 +79,51 @@ export function createCorrectionTransition(
     : null;
 }
 
+export function createLocalPositionCorrection(
+  previousVisualPosition: Vector3State,
+  previousActor: ActorState | undefined,
+  nextActor: ActorState,
+  durationSeconds: number,
+  snapshotSeconds: number,
+  maximumParachutingSpeed: number,
+  aircraftSpeed: number,
+): PositionTransition | null {
+  if (
+    !previousActor
+    || previousActor.alive !== nextActor.alive
+    || previousActor.deployment !== nextActor.deployment
+  ) return null;
+  const elapsedBudgetSeconds = Math.max(0, durationSeconds, snapshotSeconds);
+  const maximumDistance = nextActor.deployment === "aircraft"
+    ? Math.min(
+      MAX_AIRCRAFT_TRANSITION_DISTANCE,
+      elapsedBudgetSeconds * Math.max(0, aircraftSpeed) + PARACHUTING_DISTANCE_TOLERANCE,
+    )
+    : nextActor.deployment === "parachuting"
+      ? Math.min(
+        MAX_PARACHUTING_TRANSITION_DISTANCE,
+        elapsedBudgetSeconds * Math.max(0, maximumParachutingSpeed) + PARACHUTING_DISTANCE_TOLERANCE,
+      )
+      : MAX_GROUNDED_TRANSITION_DISTANCE;
+  return createCorrectionTransition(
+    previousVisualPosition,
+    nextActor.position,
+    durationSeconds,
+    maximumDistance,
+  );
+}
+
+export function interpolatedFlightProgress(
+  latestProgress: number,
+  durationSeconds: number,
+  latestServerTick: number,
+  renderedServerTick: number,
+): number {
+  if (!(durationSeconds > 0)) return clamp01(latestProgress);
+  const tickLag = Math.max(0, latestServerTick - renderedServerTick);
+  return clamp01(latestProgress - tickLag * SIMULATION_STEP_SECONDS / durationSeconds);
+}
+
 export function createRemotePositionTransition(
   previousRenderedPosition: Vector3State,
   previousActor: ActorState | undefined,
@@ -110,4 +156,8 @@ export function createRemotePositionTransition(
     nextActor.position,
     snap ? 0 : durationSeconds,
   );
+}
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
 }

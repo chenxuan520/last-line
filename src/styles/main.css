@@ -1445,16 +1445,25 @@ h1 {
   letter-spacing: 0.1em;
 }
 
-.kill-feed {
+.kill-feed,
+.connection-feed {
   position: absolute;
-  top: clamp(90px, 10vh, 110px);
   right: calc(clamp(18px, 1.8vw, 34px) + clamp(178px, 11vw, 218px) + 12px);
   display: grid;
   justify-items: end;
   gap: 4px;
 }
 
-.kill-feed div {
+.kill-feed {
+  top: clamp(170px, 18vh, 190px);
+}
+
+.connection-feed {
+  top: clamp(90px, 10vh, 110px);
+}
+
+.kill-feed div,
+.connection-feed div {
   position: relative;
   max-width: 290px;
   padding: 6px 10px 6px 18px;
@@ -2313,7 +2322,6 @@ h1 {
 
 .pause-card button,
 .result-card button {
-  margin-top: 12px;
   padding: 12px 16px;
   border: 1px solid rgb(206 219 180 / 28%);
   color: #11160f;
@@ -2323,6 +2331,23 @@ h1 {
   letter-spacing: 0.09em;
   cursor: pointer;
   transition: filter 140ms ease;
+}
+
+.pause-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.pause-actions .is-secondary {
+  color: #d7ddd1;
+  border-color: rgb(206 219 180 / 20%);
+  background: rgb(30 39 33 / 82%);
+}
+
+.result-card > button {
+  margin-top: 12px;
 }
 
 .pause-card button:hover,
@@ -2351,7 +2376,8 @@ h1 {
     width: 180px;
   }
 
-  .kill-feed {
+  .kill-feed,
+  .connection-feed {
     right: calc(clamp(18px, 1.8vw, 34px) + 192px);
   }
 
@@ -2668,6 +2694,22 @@ h1 {
     padding: 6px;
   }
 
+  #ui-root.is-touch-input .connection-feed {
+    top: max(58px, calc(env(safe-area-inset-top) + 50px));
+    right: max(128px, calc(env(safe-area-inset-right) + 120px));
+    z-index: 12;
+    max-width: 210px;
+  }
+
+  #ui-root.is-touch-input .connection-feed div {
+    padding: 5px 9px;
+    border-right: 1px solid rgb(183 197 139 / 32%);
+    color: #d8dfd2;
+    background: rgb(8 14 12 / 78%);
+    font: 700 8px/1.25 var(--tactical-font);
+    text-align: right;
+  }
+
   #ui-root.is-touch-input .minimap-heading strong,
   #ui-root.is-touch-input .minimap-heading span,
   #ui-root.is-touch-input .minimap-scale {
@@ -2736,6 +2778,10 @@ h1 {
     width: min(360px, calc(100vw - 24px));
     min-height: 170px;
     padding: 22px 28px;
+  }
+
+  #ui-root.is-touch-input .pause-actions button {
+    min-height: 44px;
   }
 }
 

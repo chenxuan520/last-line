@@ -23,6 +23,7 @@ export class GameHud {
   private readonly hitMarker: HTMLElement;
   private readonly damageFlash: HTMLElement;
   private readonly killFeed: HTMLElement;
+  private readonly connectionFeed: HTMLElement;
   private resultVisible = false;
   private inventorySignature = "";
   private weaponIconId = "";
@@ -46,6 +47,7 @@ export class GameHud {
       touchInput?: boolean;
       onRequestFullscreen?: () => void;
       onDropBackpackItem?: (index: number, itemId: string, snapshot: string) => void;
+      onExit?: () => void;
     } = {},
   ) {
     const crosshair = assets.resolve("ui.crosshair", "svg");
@@ -70,6 +72,7 @@ export class GameHud {
         <div class="hit-marker" data-hud="hit-marker">×</div>
         <div class="damage-flash" data-hud="damage-flash"></div>
         <div class="kill-feed" data-hud="kill-feed" aria-live="polite"></div>
+        <div class="connection-feed" data-hud="connection-feed" aria-live="polite"></div>
         <aside class="minimap-card" aria-label="小地图">
           <div class="minimap-heading"><strong>TACTICAL MAP</strong><span data-hud="map-status">安全区内</span></div>
           <svg class="minimap" viewBox="0 0 200 200" role="img" aria-label="苍岬岛小地图">
@@ -141,7 +144,10 @@ export class GameHud {
         <div class="pause-card" data-hud="pause">
           <strong>${options.online ? "联机对局进行中" : "对局已暂停"}</strong>
           <span>${options.online ? "点击返回战斗；服务器不会暂停" : options.touchInput ? "点击继续触控操作" : "点击继续并锁定鼠标"}</span>
-          <button type="button" data-action="resume">继续游戏</button>
+          <div class="pause-actions">
+            <button type="button" data-action="resume">继续游戏</button>
+            ${options.onExit ? `<button class="is-secondary" type="button" data-action="exit">${pauseExitLabel(options.online === true)}</button>` : ""}
+          </div>
         </div>
         <div class="orientation-card" data-hud="orientation"><strong>请旋转至横屏</strong><span>横屏模式可使用完整触控操作</span>${options.onRequestFullscreen ? '<button class="orientation-fullscreen-action" data-hud="orientation-fullscreen-action" type="button" hidden>进入横屏全屏</button>' : ""}</div>
         ${options.onRequestFullscreen ? '<button class="fullscreen-action" data-hud="fullscreen-action" type="button" hidden>进入全屏</button>' : ""}
@@ -159,7 +165,9 @@ export class GameHud {
     this.hitMarker = this.requireElement("hit-marker");
     this.damageFlash = this.requireElement("damage-flash");
     this.killFeed = this.requireElement("kill-feed");
+    this.connectionFeed = this.requireElement("connection-feed");
     root.querySelector<HTMLButtonElement>("[data-action='resume']")?.addEventListener("click", onResume);
+    root.querySelector<HTMLButtonElement>("[data-action='exit']")?.addEventListener("click", () => options.onExit?.());
     root.querySelector<HTMLButtonElement>("[data-hud='orientation-fullscreen-action']")
       ?.addEventListener("click", options.onRequestFullscreen ?? (() => undefined));
     root.querySelector<HTMLButtonElement>("[data-hud='fullscreen-action']")
@@ -290,6 +298,18 @@ export class GameHud {
     }
   }
 
+  public scrollLeaderboard(deltaY: number, deltaMode: number): void {
+    const rows = this.requireElement("leaderboard-rows");
+    rows.scrollTop += leaderboardScrollPixels(deltaY, deltaMode, rows.clientHeight);
+  }
+
+  public showConnectionStatus(text: string): void {
+    const entry = document.createElement("div");
+    entry.textContent = text;
+    this.connectionFeed.prepend(entry);
+    while (this.connectionFeed.childElementCount > 3) this.connectionFeed.lastElementChild?.remove();
+  }
+
   private updateLeaderboard(state: MatchState, playerId: string): void {
     const actorValues = Object.values(state.actors);
     const signature = createLeaderboardSignature(actorValues);
@@ -351,7 +371,7 @@ export class GameHud {
     this.showResultCard(
       "任务失败",
       `${eliminatedBy} · 第 ${placement} 名 · ${kills} 次淘汰`,
-      "重新部署",
+      this.options.online ? "返回联机大厅" : "重新部署",
       this.options.touchInput
         ? `${spectatingKiller ? "正在观察击杀者" : "正在观察存活角色"} · 使用箭头切换目标`
         : `${spectatingKiller ? "正在观察击杀者" : "正在观察存活角色"} · 空格或滚轮切换目标`,
@@ -361,7 +381,11 @@ export class GameHud {
 
   public showResult(result: MatchResult, playerId: string, kills: number): void {
     const victory = result.winnerId === playerId;
-    this.showResultCard(victory ? "最后防线" : "对局结束", victory ? `成功存活 · ${kills} 次淘汰` : `胜者 ${result.winnerId ?? "无"}`, "再来一局");
+    this.showResultCard(
+      victory ? "最后防线" : "对局结束",
+      victory ? `成功存活 · ${kills} 次淘汰` : `胜者 ${result.winnerId ?? "无"}`,
+      this.options.online ? "返回联机大厅" : "再来一局",
+    );
   }
 
   public clearResult(): void {
@@ -560,6 +584,16 @@ export class GameHud {
     if (!element) throw new Error(`HUD 元素缺失: ${name}`);
     return element;
   }
+}
+
+export function pauseExitLabel(online: boolean): string {
+  return online ? "返回联机大厅" : "返回大厅";
+}
+
+export function leaderboardScrollPixels(deltaY: number, deltaMode: number, pageHeight: number): number {
+  if (deltaMode === 1) return deltaY * 16;
+  if (deltaMode === 2) return deltaY * Math.max(0, pageHeight);
+  return deltaY;
 }
 
 export function sortLeaderboardActors(actors: readonly ActorState[]): ActorState[] {

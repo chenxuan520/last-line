@@ -290,7 +290,6 @@ export class GameRoom extends DurableService<WorkerEnv> {
       const existing = existingSocket.deserializeAttachment() as SocketAttachment | null;
       if (existing?.playerId === preflight.playerId) existingSocket.close(4001, "reconnected");
     }
-    member.connected = true;
     member.connectionEpoch += 1;
     if (preflight.token === member.pendingReconnectToken) {
       member.reconnectToken = preflight.token;
@@ -298,7 +297,7 @@ export class GameRoom extends DurableService<WorkerEnv> {
     }
     const issuedReconnectToken = crypto.randomUUID();
     member.pendingReconnectToken = issuedReconnectToken;
-    if (member.actorId) this.ensureRuntime()?.setConnected(member.actorId, true);
+    this.setMemberConnected(member, true);
     await this.persist();
     const attachment: SocketAttachment = {
       playerId: preflight.playerId,
@@ -444,8 +443,7 @@ export class GameRoom extends DurableService<WorkerEnv> {
     const attachment = socket.deserializeAttachment() as SocketAttachment | null;
     const member = attachment ? this.data?.members[attachment.playerId] : null;
     if (!attachment || !member || attachment.connectionEpoch !== member.connectionEpoch) return;
-    member.connected = false;
-    if (member.actorId) this.runtime?.setConnected(member.actorId, false);
+    if (!this.setMemberConnected(member, false)) return;
     if (this.data?.status === "countdown" && !this.canStart()) await this.cancelCountdown();
     await this.persistAndBroadcastLobby();
   }
@@ -692,7 +690,7 @@ export class GameRoom extends DurableService<WorkerEnv> {
       eventSequence: data.checkpoint.eventSequence,
     });
     for (const member of Object.values(data.members)) {
-      if (member.actorId && !member.connected) this.runtime.setConnected(member.actorId, false);
+      if (member.actorId && !member.connected) this.runtime.setConnected(member.actorId, false, false);
     }
     return this.runtime;
   }
@@ -700,12 +698,14 @@ export class GameRoom extends DurableService<WorkerEnv> {
   private sendFull(socket: PlatformSocket, member: RoomMemberRecord): void {
     const runtime = this.ensureRuntime();
     if (!runtime || !member.actorId) return;
+    const projectedState = runtime.projectState(member.actorId);
+    this.visibleLootByPlayer.set(member.playerId, new Set(Object.keys(projectedState.groundLoot)));
     this.send(socket, {
       type: "match.full",
       snapshotSequence: this.data?.checkpoint?.snapshotSequence ?? 0,
       tick: runtime.tick,
       localActorId: member.actorId,
-      state: runtime.projectState(member.actorId),
+      state: projectedState,
       displayNames: Object.fromEntries(Object.values(this.data?.members ?? {}).flatMap((entry) =>
         entry.actorId ? [[entry.actorId, entry.displayName]] : []
       )),
@@ -795,13 +795,13 @@ export class GameRoom extends DurableService<WorkerEnv> {
       await this.removeWaitingMember(member.playerId);
       return;
     }
-    member.connected = false;
-    if (member.actorId) this.runtime?.setConnected(member.actorId, false);
+    if (this.setMemberConnected(member, false)) await this.persistAndBroadcastLobby();
   }
 
   private async validateConnectedAccounts(): Promise<void> {
     const data = this.data;
     if (!data) return;
+    let changed = false;
     for (const member of Object.values(data.members)) {
       if (!member.connected || await this.memberAccountStatus(member, true) !== "revoked") continue;
       const socket = this.ctx.getWebSockets().find((candidate) => {
@@ -809,8 +809,24 @@ export class GameRoom extends DurableService<WorkerEnv> {
         return attachment?.playerId === member.playerId;
       });
       if (socket) await this.rejectAccountSocket(socket, member);
-      else member.connected = false;
+      else changed = this.setMemberConnected(member, false) || changed;
     }
+    if (changed) await this.persistAndBroadcastLobby();
+  }
+
+  private setMemberConnected(member: RoomMemberRecord, connected: boolean): boolean {
+    if (member.connected === connected) return false;
+    const runtime = member.actorId ? this.ensureRuntime() : null;
+    member.connected = connected;
+    if (!connected) this.visibleLootByPlayer.delete(member.playerId);
+    if (member.actorId) {
+      runtime?.setConnected(
+        member.actorId,
+        connected,
+        this.data?.status === "running",
+      );
+    }
+    return true;
   }
 
   private adminCapabilityAllowed(request: Request): boolean {

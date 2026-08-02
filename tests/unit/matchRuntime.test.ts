@@ -58,8 +58,8 @@ describe("MatchRuntime", () => {
     const distant = runtime.state.actors["human-2"];
     const loot = Object.values(runtime.state.groundLoot)[0];
     if (!viewer || !distant || !loot) throw new Error("test state missing");
-    viewer.deployment = "grounded";
-    viewer.position = { x: 0, y: 1.76, z: 0 };
+    viewer.deployment = "aircraft";
+    viewer.position = { x: 0, y: 180, z: 0 };
     distant.deployment = "grounded";
     distant.position = { x: 1_000, y: 1.76, z: 1_000 };
     loot.position = { x: 2, y: 0.45, z: 2 };
@@ -72,6 +72,65 @@ describe("MatchRuntime", () => {
     expect(Object.values(projected.groundLoot).every((entry) =>
       Math.hypot(entry.position.x - viewer.position.x, entry.position.z - viewer.position.z) <= 60
     )).toBe(true);
+    loot.position.x = 60.01;
+    loot.position.z = 0;
+    expect(runtime.projectState(viewer.id).groundLoot[loot.id]).toBeUndefined();
+  });
+
+  it("sends loot only on visibility, dirtiness, and range-exit transitions", () => {
+    const runtime = new MatchRuntime({
+      humanActorIds: ["human-1", "human-2"],
+      seed: 17,
+      startWithBandage: false,
+      disableAiSnipers: true,
+    });
+    const viewer = runtime.state.actors["human-1"];
+    const loot = Object.values(runtime.state.groundLoot)[0];
+    if (!viewer || !loot) throw new Error("test state missing");
+    viewer.position = { x: 0, y: 180, z: 0 };
+    loot.position = { x: 2, y: 0.45, z: 2 };
+    const initiallyVisible = new Set(Object.keys(runtime.projectState(viewer.id).groundLoot));
+    const steady = runtime.projectFrame(runtime.takeFrame(0), viewer.id, initiallyVisible);
+    expect(steady.frame.lootChanges).toEqual([]);
+
+    viewer.position.x = 1_000;
+    const exited = runtime.projectFrame(runtime.takeFrame(1), viewer.id, steady.visibleLootIds);
+    expect(exited.frame.lootChanges).toContainEqual(expect.objectContaining({ id: loot.id, available: false }));
+
+    viewer.position.x = 0;
+    const reentered = runtime.projectFrame(runtime.takeFrame(2), viewer.id, exited.visibleLootIds);
+    expect(reentered.frame.lootChanges).toContainEqual(loot);
+  });
+
+  it("emits one globally visible sequenced event per real human connection transition", () => {
+    const runtime = new MatchRuntime({
+      humanActorIds: ["human-1", "human-2"],
+      seed: 19,
+      startWithBandage: false,
+      disableAiSnipers: true,
+    });
+    runtime.takeFrame(0);
+
+    runtime.setConnected("human-2", false);
+    runtime.setConnected("human-2", false);
+    const disconnected = runtime.takeFrame(1);
+    expect(disconnected.events).toHaveLength(1);
+    expect(disconnected.events[0]).toMatchObject({
+      event: { type: "human-connection", actorId: "human-2", status: "disconnected" },
+    });
+    const projected = runtime.projectFrame(disconnected, "human-1", new Set());
+    expect(projected.frame.events).toEqual(disconnected.events);
+
+    runtime.setConnected("human-2", true);
+    runtime.setConnected("human-2", true);
+    expect(runtime.takeFrame(2).events).toEqual([expect.objectContaining({
+      event: { type: "human-connection", actorId: "human-2", status: "reconnected" },
+    })]);
+
+    runtime.setConnected("human-2", false, false);
+    expect(runtime.takeFrame(3).events).toEqual([]);
+    runtime.setConnected("bot-1", false);
+    expect(runtime.takeFrame(4).events).toEqual([]);
   });
 
   it("applies a trusted render tick to authoritative human hitscan", () => {

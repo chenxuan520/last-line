@@ -91,6 +91,7 @@ export class GameApp {
         this.menuAudio,
         this.mobileFullscreen,
         this.startSinglePlayerFromUserGesture,
+        () => this.returnToMenu(),
       );
       this.session.start();
     } catch (error) {
@@ -629,7 +630,7 @@ export class GameApp {
         this.mobileFullscreen,
         connection,
         initial,
-        (terminalMessage) => this.returnToMenu(terminalMessage),
+        (terminalMessage) => this.returnToMenu(terminalMessage, true),
       );
       this.session?.dispose();
       this.session = session;
@@ -644,13 +645,14 @@ export class GameApp {
     }
   }
 
-  private returnToMenu(terminalMessage?: string): void {
+  private returnToMenu(terminalMessage?: string, multiplayerMenu = false): void {
     this.mobileFullscreen.deactivate();
     this.session?.dispose();
     this.session = null;
     this.multiplayerConnection?.close();
     this.multiplayerConnection = null;
     if (terminalMessage) this.renderMultiplayerTerminal(terminalMessage);
+    else if (multiplayerMenu) this.renderMultiplayerMenu();
     else this.renderMenu();
   }
 

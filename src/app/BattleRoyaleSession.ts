@@ -83,6 +83,7 @@ export class BattleRoyaleSession {
     audio: AudioFeedback,
     private readonly mobileFullscreen: MobileFullscreenController,
     private readonly onRestart: () => void,
+    private readonly onExit: () => void,
     bundle: Awaited<ReturnType<typeof createIslandScene>>,
     state: MatchState,
   ) {
@@ -99,7 +100,10 @@ export class BattleRoyaleSession {
     this.aircraftInteriorRoot = bundle.aircraftInteriorRoot;
     this.syncAircraftVisual = bundle.syncAircraftVisual;
     this.syncSafeZoneRing = bundle.syncSafeZoneRing;
-    this.humanController = new HumanController(canvas, settings.sensitivity, { touchRoot: uiRoot });
+    this.humanController = new HumanController(canvas, settings.sensitivity, {
+      touchRoot: uiRoot,
+      onLeaderboardScroll: (deltaY, deltaMode) => this.hud?.scrollLeaderboard(deltaY, deltaMode),
+    });
     this.audio = audio;
     this.effects = new CombatEffects(this.scene);
     this.combatWorld = new SimulationCombatWorld(state, true, layout);
@@ -119,6 +123,7 @@ export class BattleRoyaleSession {
     audio: AudioFeedback,
     mobileFullscreen: MobileFullscreenController,
     onRestart: () => void,
+    onExit: () => void,
   ): Promise<BattleRoyaleSession> {
     const state = createBattleRoyaleState(PLAYER_ID, undefined, Math.random, {
       startWithBandage: settings.startWithBandage,
@@ -133,7 +138,18 @@ export class BattleRoyaleSession {
       undefined,
       settings.quality,
     );
-    return new BattleRoyaleSession(canvas, uiRoot, assets, settings, audio, mobileFullscreen, onRestart, bundle, state);
+    return new BattleRoyaleSession(
+      canvas,
+      uiRoot,
+      assets,
+      settings,
+      audio,
+      mobileFullscreen,
+      onRestart,
+      onExit,
+      bundle,
+      state,
+    );
   }
 
   public start(): void {
@@ -150,6 +166,7 @@ export class BattleRoyaleSession {
         onRequestFullscreen: () => this.mobileFullscreen.requestFromUserGesture(),
         onDropBackpackItem: (index, itemId, snapshot) =>
           this.humanController.requestDropBackpackItem(index, itemId, snapshot),
+        onExit: this.onExit,
       },
     );
     this.audio.start();

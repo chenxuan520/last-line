@@ -65,10 +65,18 @@ export interface RoomAdmission {
   socketPath: string;
 }
 
-export interface SequencedGameEvent {
+export interface HumanConnectionEvent {
+  type: "human-connection";
+  actorId: EntityId;
+  status: "disconnected" | "reconnected";
+}
+
+export type MultiplayerEvent = GameEvent | HumanConnectionEvent;
+
+export interface SequencedGameEvent<TEvent extends MultiplayerEvent = MultiplayerEvent> {
   sequence: number;
   shotSequence?: number;
-  event: GameEvent;
+  event: TEvent;
 }
 
 export interface MatchFrame {

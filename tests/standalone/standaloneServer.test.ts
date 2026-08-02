@@ -185,13 +185,41 @@ describe("standalone multiplayer server", () => {
     expect(firstFull.type === "match.full" && firstFull.state.phase).toBe("flight");
     await delay(150);
 
+    const secondReconnectToken = secondWelcome.type === "welcome" ? secondWelcome.reconnectToken : "";
+    second.socket.close(1000, "simulate disconnect");
+    await second.waitForClose();
+    const disconnected = await first.waitForMatching(
+      (message) => message.type === "match.snapshot" && message.frame.events.some((entry) =>
+        entry.event.type === "human-connection"
+        && entry.event.actorId === "human-2"
+        && entry.event.status === "disconnected"
+      ),
+      "peer disconnect event",
+    );
+    const secondReconnected = connect(server.origin, {
+      ...secondAdmission,
+      admissionToken: secondReconnectToken,
+    });
+    await secondReconnected.waitFor("welcome");
+    await secondReconnected.waitFor("match.full");
+    const reconnectedEvent = await first.waitForMatching(
+      (message) => message.type === "match.snapshot" && message.frame.events.some((entry) =>
+        entry.event.type === "human-connection"
+        && entry.event.actorId === "human-2"
+        && entry.event.status === "reconnected"
+      ),
+      "peer reconnect event",
+    );
+    expect(disconnected.type).toBe("match.snapshot");
+    expect(reconnectedEvent.type).toBe("match.snapshot");
+
     const roomId = firstAdmission.roomId;
     const firstPlayerId = firstAdmission.playerId;
     const reconnectToken = firstWelcome.type === "welcome" ? firstWelcome.reconnectToken : "";
     const previousTick = firstFull.type === "match.full" ? firstFull.tick : -1;
     await server.close();
     servers.splice(servers.indexOf(server), 1);
-    await Promise.all([first.waitForClose(), second.waitForClose()]);
+    await Promise.all([first.waitForClose(), secondReconnected.waitForClose()]);
 
     server = await start(fixture.config);
     const reconnectAdmission: RoomAdmission = {

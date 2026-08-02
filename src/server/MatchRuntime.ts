@@ -8,7 +8,7 @@ import { BattleRoyaleMode, createBattleRoyaleStateForHumans } from "../game/mode
 import { SIMULATION_STEP_SECONDS, SIMULATION_TICK_RATE } from "../game/simulationTiming";
 import type { ActorState, EntityId, GameEvent, GroundLootState, MatchState } from "../game/state/types";
 import { SimulationCombatWorld } from "../game/systems/SimulationCombatWorld";
-import type { MatchFrame, SequencedGameEvent } from "../network/protocol";
+import type { MatchFrame, MultiplayerEvent, SequencedGameEvent } from "../network/protocol";
 import { CommandInbox } from "./CommandInbox";
 import { LagCompensatedCombatWorld } from "./LagCompensatedCombatWorld";
 
@@ -117,15 +117,24 @@ export class MatchRuntime {
     return this.inbox.acknowledge(actorId);
   }
 
-  public setConnected(actorId: EntityId, connected: boolean): void {
+  public setConnected(actorId: EntityId, connected: boolean, announce = true): void {
     if (!this.options.humanActorIds.includes(actorId)) return;
+    const wasConnected = !this.disconnectedAtTick.has(actorId);
+    if (wasConnected === connected) return;
     if (connected) {
       this.disconnectedAtTick.delete(actorId);
       this.takeoverBots.delete(actorId);
-      return;
+    } else {
+      this.disconnectedAtTick.set(actorId, this.tickValue);
+      this.inbox.reset(actorId);
     }
-    this.disconnectedAtTick.set(actorId, this.tickValue);
-    this.inbox.reset(actorId);
+    if (announce) {
+      this.recordEvent({
+        type: "human-connection",
+        actorId,
+        status: connected ? "reconnected" : "disconnected",
+      });
+    }
   }
 
   public step(): void {
@@ -263,6 +272,8 @@ export class MatchRuntime {
     const visibleActorIds = this.visibleActorIds(viewer);
     const visibleLoot = this.visibleLoot(viewer);
     const visibleLootIds = new Set(visibleLoot.map((loot) => loot.id));
+    const newlyVisibleLoot = visibleLoot.filter((loot) => !previouslyVisibleLootIds.has(loot.id));
+    const dirtyVisibleLoot = frame.lootChanges.filter((loot) => visibleLootIds.has(loot.id));
     const hiddenLoot = [...previouslyVisibleLootIds]
       .filter((id) => !visibleLootIds.has(id))
       .flatMap((id) => {
@@ -277,7 +288,9 @@ export class MatchRuntime {
           visibleActorIds.has(actor.id) ? actor : redactActor(actor),
         ])),
         visibleActorIds: [...visibleActorIds],
-        lootChanges: [...visibleLoot, ...hiddenLoot],
+        lootChanges: [...new Map(
+          [...newlyVisibleLoot, ...dirtyVisibleLoot, ...hiddenLoot].map((loot) => [loot.id, loot]),
+        ).values()],
         events: frame.events.filter((entry) => eventVisibleTo(entry.event, viewer, this.state.actors)),
       },
       visibleLootIds,
@@ -289,17 +302,21 @@ export class MatchRuntime {
     shotSequences: ReadonlyMap<EntityId, number> = new Map(),
   ): void {
     for (const event of events) {
-      this.eventSequenceValue += 1;
       const shotSequence = event.type === "shot-fired" || event.type === "shot-traced"
         ? shotSequences.get(event.actorId)
         : undefined;
-      this.pendingEvents.push({
-        sequence: this.eventSequenceValue,
-        ...(shotSequence === undefined ? {} : { shotSequence }),
-        event,
-      });
+      this.recordEvent(event, shotSequence);
       if (event.type === "item-picked" || event.type === "item-dropped") this.dirtyLootIds.add(event.lootId);
     }
+  }
+
+  private recordEvent(event: MultiplayerEvent, shotSequence?: number): void {
+    this.eventSequenceValue += 1;
+    this.pendingEvents.push({
+      sequence: this.eventSequenceValue,
+      ...(shotSequence === undefined ? {} : { shotSequence }),
+      event,
+    });
   }
 
   private visibleActorIds(viewer: ActorState): Set<EntityId> {
@@ -315,7 +332,6 @@ export class MatchRuntime {
     return Object.values(this.state.groundLoot).filter((loot) =>
       loot.available && Math.hypot(
         loot.position.x - viewer.position.x,
-        loot.position.y - viewer.position.y,
         loot.position.z - viewer.position.z,
       ) <= LOOT_REPLICATION_RANGE
     );
@@ -350,10 +366,11 @@ function redactActor(actor: ActorState): ActorState {
 }
 
 function eventVisibleTo(
-  event: GameEvent,
+  event: MultiplayerEvent,
   viewer: ActorState,
   actors: Readonly<Record<EntityId, ActorState>>,
 ): boolean {
+  if (event.type === "human-connection") return true;
   if (event.type === "actor-died" || event.type === "match-finished" || event.type === "phase-changed" || event.type === "safe-zone-changed") {
     return true;
   }

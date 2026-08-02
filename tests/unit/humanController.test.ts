@@ -258,6 +258,32 @@ describe("HumanController weapon switching", () => {
     controller.dispose();
   });
 
+  it("routes wheel input to leaderboard scrolling while Tab is held and restores weapon switching", () => {
+    const canvas = new EventTarget() as HTMLCanvasElement;
+    const documentTarget = new EventTarget() as Document;
+    Object.defineProperty(documentTarget, "pointerLockElement", { configurable: true, value: canvas });
+    vi.stubGlobal("document", documentTarget);
+    const actor = createActorState("player", "player", { x: 0, y: 1.76, z: 0 });
+    actor.inventory.weaponSlots[1] = createWeaponState("smg");
+    const onLeaderboardScroll = vi.fn();
+    const controller = new HumanController(canvas, 1, { onLeaderboardScroll });
+    controller.rememberActor(actor);
+
+    documentTarget.dispatchEvent(keyEvent("Tab"));
+    const leaderboardWheel = wheelEvent(3, 1);
+    documentTarget.dispatchEvent(leaderboardWheel);
+
+    expect(leaderboardWheel.defaultPrevented).toBe(true);
+    expect(onLeaderboardScroll).toHaveBeenCalledWith(3, 1);
+    expect(controller.createCommand(actor).switchWeapon).toBeNull();
+    expect(controller.consumeSpectatorSwitchRequest()).toBeNull();
+
+    documentTarget.dispatchEvent(Object.assign(new Event("keyup"), { code: "Tab" }));
+    documentTarget.dispatchEvent(wheelEvent(1));
+    expect(controller.createCommand(actor).switchWeapon).toBe(1);
+    controller.dispose();
+  });
+
   it("uses space and the wheel to cycle spectators after death without pointer lock", () => {
     const canvas = new EventTarget() as HTMLCanvasElement;
     const documentTarget = new EventTarget() as Document;
@@ -501,8 +527,8 @@ function keyEvent(code: string): Event {
   return Object.assign(new Event("keydown", { cancelable: true }), { code, repeat: false });
 }
 
-function wheelEvent(deltaY: number): Event {
-  return Object.assign(new Event("wheel", { cancelable: true }), { deltaY });
+function wheelEvent(deltaY: number, deltaMode = 0): Event {
+  return Object.assign(new Event("wheel", { cancelable: true }), { deltaY, deltaMode });
 }
 
 function mouseEvent(type: string, button: number): Event {

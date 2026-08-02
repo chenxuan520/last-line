@@ -145,7 +145,7 @@ export class LocalShotPredictor {
   }
 
   public reconcileAuthoritativeEvents(
-    entries: readonly SequencedGameEvent[],
+    entries: readonly SequencedGameEvent<GameEvent>[],
     localActorId: string,
     latestInputSequence: number,
   ): ReconciledShotEvents {

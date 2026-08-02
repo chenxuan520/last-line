@@ -22,11 +22,13 @@ import {
   getActiveWeapon,
   type ActorState,
   type EntityId,
+  type GameEvent,
   type MatchState,
   type Vector3State,
 } from "../game/state/types";
 import { MAX_GLIDE_SPEED, MovementSystem, PARACHUTE_DESCENT_SPEED } from "../game/systems/MovementSystem";
 import { MultiplayerConnection } from "../network/MultiplayerClient";
+import { resolveHumanConnectionNotice } from "../network/MultiplayerPresence";
 import {
   LocalRecoilPresentation,
   LocalShotPredictor,
@@ -34,9 +36,10 @@ import {
 } from "../network/LocalShotPredictor";
 import {
   advancePositionTransition,
-  createCorrectionTransition,
+  createLocalPositionCorrection,
   createPositionTransition,
   createRemotePositionTransition,
+  interpolatedFlightProgress,
   positionTransitionComplete,
   samplePositionTransition,
   snapshotElapsedSeconds,
@@ -129,7 +132,10 @@ export class MultiplayerSession implements GameSession {
     this.syncAircraftVisual = bundle.syncAircraftVisual;
     this.syncSafeZoneRing = bundle.syncSafeZoneRing;
     this.movement = new MovementSystem(createMapLayout(initial.state.mapSeed));
-    this.humanController = new HumanController(canvas, settings.sensitivity, { touchRoot: uiRoot });
+    this.humanController = new HumanController(canvas, settings.sensitivity, {
+      touchRoot: uiRoot,
+      onLeaderboardScroll: (deltaY, deltaMode) => this.hud?.scrollLeaderboard(deltaY, deltaMode),
+    });
     this.effects = new CombatEffects(this.scene);
     this.lastSnapshotSequence = initial.snapshotSequence;
     this.lastSnapshotTick = initial.tick;
@@ -197,6 +203,7 @@ export class MultiplayerSession implements GameSession {
         onRequestFullscreen: () => this.mobileFullscreen.requestFromUserGesture(),
         onDropBackpackItem: (index, itemId, snapshot) =>
           this.humanController.requestDropBackpackItem(index, itemId, snapshot),
+        onExit: () => this.onExit(),
       },
     );
     this.audio.start();
@@ -350,6 +357,7 @@ export class MultiplayerSession implements GameSession {
         previousLocalActor,
         player,
         interpolationSeconds,
+        snapshotSeconds,
       );
     } else {
       this.localCorrection = null;
@@ -407,7 +415,15 @@ export class MultiplayerSession implements GameSession {
     const fresh = events.filter((entry) => entry.sequence > this.lastEventSequence);
     if (fresh.length === 0) return;
     this.lastEventSequence = Math.max(this.lastEventSequence, ...fresh.map((entry) => entry.sequence));
-    this.processEvents(fresh);
+    for (const entry of fresh) {
+      if (entry.event.type !== "human-connection") continue;
+      const notice = resolveHumanConnectionNotice(entry.event, this.localActorId, this.displayNames);
+      if (notice) this.hud?.showConnectionStatus(notice);
+    }
+    const gameEvents = fresh.filter(
+      (entry): entry is SequencedGameEvent<GameEvent> => entry.event.type !== "human-connection",
+    );
+    if (gameEvents.length > 0) this.processEvents(gameEvents);
   }
 
   private enqueueMessage(message: ServerMessage): void {
@@ -469,7 +485,7 @@ export class MultiplayerSession implements GameSession {
     }
   }
 
-  private processEvents(entries: readonly SequencedGameEvent[]): void {
+  private processEvents(entries: readonly SequencedGameEvent<GameEvent>[]): void {
     const events = entries.map((entry) => entry.event);
     this.hud?.handleEvents(events, this.localActorId);
     const player = this.getActor(this.localActorId);
@@ -540,7 +556,16 @@ export class MultiplayerSession implements GameSession {
     if (this.aircraftInteriorRoot.isEnabled() !== aircraftInteriorEnabled) {
       this.aircraftInteriorRoot.setEnabled(aircraftInteriorEnabled);
     }
-    this.syncAircraftVisual(this.state.flight, this.state.phase === "flight" && player.deployment !== "aircraft");
+    const flight = this.state.flight;
+    this.syncAircraftVisual({
+      ...flight,
+      progress: interpolatedFlightProgress(
+        flight.progress,
+        flight.durationSeconds,
+        this.lastSnapshotTick,
+        this.renderedServerTick,
+      ),
+    }, this.state.phase === "flight" && player.deployment !== "aircraft");
     const cameraPose = this.getJumpVisualPose(cameraActor);
     const cameraPosition = this.visualPosition(cameraActor.id, cameraActor.position);
     const cameraY = cameraPosition.y + cameraPose.cameraY;
@@ -615,16 +640,22 @@ export class MultiplayerSession implements GameSession {
     previousActor: ActorState | undefined,
     player: ActorState,
     durationSeconds: number,
+    snapshotSeconds: number,
   ): void {
-    if (!previousActor || previousActor.alive !== player.alive || previousActor.deployment !== player.deployment) {
-      this.localCorrection = null;
-      return;
-    }
-    this.localCorrection = createCorrectionTransition(
+    const flight = this.state.flight;
+    const flightDistance = Math.hypot(
+      flight.end.x - flight.start.x,
+      flight.end.y - flight.start.y,
+      flight.end.z - flight.start.z,
+    );
+    this.localCorrection = createLocalPositionCorrection(
       previousVisualPosition,
-      player.position,
+      previousActor,
+      player,
       durationSeconds,
-      6,
+      snapshotSeconds,
+      Math.hypot(MAX_GLIDE_SPEED, PARACHUTE_DESCENT_SPEED),
+      flight.durationSeconds > 0 ? flightDistance / flight.durationSeconds : 0,
     );
   }
 
