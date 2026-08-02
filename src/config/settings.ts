@@ -1,3 +1,5 @@
+import { DEFAULT_MAP_ID, type MapId } from "./maps";
+
 export type QualityLevel = "low" | "medium" | "high";
 
 export interface QualityProfile {
@@ -11,6 +13,7 @@ export interface QualityProfile {
 }
 
 export interface GameSettings {
+  mapId: MapId;
   quality: QualityLevel;
   volume: number;
   sensitivity: number;
@@ -20,6 +23,7 @@ export interface GameSettings {
 }
 
 export const DEFAULT_SETTINGS: GameSettings = {
+  mapId: DEFAULT_MAP_ID,
   quality: "medium",
   volume: 0,
   sensitivity: 1,

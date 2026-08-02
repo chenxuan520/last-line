@@ -5,6 +5,7 @@ import {
 } from "../../config/battleRoyale";
 import { ITEMS } from "../../config/items";
 import { createMapLayout, MAP_HALF_SIZE } from "../../config/map";
+import { DEFAULT_MAP_ID, type MapId } from "../../config/maps";
 import type { GameMode } from "./GameMode";
 import { ACTOR_RADIUS } from "../rules/actorGeometry";
 import { selectSimultaneousSurvivor } from "../rules/resolveSimultaneous";
@@ -296,7 +297,7 @@ export function createBattleRoyaleState(
   playerId: EntityId,
   config: BattleRoyaleConfig = BATTLE_ROYALE_CONFIG,
   random: () => number = Math.random,
-  options: { startWithBandage?: boolean } = {},
+  options: { startWithBandage?: boolean; mapId?: MapId } = {},
 ): MatchState {
   return createBattleRoyaleStateForHumans([playerId], config, random, options);
 }
@@ -305,7 +306,7 @@ export function createBattleRoyaleStateForHumans(
   humanIds: readonly EntityId[],
   config: BattleRoyaleConfig = BATTLE_ROYALE_CONFIG,
   random: () => number = Math.random,
-  options: { startWithBandage?: boolean } = {},
+  options: { startWithBandage?: boolean; mapId?: MapId } = {},
 ): MatchState {
   if (config.participantCount < 1) {
     throw new Error("大逃杀至少需要一名参与者");
@@ -318,7 +319,8 @@ export function createBattleRoyaleStateForHumans(
   }
 
   const mapSeed = Math.floor(random() * 4_294_967_296) >>> 0;
-  const layout = createMapLayout(mapSeed);
+  const mapId = options.mapId ?? DEFAULT_MAP_ID;
+  const layout = createMapLayout(mapId, mapSeed);
   const flight = createFlight(config.flightSeconds, random);
   const startWithBandage = options.startWithBandage ?? true;
   const actors: Record<EntityId, ActorState> = {};
@@ -337,6 +339,7 @@ export function createBattleRoyaleStateForHumans(
   return {
     phase: "ready",
     elapsedSeconds: 0,
+    mapId,
     mapSeed,
     actors,
     groundLoot: createGroundLoot(layout.lootSpawnPoints, layout.lootZoneCounts, layout.hospital, createLootRandom(mapSeed)),

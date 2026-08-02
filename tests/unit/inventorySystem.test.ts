@@ -19,6 +19,7 @@ import { getSupportHeight } from "../../src/game/systems/MovementSystem";
 function createState(): MatchState {
   const actor = createActorState("player", "player", { x: 0, y: getTerrainHeight(0, 0, 0) + 1.76, z: 0 });
   return {
+    mapId: "island",
     mapSeed: 0,
     phase: "combat",
     elapsedSeconds: 0,

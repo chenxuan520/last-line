@@ -354,6 +354,7 @@ function createState(...actors: ReturnType<typeof createActorState>[]): MatchSta
     actor.position.y = getTerrainHeight(actor.position.x, actor.position.z, 0) + 1.76;
   }
   return {
+    mapId: "island",
     mapSeed: 0,
     phase: "combat",
     elapsedSeconds: 0,

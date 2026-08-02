@@ -1,6 +1,7 @@
 import { BATTLE_ROYALE_CONFIG } from "../config/battleRoyale";
 import { WEAPONS } from "../config/weapons";
 import { createMapLayout, type MapLayout } from "../config/map";
+import { DEFAULT_MAP_ID, normalizeMapId, type MapId } from "../config/maps";
 import { BotController } from "../controllers/BotController";
 import { createIdleCommand, type ActorCommand } from "../game/commands/ActorCommand";
 import { GameSimulation } from "../game/GameSimulation";
@@ -22,6 +23,7 @@ export const MATCH_CHECKPOINT_VERSION = 3;
 export interface MatchRuntimeOptions {
   humanActorIds: readonly EntityId[];
   seed: number;
+  mapId?: MapId;
   startWithBandage: boolean;
   disableAiSnipers: boolean;
   state?: MatchState;
@@ -57,14 +59,17 @@ export class MatchRuntime {
   public constructor(private readonly options: MatchRuntimeOptions) {
     const random = seededRandom(options.seed);
     this.state = options.state
-      ? JSON.parse(JSON.stringify(options.state)) as MatchState
+      ? normalizeMatchState(JSON.parse(JSON.stringify(options.state)) as MatchState)
       : createBattleRoyaleStateForHumans(
         options.humanActorIds,
         BATTLE_ROYALE_CONFIG,
         random,
-        { startWithBandage: options.startWithBandage },
+        {
+          startWithBandage: options.startWithBandage,
+          mapId: options.mapId ?? DEFAULT_MAP_ID,
+        },
       );
-    this.layout = createMapLayout(this.state.mapSeed);
+    this.layout = createMapLayout(this.state.mapId, this.state.mapSeed);
     this.simulation = new GameSimulation(this.state, new BattleRoyaleMode(BATTLE_ROYALE_CONFIG, random), WEAPONS, this.layout);
     this.tickValue = options.tick ?? 0;
     this.snapshotSequenceValue = options.snapshotSequence ?? 0;
@@ -344,6 +349,11 @@ export class MatchRuntime {
 
 export function isMatchCheckpointCompatible(checkpoint: MatchCheckpoint | null | undefined): checkpoint is MatchCheckpoint {
   return checkpoint?.version === MATCH_CHECKPOINT_VERSION;
+}
+
+function normalizeMatchState(state: MatchState): MatchState {
+  state.mapId = normalizeMapId(state.mapId);
+  return state;
 }
 
 function redactActor(actor: ActorState): ActorState {

@@ -1,4 +1,5 @@
 import type { PublicRoomSummary, RoomAdmission, RoomVisibility } from "../src/network/protocol";
+import type { MapId } from "../src/config/maps";
 
 export interface GuestRecord {
   playerId: string;
@@ -28,6 +29,7 @@ export interface RoomMemberRecord {
 }
 
 export interface RoomOptions {
+  mapId: MapId;
   startWithBandage: boolean;
   disableAiSnipers: boolean;
 }

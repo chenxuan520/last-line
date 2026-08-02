@@ -454,7 +454,7 @@ describe("map layouts", () => {
         }
       }
     }
-  }, 120_000);
+  }, 240_000);
 
   it("keeps buildings and ramps inside the map and above terrain across seeds", () => {
     for (let seed = 0; seed <= 400; seed += 1) {
@@ -499,7 +499,7 @@ describe("map layouts", () => {
         }
       }
     }
-  }, 240_000);
+  }, 420_000);
 
   it("keeps every ramp navigable for the former out-of-bounds regression seed", () => {
     const layout = createMapLayout(331);

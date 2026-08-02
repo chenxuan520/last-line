@@ -28,12 +28,13 @@ import type { AssetCatalog } from "../../../assets/AssetCatalog";
 import type { AssetEntry } from "../../../assets/types";
 import { ITEMS } from "../../../config/items";
 import {
-  createMapRoadSegments,
+  BUILDING_ROOF_CAP_HEIGHT,
   createMapLayout,
   getTerrainHeight,
   HOSPITAL_WALL_COLOR,
   MAP_SIZE,
   TERRAIN_GRID_SUBDIVISIONS,
+  type MapBuilding,
   type MapLayout,
   type MapWallOpening,
 } from "../../../config/map";
@@ -41,6 +42,7 @@ import { getActiveWeapon, type ActorState, type EntityId, type FlightState, type
 import { ACTOR_EYE_HEIGHT, ACTOR_HEIGHT, ACTOR_RADIUS } from "../../../game/rules/actorGeometry";
 import { GROUND_LOOT_POSITION_HEIGHT } from "../../../game/rules/loot";
 import { QUALITY_PROFILES, type QualityLevel, type QualityProfile } from "../../../config/settings";
+import type { MapId } from "../../../config/maps";
 import { syncLootMarkerViews, type LootMarkerViewAdapter } from "../LootMarkerViewAdapter";
 import { clearDynamicChunkRecoveryAttempts } from "../../dynamicChunkRecovery";
 import { loadCatalogModel } from "../loadCatalogModel";
@@ -140,13 +142,14 @@ export async function createIslandScene(
   showGroundLootModels = true,
   localActorId?: EntityId,
   quality: QualityLevel = "high",
+  mapId: MapId = "island",
 ): Promise<IslandSceneBundle> {
   const player = (localActorId ? actors[localActorId] : undefined) ??
     Object.values(actors).find((actor) => actor.kind === "player");
   if (!player) {
     throw new Error("Island scene requires one player actor");
   }
-  const layout = createMapLayout(mapSeed);
+  const layout = createMapLayout(mapId, mapSeed);
 
   const scene = new Scene(engine);
   scene.clearColor = new Color4(0.36, 0.44, 0.46, 1);
@@ -581,7 +584,7 @@ function createIslandEnvironment(
   layout: MapLayout,
   quality: QualityProfile,
 ): void {
-  createIslandPerimeter(scene, materials);
+  if (layout.mapId === "island") createIslandPerimeter(scene, materials);
 
   const ground = CreateGround(
     "island-ground",
@@ -631,6 +634,7 @@ function createIslandEnvironment(
   createHospitalCross(scene, materials.hospitalCross, layout);
 
   createBuildingDetails(scene, materials, layout);
+  createTownBuildingSilhouettes(scene, layout);
   createRoofRamps(scene, materials, layout);
   createCoverProps(scene, materials, layout);
   createVegetation(scene, materials.trunk, materials.foliage, layout, quality);
@@ -787,7 +791,7 @@ function applyTerrainSurface(ground: Mesh, layout: MapLayout, groundMaterial: Mu
   if (!positions) return;
   const colors: number[] = [];
   const surfaceKinds: TerrainSurfaceKind[] = [];
-  const roadSegments = createMapRoadSegments(layout.landingZones);
+  const roadSegments = layout.roadSegments;
   for (let index = 0; index < positions.length; index += 3) {
     const x = positions[index] ?? 0;
     const z = positions[index + 2] ?? 0;
@@ -973,6 +977,73 @@ function createBuildingDetails(scene: Scene, materials: IslandMaterials, layout:
   }
 
   layout.wallOpenings.forEach((opening, index) => createWallOpeningFrame(trimTemplate, opening, index));
+}
+
+function createTownBuildingSilhouettes(scene: Scene, layout: MapLayout): void {
+  if (layout.mapId !== "town") return;
+  const rooftopMaterial = material(scene, "town-industrial-rooftop-material", "#514b43");
+  for (const building of layout.obstacles) {
+    const kind = building.townKind;
+    if (!kind) continue;
+    const roofY = building.baseY + building.storyHeight * building.storyCount + BUILDING_ROOF_CAP_HEIGHT;
+    const addPiece = (
+      piece: string,
+      width: number,
+      height: number,
+      depth: number,
+      offsetX = 0,
+      offsetZ = 0,
+    ): void => {
+      const mesh = CreateBox(
+        `${building.id}-${kind}-${piece}`,
+        { width, height, depth },
+        scene,
+      );
+      mesh.position.set(building.center.x + offsetX, roofY + height / 2, building.center.z + offsetZ);
+      mesh.material = rooftopMaterial;
+      markTownBuildingSilhouette(mesh, building, kind);
+    };
+
+    switch (kind) {
+      case "factory":
+        addPiece("stack-west", 1.8, 4.2, 1.8, -building.width * 0.2);
+        addPiece("stack-east", 1.5, 3.2, 1.5, building.width * 0.2);
+        break;
+      case "warehouse":
+        addPiece("roof-monitor", building.width * 0.62, 1.35, 4.8);
+        break;
+      case "rowhouse":
+        addPiece("utility-west", 4.2, 1.45, 3.8, -building.width * 0.2);
+        addPiece("utility-east", 4.2, 1.45, 3.8, building.width * 0.2);
+        break;
+      case "commercial":
+        addPiece("roof-sign", Math.min(14, building.width * 0.42), 2.6, 0.32, 0, -building.depth * 0.28);
+        break;
+      case "corner":
+        addPiece(
+          "corner-pavilion",
+          Math.min(7, building.width * 0.24),
+          2.2,
+          Math.min(7, building.depth * 0.24),
+          building.width * 0.27,
+          building.depth * 0.27,
+        );
+        break;
+      case "tower":
+        addPiece("crown", building.width * 0.46, 2.1, building.depth * 0.46);
+        addPiece("antenna", 0.55, 4.8, 0.55);
+        break;
+    }
+  }
+  for (const kind of ["factory", "warehouse", "rowhouse", "commercial", "corner", "tower"] as const) {
+    mergeStaticBatch(
+      scene,
+      `town-building-silhouettes-${kind}`,
+      (mesh) => mesh.metadata?.decoration === "town-building-silhouette" &&
+        mesh.metadata?.townKind === kind,
+      { decoration: "town-building-silhouette", townKind: kind },
+    );
+  }
 }
 
 function createWallOpeningFrame(template: Mesh, opening: MapWallOpening, index: number): void {
@@ -2064,6 +2135,21 @@ function markBuildingDetail(mesh: Mesh, obstacleId: string, detailType: string):
   mesh.checkCollisions = false;
   mesh.isPickable = false;
   mesh.metadata = { decoration: "building-detail", obstacleId, detailType };
+  mesh.freezeWorldMatrix();
+}
+
+function markTownBuildingSilhouette(
+  mesh: Mesh,
+  building: MapBuilding,
+  townKind: NonNullable<MapBuilding["townKind"]>,
+): void {
+  mesh.checkCollisions = false;
+  mesh.isPickable = false;
+  mesh.metadata = {
+    decoration: "town-building-silhouette",
+    obstacleId: building.id,
+    townKind,
+  };
   mesh.freezeWorldMatrix();
 }
 

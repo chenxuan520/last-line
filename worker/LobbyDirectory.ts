@@ -17,6 +17,7 @@ import type {
   RoomMutationResult,
   RoomOptions,
 } from "./shared";
+import { normalizeMapId } from "../src/config/maps";
 
 interface LobbyData {
   guests: Record<string, GuestRecord>;
@@ -41,7 +42,8 @@ export class LobbyDirectory extends DurableService<WorkerEnv> {
     this.metricSink = ctx.metricSink ?? consoleServerMetricSink;
     this.ctx.blockConcurrencyWhile(async () => {
       this.data = await this.ctx.storage.get<LobbyData>(STORAGE_KEY) ?? this.data;
-      if (this.removeExpiredRecords()) await this.persist();
+      const migrated = this.normalizeStoredRoomMaps();
+      if (this.removeExpiredRecords() || migrated) await this.persist();
       else this.emitActiveRoomCount();
     });
   }
@@ -145,7 +147,10 @@ export class LobbyDirectory extends DurableService<WorkerEnv> {
     if (!guest) return json({ error: "unauthorized" }, 401);
     const available = Object.values(this.data.rooms)
       .filter((room) =>
-        room.visibility === "public" && room.status === "waiting" && room.playerCount < MAX_HUMAN_PLAYERS
+        room.visibility === "public" &&
+        room.mapId === normalizeMapId(body?.mapId) &&
+        room.status === "waiting" &&
+        room.playerCount < MAX_HUMAN_PLAYERS
       )
       .sort((left, right) => right.playerCount - left.playerCount || left.code.localeCompare(right.code))[0];
     if (available) {
@@ -204,6 +209,7 @@ export class LobbyDirectory extends DurableService<WorkerEnv> {
   private async updateRoom(roomId: string, request: Request): Promise<Response> {
     const summary = await request.json<PublicRoomSummary>();
     if (summary.roomId !== roomId) return json({ error: "room-mismatch" }, 400);
+    summary.mapId = normalizeMapId(summary.mapId);
     if (summary.status === "finished") delete this.data.rooms[roomId];
     else this.data.rooms[roomId] = summary;
     await this.persist();
@@ -287,6 +293,17 @@ export class LobbyDirectory extends DurableService<WorkerEnv> {
     return changed;
   }
 
+  private normalizeStoredRoomMaps(): boolean {
+    let changed = false;
+    for (const room of Object.values(this.data.rooms)) {
+      const mapId = normalizeMapId(room.mapId);
+      if (room.mapId === mapId) continue;
+      room.mapId = mapId;
+      changed = true;
+    }
+    return changed;
+  }
+
   private allowRequest(request: Request): boolean {
     const now = Date.now();
     const key = request.headers.get("CF-Connecting-IP") ?? "local";
@@ -302,6 +319,7 @@ export class LobbyDirectory extends DurableService<WorkerEnv> {
 
 function roomOptions(body: Record<string, unknown> | null): RoomOptions {
   return {
+    mapId: normalizeMapId(body?.mapId),
     startWithBandage: body?.startWithBandage !== false,
     disableAiSnipers: body?.disableAiSnipers !== false,
   };

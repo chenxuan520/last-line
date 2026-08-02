@@ -3,6 +3,7 @@ import { AssetCatalog } from "../assets/AssetCatalog";
 import { AudioFeedback } from "../client/audio/AudioFeedback";
 import { MobileFullscreenController } from "../client/ui/MobileFullscreenController";
 import { BATTLE_ROYALE_CONFIG } from "../config/battleRoyale";
+import { MAP_DISPLAY_NAMES, normalizeMapId } from "../config/maps";
 import {
   DEFAULT_SETTINGS,
   QUALITY_PROFILES,
@@ -134,9 +135,10 @@ export class GameApp {
         <div class="menu-index"><span>OPERATION</span><b>LL-01</b></div>
         <p class="eyebrow">${BATTLE_ROYALE_CONFIG.participantCount} 人 BATTLE ROYALE</p>
         <h1 id="game-title"><span class="sr-only">最后防线</span><img class="game-logo" src="${logo.url}" alt="" /></h1>
-        <p class="menu-description">穿越随机航线空降苍岬岛，搜集武器和补给，在不断收缩的安全区内成为最后一名幸存者。</p>
+        <p class="menu-description">穿越随机航线空降${MAP_DISPLAY_NAMES[this.settings.mapId]}，搜集武器和补给，在不断收缩的安全区内成为最后一名幸存者。</p>
         <div class="settings-grid" aria-label="游戏设置">
-          <label>画面质量<select data-setting="quality"><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></label>
+          <label>地图选择<select name="map-id" data-setting="map-id"><option value="island">${MAP_DISPLAY_NAMES.island}</option><option value="town">${MAP_DISPLAY_NAMES.town}</option></select></label>
+          <label>画面质量<select name="quality" data-setting="quality"><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></label>
           <label class="volume-setting"><span>主音量 <output data-volume-output></output></span><input aria-label="主音量" data-setting="volume" type="range" min="0" max="1" step="0.1" value="${this.settings.volume}" /></label>
           <label class="sensitivity-setting"><span>视角灵敏度 <output data-sensitivity-output></output></span><input data-setting="sensitivity" type="range" min="0.4" max="2" step="0.1" value="${this.settings.sensitivity}" /></label>
           <label class="starter-setting"><span>初始补给</span><span class="starter-option"><input data-setting="start-with-bandage" type="checkbox" ${this.settings.startWithBandage ? "checked" : ""} /><i></i><b>携带 1 条绷带</b></span></label>
@@ -191,6 +193,16 @@ export class GameApp {
         </section>
       </div>
     `;
+    const mapId = this.uiRoot.querySelector<HTMLSelectElement>("[data-setting='map-id']");
+    if (mapId) mapId.value = this.settings.mapId;
+    mapId?.addEventListener("change", () => {
+      this.settings = { ...this.settings, mapId: normalizeMapId(mapId.value) };
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings));
+      const description = this.uiRoot.querySelector<HTMLElement>(".menu-description");
+      if (description) {
+        description.textContent = `穿越随机航线空降${MAP_DISPLAY_NAMES[this.settings.mapId]}，搜集武器和补给，在不断收缩的安全区内成为最后一名幸存者。`;
+      }
+    });
     const quality = this.uiRoot.querySelector<HTMLSelectElement>("[data-setting='quality']");
     if (quality) quality.value = this.settings.quality;
     const volume = this.uiRoot.querySelector<HTMLInputElement>("[data-setting='volume']");
@@ -300,9 +312,9 @@ export class GameApp {
         <section class="multiplayer-auth hidden" data-multiplayer="auth">
           <div class="multiplayer-auth-head"><b>ACCOUNT GATE</b><span data-multiplayer="auth-state">需要账号验证</span></div>
           <div class="multiplayer-auth-form" data-multiplayer="auth-form">
-            <label class="multiplayer-field">账号<input data-multiplayer="auth-username" minlength="3" maxlength="20" autocomplete="username" /></label>
-            <label class="multiplayer-field">注册昵称<input data-multiplayer="auth-display-name" maxlength="20" value="${escapeAttribute(savedName)}" /></label>
-            <label class="multiplayer-field">密码<input data-multiplayer="auth-password" type="password" minlength="12" maxlength="128" autocomplete="current-password" /></label>
+            <label class="multiplayer-field">账号<input name="username" data-multiplayer="auth-username" minlength="3" maxlength="20" autocomplete="username" /></label>
+            <label class="multiplayer-field">注册昵称<input name="display-name" data-multiplayer="auth-display-name" maxlength="20" value="${escapeAttribute(savedName)}" /></label>
+            <label class="multiplayer-field">密码<input name="password" data-multiplayer="auth-password" type="password" minlength="12" maxlength="128" autocomplete="current-password" /></label>
             <div class="multiplayer-actions compact-actions">
               <button class="secondary-button compact" data-action="account-login">登录</button>
               <button class="secondary-button compact" data-action="account-register">注册</button>
@@ -310,14 +322,14 @@ export class GameApp {
           </div>
           <button class="text-button hidden" data-action="account-logout">退出账号</button>
         </section>
-        <label class="multiplayer-field" data-multiplayer="name-field">玩家代号<input data-multiplayer="name" maxlength="20" value="${escapeAttribute(savedName)}" /></label>
+        <label class="multiplayer-field" data-multiplayer="name-field">玩家代号<input name="player-name" data-multiplayer="name" maxlength="20" value="${escapeAttribute(savedName)}" /></label>
         <div class="multiplayer-actions">
           <button class="primary-button" data-action="quick" disabled><span>快速匹配</span><b>MATCH</b></button>
           <button class="secondary-button" data-action="create-public" disabled><span>创建公开房间</span><b>PUBLIC</b></button>
           <button class="secondary-button" data-action="create-private" disabled><span>创建私人房间</span><b>PRIVATE</b></button>
         </div>
         <div class="room-code-row">
-          <input data-multiplayer="code" maxlength="6" placeholder="输入 6 位房间码" />
+          <input name="room-code" data-multiplayer="code" maxlength="6" placeholder="输入 6 位房间码" />
           <button class="secondary-button compact" data-action="join" disabled>加入</button>
         </div>
         <div class="public-room-list" data-multiplayer="rooms"><span>${apiUrl ? "正在读取联机规则…" : "尚未配置联机服务器地址"}</span></div>
@@ -479,7 +491,7 @@ export class GameApp {
         button.type = "button";
         button.className = "room-list-entry";
         const label = document.createElement("span");
-        label.textContent = `${room.hostName} · ${room.code}`;
+        label.textContent = `${room.hostName} · ${MAP_DISPLAY_NAMES[room.mapId]} · ${room.code}`;
         const count = document.createElement("b");
         count.textContent = `${room.playerCount}/${room.capacity}`;
         button.append(label, count);
@@ -563,8 +575,8 @@ export class GameApp {
     if (!summary) return;
     const local = lobby.members.find((member) => member.playerId === client.playerId);
     summary.textContent = lobby.status === "countdown"
-      ? "部署倒计时已启动"
-      : `${lobby.visibility === "private" ? "私人" : "公开"}房间 · ${lobby.members.length}/${lobby.maximumPlayers} 真人 · AI 将补满 50 人`;
+      ? `${MAP_DISPLAY_NAMES[lobby.mapId]} · 部署倒计时已启动`
+      : `${MAP_DISPLAY_NAMES[lobby.mapId]} · ${lobby.visibility === "private" ? "私人" : "公开"}房间 · ${lobby.members.length}/${lobby.maximumPlayers} 真人 · AI 将补满 50 人`;
     const members = this.uiRoot.querySelector<HTMLElement>("[data-lobby='members']");
     members?.replaceChildren(...lobby.members.map((member) => {
       const row = document.createElement("div");
@@ -676,6 +688,7 @@ export class GameApp {
   }
 
   private readSettings(): void {
+    const mapId = this.uiRoot.querySelector<HTMLSelectElement>("[data-setting='map-id']")?.value;
     const quality = this.uiRoot.querySelector<HTMLSelectElement>("[data-setting='quality']")?.value;
     const volume = Number(this.uiRoot.querySelector<HTMLInputElement>("[data-setting='volume']")?.value);
     const sensitivity = Number(this.uiRoot.querySelector<HTMLInputElement>("[data-setting='sensitivity']")?.value);
@@ -683,6 +696,7 @@ export class GameApp {
     const disableAiSnipers = this.uiRoot.querySelector<HTMLInputElement>("[data-setting='disable-ai-snipers']")?.checked;
     const showGroundLootModels = this.uiRoot.querySelector<HTMLInputElement>("[data-setting='show-ground-loot-models']")?.checked;
     this.settings = {
+      mapId: normalizeMapId(mapId),
       quality: isQuality(quality) ? quality : DEFAULT_SETTINGS.quality,
       volume: normalizeVolume(volume),
       sensitivity: normalizeSensitivity(sensitivity),
@@ -725,6 +739,7 @@ function loadSettings(): GameSettings {
   try {
     const value = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "null") as Partial<GameSettings> | null;
     return {
+      mapId: normalizeMapId(value?.mapId),
       quality: isQuality(value?.quality) ? value.quality : DEFAULT_SETTINGS.quality,
       volume: typeof value?.volume === "number" ? normalizeVolume(value.volume) : DEFAULT_SETTINGS.volume,
       sensitivity: normalizeSensitivity(value?.sensitivity),

@@ -6,6 +6,29 @@ import type { SequencedGameEvent, ServerMessage } from "../../src/network/protoc
 import { MATCH_CHECKPOINT_VERSION, MatchRuntime } from "../../src/server/MatchRuntime";
 
 describe("MatchRuntime", () => {
+  it("creates town matches explicitly and restores legacy states as island", () => {
+    const town = new MatchRuntime({
+      humanActorIds: ["human-1", "human-2"],
+      seed: 2026,
+      mapId: "town",
+      startWithBandage: true,
+      disableAiSnipers: true,
+    });
+    expect(town.state.mapId).toBe("town");
+    expect(town.state.mapSeed).toBeGreaterThanOrEqual(0);
+
+    const legacyState = JSON.parse(JSON.stringify(town.state)) as Record<string, unknown>;
+    delete legacyState.mapId;
+    const restored = new MatchRuntime({
+      humanActorIds: ["human-1", "human-2"],
+      seed: 2026,
+      startWithBandage: true,
+      disableAiSnipers: true,
+      state: legacyState as unknown as MatchRuntime["state"],
+    });
+    expect(restored.state.mapId).toBe("island");
+  });
+
   it("runs a 10-human authoritative room with 40 bots", () => {
     const humanActorIds = Array.from({ length: 10 }, (_, index) => `human-${index + 1}`);
     const runtime = new MatchRuntime({

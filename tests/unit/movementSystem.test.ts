@@ -458,6 +458,7 @@ function createState(x: number, z: number, y = GROUND_HEIGHT): MatchState {
   const groundY = getTerrainHeight(x, z, 0) + GROUND_HEIGHT;
   const actor = createActorState("actor", "player", { x, y: y === GROUND_HEIGHT ? groundY : y, z });
   return {
+    mapId: "island",
     mapSeed: 0,
     phase: "combat",
     elapsedSeconds: 0,

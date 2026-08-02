@@ -2,7 +2,8 @@ import type { AssetCatalog } from "../../assets/AssetCatalog";
 import { backpackSnapshotSignature } from "../../game/commands/ActorCommand";
 import { BATTLE_ROYALE_CONFIG } from "../../config/battleRoyale";
 import { ITEMS } from "../../config/items";
-import { createMapLayout, createMapRoadSegments, MAP_SIZE } from "../../config/map";
+import { createMapLayout, MAP_SIZE } from "../../config/map";
+import type { MapId } from "../../config/maps";
 import { WEAPONS } from "../../config/weapons";
 import { getItemIconAssetId } from "../itemIcon";
 import {
@@ -48,13 +49,14 @@ export class GameHud {
       onRequestFullscreen?: () => void;
       onDropBackpackItem?: (index: number, itemId: string, snapshot: string) => void;
       onExit?: () => void;
+      mapId?: MapId;
     } = {},
   ) {
     const crosshair = assets.resolve("ui.crosshair", "svg");
-    const mapLayout = createMapLayout(mapSeed);
+    const mapLayout = createMapLayout(options.mapId ?? "island", mapSeed);
     const mapPoints = mapLayout.mapPoints;
     const hospitalPoint = projectToMinimap(mapLayout.hospital.position);
-    const mapRoadPath = createMapRoadSegments(mapLayout.landingZones).map(([startX, startZ, endX, endZ]) => {
+    const mapRoadPath = mapLayout.roadSegments.map(([startX, startZ, endX, endZ]) => {
       const start = projectToMinimap({ x: startX, y: 0, z: startZ });
       const end = projectToMinimap({ x: endX, y: 0, z: endZ });
       return `M${start.x} ${start.y}L${end.x} ${end.y}`;
@@ -63,7 +65,7 @@ export class GameHud {
     root.innerHTML = `
       <section class="hud" aria-label="游戏状态">
         <header class="hud-topbar">
-          <div class="location-block"><span class="hud-kicker">LAST LINE // 01</span><strong>苍岬岛</strong><small data-hud="phase">航线部署</small></div>
+          <div class="location-block"><span class="hud-kicker">LAST LINE // 01</span><strong>${mapLayout.displayName}</strong><small data-hud="phase">航线部署</small></div>
           <div class="zone-block"><span data-hud="zone-label">安全区待命</span><strong data-hud="zone-time">--:--</strong><i></i></div>
           <div class="alive-counter"><small>存活</small><span data-hud="alive">${BATTLE_ROYALE_CONFIG.participantCount}</span><b data-hud="kills">0 击杀</b></div>
         </header>
@@ -75,7 +77,7 @@ export class GameHud {
         <div class="connection-feed" data-hud="connection-feed" aria-live="polite"></div>
         <aside class="minimap-card" aria-label="小地图">
           <div class="minimap-heading"><strong>TACTICAL MAP</strong><span data-hud="map-status">安全区内</span></div>
-          <svg class="minimap" viewBox="0 0 200 200" role="img" aria-label="苍岬岛小地图">
+          <svg class="minimap" viewBox="0 0 200 200" role="img" aria-label="${mapLayout.displayName}小地图">
             <rect class="minimap-sea" width="200" height="200" />
             <rect class="minimap-island" x="10" y="10" width="180" height="180" rx="5" />
             <g class="minimap-grid">

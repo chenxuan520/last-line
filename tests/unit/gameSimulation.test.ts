@@ -19,6 +19,7 @@ function createSimulation(weaponId = "rifle"): GameSimulation {
   const player = createActorState("player", "player", { x: 0, y: getTerrainHeight(0, 0, 0) + 1.76, z: 0 }, weaponId);
   const bot = createActorState("bot-1", "bot", { x: 0, y: getTerrainHeight(0, 10, 0) + 1.76, z: 10 });
   const state: MatchState = {
+    mapId: "island",
     mapSeed: 0,
     phase: "ready",
     elapsedSeconds: 0,

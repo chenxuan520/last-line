@@ -1,6 +1,8 @@
 import type { Vector3State } from "../game/state/types";
 import { ACTOR_EYE_HEIGHT } from "../game/rules/actorGeometry";
 import { GROUND_LOOT_POSITION_HEIGHT } from "../game/rules/loot";
+import { DEFAULT_MAP_ID, mapDisplayName, type MapId } from "./maps";
+import { createTownMapBlueprint, type TownBuildingKind } from "./townMap";
 
 export interface MapObstacle {
   id: string;
@@ -21,9 +23,10 @@ export interface BuildingStairwell {
 
 export interface MapBuilding extends MapObstacle {
   baseY: number;
-  storyCount: 1 | 2 | 3;
+  storyCount: 1 | 2 | 3 | 4 | 5;
   storyHeight: number;
   stairwell: BuildingStairwell | null;
+  townKind?: TownBuildingKind;
 }
 
 export interface MapWallSegment extends MapObstacle {
@@ -89,7 +92,23 @@ export interface RoofRamp {
   topY: number;
 }
 
+export interface MapSkybridge {
+  id: string;
+  fromBuildingId: string;
+  toBuildingId: string;
+  fromSide: "left" | "right";
+  toSide: "left" | "right";
+  center: Vector3State;
+  width: number;
+  height: number;
+  depth: number;
+  orientation: "x" | "z";
+  floorY: number;
+}
+
 export interface MapLayout {
+  readonly mapId: MapId;
+  readonly displayName: string;
   readonly seed: number;
   readonly mapPoints: readonly MapPoint[];
   readonly landingZones: readonly MapPoint[];
@@ -102,6 +121,8 @@ export interface MapLayout {
   readonly treeTrunks: readonly MapTreeTrunk[];
   readonly coverObstacles: readonly MapCoverObstacle[];
   readonly roofRamps: readonly RoofRamp[];
+  readonly roadSegments: readonly (readonly [number, number, number, number])[];
+  readonly skybridges: readonly MapSkybridge[];
   readonly hospital: HospitalPoi;
   readonly lootSpawnPoints: readonly Vector3State[];
   readonly lootZoneCounts: readonly number[];
@@ -176,14 +197,23 @@ const STAIRWELL_WIDTH = 4.8;
 const STAIRWELL_LANDING_DEPTH = 1.2;
 const STAIRWELL_FLOOR_BORDER = 0.3;
 const MAP_LAYOUT_CACHE_LIMIT = 8;
-const mapLayoutCache = new Map<number, MapLayout>();
+const mapLayoutCache = new Map<string, MapLayout>();
 const terrainGridCache = new WeakMap<readonly TerrainHill[], Float32Array>();
 
-export function createMapLayout(seed: number): MapLayout {
+export function createMapLayout(seed: number): MapLayout;
+export function createMapLayout(mapId: MapId, seed: number): MapLayout;
+export function createMapLayout(mapIdOrSeed: MapId | number, explicitSeed?: number): MapLayout {
+  const mapId = typeof mapIdOrSeed === "number" ? DEFAULT_MAP_ID : mapIdOrSeed;
+  const seed = typeof mapIdOrSeed === "number" ? mapIdOrSeed : explicitSeed;
+  if (seed === undefined) throw new Error("Map seed is required");
   const normalizedSeed = seed >>> 0;
-  const cached = mapLayoutCache.get(normalizedSeed);
+  const cacheKey = `${mapId}:${normalizedSeed}`;
+  const cached = mapLayoutCache.get(cacheKey);
   if (cached) {
     return cached;
+  }
+  if (mapId === "town") {
+    return cacheMapLayout(cacheKey, createTownMapLayout(normalizedSeed));
   }
 
   const terrainRandom = createSeededRandom(normalizedSeed ^ 0x9e3779b9);
@@ -319,6 +349,8 @@ export function createMapLayout(seed: number): MapLayout {
     createSeededRandom(normalizedSeed ^ 0x68bc21eb),
   );
   const layout: MapLayout = {
+    mapId,
+    displayName: mapDisplayName(mapId),
     seed: normalizedSeed,
     mapPoints,
     landingZones,
@@ -331,16 +363,448 @@ export function createMapLayout(seed: number): MapLayout {
     treeTrunks,
     coverObstacles,
     roofRamps,
+    roadSegments: createMapRoadSegments(landingZones),
+    skybridges: [],
     hospital,
     lootSpawnPoints,
     lootZoneCounts,
   };
+  return cacheMapLayout(cacheKey, layout);
+}
+
+function createTownMapLayout(seed: number): MapLayout {
+  const blueprint = createTownMapBlueprint(seed);
+  const terrainHills = createTownTerrainHills(seed);
+  const obstacles = blueprint.buildings.map<MapBuilding>((building) => {
+    const baseY = round(terrainHeightFromHills(building.x, building.z, terrainHills) - BUILDING_GROUND_EMBED);
+    const height = round(building.storyHeight * building.storyCount);
+    const base: MapBuilding = {
+      id: building.id,
+      center: { x: building.x, y: round(baseY + height / 2), z: building.z },
+      width: building.width,
+      height,
+      depth: building.depth,
+      color: building.color,
+      baseY,
+      storyCount: building.storyCount,
+      storyHeight: building.storyHeight,
+      stairwell: null,
+      townKind: building.kind,
+    };
+    return {
+      ...base,
+      stairwell: building.storyCount > 1
+        ? createBuildingStairwell(base, building.stairwellSide)
+        : null,
+    };
+  });
+  const hospitalBase = obstacles.find((building) => building.id === blueprint.hospitalBuildingId);
+  if (!hospitalBase) throw new Error("Town hospital building missing");
+  const hospitalBuilding = hospitalBase.storyCount < 2
+    ? promoteBuilding(hospitalBase, 2, 1)
+    : { ...hospitalBase, color: HOSPITAL_WALL_COLOR };
+  const hospitalIndex = obstacles.findIndex((building) => building.id === hospitalBuilding.id);
+  obstacles[hospitalIndex] = { ...hospitalBuilding, color: HOSPITAL_WALL_COLOR };
+  const roofRamps = obstacles.flatMap((building) =>
+    building.storyCount > 1
+      ? createInternalRamps(building, terrainHills)
+      : []
+  );
+  const skybridges = createTownSkybridges(blueprint.skybridges, obstacles);
+  const baseWallGeometry = createWallSegments(obstacles, terrainHills);
+  const bridgeWallGeometry = createTownSkybridgeWallGeometry(
+    skybridges,
+    obstacles,
+    terrainHills,
+    baseWallGeometry,
+  );
+  const wallSegments = [
+    ...bridgeWallGeometry.wallSegments,
+    ...createTownSkybridgeRails(skybridges),
+  ];
+  const wallOpenings = bridgeWallGeometry.wallOpenings;
+  const floorSlabs = [
+    ...obstacles.flatMap(createBuildingFloorSlabs),
+    ...createTownSkybridgeFloorSlabs(skybridges),
+  ];
+  const rockObstacles = createTownRockObstacles(seed, terrainHills);
+  const coverObstacles = createTownCoverObstacles(seed, terrainHills);
+  const lootZoneCounts = createTownLootZoneCounts(blueprint.landingZones.length);
+  const baseLootSpawnPoints = createTownLootSpawnPoints(
+    blueprint.landingZones,
+    lootZoneCounts,
+    obstacles,
+    wallOpenings,
+    terrainHills,
+    seed,
+  );
+  const hospitalMedicalPoints = createTownHospitalMedicalPoints(
+    obstacles[hospitalIndex] as MapBuilding,
+    terrainHills,
+  );
+  const hospital: HospitalPoi = {
+    name: "灰炉医院",
+    buildingId: hospitalBuilding.id,
+    position: {
+      x: hospitalBuilding.center.x,
+      y: round(terrainHeightFromHills(hospitalBuilding.center.x, hospitalBuilding.center.z, terrainHills)),
+      z: hospitalBuilding.center.z,
+    },
+    bandageLootIndex: baseLootSpawnPoints.length,
+    medkitLootIndex: baseLootSpawnPoints.length + 1,
+  };
+  const lootSpawnPoints = [...baseLootSpawnPoints, ...hospitalMedicalPoints];
+  const landingZones = blueprint.landingZones.map<MapPoint>((point) => ({
+    name: point.name,
+    position: {
+      x: point.x,
+      y: round(terrainHeightFromHills(point.x, point.z, terrainHills)),
+      z: point.z,
+    },
+  }));
+  const mapPoints = blueprint.mapPoints.map<MapPoint>((point) => ({
+    name: point.name,
+    position: {
+      x: point.x,
+      y: round(terrainHeightFromHills(point.x, point.z, terrainHills)),
+      z: point.z,
+    },
+  }));
+  const treeTrunks = createTownTreeTrunks(seed, terrainHills, obstacles, lootSpawnPoints);
+  return {
+    mapId: "town",
+    displayName: mapDisplayName("town"),
+    seed,
+    mapPoints,
+    landingZones,
+    terrainHills,
+    obstacles,
+    wallSegments,
+    wallOpenings,
+    floorSlabs,
+    rockObstacles,
+    treeTrunks,
+    coverObstacles,
+    roofRamps,
+    roadSegments: blueprint.roadSegments,
+    skybridges,
+    hospital,
+    lootSpawnPoints,
+    lootZoneCounts,
+  };
+}
+
+function cacheMapLayout(cacheKey: string, layout: MapLayout): MapLayout {
   if (mapLayoutCache.size >= MAP_LAYOUT_CACHE_LIMIT) {
-    const oldestSeed = mapLayoutCache.keys().next().value;
-    if (oldestSeed !== undefined) mapLayoutCache.delete(oldestSeed);
+    const oldestKey = mapLayoutCache.keys().next().value;
+    if (oldestKey !== undefined) mapLayoutCache.delete(oldestKey);
   }
-  mapLayoutCache.set(normalizedSeed, layout);
+  mapLayoutCache.set(cacheKey, layout);
   return layout;
+}
+
+function createTownTerrainHills(seed: number): TerrainHill[] {
+  const random = createSeededRandom(seed ^ 0x9e3779b9);
+  return [
+    { x: -1_020, z: -1_020, radius: 260, height: 5 },
+    { x: 1_020, z: -1_020, radius: 260, height: 4 },
+    { x: -1_020, z: 1_020, radius: 260, height: 4 },
+    { x: 1_020, z: 1_020, radius: 260, height: 5 },
+    ...Array.from({ length: 8 }, (_, index) => {
+      const angle = index / 8 * Math.PI * 2 + randomBetween(random, -0.12, 0.12);
+      const radius = randomBetween(random, 980, 1_090);
+      return {
+      x: round(Math.cos(angle) * radius),
+      z: round(Math.sin(angle) * radius),
+      radius: round(randomBetween(random, 120, 240)),
+      height: round(randomBetween(random, 0.4, 1.6)),
+      };
+    }),
+  ];
+}
+
+function createTownSkybridges(
+  specs: ReturnType<typeof createTownMapBlueprint>["skybridges"],
+  buildings: readonly MapBuilding[],
+): MapSkybridge[] {
+  const byId = new Map(buildings.map((building) => [building.id, building]));
+  return specs.map((spec) => {
+    const from = byId.get(spec.fromBuildingId);
+    const to = byId.get(spec.toBuildingId);
+    if (!from || !to || from.storyCount < 2 || to.storyCount < 2) {
+      throw new Error(`Town skybridge endpoint missing: ${spec.id}`);
+    }
+    const floorY = round(Math.max(
+      from.baseY + from.storyHeight + BUILDING_ROOF_CAP_HEIGHT,
+      to.baseY + to.storyHeight + BUILDING_ROOF_CAP_HEIGHT,
+    ));
+    const fromX = from.center.x + (spec.fromSide === "right" ? from.width / 2 : -from.width / 2);
+    const toX = to.center.x + (spec.toSide === "right" ? to.width / 2 : -to.width / 2);
+    const minimumX = Math.min(fromX, toX);
+    const maximumX = Math.max(fromX, toX);
+    const centerZ = round((from.center.z + to.center.z) / 2);
+    return {
+      id: spec.id,
+      fromBuildingId: from.id,
+      toBuildingId: to.id,
+      fromSide: spec.fromSide,
+      toSide: spec.toSide,
+      center: {
+        x: round((minimumX + maximumX) / 2),
+        y: round(floorY + 1.2),
+        z: centerZ,
+      },
+      width: round(maximumX - minimumX),
+      height: 2.4,
+      depth: 5.2,
+      orientation: "x",
+      floorY,
+    };
+  });
+}
+
+function createTownSkybridgeWallGeometry(
+  skybridges: readonly MapSkybridge[],
+  buildings: readonly MapBuilding[],
+  terrainHills: readonly TerrainHill[],
+  baseGeometry: ReturnType<typeof createWallSegments>,
+): ReturnType<typeof createWallSegments> {
+  const byId = new Map(buildings.map((building) => [building.id, building]));
+  const replacements = skybridges.flatMap((bridge) => [
+    {
+      building: byId.get(bridge.fromBuildingId),
+      side: bridge.fromSide,
+    },
+    {
+      building: byId.get(bridge.toBuildingId),
+      side: bridge.toSide,
+    },
+  ] as const);
+  const replacementKeys = new Set(replacements.map(({ building, side }) => `${building?.id}:${side}:1`));
+  const wallSegments = baseGeometry.wallSegments.filter((wall) => {
+    for (const key of replacementKeys) {
+      const [buildingId, side, storyIndex] = key.split(":");
+      if (wall.id.startsWith(`${buildingId}-wall-${side}-${storyIndex}-`)) return false;
+    }
+    return true;
+  });
+  const wallOpenings = baseGeometry.wallOpenings.filter(
+    (opening) => !replacementKeys.has(`${opening.obstacleId}:${opening.side}:${opening.storyIndex}`),
+  );
+  for (const { building, side } of replacements) {
+    if (!building) throw new Error("Town skybridge opening building missing");
+    const geometry = createFacadeGeometry(building, 1, side, "door", terrainHills);
+    wallSegments.push(...geometry.wallSegments);
+    wallOpenings.push(geometry.opening);
+  }
+  return { wallSegments, wallOpenings };
+}
+
+function createTownSkybridgeFloorSlabs(skybridges: readonly MapSkybridge[]): MapFloorSlab[] {
+  return skybridges.map((bridge) => ({
+    id: `${bridge.id}-floor`,
+    obstacleId: bridge.id,
+    level: 1,
+    kind: "floor",
+    center: {
+      x: bridge.center.x,
+      y: round(bridge.floorY - BUILDING_ROOF_CAP_HEIGHT / 2),
+      z: bridge.center.z,
+    },
+    width: bridge.width,
+    height: BUILDING_ROOF_CAP_HEIGHT,
+    depth: bridge.depth,
+    color: "#545b5e",
+  }));
+}
+
+function createTownSkybridgeRails(skybridges: readonly MapSkybridge[]): MapWallSegment[] {
+  return skybridges.flatMap((bridge) => [-1, 1].map((side) => ({
+    id: `${bridge.id}-rail-${side < 0 ? "north" : "south"}`,
+    obstacleId: bridge.id,
+    center: {
+      x: bridge.center.x,
+      y: round(bridge.floorY + bridge.height / 2),
+      z: round(bridge.center.z + side * (bridge.depth / 2 - BUILDING_WALL_THICKNESS / 2)),
+    },
+    width: bridge.width,
+    height: bridge.height,
+    depth: BUILDING_WALL_THICKNESS,
+    color: "#4b5154",
+  })));
+}
+
+function createTownRockObstacles(seed: number, terrainHills: readonly TerrainHill[]): MapRockObstacle[] {
+  const random = createSeededRandom(seed ^ 0x165667b1);
+  return Array.from({ length: 64 }, (_, index) => {
+    const column = index % 16;
+    const row = Math.floor(index / 16);
+    const x = -825 + column * 110;
+    const z = row < 2 ? -1_050 + row * 2_100 : -1_050 + (row - 2) * 2_100;
+    const offsetX = row < 2 ? randomBetween(random, -20, 20) : (row === 2 ? -1_050 : 1_050);
+    const offsetZ = row < 2 ? z : x;
+    const centerX = round(row < 2 ? x + offsetX : offsetX);
+    const centerZ = round(row < 2 ? offsetZ : x + randomBetween(random, -20, 20));
+    const width = round(randomBetween(random, 5.5, 8));
+    const depth = round(randomBetween(random, 5, 8));
+    const height = round(randomBetween(random, 3.4, 5.2));
+    const ground = terrainHeightFromHills(centerX, centerZ, terrainHills);
+    return {
+      id: `town-cover-rock-${index}`,
+      center: { x: centerX, y: round(ground + height / 2), z: centerZ },
+      width,
+      height,
+      depth,
+      color: "#4f5553",
+    };
+  });
+}
+
+function createTownCoverObstacles(seed: number, terrainHills: readonly TerrainHill[]): MapCoverObstacle[] {
+  const random = createSeededRandom(seed ^ 0xa24baed5);
+  return Array.from({ length: 168 }, (_, index) => {
+    const street = Math.floor(index / 21) % 8;
+    const slot = index % 21;
+    const horizontal = index % 2 === 0;
+    const fixed = -630 + street * 180 + (horizontal ? 84 : -84);
+    const variable = -850 + slot * 85;
+    const x = round(horizontal ? variable : fixed);
+    const z = round(horizontal ? fixed : variable);
+    const kind = index % 3 === 0 ? "hay" as const : "fence" as const;
+    const longSize = round(randomBetween(random, 7, 12));
+    const width = kind === "fence"
+      ? horizontal ? longSize : 0.8
+      : round(randomBetween(random, 4, 7));
+    const depth = kind === "fence"
+      ? horizontal ? 0.8 : longSize
+      : round(randomBetween(random, 3, 5));
+    const height = kind === "fence" ? 2.2 : round(randomBetween(random, 2.4, 3.6));
+    const ground = terrainHeightFromHills(x, z, terrainHills);
+    return {
+      id: `town-cover-${index}`,
+      kind,
+      center: { x, y: round(ground + height / 2), z },
+      width,
+      height,
+      depth,
+      color: kind === "fence" ? "#5c615e" : "#6d5f4b",
+    };
+  });
+}
+
+function createTownLootZoneCounts(zoneCount: number): number[] {
+  const counts = Array.from({ length: zoneCount }, () => 15);
+  for (let index = 0; index < Math.min(8, zoneCount); index += 1) {
+    counts[index] = 16;
+  }
+  return counts;
+}
+
+function createTownLootSpawnPoints(
+  landingZones: readonly { name: string; x: number; z: number }[],
+  counts: readonly number[],
+  buildings: readonly MapBuilding[],
+  openings: readonly MapWallOpening[],
+  terrainHills: readonly TerrainHill[],
+  seed: number,
+): Vector3State[] {
+  const random = createSeededRandom(seed ^ 0xc2b2ae35);
+  const usedBuildingIds = new Set<string>();
+  const byDistance = (point: { x: number; z: number }) => [...buildings].sort((left, right) =>
+    distanceSquared2d(left.center.x, left.center.z, point.x, point.z) -
+      distanceSquared2d(right.center.x, right.center.z, point.x, point.z) ||
+    left.id.localeCompare(right.id)
+  );
+  const selected: Vector3State[] = [];
+  for (const [zoneIndex, zone] of landingZones.entries()) {
+    const targetCount = counts[zoneIndex] ?? 15;
+    const nearbyBuildings = byDistance(zone);
+    for (let slot = 0; slot < targetCount; slot += 1) {
+      const startIndex = (slot * 3 + zoneIndex) % nearbyBuildings.length;
+      const building = Array.from({ length: nearbyBuildings.length }, (_, offset) =>
+        nearbyBuildings[(startIndex + offset) % nearbyBuildings.length]
+      ).find((candidate) => candidate && !usedBuildingIds.has(candidate.id));
+      if (!building) throw new Error(`Town loot building missing for ${zone.name}`);
+      usedBuildingIds.add(building.id);
+      const opening = openings.find((candidate) =>
+        candidate.obstacleId === building.id && candidate.storyIndex === 0 && candidate.kind === "door"
+      );
+      const jitterX = randomBetween(random, -2, 2);
+      const jitterZ = randomBetween(random, -2, 2);
+      const x = round(building.center.x + jitterX);
+      const z = round(building.center.z + jitterZ);
+      const candidate = {
+        x,
+        y: round(terrainHeightFromHills(x, z, terrainHills) + GROUND_LOOT_POSITION_HEIGHT),
+        z,
+      };
+      if (opening && slot % 4 === 0) {
+        candidate.x = round(opening.center.x + (opening.side === "left" ? 1.2 : opening.side === "right" ? -1.2 : 0));
+        candidate.z = round(opening.center.z + (opening.side === "front" ? 1.2 : opening.side === "back" ? -1.2 : 0));
+        candidate.y = round(terrainHeightFromHills(candidate.x, candidate.z, terrainHills) + GROUND_LOOT_POSITION_HEIGHT);
+      }
+      selected.push(candidate);
+    }
+  }
+  return selected;
+}
+
+function createTownHospitalMedicalPoints(
+  hospital: MapBuilding,
+  terrainHills: readonly TerrainHill[],
+): [Vector3State, Vector3State] {
+  return [-4, 4].map((offset) => {
+    const x = round(hospital.center.x + offset);
+    const z = hospital.center.z;
+    return {
+      x,
+      y: round(terrainHeightFromHills(x, z, terrainHills) + GROUND_LOOT_POSITION_HEIGHT),
+      z,
+    };
+  }) as [Vector3State, Vector3State];
+}
+
+function createTownTreeTrunks(
+  seed: number,
+  terrainHills: readonly TerrainHill[],
+  buildings: readonly MapBuilding[],
+  loot: readonly Vector3State[],
+): MapTreeTrunk[] {
+  const random = createSeededRandom(seed ^ 0x68bc21eb);
+  const trees: MapTreeTrunk[] = [];
+  for (let attempt = 0; attempt < 20_000 && trees.length < 96; attempt += 1) {
+    const parkTree = trees.length < 48;
+    const x = round(parkTree ? randomBetween(random, 690, 850) : randomBetween(random, -1_120, 1_120));
+    const z = round(parkTree ? randomBetween(random, -130, 130) : randomBetween(random, -1_120, 1_120));
+    if (
+      buildings.some((building) => buildingsOverlap(
+        building,
+        { id: "", center: { x, y: 0, z }, width: 5, height: 5, depth: 5, color: "" },
+        6,
+      )) ||
+      loot.some((point) => Math.hypot(point.x - x, point.z - z) < 5) ||
+      trees.some((tree) => Math.hypot(tree.center.x - x, tree.center.z - z) < 12)
+    ) continue;
+    const width = round(randomBetween(random, 2.2, 3.2));
+    const height = round(randomBetween(random, 9, 14));
+    const depth = round(randomBetween(random, 2.2, 3.2));
+    const ground = terrainHeightFromHills(x, z, terrainHills);
+    trees.push({
+      id: `town-tree-${trees.length}`,
+      kind: "tree-trunk",
+      center: { x, y: round(ground + height / 2), z },
+      width,
+      height,
+      depth,
+      color: "#5a4d39",
+    });
+  }
+  if (trees.length !== 96) throw new Error("Not enough town tree trunks");
+  return trees;
+}
+
+function distanceSquared2d(x: number, z: number, targetX: number, targetZ: number): number {
+  return (x - targetX) ** 2 + (z - targetZ) ** 2;
 }
 
 export function getTerrainHeight(x: number, z: number, seedOrLayout: number | MapLayout = DEFAULT_MAP_SEED): number {

@@ -165,7 +165,7 @@ export class InventorySystem {
       }
       this.droppedDeadActors.add(actor);
       actor.inventory.usingItem = null;
-      const placement = createDropPlacementContext(state, this.getLayout(state.mapSeed));
+      const placement = createDropPlacementContext(state, this.getLayout(state.mapId, state.mapSeed));
 
       for (let slot = 0; slot < actor.inventory.weaponSlots.length; slot += 1) {
         const weapon = actor.inventory.weaponSlots[slot];
@@ -483,7 +483,7 @@ export class InventorySystem {
       itemId,
       quantity,
       ...(weapon ? { weapon } : {}),
-      position: findDynamicDropPosition(state, actor, this.getLayout(state.mapSeed), placement),
+      position: findDynamicDropPosition(state, actor, this.getLayout(state.mapId, state.mapSeed), placement),
       available: true,
       source,
     };
@@ -520,8 +520,10 @@ export class InventorySystem {
     return true;
   }
 
-  private getLayout(seed: number): MapLayout {
-    if (this.layout.seed !== seed) this.layout = createMapLayout(seed);
+  private getLayout(mapId: MatchState["mapId"], seed: number): MapLayout {
+    if (this.layout.mapId !== mapId || this.layout.seed !== seed) {
+      this.layout = createMapLayout(mapId, seed);
+    }
     return this.layout;
   }
 }

@@ -9,6 +9,14 @@ const POI_VISUAL_TYPES: Readonly<Record<string, PoiVisualType>> = {
   雷达哨: "station",
   西风农场: "warehouse",
   东岭营地: "town",
+  灰炉广场: "station",
+  铸造工业园: "warehouse",
+  旧火车站: "station",
+  工人住宅区: "town",
+  仓储港区: "warehouse",
+  老城区: "town",
+  商业街: "town",
+  城市公园: "station",
   医院: "hospital",
 };
 

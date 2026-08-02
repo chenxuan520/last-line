@@ -1,7 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GridNavigator } from "../../src/ai/navigation/GridNavigator";
 import type { BattleRoyaleConfig } from "../../src/config/battleRoyale";
-import { createMapLayout, LOOT_SPAWN_POINTS, MAP_WALL_SEGMENTS, TOTAL_LOOT_POINTS } from "../../src/config/map";
+import {
+  createMapLayout,
+  getTerrainHeight,
+  LOOT_SPAWN_POINTS,
+  MAP_WALL_SEGMENTS,
+  TOTAL_LOOT_POINTS,
+} from "../../src/config/map";
+import type { MapId } from "../../src/config/maps";
 import { WEAPONS } from "../../src/config/weapons";
 import { BotController } from "../../src/controllers/BotController";
 import { createIdleCommand, type ActorCommand } from "../../src/game/commands/ActorCommand";
@@ -130,7 +137,95 @@ describe("AI loot reachability", () => {
     expect(bots.some((bot) => bot.inventory.backpack.some((stack) => stack.itemId === "ammo.sniper"))).toBe(false);
   }, 120_000);
 
-  it("lets 49 real bot controllers loot, fight, and produce one winner", () => {
+  it("arms at least 42 of 49 bots in Greyfurnace City", () => {
+    const seed = 42;
+    const random = seededRandom(seed);
+    const state = createBattleRoyaleState("player", TEST_CONFIG, random, { mapId: "town" });
+    const layout = createMapLayout("town", state.mapSeed);
+    const simulation = new GameSimulation(state, new BattleRoyaleMode(TEST_CONFIG, random), WEAPONS, layout);
+    const bots = Object.values(state.actors).filter((actor) => actor.kind === "bot");
+    const controllers = new Map(
+      bots.map((bot, index) => [
+        bot.id,
+        new BotController(index + 1, seededRandom(seed * 100 + index), true, layout),
+      ]),
+    );
+    simulation.start();
+
+    let groundedAt: number | null = null;
+    for (let tick = 0; tick < 1_000; tick += 1) {
+      const commands = new Map<EntityId, ActorCommand>([["player", createIdleCommand()]]);
+      for (const bot of bots) {
+        const controller = controllers.get(bot.id);
+        if (!controller) throw new Error(`controller missing for ${bot.id}`);
+        commands.set(bot.id, controller.update(bot, state, NO_COMBAT_WORLD, 0.25, "player"));
+      }
+      simulation.step(0.25, commands, NO_COMBAT_WORLD);
+      if (bots.every((bot) => bot.deployment === "grounded")) {
+        groundedAt ??= state.elapsedSeconds;
+        if (state.elapsedSeconds - groundedAt >= 140) break;
+      }
+    }
+
+    const armedBots = bots.filter((bot) => getActiveWeapon(bot) !== null);
+    expect(bots.every((bot) => bot.deployment === "grounded")).toBe(true);
+    expect(armedBots.length, `${armedBots.length} town bots armed`).toBeGreaterThanOrEqual(42);
+  }, 120_000);
+
+  it.each([1, 42, 99])("keeps Greyfurnace City loot navigable and interactable with seed %i", (seed) => {
+    const random = seededRandom(seed);
+    const state = createBattleRoyaleState("player", TEST_CONFIG, random, { mapId: "town" });
+    const layout = createMapLayout("town", state.mapSeed);
+    const navigator = new GridNavigator(layout);
+    const inventory = new InventorySystem(layout);
+    const player = state.actors.player;
+    if (!player) throw new Error("Town loot test player missing");
+    player.deployment = "grounded";
+
+    for (const [index, point] of layout.lootSpawnPoints.entries()) {
+      const building = layout.obstacles.find((candidate) =>
+        Math.abs(point.x - candidate.center.x) <= candidate.width / 2 &&
+        Math.abs(point.z - candidate.center.z) <= candidate.depth / 2
+      );
+      if (!building) throw new Error(`Town loot ${index} is not inside a building`);
+      const door = layout.wallOpenings.find((opening) =>
+        opening.obstacleId === building.id &&
+        opening.storyIndex === 0 &&
+        opening.kind === "door"
+      );
+      if (!door) throw new Error(`Town loot ${index} building has no ground door`);
+      const outside = {
+        x: door.center.x,
+        y: getTerrainHeight(door.center.x, door.center.z - 1.1, layout) + 1.76,
+        z: door.center.z - 1.1,
+      };
+      const target = {
+        x: point.x,
+        y: getTerrainHeight(point.x, point.z, layout) + 1.76,
+        z: point.z,
+      };
+      expect(navigator.findPath(outside, target), `${seed}:${index}:path`).not.toHaveLength(0);
+
+      player.position = target;
+      player.inventory.backpack = [];
+      state.groundLoot = {
+        loot: {
+          id: "loot",
+          itemId: "ammo.rifle",
+          quantity: 1,
+          position: { ...point },
+          available: true,
+        },
+      };
+      inventory.processCommand(state, player.id, { ...createIdleCommand(), interact: true }, []);
+      expect(state.groundLoot.loot?.available, `${seed}:${index}:pickup`).toBe(false);
+    }
+  }, 120_000);
+
+  it.each([
+    ["island", "island"],
+    ["Greyfurnace City", "town"],
+  ] as const)("lets 49 real bot controllers loot, fight, and produce one winner on %s", (_label, mapId: MapId) => {
     const config: BattleRoyaleConfig = {
       participantCount: 50,
       flightSeconds: 1,
@@ -143,13 +238,17 @@ describe("AI loot reachability", () => {
     vi.spyOn(Math, "random").mockImplementation(seededRandom(2026));
     const findPath = vi.spyOn(GridNavigator.prototype, "findPath");
     const random = seededRandom(2026);
-    const state = createBattleRoyaleState("player", config, random);
-    const simulation = new GameSimulation(state, new BattleRoyaleMode(config, random), WEAPONS);
+    const state = createBattleRoyaleState("player", config, random, { mapId });
+    const layout = createMapLayout(mapId, state.mapSeed);
+    const simulation = new GameSimulation(state, new BattleRoyaleMode(config, random), WEAPONS, layout);
     const bots = Object.values(state.actors).filter((actor) => actor.kind === "bot");
     const controllers = new Map(
-      bots.map((bot, index) => [bot.id, new BotController(index + 1, seededRandom(20_260 + index), true)]),
+      bots.map((bot, index) => [
+        bot.id,
+        new BotController(index + 1, seededRandom(20_260 + index), true, layout),
+      ]),
     );
-    const world = new SimulationCombatWorld(state);
+    const world = new SimulationCombatWorld(state, true, layout);
     const hasLineOfSight = vi.spyOn(world, "hasLineOfSight");
     const traceShotDetailed = vi.spyOn(world, "traceShotDetailed");
     simulation.start();
@@ -204,9 +303,9 @@ describe("AI loot reachability", () => {
     expect(allEvents.some((event) => event.type === "actor-died" && event.sourceId?.startsWith("bot-"))).toBe(true);
     expect(controllerUpdates).toBeLessThanOrEqual(47_000);
     expect(actorCommands).toBeLessThanOrEqual(48_000);
-    expect(findPath.mock.calls.length).toBeLessThanOrEqual(17_500);
-    expect(hasLineOfSight.mock.calls.length).toBeLessThanOrEqual(20_000);
-    expect(traceShotDetailed.mock.calls.length).toBeLessThanOrEqual(23_500);
+    expect(findPath.mock.calls.length).toBeLessThanOrEqual(mapId === "town" ? 22_000 : 17_500);
+    expect(hasLineOfSight.mock.calls.length).toBeLessThanOrEqual(mapId === "town" ? 22_000 : 20_000);
+    expect(traceShotDetailed.mock.calls.length).toBeLessThanOrEqual(mapId === "town" ? 25_000 : 23_500);
     expect(allEvents.length).toBeLessThanOrEqual(7_000);
     expect(peakGroundLoot).toBeLessThanOrEqual(300);
     expect(steps).toBeLessThanOrEqual(1_200);

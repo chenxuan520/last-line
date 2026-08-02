@@ -87,8 +87,46 @@ export class GridNavigator {
       return [];
     }
 
-    const startExit = this.pathToGround(normalizedStart, startLocation);
-    const targetEntrance = this.pathFromGround(normalizedTarget, targetLocation);
+    const skybridgePath = this.findSkybridgePath(
+      normalizedStart,
+      startLocation,
+      normalizedTarget,
+      targetLocation,
+    );
+    if (skybridgePath.length > 0) return skybridgePath;
+
+    if (this.layout?.mapId === "town") {
+      const groundPath = this.findPathViaExteriorGround(
+        normalizedStart,
+        startLocation,
+        normalizedTarget,
+        targetLocation,
+      );
+      const bridgePath = this.findComposedSkybridgePath(
+        normalizedStart,
+        startLocation,
+        normalizedTarget,
+        targetLocation,
+      );
+      return bridgePath.length > 0 ? bridgePath : groundPath;
+    }
+
+    if (startLocation.level === 0 && targetLocation.level === 0) {
+      const doorPath = this.findGroundDoorPath(normalizedStart, normalizedTarget);
+      if (doorPath.length > 0) return doorPath;
+    }
+
+    return this.findPathViaGround(normalizedStart, startLocation, normalizedTarget, targetLocation);
+  }
+
+  private findPathViaGround(
+    start: Vector3State,
+    startLocation: SurfaceLocation,
+    target: Vector3State,
+    targetLocation: SurfaceLocation,
+  ): Vector3State[] {
+    const startExit = this.pathToGround(start, startLocation);
+    const targetEntrance = this.pathFromGround(target, targetLocation);
     if (!startExit || !targetEntrance) return [];
     const groundPath = this.findSurfacePath(startExit.ground, targetEntrance.ground, GROUND_LOCATION);
     if (groundPath.length === 0) return [];
@@ -96,6 +134,102 @@ export class GridNavigator {
     appendPath(path, groundPath);
     appendPath(path, targetEntrance.path);
     return path;
+  }
+
+  private findPathViaExteriorGround(
+    start: Vector3State,
+    startLocation: SurfaceLocation,
+    target: Vector3State,
+    targetLocation: SurfaceLocation,
+  ): Vector3State[] {
+    const startExit = this.pathToExteriorGround(start, startLocation);
+    const targetEntrance = this.pathFromExteriorGround(target, targetLocation);
+    if (!startExit || !targetEntrance) return [];
+    const groundPath = this.findSurfacePath(startExit.ground, targetEntrance.ground, GROUND_LOCATION);
+    if (groundPath.length === 0) return [];
+    const path = [...startExit.path];
+    appendPath(path, groundPath);
+    appendPath(path, targetEntrance.path);
+    return path;
+  }
+
+  private findSkybridgePath(
+    start: Vector3State,
+    startLocation: SurfaceLocation,
+    target: Vector3State,
+    targetLocation: SurfaceLocation,
+  ): Vector3State[] {
+    if (
+      !this.layout ||
+      startLocation.level !== 1 ||
+      targetLocation.level !== 1 ||
+      !startLocation.building ||
+      !targetLocation.building
+    ) return [];
+    const bridge = this.layout.skybridges.find((candidate) =>
+      (candidate.fromBuildingId === startLocation.building?.id &&
+        candidate.toBuildingId === targetLocation.building?.id) ||
+      (candidate.toBuildingId === startLocation.building?.id &&
+        candidate.fromBuildingId === targetLocation.building?.id)
+    );
+    if (!bridge) return [];
+    const startIsFrom = bridge.fromBuildingId === startLocation.building.id;
+    const startSide = startIsFrom ? bridge.fromSide : bridge.toSide;
+    const targetSide = startIsFrom ? bridge.toSide : bridge.fromSide;
+    const startDoor = skybridgeDoorPoints(startLocation.building, startSide, bridge);
+    const targetDoor = skybridgeDoorPoints(targetLocation.building, targetSide, bridge);
+    const startInterior = this.findSurfacePath(start, startDoor.inside, startLocation);
+    const targetInterior = this.findSurfacePath(targetDoor.inside, target, targetLocation);
+    if (startInterior.length === 0 || targetInterior.length === 0) return [];
+    const path = [...startInterior];
+    appendPoint(path, startDoor.outside);
+    appendPoint(path, targetDoor.outside);
+    appendPoint(path, targetDoor.inside);
+    appendPath(path, targetInterior);
+    return path;
+  }
+
+  private findComposedSkybridgePath(
+    start: Vector3State,
+    startLocation: SurfaceLocation,
+    target: Vector3State,
+    targetLocation: SurfaceLocation,
+  ): Vector3State[] {
+    if (!this.layout) return [];
+    let best: Vector3State[] = [];
+    for (const bridge of this.layout.skybridges) {
+      const endpointIds = new Set([bridge.fromBuildingId, bridge.toBuildingId]);
+      const relevant =
+        Boolean(startLocation.building && startLocation.level > 0 && endpointIds.has(startLocation.building.id)) ||
+        Boolean(targetLocation.building && targetLocation.level > 0 && endpointIds.has(targetLocation.building.id));
+      if (!relevant) continue;
+      const fromBuilding = this.buildings.find((building) => building.id === bridge.fromBuildingId);
+      const toBuilding = this.buildings.find((building) => building.id === bridge.toBuildingId);
+      if (!fromBuilding || !toBuilding) continue;
+      for (const [entryBuilding, entrySide, exitBuilding, exitSide] of [
+        [fromBuilding, bridge.fromSide, toBuilding, bridge.toSide],
+        [toBuilding, bridge.toSide, fromBuilding, bridge.fromSide],
+      ] as const) {
+        const entryDoor = skybridgeDoorPoints(entryBuilding, entrySide, bridge);
+        const exitDoor = skybridgeDoorPoints(exitBuilding, exitSide, bridge);
+        const entryLocation = this.findLocation(entryDoor.inside);
+        const exitLocation = this.findLocation(exitDoor.inside);
+        const entryPath = sameLocation(startLocation, entryLocation)
+          ? this.findSurfacePath(start, entryDoor.inside, startLocation)
+          : this.findPathViaExteriorGround(start, startLocation, entryDoor.inside, entryLocation);
+        const exitPath = sameLocation(exitLocation, targetLocation)
+          ? this.findSurfacePath(exitDoor.inside, target, targetLocation)
+          : this.findPathViaExteriorGround(exitDoor.inside, exitLocation, target, targetLocation);
+        if (entryPath.length === 0 || exitPath.length === 0) continue;
+        const path = [...entryPath];
+        appendPoint(path, entryDoor.outside);
+        appendPoint(path, exitDoor.outside);
+        appendPoint(path, exitDoor.inside);
+        appendPath(path, exitPath);
+        best = shorterPath(best, path);
+      }
+    }
+    return best;
   }
 
   private findSurfacePath(start: Vector3State, target: Vector3State, location: SurfaceLocation): Vector3State[] {
@@ -171,7 +305,12 @@ export class GridNavigator {
     const outsidePoint = { x: door.center.x, y: start.y, z: door.center.z - 1.1 };
     const insidePoint = { x: door.center.x, y: start.y, z: door.center.z + 1.1 };
     const outsideLocation = this.groundLocation(outsidePoint);
-    const insideLocation = this.groundLocation(insidePoint);
+    const insideLocation = {
+      building,
+      level: 0,
+      supportY: this.groundSupport(insidePoint),
+      ramp: null,
+    };
     const outside = this.normalizePoint(outsidePoint, outsideLocation);
     const inside = this.normalizePoint(insidePoint, insideLocation);
     const path: Vector3State[] = [];
@@ -213,6 +352,12 @@ export class GridNavigator {
         const supportY = building.baseY + level * building.storyHeight + BUILDING_ROOF_CAP_HEIGHT;
         if (point.y >= supportY + 0.15) return { building, level, supportY, ramp: null };
       }
+      return {
+        building,
+        level: 0,
+        supportY: this.groundSupport(point),
+        ramp: null,
+      };
     }
     return { ...GROUND_LOCATION, supportY: this.groundSupport(point) };
   }
@@ -294,6 +439,65 @@ export class GridNavigator {
     return { path, ground };
   }
 
+  private pathToExteriorGround(start: Vector3State, location: SurfaceLocation): GroundTransition | null {
+    const interior = this.pathToGround(start, location);
+    if (!interior || !location.building) return interior;
+    const door = this.groundDoorTransition(location.building);
+    if (!door) return null;
+    const interiorPath = this.findSurfacePath(interior.ground, door.inside, door.insideLocation);
+    if (interiorPath.length === 0) return null;
+    const path = [...interior.path];
+    appendPath(path, interiorPath);
+    appendPoint(path, door.outside);
+    return { path, ground: door.outside };
+  }
+
+  private pathFromExteriorGround(target: Vector3State, location: SurfaceLocation): GroundTransition | null {
+    const interior = this.pathFromGround(target, location);
+    if (!interior || !location.building) return interior;
+    const door = this.groundDoorTransition(location.building);
+    if (!door) return null;
+    const interiorPath = this.findSurfacePath(door.inside, interior.ground, door.insideLocation);
+    if (interiorPath.length === 0) return null;
+    const path = [door.outside, door.inside];
+    appendPath(path, interiorPath);
+    appendPath(path, interior.path);
+    return { path, ground: door.outside };
+  }
+
+  private groundDoorTransition(building: MapBuilding): GroundDoorTransition | null {
+    const opening = this.layout?.wallOpenings.find((candidate) =>
+      candidate.obstacleId === building.id &&
+      candidate.storyIndex === 0 &&
+      candidate.kind === "door"
+    );
+    if (!opening) return null;
+    const direction = opening.side === "front" || opening.side === "left" ? -1 : 1;
+    const horizontalAlongX = opening.side === "front" || opening.side === "back";
+    const outsidePoint = {
+      x: opening.center.x + (horizontalAlongX ? 0 : direction * 1.1),
+      y: 0,
+      z: opening.center.z + (horizontalAlongX ? direction * 1.1 : 0),
+    };
+    const insidePoint = {
+      x: opening.center.x - (horizontalAlongX ? 0 : direction * 1.1),
+      y: 0,
+      z: opening.center.z - (horizontalAlongX ? direction * 1.1 : 0),
+    };
+    const outsideLocation = this.groundLocation(outsidePoint);
+    const insideLocation = {
+      building,
+      level: 0,
+      supportY: this.groundSupport(insidePoint),
+      ramp: null,
+    };
+    return {
+      outside: this.normalizePoint(outsidePoint, outsideLocation),
+      inside: this.normalizePoint(insidePoint, insideLocation),
+      insideLocation,
+    };
+  }
+
   private rampForLevel(building: MapBuilding, fromLevel: number): RoofRamp | null {
     return this.roofRamps.find((ramp) => ramp.obstacleId === building.id && ramp.fromLevel === fromLevel) ?? null;
   }
@@ -313,9 +517,15 @@ export class GridNavigator {
   private blockersForLocation(location: SurfaceLocation): SurfaceBlockers {
     const supportY = location.supportY;
     const ground = location.level === 0;
-    const fullScan = this.blockerIndex ? null : this.blockingObstacles.filter((obstacle) =>
+    const townInterior = this.layout?.mapId === "town" && location.building
+      ? this.layout.wallSegments.filter((obstacle) =>
+        obstacle.obstacleId === location.building?.id &&
+        this.obstacleOverlapsLocation(obstacle, { supportY, ground })
+      )
+      : null;
+    const fullScan = townInterior ?? (this.blockerIndex ? null : this.blockingObstacles.filter((obstacle) =>
       this.obstacleOverlapsLocation(obstacle, { supportY, ground })
-    );
+    ));
     let stairwell: MapObstacle | null = null;
     if (location.building?.stairwell && location.level > 0) {
       const geometry = location.building.stairwell;
@@ -405,6 +615,12 @@ interface GroundTransition {
   ground: Vector3State;
 }
 
+interface GroundDoorTransition {
+  outside: Vector3State;
+  inside: Vector3State;
+  insideLocation: SurfaceLocation;
+}
+
 interface SurfaceBlockers {
   supportY: number;
   ground: boolean;
@@ -428,6 +644,28 @@ function rampPoint(ramp: RoofRamp, top: boolean): Vector3State {
   };
 }
 
+function skybridgeDoorPoints(
+  building: MapBuilding,
+  side: "left" | "right",
+  bridge: MapLayout["skybridges"][number],
+): { inside: Vector3State; outside: Vector3State } {
+  const direction = side === "right" ? 1 : -1;
+  const insideY = building.baseY + building.storyHeight + BUILDING_ROOF_CAP_HEIGHT + ACTOR_EYE_HEIGHT;
+  const outsideY = bridge.floorY + ACTOR_EYE_HEIGHT;
+  return {
+    inside: {
+      x: building.center.x + direction * (building.width / 2 - 1.1),
+      y: insideY,
+      z: bridge.center.z,
+    },
+    outside: {
+      x: building.center.x + direction * (building.width / 2 + 1.1),
+      y: outsideY,
+      z: bridge.center.z,
+    },
+  };
+}
+
 function appendPath(target: Vector3State[], points: readonly Vector3State[]): void {
   for (const point of points) appendPoint(target, point);
 }
@@ -436,6 +674,27 @@ function appendPoint(target: Vector3State[], point: Vector3State): void {
   const previous = target.at(-1);
   if (previous && horizontalDistance(previous, point) < 1e-6 && Math.abs(previous.y - point.y) < 1e-6) return;
   target.push({ ...point });
+}
+
+function shorterPath(left: Vector3State[], right: Vector3State[]): Vector3State[] {
+  if (left.length === 0) return right;
+  if (right.length === 0) return left;
+  return pathLength(left) <= pathLength(right) ? left : right;
+}
+
+function pathLength(path: readonly Vector3State[]): number {
+  let length = 0;
+  for (let index = 1; index < path.length; index += 1) {
+    const previous = path[index - 1];
+    const point = path[index];
+    if (!previous || !point) continue;
+    length += Math.hypot(
+      point.x - previous.x,
+      point.y - previous.y,
+      point.z - previous.z,
+    );
+  }
+  return length;
 }
 
 function isMapLayout(value: MapLayout | readonly MapObstacle[]): value is MapLayout {
@@ -558,7 +817,9 @@ function obstacleOverlapsSurface(obstacle: MapObstacle, supportY: number): boole
 function getLayoutBlockingObstacles(layout: MapLayout): readonly MapObstacle[] {
   let obstacles = layoutBlockingObstacles.get(layout);
   if (!obstacles) {
-    obstacles = [...layout.wallSegments, ...layout.rockObstacles, ...layout.coverObstacles, ...layout.treeTrunks];
+    obstacles = layout.mapId === "town"
+      ? [...layout.obstacles, ...layout.rockObstacles, ...layout.coverObstacles, ...layout.treeTrunks]
+      : [...layout.wallSegments, ...layout.rockObstacles, ...layout.coverObstacles, ...layout.treeTrunks];
     layoutBlockingObstacles.set(layout, obstacles);
   }
   return obstacles;

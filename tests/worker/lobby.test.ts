@@ -42,9 +42,27 @@ describe("multiplayer worker", () => {
     expect(rooms[0]).toMatchObject({
       roomId: firstAdmission.roomId,
       visibility: "public",
+      mapId: "island",
       playerCount: 2,
       capacity: 10,
     });
+  });
+
+  it("defaults legacy room requests to island and separates quick match by map", async () => {
+    const legacyGuest = await createGuest("Legacy Island");
+    const townGuest = await createGuest("Town Alpha");
+    const townPeer = await createGuest("Town Bravo");
+    const legacyAdmission = await post("/v1/matchmaking/quick", legacyGuest);
+    const townAdmission = await post("/v1/matchmaking/quick", { ...townGuest, mapId: "town" });
+    const townPeerAdmission = await post("/v1/matchmaking/quick", { ...townPeer, mapId: "town" });
+    const rooms = await getRooms();
+
+    expect(townAdmission.roomId).not.toBe(legacyAdmission.roomId);
+    expect(townPeerAdmission.roomId).toBe(townAdmission.roomId);
+    expect(rooms).toEqual(expect.arrayContaining([
+      expect.objectContaining({ roomId: legacyAdmission.roomId, mapId: "island", playerCount: 1 }),
+      expect.objectContaining({ roomId: townAdmission.roomId, mapId: "town", playerCount: 2 }),
+    ]));
   });
 
   it("evaluates cached account status against each member session revision", async () => {

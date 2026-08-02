@@ -154,7 +154,7 @@ describe("standalone multiplayer server", () => {
     let server = await start(fixture.config);
     const firstGuest = await createGuest(server.origin, "Alpha");
     const secondGuest = await createGuest(server.origin, "Bravo");
-    const firstAdmission = await createPrivateRoom(server.origin, firstGuest);
+    const firstAdmission = await createPrivateRoom(server.origin, firstGuest, "town");
     const secondAdmission = await joinPrivateRoom(server.origin, firstAdmission.code, secondGuest);
     const first = connect(server.origin, firstAdmission);
     const second = connect(server.origin, secondAdmission);
@@ -181,8 +181,10 @@ describe("standalone multiplayer server", () => {
     );
     first.socket.send(JSON.stringify({ type: "lobby.start" }));
     const firstFull = await first.waitFor("match.full", 6_000);
-    await second.waitFor("match.full", 6_000);
+    const secondFull = await second.waitFor("match.full", 6_000);
     expect(firstFull.type === "match.full" && firstFull.state.phase).toBe("flight");
+    expect(firstFull.type === "match.full" && firstFull.state.mapId).toBe("town");
+    expect(secondFull.type === "match.full" && secondFull.state.mapId).toBe("town");
     await delay(150);
 
     const secondReconnectToken = secondWelcome.type === "welcome" ? secondWelcome.reconnectToken : "";
@@ -233,6 +235,7 @@ describe("standalone multiplayer server", () => {
     const restored = await reconnected.waitFor("match.full");
     expect(restoredWelcome.type === "welcome" && restoredWelcome.roomId).toBe(roomId);
     expect(restored.type === "match.full" && restored.tick).toBeGreaterThanOrEqual(previousTick);
+    expect(restored.type === "match.full" && restored.state.mapId).toBe("town");
     reconnected.socket.close(1000, "done");
     await reconnected.waitForClose();
     expect(secondWelcome.type).toBe("welcome");
@@ -378,8 +381,12 @@ async function createGuest(origin: string, displayName: string): Promise<GuestCr
   return result.value as GuestCredentials;
 }
 
-async function createPrivateRoom(origin: string, guest: GuestCredentials): Promise<RoomAdmission> {
-  const result = await post(origin, "/v1/rooms", { ...guest, visibility: "private" });
+async function createPrivateRoom(
+  origin: string,
+  guest: GuestCredentials,
+  mapId: "island" | "town" = "island",
+): Promise<RoomAdmission> {
+  const result = await post(origin, "/v1/rooms", { ...guest, visibility: "private", mapId });
   expect(result.response.status).toBe(201);
   return result.value as RoomAdmission;
 }

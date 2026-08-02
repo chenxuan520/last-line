@@ -44,6 +44,8 @@ const FORCED_RELOCATION_SECONDS = 20;
 const FORCED_RELOCATION_CLEAR_DISTANCE = 6;
 const FORCED_RELOCATION_PATH_CHECKS = 1;
 const ZONE_PATH_RETRY_SECONDS = 2;
+const LOOT_PATH_RETRY_DISTANCE = 36;
+const MAX_REJECTED_LOOT_PATHS = 320;
 const PARACHUTE_TARGET_DEAD_ZONE = 0.75;
 const PARACHUTE_APPROACH_DISTANCE = 12;
 const SNIPER_WEAPON_ITEM_ID = "weapon.sniper";
@@ -60,6 +62,7 @@ interface LootSelection {
 export class BotController {
   private layout: MapLayout;
   private navigator: GridNavigator;
+  private navigatorMapId: MatchState["mapId"];
   private navigatorSeed: number;
   private dropProgress: number | null = null;
   private readonly dropProgressJitter: number;
@@ -77,6 +80,7 @@ export class BotController {
   private navigationPreservesAim = false;
   private navigationTarget: Vector3State | null = null;
   private lootTargetId: string | null = null;
+  private readonly rejectedLootPaths = new Map<string, Vector3State>();
   private patrolTarget: Vector3State | null = null;
   private patrolTargetUntilSeconds = -1;
   private patrolSequence = 0;
@@ -123,6 +127,7 @@ export class BotController {
   ) {
     this.layout = initialLayout;
     this.navigator = new GridNavigator(initialLayout);
+    this.navigatorMapId = initialLayout.mapId;
     this.navigatorSeed = initialLayout.seed;
     this.dropProgressJitter = randomBetween(this.random, -0.045, 0.045);
     this.landingPoiSlot = Math.max(0, index - 1) % LANDING_ZONE_COUNT;
@@ -145,10 +150,11 @@ export class BotController {
       this.controlledActorNumericId = numericId(actor.id);
     }
     let layout = this.layout;
-    if (state.mapSeed !== this.navigatorSeed) {
-      layout = createMapLayout(state.mapSeed);
+    if (state.mapId !== this.navigatorMapId || state.mapSeed !== this.navigatorSeed) {
+      layout = createMapLayout(state.mapId, state.mapSeed);
       this.layout = layout;
       this.navigator = new GridNavigator(layout);
+      this.navigatorMapId = state.mapId;
       this.navigatorSeed = state.mapSeed;
       this.landingTarget = fallbackLandingTarget(layout, this.landingFallbackIndex);
       this.weaponLandingTarget = null;
@@ -157,6 +163,7 @@ export class BotController {
       this.navigationPath = [];
       this.navigationTarget = null;
       this.lootTargetId = null;
+      this.rejectedLootPaths.clear();
       this.patrolTarget = null;
       this.patrolTargetUntilSeconds = -1;
       this.damageInvestigationTarget = null;
@@ -607,6 +614,7 @@ export class BotController {
       const x = patrolCenter.x + Math.cos(angle) * radius;
       const z = patrolCenter.z + Math.sin(angle) * radius;
       const candidate = { x, y: getTerrainHeight(x, z, layout) + ACTOR_EYE_HEIGHT, z };
+      if (pointInsideGroundBlocker(candidate, layout)) continue;
       const path = this.navigator.findPath(actor.position, candidate);
       if (path.length === 0 || horizontalDistance(actor.position, candidate) < 2) continue;
       this.patrolTarget = candidate;
@@ -709,6 +717,7 @@ export class BotController {
       const path = this.navigator.findPath(actor.position, target);
       pathChecks += 1;
       if (path.length > 0) return { coverId: obstacle.id, target, path };
+      this.rejectedRetreatCoverIds.add(obstacle.id);
       if (pathChecks >= 4) break;
     }
     return null;
@@ -795,8 +804,14 @@ export class BotController {
         if (this.navigationPath.length > 0 || distanceSquared(actor.position, currentTarget.position) <= LOOT_INTERACTION_DISTANCE ** 2) {
           return { loot: currentTarget, generation: currentTarget.generation ?? 0, path: this.navigationPath, replacementItemId };
         }
-        const path = this.navigator.findPath(actor.position, currentTarget.position);
-        if (path.length > 0) return { loot: currentTarget, generation: currentTarget.generation ?? 0, path, replacementItemId };
+        if (!this.isRejectedLootPath(actor, currentTarget)) {
+          const path = this.navigator.findPath(actor.position, currentTarget.position);
+          if (path.length > 0) {
+            this.acceptLootPath(currentTarget);
+            return { loot: currentTarget, generation: currentTarget.generation ?? 0, path, replacementItemId };
+          }
+          this.rejectLootPath(actor, currentTarget);
+        }
       }
       this.clearNavigation();
     }
@@ -823,8 +838,10 @@ export class BotController {
           ...candidates.slice(nearbyCandidateCount),
         ];
     for (const candidate of orderedCandidates) {
+      if (this.isRejectedLootPath(actor, candidate.loot)) continue;
       const path = this.navigator.findPath(actor.position, candidate.loot.position);
       if (path.length > 0) {
+        this.acceptLootPath(candidate.loot);
         this.lootTargetId = candidate.loot.id;
         return {
           loot: candidate.loot,
@@ -833,6 +850,7 @@ export class BotController {
           replacementItemId: candidate.replacementItemId,
         };
       }
+      this.rejectLootPath(actor, candidate.loot);
     }
     return null;
   }
@@ -1096,6 +1114,7 @@ export class BotController {
         y: getTerrainHeight(candidate.x, candidate.z, this.layout) + ACTOR_EYE_HEIGHT,
         z: candidate.z,
       };
+      if (pointInsideGroundBlocker(target, this.layout)) continue;
       if (horizontalDistance(actor.position, target) < 8) continue;
       if (pathChecks >= FORCED_RELOCATION_PATH_CHECKS) break;
       pathChecks += 1;
@@ -1167,6 +1186,7 @@ export class BotController {
       });
     }
     for (const candidate of candidates) {
+      if (pointInsideGroundBlocker(candidate, this.layout)) continue;
       const path = this.navigator.findPath(actor.position, candidate);
       if (path.length > 0) {
         this.zonePathRetryAtSeconds = -1;
@@ -1231,6 +1251,30 @@ export class BotController {
       const oldest = this.rejectedRetreatCoverIds.values().next().value;
       if (oldest) this.rejectedRetreatCoverIds.delete(oldest);
     }
+  }
+
+  private isRejectedLootPath(actor: ActorState, loot: GroundLootState): boolean {
+    const rejectedAt = this.rejectedLootPaths.get(lootPathKey(loot));
+    if (!rejectedAt) return false;
+    if (horizontalDistance(actor.position, rejectedAt) >= LOOT_PATH_RETRY_DISTANCE) {
+      this.rejectedLootPaths.delete(lootPathKey(loot));
+      return false;
+    }
+    return true;
+  }
+
+  private rejectLootPath(actor: ActorState, loot: GroundLootState): void {
+    const key = lootPathKey(loot);
+    this.rejectedLootPaths.delete(key);
+    this.rejectedLootPaths.set(key, { ...actor.position });
+    if (this.rejectedLootPaths.size > MAX_REJECTED_LOOT_PATHS) {
+      const oldest = this.rejectedLootPaths.keys().next().value;
+      if (oldest) this.rejectedLootPaths.delete(oldest);
+    }
+  }
+
+  private acceptLootPath(loot: GroundLootState): void {
+    this.rejectedLootPaths.delete(lootPathKey(loot));
   }
 
   private isAllowedLoot(loot: GroundLootState): boolean {
@@ -1303,6 +1347,22 @@ function pointInsideBuilding(point: Vector3State, layout: ReturnType<typeof crea
       Math.abs(point.x - obstacle.center.x) < obstacle.width / 2 - 0.6 &&
       Math.abs(point.z - obstacle.center.z) < obstacle.depth / 2 - 0.6,
   );
+}
+
+function pointInsideGroundBlocker(point: Vector3State, layout: MapLayout): boolean {
+  return [
+    ...layout.obstacles,
+    ...layout.rockObstacles,
+    ...layout.coverObstacles,
+    ...layout.treeTrunks,
+  ].some((obstacle) =>
+    Math.abs(point.x - obstacle.center.x) <= obstacle.width / 2 + 0.64 &&
+    Math.abs(point.z - obstacle.center.z) <= obstacle.depth / 2 + 0.64
+  );
+}
+
+function lootPathKey(loot: GroundLootState): string {
+  return `${loot.id}:${loot.generation ?? 0}`;
 }
 
 function randomBetween(random: () => number, minimum: number, maximum: number): number {

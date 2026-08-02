@@ -110,6 +110,7 @@ function createState(...actors: ReturnType<typeof createActorState>[]): MatchSta
   return {
     phase: "combat",
     elapsedSeconds: 0,
+    mapId: "island",
     mapSeed: 0,
     actors: Object.fromEntries(actors.map((actor) => [actor.id, actor])),
     groundLoot: {},

@@ -59,7 +59,7 @@ export class MovementSystem {
     if (!actor?.alive || !Number.isFinite(deltaSeconds) || deltaSeconds <= 0) {
       return;
     }
-    const layout = this.getLayout(state.mapSeed);
+    const layout = this.getLayout(state.mapId, state.mapSeed);
 
     const aimLength = Math.hypot(command.aimDirection.x, command.aimDirection.z);
     if (aimLength > 0) {
@@ -104,8 +104,10 @@ export class MovementSystem {
     this.moveVertically(actor, command.jump, deltaSeconds, layout);
   }
 
-  private getLayout(seed: number): MapLayout {
-    if (this.layout.seed !== seed) this.layout = createMapLayout(seed);
+  private getLayout(mapId: MatchState["mapId"], seed: number): MapLayout {
+    if (this.layout.mapId !== mapId || this.layout.seed !== seed) {
+      this.layout = createMapLayout(mapId, seed);
+    }
     return this.layout;
   }
 

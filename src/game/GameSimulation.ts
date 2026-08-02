@@ -19,7 +19,7 @@ export class GameSimulation {
     public readonly state: MatchState,
     private readonly mode: GameMode,
     weapons: Readonly<Record<string, WeaponConfig>>,
-    layout: MapLayout = createMapLayout(state.mapSeed),
+    layout: MapLayout = createMapLayout(state.mapId, state.mapSeed),
   ) {
     this.combat = new CombatSystem(weapons);
     this.inventory = new InventorySystem(layout);

@@ -131,7 +131,7 @@ export class MultiplayerSession implements GameSession {
     this.aircraftInteriorRoot = bundle.aircraftInteriorRoot;
     this.syncAircraftVisual = bundle.syncAircraftVisual;
     this.syncSafeZoneRing = bundle.syncSafeZoneRing;
-    this.movement = new MovementSystem(createMapLayout(initial.state.mapSeed));
+    this.movement = new MovementSystem(createMapLayout(initial.state.mapId, initial.state.mapSeed));
     this.humanController = new HumanController(canvas, settings.sensitivity, {
       touchRoot: uiRoot,
       onLeaderboardScroll: (deltaY, deltaMode) => this.hud?.scrollLeaderboard(deltaY, deltaMode),
@@ -171,6 +171,7 @@ export class MultiplayerSession implements GameSession {
       settings.showGroundLootModels,
       initial.localActorId,
       settings.quality,
+      initial.state.mapId,
     );
     return new MultiplayerSession(
       canvas,
@@ -197,6 +198,7 @@ export class MultiplayerSession implements GameSession {
       () => this.resumeInput(),
       () => this.onExit(),
       {
+        mapId: this.state.mapId,
         online: true,
         actorLabels: this.displayNames,
         touchInput: this.humanController.usesTouchControls(),

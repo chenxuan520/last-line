@@ -1,5 +1,6 @@
 import type { ActorCommand } from "../game/commands/ActorCommand";
 import { createIdleCommand } from "../game/commands/ActorCommand";
+import type { MapId } from "../config/maps";
 import type {
   ActorState,
   EntityId,
@@ -13,7 +14,7 @@ import type {
   WeaponSlot,
 } from "../game/state/types";
 
-export const MULTIPLAYER_PROTOCOL_VERSION = 3;
+export const MULTIPLAYER_PROTOCOL_VERSION = 4;
 export const MIN_HUMAN_PLAYERS = 2;
 export const MAX_HUMAN_PLAYERS = 10;
 
@@ -38,6 +39,7 @@ export interface LobbyView {
   roomId: string;
   code: string;
   visibility: RoomVisibility;
+  mapId: MapId;
   status: RoomStatus;
   revision: number;
   countdownEndsAt: number | null;
@@ -50,6 +52,7 @@ export interface PublicRoomSummary {
   roomId: string;
   code: string;
   visibility: RoomVisibility;
+  mapId: MapId;
   hostName: string;
   playerCount: number;
   capacity: number;

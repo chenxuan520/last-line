@@ -44,6 +44,7 @@ export class MultiplayerClient {
     return this.post<RoomAdmission>("/v1/rooms", {
       ...guest,
       visibility,
+      mapId: this.settings.mapId,
       startWithBandage: this.settings.startWithBandage,
       disableAiSnipers: this.settings.disableAiSnipers,
     });
@@ -53,6 +54,7 @@ export class MultiplayerClient {
     const guest = await this.ensureGuest();
     return this.post<RoomAdmission>("/v1/matchmaking/quick", {
       ...guest,
+      mapId: this.settings.mapId,
       startWithBandage: this.settings.startWithBandage,
       disableAiSnipers: this.settings.disableAiSnipers,
     });

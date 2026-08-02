@@ -912,6 +912,56 @@ describe("IslandScene lifecycle", () => {
     ]);
   });
 
+  it("builds Greyfurnace City with dense buildings and authoritative skybridges", async () => {
+    const engine = new NullEngine();
+    const assets = createAssets();
+    const state = createBattleRoyaleState("player", {
+      participantCount: 2,
+      flightSeconds: 1,
+      safeZoneStages: [{ waitSeconds: 1, shrinkSeconds: 1, radius: 100, damagePerSecond: 1 }],
+    }, () => 0.5, { mapId: "town" });
+    const layout = createMapLayout("town", state.mapSeed);
+    const bundle = await createIslandScene(
+      engine,
+      assets,
+      state.actors,
+      state.groundLoot,
+      state.mapSeed,
+      false,
+      undefined,
+      "low",
+      state.mapId,
+    );
+
+    expect(layout.obstacles).toHaveLength(448);
+    expect(layout.skybridges).toHaveLength(32);
+    expect(bundle.scene.meshes.some((mesh) => mesh.name === "island-beach")).toBe(false);
+    expect(bundle.scene.meshes.some((mesh) => mesh.name === "island-wet-shore")).toBe(false);
+    expect(bundle.scene.meshes.some((mesh) => mesh.name === "building-floor-slabs-batch")).toBe(true);
+    expect(bundle.scene.meshes
+      .filter((mesh) => mesh.name.startsWith("town-building-silhouettes-"))
+      .map((mesh) => mesh.metadata?.townKind)
+      .sort()).toEqual(["commercial", "corner", "factory", "rowhouse", "tower", "warehouse"]);
+    expect(new Set(bundle.scene.meshes
+      .filter((mesh) => mesh.metadata?.decoration === "poi")
+      .map((mesh) => mesh.metadata?.poiName)
+      .filter((name): name is string => typeof name === "string")))
+      .toEqual(new Set(layout.mapPoints.map((point) => point.name)));
+    const doorSillIds = new Set(
+      layout.wallOpenings
+        .filter((opening) => opening.kind === "door")
+        .map((opening) => `${opening.obstacleId}-wall-${opening.side}-${opening.storyIndex}-sill`),
+    );
+    expect(bundle.scene.meshes
+      .filter((mesh) => mesh.name.startsWith("building-walls-"))
+      .reduce((total, mesh) => total + Number(mesh.metadata?.sourceCount ?? 0), 0))
+      .toBe(layout.wallSegments.filter((wall) => !doorSillIds.has(wall.id)).length);
+    expect(bundle.scene.meshes.length).toBeLessThan(900);
+
+    bundle.scene.dispose();
+    engine.dispose();
+  }, 60_000);
+
   it("keeps the clearing sky poles stable while lifting the sun into the upper hemisphere", async () => {
     const engine = new NullEngine();
     const assets = createAssets();
@@ -942,7 +992,7 @@ describe("IslandScene lifecycle", () => {
 
     bundle.scene.dispose();
     engine.dispose();
-  });
+  }, 30_000);
 });
 
 function createAssets(): AssetCatalog {

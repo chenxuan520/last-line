@@ -1,3 +1,4 @@
+import { normalizeMapId } from "../src/config/maps";
 import type { EntityId } from "../src/game/state/types";
 import { SIMULATION_TICK_MS, SIMULATION_TICK_RATE } from "../src/game/simulationTiming";
 import {
@@ -120,6 +121,12 @@ export class GameRoom extends DurableService<WorkerEnv> {
         this.ctx.storage.get<MatchCheckpoint>(CHECKPOINT_KEY),
       ]);
       this.data = room ?? null;
+      if (this.data) {
+        this.data.options = {
+          ...this.data.options,
+          mapId: normalizeMapId(this.data.options?.mapId),
+        };
+      }
       if (
         this.data
         && checkpoint
@@ -463,7 +470,10 @@ export class GameRoom extends DurableService<WorkerEnv> {
       status: "waiting",
       revision: 1,
       countdownEndsAt: null,
-      options: input.options,
+      options: {
+        ...input.options,
+        mapId: normalizeMapId(input.options?.mapId),
+      },
       seed: randomUint32(),
       expiresAt: Date.now() + WAITING_TTL_MS,
       members: { [member.playerId]: member },
@@ -561,6 +571,7 @@ export class GameRoom extends DurableService<WorkerEnv> {
     const runtime = new MatchRuntime({
       humanActorIds: members.map((member) => member.actorId as EntityId),
       seed: data.seed,
+      mapId: data.options.mapId,
       startWithBandage: data.options.startWithBandage,
       disableAiSnipers: data.options.disableAiSnipers,
     });
@@ -846,6 +857,7 @@ export class GameRoom extends DurableService<WorkerEnv> {
       roomId: data.roomId,
       code: data.code,
       visibility: data.visibility,
+      mapId: data.options.mapId,
       status: data.status,
       revision: data.revision,
       countdownEndsAt: data.countdownEndsAt,
@@ -882,6 +894,7 @@ export class GameRoom extends DurableService<WorkerEnv> {
       roomId: data.roomId,
       code: data.code,
       visibility: data.visibility,
+      mapId: data.options.mapId,
       hostName: host?.displayName ?? "无人房间",
       playerCount: Object.keys(data.members).length,
       capacity: MAX_HUMAN_PLAYERS,

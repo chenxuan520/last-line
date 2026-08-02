@@ -19,6 +19,7 @@ export type ActorHitboxState = Pick<ActorState, "id" | "position" | "alive" | "d
 
 export class SimulationCombatWorld implements CombatWorld {
   private layout: MapLayout;
+  private layoutMapId: MatchState["mapId"];
   private layoutSeed: number;
   private environmentObstacles: readonly MapObstacle[];
   private obstacleIndex: StaticGridIndex<MapObstacle>;
@@ -27,8 +28,9 @@ export class SimulationCombatWorld implements CombatWorld {
   public constructor(
     private readonly state: MatchState,
     private readonly useSpatialIndex = true,
-    initialLayout: MapLayout = createMapLayout(state.mapSeed),
+    initialLayout: MapLayout = createMapLayout(state.mapId, state.mapSeed),
   ) {
+    this.layoutMapId = initialLayout.mapId;
     this.layoutSeed = initialLayout.seed;
     this.layout = initialLayout;
     this.environmentObstacles = environmentObstacles(this.layout);
@@ -147,9 +149,10 @@ export class SimulationCombatWorld implements CombatWorld {
   }
 
   private getLayout(): MapLayout {
-    if (this.layoutSeed !== this.state.mapSeed) {
+    if (this.layoutMapId !== this.state.mapId || this.layoutSeed !== this.state.mapSeed) {
+      this.layoutMapId = this.state.mapId;
       this.layoutSeed = this.state.mapSeed;
-      this.layout = createMapLayout(this.state.mapSeed);
+      this.layout = createMapLayout(this.state.mapId, this.state.mapSeed);
       this.environmentObstacles = environmentObstacles(this.layout);
       this.obstacleIndex = createObstacleIndex(this.environmentObstacles);
       this.rampIndex = createRampIndex(this.layout.roofRamps);

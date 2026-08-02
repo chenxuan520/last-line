@@ -45,6 +45,28 @@ describe("minimap projection", () => {
     expect(getPoiDecalAssetId("未知区域")).toBeNull();
   });
 
+  it("maps every Greyfurnace City POI to a stable visual type", () => {
+    expect([
+      "灰炉广场",
+      "铸造工业园",
+      "旧火车站",
+      "工人住宅区",
+      "仓储港区",
+      "老城区",
+      "商业街",
+      "城市公园",
+    ].map((name) => getPoiVisualType(name))).toEqual([
+      "station",
+      "warehouse",
+      "station",
+      "town",
+      "warehouse",
+      "town",
+      "town",
+      "station",
+    ]);
+  });
+
   it("builds player, route, and safe-zone markers without exposing enemies", () => {
     const state = createBattleRoyaleState("player", undefined, () => 0.5);
     const player = state.actors.player;

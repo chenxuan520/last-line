@@ -89,7 +89,7 @@ export class BattleRoyaleSession {
     state: MatchState,
   ) {
     const mode = new BattleRoyaleMode();
-    const layout = createMapLayout(state.mapSeed);
+    const layout = createMapLayout(state.mapId, state.mapSeed);
     this.simulation = new GameSimulation(state, mode, WEAPONS, layout);
     this.scene = bundle.scene;
     this.camera = bundle.camera;
@@ -128,6 +128,7 @@ export class BattleRoyaleSession {
   ): Promise<BattleRoyaleSession> {
     const state = createBattleRoyaleState(PLAYER_ID, undefined, Math.random, {
       startWithBandage: settings.startWithBandage,
+      mapId: settings.mapId,
     });
     const bundle = await createIslandScene(
       engine,
@@ -138,6 +139,7 @@ export class BattleRoyaleSession {
       settings.showGroundLootModels,
       undefined,
       settings.quality,
+      state.mapId,
     );
     return new BattleRoyaleSession(
       canvas,
@@ -163,6 +165,7 @@ export class BattleRoyaleSession {
       () => this.resumeInput(),
       this.onRestart,
       {
+        mapId: this.simulation.state.mapId,
         touchInput: this.humanController.usesTouchControls(),
         onRequestFullscreen: () => this.mobileFullscreen.requestFromUserGesture(),
         onDropBackpackItem: (index, itemId, snapshot) =>

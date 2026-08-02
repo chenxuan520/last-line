@@ -1,4 +1,5 @@
 import { ITEMS } from "../../config/items";
+import type { MapId } from "../../config/maps";
 import { WEAPONS } from "../../config/weapons";
 
 export type EntityId = string;
@@ -95,6 +96,7 @@ export interface MatchResult {
 export interface MatchState {
   phase: "ready" | "flight" | "combat" | "finished";
   elapsedSeconds: number;
+  mapId: MapId;
   mapSeed: number;
   actors: Record<EntityId, ActorState>;
   groundLoot: Record<EntityId, GroundLootState>;
