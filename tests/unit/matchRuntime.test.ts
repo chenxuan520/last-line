@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { getTerrainHeight } from "../../src/config/map";
 import { createIdleCommand } from "../../src/game/commands/ActorCommand";
 import { createWeaponState } from "../../src/game/state/types";
 import type { SequencedGameEvent, ServerMessage } from "../../src/network/protocol";
@@ -71,6 +72,62 @@ describe("MatchRuntime", () => {
     expect(Object.values(projected.groundLoot).every((entry) =>
       Math.hypot(entry.position.x - viewer.position.x, entry.position.z - viewer.position.z) <= 60
     )).toBe(true);
+  });
+
+  it("applies a trusted render tick to authoritative human hitscan", () => {
+    const runtime = new MatchRuntime({
+      humanActorIds: ["human-1", "human-2"],
+      seed: 13,
+      startWithBandage: false,
+      disableAiSnipers: true,
+    });
+    for (const actor of Object.values(runtime.state.actors)) {
+      actor.alive = actor.id === "human-1" || actor.id === "human-2";
+      actor.deployment = "grounded";
+    }
+    const shooter = runtime.state.actors["human-1"];
+    const target = runtime.state.actors["human-2"];
+    if (!shooter || !target) throw new Error("test humans missing");
+    shooter.position = { x: 0, y: getTerrainHeight(0, 0, runtime.state.mapSeed) + 1.76, z: 0 };
+    target.position = { x: 0, y: getTerrainHeight(0, 3, runtime.state.mapSeed) + 1.76, z: 3 };
+    shooter.inventory.weaponSlots = [createWeaponState("rifle"), null];
+    shooter.inventory.activeWeaponSlot = 0;
+    target.armor = 0;
+    target.inventory.armorLevel = 0;
+    runtime.state.phase = "combat";
+    runtime.state.safeZone.radius = 1_000;
+    runtime.state.safeZone.damagePerSecond = 0;
+    runtime.takeFrame(0);
+    runtime.step();
+    const renderTick = runtime.tick;
+    const aimDirection = {
+      x: target.position.x - shooter.position.x,
+      y: target.position.y - shooter.position.y,
+      z: target.position.z - shooter.position.z,
+    };
+    target.position = { x: 5, y: getTerrainHeight(5, 3, runtime.state.mapSeed) + 1.76, z: 3 };
+
+    expect(runtime.submitInput(
+      shooter.id,
+      1,
+      { ...createIdleCommand(), aimDirection, fire: true },
+      renderTick,
+      77,
+      "rifle",
+    )).toBe(true);
+    runtime.step();
+
+    const events = runtime.takeFrame(0).events;
+    expect(events).toContainEqual(expect.objectContaining({
+      shotSequence: 77,
+      event: expect.objectContaining({ type: "shot-fired", actorId: shooter.id }),
+    }));
+    expect(events.map(({ event }) => event)).toContainEqual(expect.objectContaining({
+      type: "actor-damaged",
+      actorId: target.id,
+      sourceId: shooter.id,
+    }));
+    expect(target.health).toBeLessThan(target.maxHealth);
   });
 
   it("keeps hot full, snapshot, event burst, and checkpoint payloads bounded", () => {

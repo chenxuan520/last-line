@@ -164,6 +164,18 @@ export class CombatEffects {
     }
   }
 
+  public handleImpacts(events: readonly GameEvent[], playerId: EntityId): void {
+    if (this.disposed) return;
+    for (const event of events) {
+      if (event.type !== "shot-traced") continue;
+      if (event.hitType === "environment") {
+        this.showEnvironmentImpact(event);
+      } else if (event.hitType === "actor") {
+        this.showActorImpact(event, playerId);
+      }
+    }
+  }
+
   public update(deltaSeconds: number): void {
     if (this.disposed || !(deltaSeconds > 0)) return;
 

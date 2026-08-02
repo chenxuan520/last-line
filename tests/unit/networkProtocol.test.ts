@@ -19,6 +19,18 @@ describe("multiplayer protocol", () => {
   it("rejects non-finite and malformed commands", () => {
     expect(sanitizeActorCommand({ ...createIdleCommand(), move: { x: Number.NaN, y: 0, z: 0 } })).toBeNull();
     expect(parseClientMessage({ type: "match.input", sequence: -1, command: createIdleCommand() })).toBeNull();
+    expect(parseClientMessage({
+      type: "match.input",
+      sequence: 1,
+      renderTick: -1,
+      command: createIdleCommand(),
+    })).toBeNull();
+    expect(parseClientMessage({
+      type: "match.input",
+      sequence: 1,
+      shotSequence: 1,
+      command: createIdleCommand(),
+    })).toBeNull();
     expect(parseClientMessage({ type: "unknown" })).toBeNull();
   });
 
@@ -37,5 +49,27 @@ describe("multiplayer protocol", () => {
       ...createIdleCommand(),
       dropItem,
     })?.dropItem).toBe(dropItem);
+  });
+
+  it("accepts a bounded server render tick while remaining compatible with older input", () => {
+    expect(parseClientMessage({
+      type: "match.input",
+      sequence: 7,
+      renderTick: 42,
+      shotSequence: 7,
+      shotWeaponId: "rifle",
+      command: createIdleCommand(),
+    })).toMatchObject({
+      type: "match.input",
+      sequence: 7,
+      renderTick: 42,
+      shotSequence: 7,
+      shotWeaponId: "rifle",
+    });
+    expect(parseClientMessage({
+      type: "match.input",
+      sequence: 8,
+      command: createIdleCommand(),
+    })).toMatchObject({ type: "match.input", sequence: 8 });
   });
 });

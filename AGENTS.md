@@ -34,6 +34,7 @@ npm run preview
 - Keep `GameMode` generic. Battle royale behavior belongs in `BattleRoyaleMode`; do not speculate about future 5v5 rules.
 - Cloudflare and standalone multiplayer must share protocol, gateway, lobby, room, account, administrator, and match-domain logic. Platform-specific code is limited to storage, alarm, socket, HTTP, and process-lifecycle adapters; never fork gameplay or copy a second service implementation.
 - The browser selects a backend only by URL (`same-origin` for full-stack standalone). It must not branch on Cloudflare versus standalone gameplay semantics.
+- Multiplayer may predict only reversible local firing presentation. Hits, ammunition, damage, and death stay server-authoritative; human hitscan rewind must use monotonic server-issued render ticks, retain at most the documented 200ms actor-capsule window, and keep current authoritative map occlusion. Single-player and Bot shots remain current-state queries.
 
 ## Server Rules
 
@@ -75,6 +76,7 @@ npm run preview
 - Run both Worker and standalone contract suites after changing shared multiplayer classes. Standalone regressions must cover real HTTP/WebSocket behavior, persistence/restart, process locking, alarm generations, reconnect grace, room eviction, and bounded shutdown; use deterministic barriers for races instead of timing-only assertions.
 - Keep `test:multiplayer:production` as a real public HTTP/WebSocket smoke, separate from coverage. It must create a private room, validate the deployed welcome protocol and lobby state, then leave; run it after every production Worker or Pages deployment. The scheduled production-smoke workflow is drift detection, not an atomic deployment gate.
 - Never let a generic WebSocket `closed` status overwrite a specific terminal multiplayer error. Protocol mismatch, room closure, account revocation, and similar terminal causes must remain the final visible message and provide a usable path back to the multiplayer menu.
+- Multiplayer firing regressions must cover local cadence/magazine limits, predicted-versus-authoritative effect deduplication, optional legacy render ticks, monotonic socket bounds, historical actor hits, the rewind cap, and current-map obstruction.
 - Performance gates must use deterministic operation, protocol-byte, scene-resource, and raw-artifact counts. Do not hard-gate wall-clock duration, FPS, heap usage, or compressed sizes; changing a checked-in budget requires an explicit architecture/resource review.
 - Coverage is measured separately by source ownership: V8 for `src/` and `standalone/`, Istanbul for the Cloudflare `worker/` runtime. Keep all business source files in scope, write reports only under the ignored `node_modules/.cache/coverage/`, and treat lowering a checked-in threshold as a reviewed quality decision rather than hiding uncovered code.
 

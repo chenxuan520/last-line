@@ -22,12 +22,16 @@ import {
   getActiveWeapon,
   type ActorState,
   type EntityId,
-  type GameEvent,
   type MatchState,
   type Vector3State,
 } from "../game/state/types";
 import { MAX_GLIDE_SPEED, MovementSystem, PARACHUTE_DESCENT_SPEED } from "../game/systems/MovementSystem";
 import { MultiplayerConnection } from "../network/MultiplayerClient";
+import {
+  LocalRecoilPresentation,
+  LocalShotPredictor,
+  type PredictedLocalShot,
+} from "../network/LocalShotPredictor";
 import {
   advancePositionTransition,
   createCorrectionTransition,
@@ -74,6 +78,8 @@ export class MultiplayerSession implements GameSession {
   private readonly movement: MovementSystem;
   private readonly queuedMessages: ServerMessage[] = [];
   private readonly pendingInputs: PendingInput[] = [];
+  private readonly localRecoil = new LocalRecoilPresentation();
+  private readonly localShotPredictor = new LocalShotPredictor();
   private readonly actorVisualSignatures = new Map<EntityId, string>();
   private readonly jumpVisualStates = new Map<EntityId, JumpVisualState>();
   private readonly remotePoses = new Map<EntityId, PositionTransition>();
@@ -91,6 +97,11 @@ export class MultiplayerSession implements GameSession {
   private spectatorActorId: EntityId | null = null;
   private visibleActorIds = new Set<EntityId>();
   private lastViewWeaponId: string | null = null;
+  private renderedServerTick: number;
+  private renderTickStart: number;
+  private renderTickTarget: number;
+  private renderTickElapsedSeconds = 0;
+  private renderTickDurationSeconds = 0;
 
   private constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -122,6 +133,9 @@ export class MultiplayerSession implements GameSession {
     this.effects = new CombatEffects(this.scene);
     this.lastSnapshotSequence = initial.snapshotSequence;
     this.lastSnapshotTick = initial.tick;
+    this.renderedServerTick = initial.tick;
+    this.renderTickStart = initial.tick;
+    this.renderTickTarget = initial.tick;
     this.processSequencedEvents(initial.events);
     for (const actor of Object.values(this.state.actors)) {
       this.remotePoses.set(actor.id, createPositionTransition(actor.position, actor.position, 0));
@@ -280,6 +294,9 @@ export class MultiplayerSession implements GameSession {
     this.lastSnapshotTick = message.tick;
     this.lastEventSequence = -1;
     this.pendingInputs.length = 0;
+    this.localRecoil.reset();
+    this.localShotPredictor.reset();
+    this.resetRenderedServerTick(message.tick);
     this.localCorrection = null;
     this.remotePoses.clear();
     for (const actor of Object.values(this.state.actors)) {
@@ -300,6 +317,7 @@ export class MultiplayerSession implements GameSession {
     const snapshotSeconds = snapshotElapsedSeconds(this.lastSnapshotTick, frame.tick);
     const interpolationSeconds = snapshotInterpolationSeconds(this.lastSnapshotTick, frame.tick);
     this.lastSnapshotTick = frame.tick;
+    this.beginRenderedServerTickTransition(frame.tick, interpolationSeconds);
     const renderedPositions = new Map<EntityId, Vector3State>();
     const previouslyVisibleActorIds = this.visibleActorIds;
     const previousActors = this.state.actors;
@@ -351,6 +369,7 @@ export class MultiplayerSession implements GameSession {
     }
     this.syncLootMeshes(this.state.groundLoot);
     this.processSequencedEvents(frame.events);
+    if (player) this.localShotPredictor.synchronize(player, this.inputSequence);
     this.synchronizeOutcome();
   }
 
@@ -360,11 +379,27 @@ export class MultiplayerSession implements GameSession {
     this.humanController.rememberActor(player);
     const command = this.humanController.createCommand(player);
     this.inputSequence += 1;
-    const message: ClientMessage = { type: "match.input", sequence: this.inputSequence, command };
+    const predictedShot = this.localShotPredictor.predict(
+      { ...player, position: this.visualPosition(this.localActorId, player.position) },
+      command,
+      deltaSeconds,
+      this.inputSequence,
+    );
+    const message: ClientMessage = {
+      type: "match.input",
+      sequence: this.inputSequence,
+      renderTick: Math.max(0, Math.floor(this.renderedServerTick)),
+      ...(predictedShot ? { shotSequence: predictedShot.inputSequence } : {}),
+      ...(predictedShot ? { shotWeaponId: predictedShot.weaponId } : {}),
+      command,
+    };
     if (this.connection.send(message)) {
       this.pendingInputs.push({ sequence: this.inputSequence, command });
       if (this.pendingInputs.length > 180) this.pendingInputs.shift();
       this.movement.processCommand(this.state, this.localActorId, command, deltaSeconds);
+      if (predictedShot) this.presentPredictedShot(predictedShot);
+    } else if (predictedShot) {
+      this.localShotPredictor.cancelPredictedShot(predictedShot.inputSequence);
     }
   }
 
@@ -372,7 +407,7 @@ export class MultiplayerSession implements GameSession {
     const fresh = events.filter((entry) => entry.sequence > this.lastEventSequence);
     if (fresh.length === 0) return;
     this.lastEventSequence = Math.max(this.lastEventSequence, ...fresh.map((entry) => entry.sequence));
-    this.processEvents(fresh.map((entry) => entry.event));
+    this.processEvents(fresh);
   }
 
   private enqueueMessage(message: ServerMessage): void {
@@ -434,20 +469,27 @@ export class MultiplayerSession implements GameSession {
     }
   }
 
-  private processEvents(events: readonly GameEvent[]): void {
+  private processEvents(entries: readonly SequencedGameEvent[]): void {
+    const events = entries.map((entry) => entry.event);
     this.hud?.handleEvents(events, this.localActorId);
     const player = this.getActor(this.localActorId);
     const observer = this.spectatorActorId ? this.state.actors[this.spectatorActorId] ?? player : player;
-    this.audio.handleEvents(events, {
+    const reconciled = this.localShotPredictor.reconcileAuthoritativeEvents(
+      entries,
+      this.localActorId,
+      this.inputSequence,
+    );
+    for (const weaponId of reconciled.unpredictedLocalWeaponIds) {
+      this.localRecoil.add(WEAPONS[weaponId]?.recoil ?? 0);
+    }
+    this.audio.handleEvents(reconciled.audioEvents, {
       playerId: this.localActorId,
       observerId: observer.id,
       position: observer.position,
     });
-    this.effects.handleEvents(events, this.localActorId);
+    this.effects.handleEvents(reconciled.effectEvents, this.localActorId);
+    this.effects.handleImpacts(reconciled.impactOnlyEvents, this.localActorId);
     for (const event of events) {
-      if (event.type === "shot-fired" && event.actorId === this.localActorId) {
-        this.humanController.applyRecoil(WEAPONS[event.weaponId]?.recoil ?? 0);
-      }
       if (event.type === "actor-died") {
         this.actorRoots.get(event.actorId)?.setEnabled(false);
         this.spectatorActorId = resolveSpectatorActorId(
@@ -505,8 +547,10 @@ export class MultiplayerSession implements GameSession {
     if (!this.camera.position.equalsToFloats(cameraPosition.x, cameraY, cameraPosition.z)) {
       this.camera.position.set(cameraPosition.x, cameraY, cameraPosition.z);
     }
-    if (!this.camera.rotation.equalsToFloats(cameraActor.pitch, cameraActor.yaw, 0)) {
-      this.camera.rotation.set(cameraActor.pitch, cameraActor.yaw, 0);
+    const cameraPitch = cameraActor.pitch
+      + (cameraActor.id === this.localActorId ? this.localRecoil.pitchOffset : 0);
+    if (!this.camera.rotation.equalsToFloats(cameraPitch, cameraActor.yaw, 0)) {
+      this.camera.rotation.set(cameraPitch, cameraActor.yaw, 0);
     }
     this.syncViewWeaponVisual(activeViewWeapon, cameraPose.weaponY, cameraPose.weaponRotationX);
     for (const [actorId, root] of this.actorRoots) {
@@ -559,6 +603,8 @@ export class MultiplayerSession implements GameSession {
 
   private advanceVisualSmoothing(frameSeconds: number): void {
     for (const pose of this.remotePoses.values()) advancePositionTransition(pose, frameSeconds);
+    this.localRecoil.advance(frameSeconds);
+    this.advanceRenderedServerTick(frameSeconds);
     if (!this.localCorrection) return;
     advancePositionTransition(this.localCorrection, frameSeconds);
     if (positionTransitionComplete(this.localCorrection)) this.localCorrection = null;
@@ -580,6 +626,44 @@ export class MultiplayerSession implements GameSession {
       durationSeconds,
       6,
     );
+  }
+
+  private presentPredictedShot(shot: PredictedLocalShot): void {
+    const player = this.getActor(this.localActorId);
+    this.audio.handleEvents([shot.fired], {
+      playerId: this.localActorId,
+      observerId: this.localActorId,
+      position: player.position,
+    });
+    this.effects.handleEvents([shot.trace], this.localActorId);
+    this.localRecoil.add(WEAPONS[shot.weaponId]?.recoil ?? 0);
+  }
+
+  private resetRenderedServerTick(tick: number): void {
+    this.renderedServerTick = tick;
+    this.renderTickStart = tick;
+    this.renderTickTarget = tick;
+    this.renderTickElapsedSeconds = 0;
+    this.renderTickDurationSeconds = 0;
+  }
+
+  private beginRenderedServerTickTransition(tick: number, durationSeconds: number): void {
+    this.renderTickStart = this.renderedServerTick;
+    this.renderTickTarget = tick;
+    this.renderTickElapsedSeconds = 0;
+    this.renderTickDurationSeconds = durationSeconds;
+    if (durationSeconds <= 0) this.renderedServerTick = tick;
+  }
+
+  private advanceRenderedServerTick(frameSeconds: number): void {
+    if (this.renderTickDurationSeconds <= 0 || this.renderedServerTick === this.renderTickTarget) return;
+    this.renderTickElapsedSeconds = Math.min(
+      this.renderTickDurationSeconds,
+      this.renderTickElapsedSeconds + Math.max(0, frameSeconds),
+    );
+    const progress = this.renderTickElapsedSeconds / this.renderTickDurationSeconds;
+    this.renderedServerTick = this.renderTickStart
+      + (this.renderTickTarget - this.renderTickStart) * progress;
   }
 
   private syncViewWeaponVisual(

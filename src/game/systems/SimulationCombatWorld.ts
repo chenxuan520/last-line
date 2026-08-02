@@ -15,6 +15,8 @@ import type { CombatWorld, ShotResult, ShotTrace } from "./CombatSystem";
 const GEOMETRY_EPSILON = 1e-9;
 const COMBAT_GRID_CELL_SIZE = 32;
 
+export type ActorHitboxState = Pick<ActorState, "id" | "position" | "alive" | "deployment">;
+
 export class SimulationCombatWorld implements CombatWorld {
   private layout: MapLayout;
   private layoutSeed: number;
@@ -39,6 +41,13 @@ export class SimulationCombatWorld implements CombatWorld {
   }
 
   public traceShotDetailed(trace: ShotTrace): ShotResult {
+    return this.traceShotDetailedAgainstActors(trace, this.state.actors);
+  }
+
+  public traceShotDetailedAgainstActors(
+    trace: ShotTrace,
+    actors: Readonly<Record<EntityId, ActorHitboxState>>,
+  ): ShotResult {
     const direction = normalize(trace.direction);
     if (!direction || !Number.isFinite(trace.range) || trace.range <= 0) {
       return missResult(trace.origin, { x: 0, y: 0, z: 1 }, 0);
@@ -77,8 +86,8 @@ export class SimulationCombatWorld implements CombatWorld {
 
     let nearestActorId: EntityId | null = null;
     let nearestActorHit: ActorSurfaceHit | null = null;
-    for (const actorId in this.state.actors) {
-      const actor = this.state.actors[actorId];
+    for (const actorId in actors) {
+      const actor = actors[actorId];
       if (!actor) continue;
       if (!actor.alive || actor.deployment === "aircraft" || actor.id === trace.shooterId) {
         continue;
@@ -186,7 +195,7 @@ function intersectActor(
   origin: Vector3State,
   direction: Vector3State,
   range: number,
-  actor: ActorState,
+  actor: ActorHitboxState,
 ): ActorSurfaceHit | null {
     const feetY = actor.position.y - ACTOR_EYE_HEIGHT;
     const segmentMinY = feetY + ACTOR_RADIUS;

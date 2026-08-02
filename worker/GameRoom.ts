@@ -17,6 +17,7 @@ import {
   MatchRuntime,
   type MatchCheckpoint,
 } from "../src/server/MatchRuntime";
+import { boundClientRenderTick } from "../src/server/LagCompensatedCombatWorld";
 import {
   consoleServerMetricSink,
   RoomMetricCollector,
@@ -56,6 +57,8 @@ interface SocketAttachment {
   connectionEpoch: number;
   usedAdmission: boolean;
   issuedReconnectToken?: string;
+  lastSentMatchTick?: number;
+  lastAcceptedRenderTick?: number;
 }
 
 interface PendingCheckpoint {
@@ -394,7 +397,23 @@ export class GameRoom extends DurableService<WorkerEnv> {
     }
     if (command.type === "match.input") {
       if (data.status === "running" && member.actorId) {
-        this.ensureRuntime()?.submitInput(member.actorId, command.sequence, command.command);
+        const renderTick = boundClientRenderTick(
+          command.renderTick,
+          attachment.lastSentMatchTick,
+          attachment.lastAcceptedRenderTick,
+        );
+        const accepted = this.ensureRuntime()?.submitInput(
+          member.actorId,
+          command.sequence,
+          command.command,
+          renderTick,
+          command.shotSequence,
+          command.shotWeaponId,
+        ) ?? false;
+        if (accepted && renderTick !== undefined) {
+          attachment.lastAcceptedRenderTick = renderTick;
+          socket.serializeAttachment(attachment);
+        }
       }
       return;
     }
@@ -640,7 +659,7 @@ export class GameRoom extends DurableService<WorkerEnv> {
     for (const socket of this.ctx.getWebSockets()) {
       const attachment = socket.deserializeAttachment() as SocketAttachment | null;
       const member = attachment ? this.data?.members[attachment.playerId] : null;
-      if (!member?.actorId) continue;
+      if (!attachment || !member?.actorId) continue;
       const projection = runtime.projectFrame(
         commonFrame,
         member.actorId,
@@ -652,6 +671,8 @@ export class GameRoom extends DurableService<WorkerEnv> {
         ackSequence: runtime.acknowledge(member.actorId),
         frame: projection.frame,
       });
+      attachment.lastSentMatchTick = commonFrame.tick;
+      socket.serializeAttachment(attachment);
     }
   }
 
@@ -690,6 +711,12 @@ export class GameRoom extends DurableService<WorkerEnv> {
       )),
       events: [],
     });
+    const attachment = socket.deserializeAttachment() as SocketAttachment | null;
+    if (attachment) {
+      attachment.lastSentMatchTick = runtime.tick;
+      attachment.lastAcceptedRenderTick = runtime.tick;
+      socket.serializeAttachment(attachment);
+    }
   }
 
   private async removeWaitingMember(playerId: string): Promise<void> {

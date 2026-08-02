@@ -67,6 +67,7 @@ export interface RoomAdmission {
 
 export interface SequencedGameEvent {
   sequence: number;
+  shotSequence?: number;
   event: GameEvent;
 }
 
@@ -90,7 +91,14 @@ export type ClientMessage =
   | { type: "lobby.ready"; ready: boolean }
   | { type: "lobby.start" }
   | { type: "lobby.leave" }
-  | { type: "match.input"; sequence: number; command: ActorCommand }
+  | {
+      type: "match.input";
+      sequence: number;
+      renderTick?: number;
+      shotSequence?: number;
+      shotWeaponId?: string;
+      command: ActorCommand;
+    }
   | { type: "match.resync" }
   | { type: "ping"; clientTimeMs: number };
 
@@ -136,8 +144,32 @@ export function parseClientMessage(value: unknown): ClientMessage | null {
   }
   const sequence = value.sequence;
   if (value.type === "match.input" && typeof sequence === "number" && Number.isSafeInteger(sequence) && sequence >= 0) {
+    const renderTick = value.renderTick;
+    if (
+      renderTick !== undefined
+      && (typeof renderTick !== "number" || !Number.isSafeInteger(renderTick) || renderTick < 0)
+    ) return null;
+    const shotSequence = value.shotSequence;
+    if (
+      shotSequence !== undefined
+      && (typeof shotSequence !== "number" || !Number.isSafeInteger(shotSequence) || shotSequence < 0)
+    ) return null;
+    const shotWeaponId = value.shotWeaponId;
+    if (
+      (shotSequence === undefined) !== (shotWeaponId === undefined)
+      || (shotWeaponId !== undefined && (
+        typeof shotWeaponId !== "string" || shotWeaponId.length === 0 || shotWeaponId.length > 128
+      ))
+    ) return null;
     const command = sanitizeActorCommand(value.command);
-    return command ? { type: "match.input", sequence, command } : null;
+    return command ? {
+      type: "match.input",
+      sequence,
+      ...(renderTick === undefined ? {} : { renderTick }),
+      ...(shotSequence === undefined ? {} : { shotSequence }),
+      ...(shotWeaponId === undefined ? {} : { shotWeaponId }),
+      command,
+    } : null;
   }
   return null;
 }

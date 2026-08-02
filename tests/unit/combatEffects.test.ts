@@ -93,6 +93,23 @@ describe("CombatEffects", () => {
     scene.dispose();
     engine.dispose();
   });
+
+  it("can apply an authoritative impact without replaying predicted muzzle and tracer presentation", () => {
+    const engine = new NullEngine();
+    const scene = new Scene(engine);
+    const effects = new CombatEffects(scene);
+
+    effects.handleImpacts([actorTrace("bot")], "player");
+
+    expect(effects.counters).toMatchObject({
+      activeTracers: 0,
+      activeMuzzles: 0,
+      activeImpacts: 1,
+    });
+    effects.dispose();
+    scene.dispose();
+    engine.dispose();
+  });
 });
 
 function environmentTrace(index: number): GameEvent {

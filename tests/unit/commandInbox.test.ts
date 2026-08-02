@@ -33,4 +33,37 @@ describe("CommandInbox", () => {
     expect(inbox.consume("human-1", 1)).toMatchObject({ jump: true, move: { x: 1, y: 0, z: 0 } });
     expect(inbox.acknowledge("human-1")).toBe(2);
   });
+
+  it("retains the render tick associated with the latest continuous input", () => {
+    const inbox = new CommandInbox();
+    inbox.accept("human-1", 1, { ...createIdleCommand(), fire: true }, 10, 6);
+    inbox.accept("human-1", 2, { ...createIdleCommand(), fire: true }, 11, 7);
+
+    expect(inbox.consumeWithMetadata("human-1", 11)).toMatchObject({
+      command: { fire: true },
+      inputSequence: 2,
+      renderTick: 7,
+    });
+  });
+
+  it("preserves predicted shot order when newer continuous inputs coalesce", () => {
+    const inbox = new CommandInbox();
+    inbox.accept("human-1", 1, { ...createIdleCommand(), fire: true }, 10, 6, 101, "rifle");
+    inbox.accept("human-1", 2, { ...createIdleCommand(), fire: true }, 10, 7);
+    inbox.accept("human-1", 3, { ...createIdleCommand(), fire: true }, 10, 7, 103, "rifle");
+
+    expect(inbox.consumeWithMetadata("human-1", 10).inputSequence).toBe(3);
+    expect(inbox.consumeShotSequence("human-1", 10, "rifle")).toBe(101);
+    expect(inbox.consumeShotSequence("human-1", 11, "rifle")).toBe(103);
+    expect(inbox.consumeShotSequence("human-1", 11, "rifle")).toBeNull();
+  });
+
+  it("does not let a rejected prediction consume another weapon's shot token", () => {
+    const inbox = new CommandInbox();
+    inbox.accept("human-1", 1, { ...createIdleCommand(), fire: true }, 10, 6, 201, "rifle");
+    inbox.accept("human-1", 2, { ...createIdleCommand(), fire: true }, 10, 7, 202, "smg");
+
+    expect(inbox.consumeShotSequence("human-1", 10, "smg")).toBe(202);
+    expect(inbox.consumeShotSequence("human-1", 10, "rifle")).toBe(201);
+  });
 });

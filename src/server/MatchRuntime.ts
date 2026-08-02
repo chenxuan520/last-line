@@ -10,6 +10,7 @@ import type { ActorState, EntityId, GameEvent, GroundLootState, MatchState } fro
 import { SimulationCombatWorld } from "../game/systems/SimulationCombatWorld";
 import type { MatchFrame, SequencedGameEvent } from "../network/protocol";
 import { CommandInbox } from "./CommandInbox";
+import { LagCompensatedCombatWorld } from "./LagCompensatedCombatWorld";
 
 const BOT_COHORTS = 3;
 const TAKEOVER_TICKS = SIMULATION_TICK_RATE * 5;
@@ -39,7 +40,7 @@ export interface MatchCheckpoint {
 export class MatchRuntime {
   public readonly state: MatchState;
   private readonly simulation: GameSimulation;
-  private readonly world: SimulationCombatWorld;
+  private readonly world: LagCompensatedCombatWorld;
   private readonly layout: MapLayout;
   private readonly bots = new Map<EntityId, BotController>();
   private readonly botContinuousCommands = new Map<EntityId, ActorCommand>();
@@ -64,10 +65,13 @@ export class MatchRuntime {
       );
     this.layout = createMapLayout(this.state.mapSeed);
     this.simulation = new GameSimulation(this.state, new BattleRoyaleMode(BATTLE_ROYALE_CONFIG, random), WEAPONS, this.layout);
-    this.world = new SimulationCombatWorld(this.state, true, this.layout);
     this.tickValue = options.tick ?? 0;
     this.snapshotSequenceValue = options.snapshotSequence ?? 0;
     this.eventSequenceValue = options.eventSequence ?? 0;
+    this.world = new LagCompensatedCombatWorld(
+      this.state,
+      new SimulationCombatWorld(this.state, true, this.layout),
+    );
     Object.values(this.state.actors).filter((actor) => actor.kind === "bot").forEach((actor, index) => {
       this.bots.set(actor.id, new BotController(
         index + 1,
@@ -82,14 +86,31 @@ export class MatchRuntime {
       this.simulation.start();
       this.recordEvents(this.simulation.drainEvents());
     }
+    this.world.recordFrame(this.tickValue);
   }
 
   public get tick(): number {
     return this.tickValue;
   }
 
-  public submitInput(actorId: EntityId, sequence: number, command: ActorCommand): boolean {
-    return this.options.humanActorIds.includes(actorId) && this.inbox.accept(actorId, sequence, command, this.tickValue);
+  public submitInput(
+    actorId: EntityId,
+    sequence: number,
+    command: ActorCommand,
+    renderTick?: number,
+    shotSequence?: number,
+    shotWeaponId?: string,
+  ): boolean {
+    return this.options.humanActorIds.includes(actorId)
+      && this.inbox.accept(
+        actorId,
+        sequence,
+        command,
+        this.tickValue,
+        renderTick,
+        shotSequence,
+        shotWeaponId,
+      );
   }
 
   public acknowledge(actorId: EntityId): number {
@@ -110,6 +131,7 @@ export class MatchRuntime {
   public step(): void {
     if (this.state.phase === "finished") return;
     const commands = new Map<EntityId, ActorCommand>();
+    const rewindTicks = new Map<EntityId, number>();
     let livingActorCount: number | undefined;
     const getLivingActorCount = (): number => {
       livingActorCount ??= Object.values(this.state.actors).filter((candidate) => candidate.alive).length;
@@ -139,7 +161,9 @@ export class MatchRuntime {
           actor.deployment === "grounded" ? getLivingActorCount() : undefined,
         ));
       } else {
-        commands.set(actorId, this.inbox.consume(actorId, this.tickValue));
+        const input = this.inbox.consumeWithMetadata(actorId, this.tickValue);
+        commands.set(actorId, input.command);
+        if (input.command.fire && input.renderTick !== null) rewindTicks.set(actorId, input.renderTick);
       }
     }
     let botIndex = 0;
@@ -163,9 +187,22 @@ export class MatchRuntime {
       }
       botIndex += 1;
     }
-    this.simulation.step(SIMULATION_STEP_SECONDS, commands, this.world);
+    this.world.beginStep(this.tickValue, rewindTicks);
+    try {
+      this.simulation.step(SIMULATION_STEP_SECONDS, commands, this.world);
+    } finally {
+      this.world.endStep();
+    }
+    const events = this.simulation.drainEvents();
+    const shotSequences = new Map<EntityId, number>();
+    for (const event of events) {
+      if (event.type !== "shot-fired") continue;
+      const shotSequence = this.inbox.consumeShotSequence(event.actorId, this.tickValue, event.weaponId);
+      if (shotSequence !== null) shotSequences.set(event.actorId, shotSequence);
+    }
     this.tickValue += 1;
-    this.recordEvents(this.simulation.drainEvents());
+    this.world.recordFrame(this.tickValue);
+    this.recordEvents(events, shotSequences);
   }
 
   public takeFrame(serverTimeMs: number): MatchFrame {
@@ -247,10 +284,20 @@ export class MatchRuntime {
     };
   }
 
-  private recordEvents(events: readonly GameEvent[]): void {
+  private recordEvents(
+    events: readonly GameEvent[],
+    shotSequences: ReadonlyMap<EntityId, number> = new Map(),
+  ): void {
     for (const event of events) {
       this.eventSequenceValue += 1;
-      this.pendingEvents.push({ sequence: this.eventSequenceValue, event });
+      const shotSequence = event.type === "shot-fired" || event.type === "shot-traced"
+        ? shotSequences.get(event.actorId)
+        : undefined;
+      this.pendingEvents.push({
+        sequence: this.eventSequenceValue,
+        ...(shotSequence === undefined ? {} : { shotSequence }),
+        event,
+      });
       if (event.type === "item-picked" || event.type === "item-dropped") this.dirtyLootIds.add(event.lootId);
     }
   }
