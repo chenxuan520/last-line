@@ -1,10 +1,18 @@
 import type { ActorCommand } from "../game/commands/ActorCommand";
-import { createIdleCommand } from "../game/commands/ActorCommand";
+import { createBackpackStackDropRequest, createIdleCommand } from "../game/commands/ActorCommand";
 import { WEAPONS } from "../config/weapons";
 import { getActiveWeapon, getItemQuantity, type ActorState, type WeaponSlot } from "../game/state/types";
 import { TouchInputAdapter, type TouchAction, type TouchInputSink } from "./TouchInputAdapter";
 
 const MOVEMENT_KEYS = new Set(["KeyW", "KeyA", "KeyS", "KeyD", "ShiftLeft", "ShiftRight"]);
+const BACKPACK_DROP_KEYS = new Map([
+  ["Digit4", 0],
+  ["Digit5", 1],
+  ["Digit6", 2],
+  ["Digit7", 3],
+  ["Digit8", 4],
+  ["Digit9", 5],
+]);
 export type SpectatorSwitchDirection = -1 | 1;
 export interface HumanControllerOptions {
   touchRoot?: HTMLElement;
@@ -136,7 +144,7 @@ export class HumanController implements TouchInputSink {
 
   public applyTouchLook(deltaX: number, deltaY: number): void {
     if (!this.isGameplayInputActive()) return;
-    this.applyLookDelta(deltaX, deltaY, 0.0042);
+    this.applyLookDelta(deltaX, deltaY, 0.006);
   }
 
   public setTouchFire(held: boolean): void {
@@ -146,6 +154,23 @@ export class HumanController implements TouchInputSink {
       return;
     }
     if (this.isGameplayInputActive() && !this.fireSuppressedUntilRelease) this.fireHeld = true;
+  }
+
+  public requestDropBackpackItem(index: number, itemId: string, expectedSnapshot?: string): void {
+    if (
+      !this.isGameplayInputActive() ||
+      !this.lastActor?.alive ||
+      this.lastActor.deployment !== "grounded" ||
+      this.lastActor.inventory.backpack[index]?.itemId !== itemId
+    ) {
+      return;
+    }
+    this.dropItemRequested = createBackpackStackDropRequest(
+      index,
+      itemId,
+      this.lastActor.inventory.backpack,
+      expectedSnapshot,
+    );
   }
 
   public triggerTouchAction(action: Exclude<TouchAction, "fire">): void {
@@ -247,6 +272,11 @@ export class HumanController implements TouchInputSink {
     }
     if (event.code === "Digit2" || event.code === "Numpad2") {
       this.requestWeaponSlot(1);
+    }
+    const backpackIndex = BACKPACK_DROP_KEYS.get(event.code);
+    if (backpackIndex !== undefined) {
+      const itemId = this.lastActor?.inventory.backpack[backpackIndex]?.itemId;
+      if (itemId) this.requestDropBackpackItem(backpackIndex, itemId);
     }
     if (event.code === "KeyQ") this.requestMedicalItem("bandage");
     if (event.code === "KeyH") this.requestMedicalItem("medkit");

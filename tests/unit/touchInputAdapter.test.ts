@@ -27,7 +27,7 @@ describe("touch input adapter", () => {
     expect(Math.hypot(state.knobX, state.knobY)).toBeCloseTo(50);
   });
 
-  it("tracks movement, look, and fire pointers independently", () => {
+  it("tracks movement, look, and dual fire pointers independently", () => {
     const knob = { style: { translate: "" } };
     const root = new EventTarget() as HTMLElement;
     Object.assign(root, {
@@ -54,19 +54,61 @@ describe("touch input adapter", () => {
     root.dispatchEvent(pointerEvent("pointerdown", 2, 200, 100));
     delete root.dataset.touchRole;
     root.dataset.touchAction = "fire";
+    root.dataset.touchRole = "fire-look";
     root.dispatchEvent(pointerEvent("pointerdown", 3, 300, 100));
     root.dispatchEvent(pointerEvent("pointermove", 2, 230, 90));
+    root.dispatchEvent(pointerEvent("pointermove", 3, 320, 110));
+    root.dataset.touchRole = "fire";
+    root.dispatchEvent(pointerEvent("pointerdown", 4, 80, 100));
 
     expect(movement.at(-1)?.[1]).toBeGreaterThan(0);
     expect(looks).toContainEqual([30, -10]);
+    expect(looks).toContainEqual([20, 10]);
     expect(fire).toContain(true);
 
     root.dispatchEvent(pointerEvent("pointerup", 1, 60, 20));
     root.dispatchEvent(pointerEvent("pointerup", 3, 300, 100));
     expect(movement.at(-1)).toEqual([0, 0, 0]);
+    expect(fire.at(-1)).toBe(true);
+    root.dispatchEvent(pointerEvent("pointerup", 4, 80, 100));
     expect(fire.at(-1)).toBe(false);
     expect(knob.style.translate).toBe("0 0");
     adapter.dispose();
+  });
+
+  it("releases dual fire through cancellation, capture loss, reset, and disposal", () => {
+    const root = createTouchRoot();
+    const fire: boolean[] = [];
+    const adapter = new TouchInputAdapter(root, {
+      setTouchMovement: () => undefined,
+      applyTouchLook: () => undefined,
+      setTouchFire: (held) => fire.push(held),
+      triggerTouchAction: () => undefined,
+    });
+
+    pressFire(root, 1, "fire-look");
+    pressFire(root, 2, "fire");
+    root.dispatchEvent(pointerEvent("pointercancel", 1, 0, 0));
+    expect(fire.at(-1)).toBe(true);
+    root.dispatchEvent(pointerEvent("lostpointercapture", 2, 0, 0));
+    expect(fire.at(-1)).toBe(false);
+
+    pressFire(root, 3, "fire-look");
+    pressFire(root, 4, "fire");
+    root.dispatchEvent(pointerEvent("lostpointercapture", 4, 0, 0));
+    expect(fire.at(-1)).toBe(true);
+    root.dispatchEvent(pointerEvent("pointercancel", 3, 0, 0));
+    expect(fire.at(-1)).toBe(false);
+
+    pressFire(root, 5, "fire-look");
+    pressFire(root, 6, "fire");
+    adapter.reset();
+    expect(fire.at(-1)).toBe(false);
+
+    pressFire(root, 7, "fire-look");
+    pressFire(root, 8, "fire");
+    adapter.dispose();
+    expect(fire.at(-1)).toBe(false);
   });
 });
 
@@ -77,4 +119,21 @@ function pointerEvent(type: string, pointerId: number, clientX: number, clientY:
     clientX,
     clientY,
   });
+}
+
+function createTouchRoot(): HTMLElement {
+  const root = new EventTarget() as HTMLElement;
+  Object.assign(root, {
+    dataset: {} as DOMStringMap,
+    closest: () => root,
+    setPointerCapture: () => undefined,
+    querySelector: () => null,
+  });
+  return root;
+}
+
+function pressFire(root: HTMLElement, pointerId: number, role: "fire" | "fire-look"): void {
+  root.dataset.touchAction = "fire";
+  root.dataset.touchRole = role;
+  root.dispatchEvent(pointerEvent("pointerdown", pointerId, pointerId * 10, 20));
 }

@@ -57,3 +57,27 @@ export const QUALITY_PROFILES: Readonly<Record<QualityLevel, QualityProfile>> = 
     modelLodDistance: 65,
   },
 };
+
+export function normalizeSensitivity(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(0.4, Math.min(2, value))
+    : DEFAULT_SETTINGS.sensitivity;
+}
+
+export function usesMobileDevicePixels(
+  matchMedia: ((query: string) => { readonly matches: boolean }) | undefined,
+): boolean {
+  return matchMedia?.("(pointer: coarse)").matches === true;
+}
+
+export function renderHardwareScalingLevel(
+  quality: QualityLevel,
+  devicePixelRatio: number,
+  useDevicePixels: boolean,
+): number {
+  const profileScaling = QUALITY_PROFILES[quality].hardwareScalingLevel;
+  if (!useDevicePixels) return profileScaling;
+  const pixelRatio = Number.isFinite(devicePixelRatio) ? Math.max(1, devicePixelRatio) : 1;
+  const effectivePixelRatio = Math.min(pixelRatio, 2);
+  return profileScaling / effectivePixelRatio;
+}

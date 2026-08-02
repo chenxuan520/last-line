@@ -3,7 +3,15 @@ import { AssetCatalog } from "../assets/AssetCatalog";
 import { AudioFeedback } from "../client/audio/AudioFeedback";
 import { MobileFullscreenController } from "../client/ui/MobileFullscreenController";
 import { BATTLE_ROYALE_CONFIG } from "../config/battleRoyale";
-import { DEFAULT_SETTINGS, QUALITY_PROFILES, type GameSettings, type QualityLevel } from "../config/settings";
+import {
+  DEFAULT_SETTINGS,
+  QUALITY_PROFILES,
+  normalizeSensitivity,
+  renderHardwareScalingLevel,
+  usesMobileDevicePixels,
+  type GameSettings,
+  type QualityLevel,
+} from "../config/settings";
 import {
   getDefaultMultiplayerApiUrl,
   MultiplayerAuthClient,
@@ -124,7 +132,7 @@ export class GameApp {
         <div class="settings-grid" aria-label="游戏设置">
           <label>画面质量<select data-setting="quality"><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></label>
           <label class="volume-setting"><span>主音量 <output data-volume-output></output></span><input aria-label="主音量" data-setting="volume" type="range" min="0" max="1" step="0.1" value="${this.settings.volume}" /></label>
-          <label>视角灵敏度<input data-setting="sensitivity" type="range" min="0.4" max="2" step="0.1" value="${this.settings.sensitivity}" /></label>
+          <label class="sensitivity-setting"><span>视角灵敏度 <output data-sensitivity-output></output></span><input data-setting="sensitivity" type="range" min="0.4" max="2" step="0.1" value="${this.settings.sensitivity}" /></label>
           <label class="starter-setting"><span>初始补给</span><span class="starter-option"><input data-setting="start-with-bandage" type="checkbox" ${this.settings.startWithBandage ? "checked" : ""} /><i></i><b>携带 1 条绷带</b></span></label>
           <label class="starter-setting ai-sniper-setting"><span>AI 规则</span><span class="starter-option"><input data-setting="disable-ai-snipers" type="checkbox" ${this.settings.disableAiSnipers ? "checked" : ""} /><i></i><b>禁用狙击枪与狙击弹</b></span></label>
           <label class="starter-setting loot-model-setting"><span>物资显示</span><span class="starter-option"><input data-setting="show-ground-loot-models" type="checkbox" ${this.settings.showGroundLootModels ? "checked" : ""} /><i></i><b>显示三维物资模型</b></span></label>
@@ -164,12 +172,12 @@ export class GameApp {
             <article>
               <span class="about-index">03 // CONTROLS</span>
               <h3>桌面操作</h3>
-              <dl><div><dt>WASD / Shift</dt><dd>移动 / 冲刺</dd></div><div><dt>鼠标</dt><dd>视角 / 开火 / 瞄准</dd></div><div><dt>Space / F / R</dt><dd>跳跃 / 拾取 / 换弹</dd></div><div><dt>1·2 / Q·H</dt><dd>切枪 / 治疗</dd></div></dl>
+              <dl><div><dt>WASD / Shift</dt><dd>移动 / 冲刺</dd></div><div><dt>鼠标</dt><dd>视角 / 开火 / 瞄准</dd></div><div><dt>Space / F / R</dt><dd>跳跃 / 拾取 / 换弹</dd></div><div><dt>1·2 / 4–9 / G</dt><dd>切枪 / 丢背包物品 / 丢当前武器</dd></div><div><dt>Q / H</dt><dd>绷带 / 急救包</dd></div></dl>
             </article>
             <article>
               <span class="about-index">04 // MOBILE</span>
               <h3>手机横屏</h3>
-              <p>左侧摇杆移动，右侧滑动视角；屏幕按钮支持开火、瞄准、跳跃、拾取、换弹、切枪、治疗和暂停。</p>
+              <p>左侧摇杆移动，右侧滑动视角；左右双开火键支持两指操作，右侧开火时可继续拖动瞄准。屏幕按钮还支持瞄准、跳跃、拾取、换弹、切枪、治疗和暂停。</p>
               <small>建议使用最新版 Chrome 或 Edge，并允许全屏横屏以获得完整操作空间。</small>
             </article>
           </div>
@@ -194,6 +202,18 @@ export class GameApp {
     volume?.addEventListener("input", () => updateVolume(false));
     volume?.addEventListener("change", () => updateVolume(true));
     updateVolume(false);
+    const sensitivity = this.uiRoot.querySelector<HTMLInputElement>("[data-setting='sensitivity']");
+    const sensitivityOutput = this.uiRoot.querySelector<HTMLOutputElement>("[data-sensitivity-output]");
+    const updateSensitivity = (): void => {
+      if (!sensitivity) return;
+      const nextSensitivity = normalizeSensitivity(Number(sensitivity.value));
+      this.settings = { ...this.settings, sensitivity: nextSensitivity };
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings));
+      sensitivity.style.setProperty("--range-progress", `${(nextSensitivity - 0.4) / 1.6 * 100}%`);
+      if (sensitivityOutput) sensitivityOutput.textContent = `${nextSensitivity.toFixed(1)}×`;
+    };
+    sensitivity?.addEventListener("input", updateSensitivity);
+    updateSensitivity();
     const startWithBandage = this.uiRoot.querySelector<HTMLInputElement>("[data-setting='start-with-bandage']");
     startWithBandage?.addEventListener("change", () => {
       this.settings = { ...this.settings, startWithBandage: startWithBandage.checked };
@@ -658,7 +678,7 @@ export class GameApp {
     this.settings = {
       quality: isQuality(quality) ? quality : DEFAULT_SETTINGS.quality,
       volume: normalizeVolume(volume),
-      sensitivity: Number.isFinite(sensitivity) ? sensitivity : DEFAULT_SETTINGS.sensitivity,
+      sensitivity: normalizeSensitivity(sensitivity),
       startWithBandage: typeof startWithBandage === "boolean" ? startWithBandage : DEFAULT_SETTINGS.startWithBandage,
       disableAiSnipers: typeof disableAiSnipers === "boolean" ? disableAiSnipers : DEFAULT_SETTINGS.disableAiSnipers,
       showGroundLootModels: typeof showGroundLootModels === "boolean"
@@ -670,7 +690,13 @@ export class GameApp {
 
   private applyQuality(): void {
     const profile = QUALITY_PROFILES[this.settings.quality];
-    this.engine.setHardwareScalingLevel(profile.hardwareScalingLevel);
+    const pixelRatio = typeof window === "undefined" ? 1 : window.devicePixelRatio;
+    const touchPixels = usesMobileDevicePixels(
+      typeof window !== "undefined" && typeof window.matchMedia === "function"
+        ? window.matchMedia.bind(window)
+        : undefined,
+    );
+    this.engine.setHardwareScalingLevel(renderHardwareScalingLevel(this.settings.quality, pixelRatio, touchPixels));
     this.engine.maxFPS = profile.maxFps;
   }
 
@@ -694,7 +720,7 @@ function loadSettings(): GameSettings {
     return {
       quality: isQuality(value?.quality) ? value.quality : DEFAULT_SETTINGS.quality,
       volume: typeof value?.volume === "number" ? normalizeVolume(value.volume) : DEFAULT_SETTINGS.volume,
-      sensitivity: typeof value?.sensitivity === "number" ? value.sensitivity : DEFAULT_SETTINGS.sensitivity,
+      sensitivity: normalizeSensitivity(value?.sensitivity),
       startWithBandage: typeof value?.startWithBandage === "boolean"
         ? value.startWithBandage
         : DEFAULT_SETTINGS.startWithBandage,

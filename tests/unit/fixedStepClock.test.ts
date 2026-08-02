@@ -47,4 +47,5 @@ describe("FixedStepClock", () => {
     ]).toEqual([5, 6, 7]);
     expect(QUALITY_PROFILES.low.shrubCount).toBeLessThan(QUALITY_PROFILES.high.shrubCount);
   });
+
 });

@@ -181,6 +181,8 @@ export class MultiplayerSession implements GameSession {
         actorLabels: this.displayNames,
         touchInput: this.humanController.usesTouchControls(),
         onRequestFullscreen: () => this.mobileFullscreen.requestFromUserGesture(),
+        onDropBackpackItem: (index, itemId, snapshot) =>
+          this.humanController.requestDropBackpackItem(index, itemId, snapshot),
       },
     );
     this.audio.start();

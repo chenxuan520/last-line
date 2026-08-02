@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createIdleCommand, type ActorCommand } from "../../src/game/commands/ActorCommand";
+import {
+  createBackpackStackDropRequest,
+  createIdleCommand,
+  type ActorCommand,
+} from "../../src/game/commands/ActorCommand";
 import {
   createActorState,
   createWeaponState,
@@ -365,6 +369,66 @@ describe("InventorySystem", () => {
       expect.objectContaining({ itemId: "ammo.rifle", quantity: 40, available: true }),
     );
     expect(events[0]).toEqual(expect.objectContaining({ type: "item-dropped", actorId: actor.id, quantity: 40 }));
+  });
+
+  it("drops the exact requested backpack stack and rejects stale index-item pairs", () => {
+    const state = createState();
+    const actor = state.actors.player;
+    const events: GameEvent[] = [];
+    actor.inventory.backpack = [
+      { itemId: "ammo.rifle", quantity: 40 },
+      { itemId: "bandage", quantity: 2 },
+      { itemId: "ammo.rifle", quantity: 15 },
+    ];
+    const dropThird = createBackpackStackDropRequest(2, "ammo.rifle", actor.inventory.backpack);
+    if (!dropThird) throw new Error("drop request missing");
+
+    new InventorySystem().processCommand(state, actor.id, command({ dropItem: dropThird }), events);
+
+    expect(actor.inventory.backpack).toEqual([
+      { itemId: "ammo.rifle", quantity: 40 },
+      { itemId: "bandage", quantity: 2 },
+    ]);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "item-dropped",
+      itemId: "ammo.rifle",
+      quantity: 15,
+    }));
+
+    const staleRequest = createBackpackStackDropRequest(1, "ammo.rifle", [
+      { itemId: "ammo.rifle", quantity: 40 },
+      { itemId: "ammo.rifle", quantity: 15 },
+    ]);
+    if (!staleRequest) throw new Error("stale drop request missing");
+    new InventorySystem().processCommand(state, actor.id, command({ dropItem: staleRequest }), events);
+
+    expect(actor.inventory.backpack).toEqual([
+      { itemId: "ammo.rifle", quantity: 40 },
+      { itemId: "bandage", quantity: 2 },
+    ]);
+    expect(events.filter((event) => event.type === "item-dropped")).toHaveLength(1);
+  });
+
+  it("rejects a stale drop when healing moves an identical stack into the requested index", () => {
+    const state = createState();
+    const actor = state.actors.player;
+    actor.health = 50;
+    actor.inventory.backpack = [
+      { itemId: "bandage", quantity: 1 },
+      { itemId: "bandage", quantity: 5 },
+    ];
+    actor.inventory.usingItem = { itemId: "bandage", remainingSeconds: 0 };
+    const dropFirst = createBackpackStackDropRequest(0, "bandage", actor.inventory.backpack);
+    if (!dropFirst) throw new Error("drop request missing");
+    const inventory = new InventorySystem();
+    const events: GameEvent[] = [];
+
+    inventory.update(state, 0, events);
+    inventory.processCommand(state, actor.id, command({ dropItem: dropFirst }), events);
+
+    expect(actor.inventory.backpack).toEqual([{ itemId: "bandage", quantity: 5 }]);
+    expect(events.filter((event) => event.type === "item-dropped")).toEqual([]);
+    expect(events).toContainEqual({ type: "healing-completed", actorId: actor.id, itemId: "bandage" });
   });
 
   it("drops each dead actor inventory exactly once", () => {

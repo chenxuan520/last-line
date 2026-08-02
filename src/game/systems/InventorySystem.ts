@@ -7,6 +7,10 @@ import {
   type MapObstacle,
 } from "../../config/map";
 import type { ActorCommand } from "../commands/ActorCommand";
+import {
+  backpackSnapshotSignature,
+  parseBackpackStackDropRequest,
+} from "../commands/ActorCommand";
 import { StaticGridIndex } from "../spatial/StaticGridIndex";
 import {
   getActiveWeapon,
@@ -363,6 +367,11 @@ export class InventorySystem {
   }
 
   private dropItem(state: MatchState, actor: ActorState, itemId: string, events: GameEvent[]): EntityId | null {
+    const backpackRequest = parseBackpackStackDropRequest(itemId);
+    if (backpackRequest) {
+      if (backpackRequest.snapshot !== backpackSnapshotSignature(actor.inventory.backpack)) return null;
+      return this.dropBackpackStack(state, actor, backpackRequest.index, backpackRequest.itemId, events);
+    }
     const item = ITEMS[itemId];
     if (!item) {
       return null;
@@ -414,7 +423,22 @@ export class InventorySystem {
     }
 
     const stackIndex = actor.inventory.backpack.findIndex((stack) => stack.itemId === itemId);
+    return this.dropBackpackStack(state, actor, stackIndex, itemId, events);
+  }
+
+  private dropBackpackStack(
+    state: MatchState,
+    actor: ActorState,
+    stackIndex: number,
+    itemId: string,
+    events: GameEvent[],
+  ): EntityId | null {
     if (stackIndex < 0) {
+      return null;
+    }
+    const item = ITEMS[itemId];
+    const candidate = actor.inventory.backpack[stackIndex];
+    if (!item || item.kind === "weapon" || item.kind === "armor" || item.kind === "helmet" || candidate?.itemId !== itemId) {
       return null;
     }
     const [stack] = actor.inventory.backpack.splice(stackIndex, 1);

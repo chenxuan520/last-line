@@ -174,7 +174,7 @@ describe("minimap projection", () => {
     expect(pickupPromptText(player, state.groundLoot, true)).toBe("拾取 二级护甲");
   });
 
-  it("refreshes the pickup prompt when backpack capacity increases", () => {
+  it("keeps a full backpack pickup unavailable until the player drops a stack", () => {
     const state = createBattleRoyaleState("player", undefined, () => 0.5);
     const player = state.actors.player;
     if (!player) throw new Error("player missing");

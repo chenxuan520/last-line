@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { createIdleCommand } from "../../src/game/commands/ActorCommand";
+import {
+  createBackpackStackDropRequest,
+  createIdleCommand,
+} from "../../src/game/commands/ActorCommand";
 import { parseClientMessage, sanitizeActorCommand } from "../../src/network/protocol";
 
 describe("multiplayer protocol", () => {
@@ -17,5 +20,22 @@ describe("multiplayer protocol", () => {
     expect(sanitizeActorCommand({ ...createIdleCommand(), move: { x: Number.NaN, y: 0, z: 0 } })).toBeNull();
     expect(parseClientMessage({ type: "match.input", sequence: -1, command: createIdleCommand() })).toBeNull();
     expect(parseClientMessage({ type: "unknown" })).toBeNull();
+  });
+
+  it("preserves an indexed backpack drop request through multiplayer sanitization", () => {
+    const dropItem = createBackpackStackDropRequest(5, "ammo.rifle", [
+      { itemId: "ammo.shell", quantity: 1 },
+      { itemId: "bandage", quantity: 1 },
+      { itemId: "medkit", quantity: 1 },
+      { itemId: "ammo.light", quantity: 1 },
+      { itemId: "ammo.sniper", quantity: 1 },
+      { itemId: "ammo.rifle", quantity: 1 },
+    ]);
+    expect(dropItem).not.toBeNull();
+
+    expect(sanitizeActorCommand({
+      ...createIdleCommand(),
+      dropItem,
+    })?.dropItem).toBe(dropItem);
   });
 });

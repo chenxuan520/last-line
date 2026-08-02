@@ -1,4 +1,5 @@
 import type { AssetCatalog } from "../../assets/AssetCatalog";
+import { backpackSnapshotSignature } from "../../game/commands/ActorCommand";
 import { BATTLE_ROYALE_CONFIG } from "../../config/battleRoyale";
 import { ITEMS } from "../../config/items";
 import { createMapLayout, createMapRoadSegments, MAP_SIZE } from "../../config/map";
@@ -44,6 +45,7 @@ export class GameHud {
       actorLabels?: Readonly<Record<string, string>>;
       touchInput?: boolean;
       onRequestFullscreen?: () => void;
+      onDropBackpackItem?: (index: number, itemId: string, snapshot: string) => void;
     } = {},
   ) {
     const crosshair = assets.resolve("ui.crosshair", "svg");
@@ -98,14 +100,15 @@ export class GameHud {
           <small>移动或开火会中断</small>
         </div>
         <aside class="controls-card">
-          <span><b>WASD</b>移动</span><span><b>SHIFT</b>冲刺</span><span><b>SPACE</b>跳伞 / 跳跃</span><span><b>F</b>拾取</span>
-          <span><b>1 / 2</b>切枪</span><span><b>Q</b>绷带</span><span><b>H</b>急救包</span><span><b>R</b>换弹</span>
+          <span><b>WASD / SHIFT</b>移动 / 冲刺</span><span><b>SPACE / F / R</b>跳跃 / 拾取 / 换弹</span>
+          <span><b>1 / 2</b>切枪</span><span><b>4–9 / G</b>丢背包 / 当前武器</span><span><b>Q / H</b>绷带 / 急救包</span>
         </aside>
         ${options.touchInput ? `
           <div class="touch-controls" data-hud="touch-controls" aria-label="触控操作">
             <div class="touch-look-area" data-touch-role="look" aria-label="滑动视角"></div>
             <div class="touch-joystick" data-touch-role="move" aria-label="移动摇杆"><i></i><b data-touch-knob></b></div>
-            <button class="touch-action touch-fire" type="button" data-touch-action="fire">开火</button>
+            <button class="touch-action touch-fire touch-fire-left" type="button" data-touch-action="fire" data-touch-role="fire" aria-label="左侧开火">开火</button>
+            <button class="touch-action touch-fire touch-fire-right" type="button" data-touch-action="fire" data-touch-role="fire-look" aria-label="右侧开火并拖动瞄准">开火</button>
             <button class="touch-action touch-scope" type="button" data-touch-action="scope">瞄准</button>
             <button class="touch-action touch-jump" type="button" data-touch-action="jump">跳跃</button>
             <button class="touch-action touch-pickup" type="button" data-touch-action="interact">拾取</button>
@@ -167,6 +170,18 @@ export class GameHud {
       ?.addEventListener("click", () => this.setMobileInventoryVisible(false, true));
     root.querySelector<HTMLElement>("[data-hud='inventory-backdrop']")
       ?.addEventListener("click", () => this.setMobileInventoryVisible(false, true));
+    root.querySelector<HTMLElement>("[data-hud='backpack']")
+      ?.addEventListener("click", (event) => {
+        const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-drop-backpack-item]");
+        if (!button || !this.options.onDropBackpackItem) return;
+        const index = Number(button.dataset.dropBackpackIndex);
+        if (!Number.isSafeInteger(index) || index < 0) return;
+        this.options.onDropBackpackItem(
+          index,
+          button.dataset.dropBackpackItem ?? "",
+          button.dataset.dropBackpackSnapshot ?? "",
+        );
+      });
   }
 
   public dispose(): void {
@@ -253,15 +268,19 @@ export class GameHud {
     this.setText("weapon-name", config?.label ?? "未装备");
     this.setText("ammo", weapon ? weapon.ammoInMagazine.toString().padStart(2, "0") : "--");
     this.setText("reserve", getReserveAmmo(viewedActor).toString());
+    const canManageBackpack = player.alive && viewedActor.id === player.id;
+    const canDropBackpack = canManageBackpack && player.deployment === "grounded";
     const inventorySignature = JSON.stringify({
       actorId: viewedActor.id,
+      canManageBackpack,
+      canDropBackpack,
       activeWeaponSlot: viewedActor.inventory.activeWeaponSlot,
       weaponIds: viewedActor.inventory.weaponSlots.map((slot) => slot?.weaponId ?? null),
       backpack: viewedActor.inventory.backpack,
     });
     if (inventorySignature !== this.inventorySignature) {
       this.renderWeaponSlots(viewedActor);
-      this.renderBackpack(viewedActor);
+      this.renderBackpack(viewedActor, canManageBackpack, canDropBackpack);
       this.inventorySignature = inventorySignature;
     }
     const promptSignature = pickupPromptSignature(player, state.groundLoot);
@@ -430,14 +449,19 @@ export class GameHud {
     this.requireElement("weapon-slots").replaceChildren(fragment);
   }
 
-  private renderBackpack(player: ActorState): void {
+  private renderBackpack(
+    player: ActorState,
+    canManageBackpack: boolean,
+    canDropBackpack: boolean,
+  ): void {
     const backpack = this.requireElement("backpack");
     if (player.inventory.backpack.length === 0) {
       backpack.textContent = "背包为空";
       return;
     }
     const fragment = document.createDocumentFragment();
-    for (const stack of player.inventory.backpack) {
+    const snapshot = backpackSnapshotSignature(player.inventory.backpack);
+    player.inventory.backpack.forEach((stack, index) => {
       const item = document.createElement("span");
       item.className = "item-stack";
       const icon = document.createElement("img");
@@ -446,8 +470,26 @@ export class GameHud {
       const label = document.createElement("span");
       label.textContent = `${getItemLabel(stack.itemId)} ×${stack.quantity}`;
       item.append(icon, label);
+      if (canManageBackpack && this.options.onDropBackpackItem && this.options.touchInput) {
+        const drop = document.createElement("button");
+        drop.type = "button";
+        drop.className = "backpack-drop";
+        drop.dataset.dropBackpackItem = stack.itemId;
+        drop.dataset.dropBackpackIndex = index.toString();
+        drop.dataset.dropBackpackSnapshot = snapshot;
+        drop.setAttribute("aria-label", `丢弃 ${getItemLabel(stack.itemId)} ×${stack.quantity}`);
+        drop.textContent = "丢弃";
+        drop.disabled = !canDropBackpack;
+        item.append(drop);
+      } else if (canManageBackpack && this.options.onDropBackpackItem) {
+        const shortcut = document.createElement("kbd");
+        shortcut.className = "backpack-drop";
+        shortcut.classList.toggle("is-disabled", !canDropBackpack);
+        shortcut.textContent = `${index + 4} 丢弃`;
+        item.append(shortcut);
+      }
       fragment.append(item);
-    }
+    });
     backpack.replaceChildren(fragment);
   }
 

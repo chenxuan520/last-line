@@ -241,13 +241,15 @@ h1 {
   letter-spacing: 0.08em;
 }
 
-.settings-grid .volume-setting span {
+.settings-grid .volume-setting span,
+.settings-grid .sensitivity-setting span {
   display: flex;
   justify-content: space-between;
   gap: 8px;
 }
 
-.settings-grid .volume-setting output {
+.settings-grid .volume-setting output,
+.settings-grid .sensitivity-setting output {
   color: var(--signal-bright);
   font-variant-numeric: tabular-nums;
 }
@@ -1547,10 +1549,11 @@ h1 {
   bottom: 112px;
   left: clamp(18px, 1.8vw, 34px);
   display: flex;
-  max-width: min(570px, 52vw);
-  flex-wrap: wrap;
-  gap: 5px 6px;
+  max-width: calc(100vw - 36px);
+  flex-wrap: nowrap;
+  gap: 6px;
   opacity: 0.72;
+  white-space: nowrap;
 }
 
 .controls-card span {
@@ -1667,6 +1670,21 @@ h1 {
   object-fit: contain;
   opacity: 0.8;
   filter: saturate(76%);
+}
+
+.backpack-drop {
+  min-height: 24px;
+  padding: 4px 6px;
+  border: 1px solid rgb(213 224 192 / 20%);
+  color: #cbd2c5;
+  background: rgb(12 19 15 / 64%);
+  font: 700 8px/1 var(--tactical-font);
+  letter-spacing: 0.04em;
+}
+
+.backpack-drop.is-disabled,
+.backpack-drop:disabled {
+  opacity: 0.42;
 }
 
 .empty-slot-mark {
@@ -1959,7 +1977,7 @@ h1 {
   background: rgb(159 177 113 / 58%);
 }
 
-.touch-fire {
+.touch-fire-right {
   right: max(20px, env(safe-area-inset-right));
   bottom: max(72px, calc(env(safe-area-inset-bottom) + 58px));
   width: 76px;
@@ -1967,6 +1985,16 @@ h1 {
   border-color: rgb(219 112 91 / 48%);
   background: rgb(111 40 31 / 48%);
   font-size: 13px;
+}
+
+.touch-fire-left {
+  bottom: max(92px, calc(env(safe-area-inset-bottom) + 78px));
+  left: max(166px, calc(env(safe-area-inset-left) + 148px));
+  width: 62px;
+  height: 62px;
+  border-color: rgb(219 112 91 / 42%);
+  background: rgb(111 40 31 / 42%);
+  font-size: 11px;
 }
 
 .touch-jump {
@@ -2092,6 +2120,16 @@ h1 {
     justify-content: flex-start;
     background: rgb(10 15 13 / 58%);
     text-align: left;
+  }
+
+  #ui-root.is-touch-input .backpack-drop {
+    min-height: 44px;
+    padding: 8px 12px;
+    border-color: rgb(219 112 91 / 42%);
+    color: #f1d6d0;
+    background: rgb(111 40 31 / 42%);
+    pointer-events: auto;
+    touch-action: manipulation;
   }
 }
 
@@ -2301,7 +2339,8 @@ h1 {
   }
 
   .controls-card {
-    max-width: 470px;
+    transform: scale(0.9);
+    transform-origin: left bottom;
   }
 
   .inventory-card {
@@ -2355,9 +2394,13 @@ h1 {
     right: calc(clamp(18px, 1.8vw, 34px) + 182px);
   }
 
-  .controls-card,
   .inventory-card {
     max-width: 445px;
+  }
+
+  .controls-card {
+    transform: scale(0.8);
+    transform-origin: left bottom;
   }
 
   .controls-card span {

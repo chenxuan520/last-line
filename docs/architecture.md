@@ -28,9 +28,11 @@ Simultaneous lethal damage uses a deterministic tick-based selector. The selecte
 
 ## Controllers
 
-`HumanController` maps keyboard, mouse, and touch state to the same `ActorCommand`. `TouchInputAdapter` only tracks bounded Pointer Event state for the movement joystick, look region, fire hold, and one-shot HUD actions; it never reads or mutates authoritative match state. The mobile backpack action only opens the existing HUD inventory view and never creates a second inventory model. Portrait rotation, page hiding, pause, healing, and disposal clear held touch state to prevent stuck movement or fire. `MobileFullscreenController` requests fullscreen synchronously from a real start/retry click, then attempts a landscape orientation lock when supported. It never requests from `orientationchange`; rejected, unsupported, or exited fullscreen falls back to manual rotation and a non-blocking HUD retry action.
+`HumanController` maps keyboard, mouse, and touch state to the same `ActorCommand`. `TouchInputAdapter` only tracks bounded Pointer Event state for the movement joystick, look region, at most two fire holds, and one-shot HUD actions; it never reads or mutates authoritative match state. Mobile controls expose left and right fire buttons, and the right fire pointer can continue producing look deltas while held so firing does not block aim adjustment. The mobile backpack action only opens the existing HUD inventory view and never creates a second inventory model. Portrait rotation, page hiding, pause, healing, and disposal clear held touch state to prevent stuck movement or fire. `MobileFullscreenController` requests fullscreen synchronously from a real start/retry click, then attempts a landscape orientation lock when supported. It never requests from `orientationchange`; rejected, unsupported, or exited fullscreen falls back to manual rotation and a non-blocking HUD retry action.
 
 Each `BotController` has independent decision timers and memory. Bots use the same commands and systems as the player for movement, looting, firing, reloading, switching weapons, and healing.
+
+`InventorySystem` remains authoritative for all drops. Human controllers encode the selected backpack index and expected item ID into the existing one-shot `dropItem` command; the rule system validates both before dropping the entire stack. Desktop slots use keys `4`–`9`, while mobile slots expose HUD drop buttons. Full backpacks continue rejecting new stacks until the player explicitly frees a slot, and bot looting policy remains unchanged.
 
 ## Rendering
 
@@ -78,7 +80,7 @@ Server telemetry is deliberately observational. `LobbyDirectory` emits an absolu
 - Staggered AI decisions based on distance
 - Bounded multi-wall path search with per-Bot path reuse
 - Shared materials and hardware instances for static trees, shrubs, and decorative rocks; reusable loot records keep individually mutable meshes
-- Low/medium/high quality profiles keep all 384 authoritative trees at identical seeded positions and vary only foliage tessellation, decorative-rock/shrub density, hardware scaling, and 60/90/120 FPS ceilings. Low quality keeps procedural characters without downloading GLBs; medium/high load character GLBs on demand and use distance-based character LOD. Held weapons remain procedural at every quality level.
+- Low/medium/high quality profiles keep all 384 authoritative trees at identical seeded positions and vary only foliage tessellation, decorative-rock/shrub density, hardware scaling, and 60/90/120 FPS ceilings. Coarse-pointer rendering combines the selected hardware-scaling profile with up to 2x device pixel ratio, improving high-DPI mobile clarity without changing desktop rendering or allowing unbounded render-target growth. Low quality keeps procedural characters without downloading GLBs; medium/high load character GLBs on demand and use distance-based character LOD. Held weapons remain procedural at every quality level.
 - HUD state-heavy work runs at 10 Hz while scope, pause, orientation, and touch-control feedback remain render-frame responsive; leaderboard DOM rebuilds only when rank fields change
 - Safe-zone geometry reuses one updatable position buffer instead of reallocating vertex/normal arrays during shrinking
 - No dynamic shadows or full rigid-body simulation

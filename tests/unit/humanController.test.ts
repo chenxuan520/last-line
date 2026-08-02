@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HumanController } from "../../src/controllers/HumanController";
+import {
+  backpackSnapshotSignature,
+  parseBackpackStackDropRequest,
+} from "../../src/game/commands/ActorCommand";
 import { createActorState, createWeaponState, type MatchState } from "../../src/game/state/types";
 import { InventorySystem } from "../../src/game/systems/InventorySystem";
 
@@ -200,6 +204,43 @@ describe("HumanController weapon switching", () => {
     controller.dispose();
   });
 
+  it("maps desktop keys 4-9 and mobile requests to one-shot backpack stack drops", () => {
+    const canvas = new EventTarget() as HTMLCanvasElement;
+    const documentTarget = new EventTarget() as Document;
+    Object.defineProperty(documentTarget, "pointerLockElement", { configurable: true, value: canvas });
+    vi.stubGlobal("document", documentTarget);
+    const actor = createActorState("player", "player", { x: 0, y: 1.76, z: 0 });
+    actor.inventory.backpack = [
+      { itemId: "ammo.rifle", quantity: 40 },
+      { itemId: "medkit", quantity: 1 },
+    ];
+    const controller = new HumanController(canvas, 1, { touchEnabled: false });
+    controller.rememberActor(actor);
+
+    documentTarget.dispatchEvent(keyEvent("Digit5"));
+    expect(parseBackpackStackDropRequest(controller.createCommand(actor).dropItem ?? "")).toMatchObject({
+      index: 1,
+      itemId: "medkit",
+    });
+    expect(controller.createCommand(actor).dropItem).toBeNull();
+
+    controller.requestDropBackpackItem(0, "ammo.rifle");
+    expect(parseBackpackStackDropRequest(controller.createCommand(actor).dropItem ?? "")).toMatchObject({
+      index: 0,
+      itemId: "ammo.rifle",
+    });
+    controller.requestDropBackpackItem(1, "ammo.rifle");
+    expect(controller.createCommand(actor).dropItem).toBeNull();
+
+    const oldSnapshot = backpackSnapshotSignature(actor.inventory.backpack);
+    actor.inventory.backpack[0]!.quantity = 39;
+    controller.rememberActor(actor);
+    controller.requestDropBackpackItem(0, "ammo.rifle", oldSnapshot);
+    expect(parseBackpackStackDropRequest(controller.createCommand(actor).dropItem ?? "")?.snapshot)
+      .toBe(oldSnapshot);
+    controller.dispose();
+  });
+
   it("shows the leaderboard only while Tab is held", () => {
     const canvas = new EventTarget() as HTMLCanvasElement;
     const documentTarget = new EventTarget() as Document;
@@ -263,8 +304,8 @@ describe("HumanController weapon switching", () => {
 
     expect(controller.usesTouchControls()).toBe(true);
     expect(controller.isGameplayInputActive()).toBe(true);
-    expect(command.move.x).toBeCloseTo(Math.sin(0.42));
-    expect(command.move.z).toBeCloseTo(Math.cos(0.42));
+    expect(command.move.x).toBeCloseTo(Math.sin(0.6));
+    expect(command.move.z).toBeCloseTo(Math.cos(0.6));
     expect(command.sprint).toBe(true);
     expect(command.fire).toBe(true);
     expect(command.jump).toBe(true);
@@ -286,20 +327,103 @@ describe("HumanController weapon switching", () => {
     controller.dispose();
   });
 
-  it("suppresses held touch movement and fire when healing starts", () => {
+  it("applies the full touch sensitivity range to a fast mobile look baseline", () => {
     const canvas = new EventTarget() as HTMLCanvasElement;
     const documentTarget = new EventTarget() as Document;
     Object.defineProperty(documentTarget, "pointerLockElement", { configurable: true, value: null });
     vi.stubGlobal("document", documentTarget);
+    const lowSensitivity = new HumanController(canvas, 0.4, { touchEnabled: true });
+    const highSensitivity = new HumanController(canvas, 2, { touchEnabled: true });
+
+    lowSensitivity.applyTouchLook(100, 0);
+    highSensitivity.applyTouchLook(100, 0);
+
+    expect(lowSensitivity.getRotation().yaw).toBeCloseTo(0.24);
+    expect(highSensitivity.getRotation().yaw).toBeCloseTo(1.2);
+    expect(highSensitivity.getRotation().yaw / lowSensitivity.getRotation().yaw).toBeCloseTo(5);
+    lowSensitivity.dispose();
+    highSensitivity.dispose();
+  });
+
+  it("keeps the desktop mouse look baseline unchanged", () => {
+    const canvas = new EventTarget() as HTMLCanvasElement;
+    const documentTarget = new EventTarget() as Document;
+    Object.defineProperty(documentTarget, "pointerLockElement", { configurable: true, value: canvas });
+    vi.stubGlobal("document", documentTarget);
+    const controller = new HumanController(canvas, 1, { touchEnabled: false });
+
+    documentTarget.dispatchEvent(Object.assign(new Event("mousemove"), { movementX: 100, movementY: 0 }));
+
+    expect(controller.getRotation().yaw).toBeCloseTo(0.21);
+    controller.dispose();
+  });
+
+  it("clears dual touch fire through pause, hiding, blur, and disposal", () => {
+    const canvas = new EventTarget() as HTMLCanvasElement;
+    const documentTarget = new EventTarget() as Document;
+    const windowTarget = createTouchWindow();
+    const touchRoot = createTouchRoot();
+    let visibilityState: DocumentVisibilityState = "visible";
+    Object.defineProperty(documentTarget, "pointerLockElement", { configurable: true, value: null });
+    Object.defineProperty(documentTarget, "visibilityState", { configurable: true, get: () => visibilityState });
+    vi.stubGlobal("document", documentTarget);
+    vi.stubGlobal("window", windowTarget);
+    const actor = createActorState("player", "player", { x: 0, y: 1.76, z: 0 });
+    const controller = new HumanController(canvas, 1, { touchEnabled: true, touchRoot });
+    controller.rememberActor(actor);
+
+    pressTouchFire(touchRoot, 1, "fire-look");
+    pressTouchFire(touchRoot, 2, "fire");
+    expect(controller.createCommand(actor).fire).toBe(true);
+    pressTouchAction(touchRoot, 9, "pause");
+    expect(controller.createCommand(actor).fire).toBe(false);
+
+    controller.resumeInput();
+    pressTouchFire(touchRoot, 3, "fire-look");
+    pressTouchFire(touchRoot, 4, "fire");
+    visibilityState = "hidden";
+    documentTarget.dispatchEvent(new Event("visibilitychange"));
+    expect(controller.createCommand(actor).fire).toBe(false);
+
+    visibilityState = "visible";
+    controller.resumeInput();
+    pressTouchFire(touchRoot, 5, "fire-look");
+    pressTouchFire(touchRoot, 6, "fire");
+    windowTarget.dispatchEvent(new Event("blur"));
+    expect(controller.createCommand(actor).fire).toBe(false);
+
+    controller.resumeInput();
+    pressTouchFire(touchRoot, 7, "fire-look");
+    pressTouchFire(touchRoot, 8, "fire");
+    windowTarget.portrait = true;
+    windowTarget.dispatchEvent(new Event("orientationchange"));
+    expect(controller.createCommand(actor).fire).toBe(false);
+
+    windowTarget.portrait = false;
+    controller.resumeInput();
+    pressTouchFire(touchRoot, 10, "fire-look");
+    pressTouchFire(touchRoot, 11, "fire");
+    controller.dispose();
+    expect(controller.createCommand(actor).fire).toBe(false);
+  });
+
+  it("suppresses dual touch fire until every held pointer is released during healing", () => {
+    const canvas = new EventTarget() as HTMLCanvasElement;
+    const documentTarget = new EventTarget() as Document;
+    const windowTarget = createTouchWindow();
+    const touchRoot = createTouchRoot();
+    Object.defineProperty(documentTarget, "pointerLockElement", { configurable: true, value: null });
+    vi.stubGlobal("document", documentTarget);
+    vi.stubGlobal("window", windowTarget);
     const actor = createActorState("player", "player", { x: 0, y: 1.76, z: 0 });
     actor.health = 40;
     actor.inventory.backpack = [{ itemId: "bandage", quantity: 1 }];
-    const controller = new HumanController(canvas, 1, { touchEnabled: true });
+    const controller = new HumanController(canvas, 1, { touchEnabled: true, touchRoot });
     controller.rememberActor(actor);
 
-    controller.setTouchMovement(0.5, 0.5, 1);
-    controller.setTouchFire(true);
-    controller.triggerTouchAction("bandage");
+    pressTouchFire(touchRoot, 1, "fire-look");
+    pressTouchFire(touchRoot, 2, "fire");
+    pressTouchAction(touchRoot, 4, "bandage");
 
     expect(controller.createCommand(actor)).toMatchObject({
       move: { x: 0, y: 0, z: 0 },
@@ -308,6 +432,14 @@ describe("HumanController weapon switching", () => {
       useItem: "bandage",
     });
     expect(controller.createCommand(actor).useItem).toBeNull();
+    touchRoot.dispatchEvent(touchPointerEvent("pointerup", 1));
+    expect(controller.createCommand(actor).fire).toBe(false);
+    touchRoot.dispatchEvent(touchPointerEvent("pointerup", 2));
+    expect(controller.createCommand(actor).fire).toBe(false);
+
+    pressTouchFire(touchRoot, 3, "fire-look");
+    expect(controller.createCommand(actor).fire).toBe(true);
+    touchRoot.dispatchEvent(touchPointerEvent("pointerup", 3));
     controller.dispose();
   });
 
@@ -375,4 +507,55 @@ function wheelEvent(deltaY: number): Event {
 
 function mouseEvent(type: string, button: number): Event {
   return Object.assign(new Event(type), { button });
+}
+
+type TouchRoot = HTMLElement;
+
+type TouchWindow = Window & {
+  portrait: boolean;
+};
+
+function createTouchRoot(): TouchRoot {
+  const root = new EventTarget() as TouchRoot;
+  Object.assign(root, {
+    dataset: {} as DOMStringMap,
+    closest: () => root,
+    setPointerCapture: () => undefined,
+    querySelector: () => null,
+  });
+  return root;
+}
+
+function createTouchWindow(): TouchWindow {
+  const windowTarget = new EventTarget() as unknown as TouchWindow;
+  Object.assign(windowTarget, {
+    portrait: false,
+    matchMedia: (query: string) => ({ matches: query === "(orientation: portrait)" && windowTarget.portrait }),
+  });
+  return windowTarget;
+}
+
+function pressTouchFire(root: TouchRoot, pointerId: number, role: "fire" | "fire-look"): void {
+  root.dataset.touchAction = "fire";
+  root.dataset.touchRole = role;
+  root.dispatchEvent(touchPointerEvent("pointerdown", pointerId));
+}
+
+function pressTouchAction(
+  root: TouchRoot,
+  pointerId: number,
+  action: "bandage" | "pause",
+): void {
+  root.dataset.touchAction = action;
+  delete root.dataset.touchRole;
+  root.dispatchEvent(touchPointerEvent("pointerdown", pointerId));
+}
+
+function touchPointerEvent(type: string, pointerId: number): Event {
+  return Object.assign(new Event(type, { cancelable: true }), {
+    pointerId,
+    pointerType: "touch",
+    clientX: pointerId * 10,
+    clientY: 20,
+  });
 }

@@ -53,7 +53,7 @@ export function normalizeTouchJoystick(
 export class TouchInputAdapter {
   private movementPointerId: number | null = null;
   private lookPointerId: number | null = null;
-  private firePointerId: number | null = null;
+  private readonly firePointers = new Map<number, { lookX: number; lookY: number; controlsLook: boolean }>();
   private movementElement: HTMLElement | null = null;
   private movementSuppressed = false;
   private lookX = 0;
@@ -80,7 +80,7 @@ export class TouchInputAdapter {
   public reset(): void {
     this.movementPointerId = null;
     this.lookPointerId = null;
-    this.firePointerId = null;
+    this.firePointers.clear();
     this.movementSuppressed = false;
     this.sink.setTouchMovement(0, 0, 0);
     this.sink.setTouchFire(false);
@@ -106,8 +106,12 @@ export class TouchInputAdapter {
       event.preventDefault();
       control.setPointerCapture?.(event.pointerId);
       if (action === "fire") {
-        if (this.firePointerId !== null) return;
-        this.firePointerId = event.pointerId;
+        if (this.firePointers.size >= 2 || this.firePointers.has(event.pointerId)) return;
+        this.firePointers.set(event.pointerId, {
+          lookX: event.clientX,
+          lookY: event.clientY,
+          controlsLook: role === "fire-look",
+        });
         this.sink.setTouchFire(true);
       } else {
         this.sink.triggerTouchAction(action);
@@ -143,6 +147,14 @@ export class TouchInputAdapter {
       this.sink.applyTouchLook(event.clientX - this.lookX, event.clientY - this.lookY);
       this.lookX = event.clientX;
       this.lookY = event.clientY;
+      return;
+    }
+    const firePointer = this.firePointers.get(event.pointerId);
+    if (firePointer?.controlsLook) {
+      event.preventDefault();
+      this.sink.applyTouchLook(event.clientX - firePointer.lookX, event.clientY - firePointer.lookY);
+      firePointer.lookX = event.clientX;
+      firePointer.lookY = event.clientY;
     }
   };
 
@@ -158,10 +170,9 @@ export class TouchInputAdapter {
       event.preventDefault();
       this.lookPointerId = null;
     }
-    if (event.pointerId === this.firePointerId) {
+    if (this.firePointers.delete(event.pointerId)) {
       event.preventDefault();
-      this.firePointerId = null;
-      this.sink.setTouchFire(false);
+      this.sink.setTouchFire(this.firePointers.size > 0);
     }
   };
 
