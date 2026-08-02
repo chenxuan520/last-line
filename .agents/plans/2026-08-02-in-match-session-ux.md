@@ -34,6 +34,7 @@
 - 2026-08-02 23:17：完整门禁与浏览器验收通过。桌面单机从真实“开始游戏”点击进入后，加载结束仍保持 pointer lock 且暂停卡未显示。单机淘汰结果卡静音浏览器注入验收得到按钮 `重新部署` / `返回大厅`，点击后仅触发各自 callback、无横向溢出；同一验证确认联机淘汰结果仍只有原有 `返回联机大厅`，未改变联机死亡语义。自动验证、构建与预算结果同关联性能 plan；浏览器 console 无 error/warn，页面和服务已立即清理。
 - 2026-08-02 23:26：采纳 Round 7 pointer-lock Medium。新增安全调用边界：API 缺失、同步抛错、旧式 void 返回和异步 reject 均被包含，且无论请求结果如何都会继续执行 fullscreen 激活与 `startMatch()`，由原暂停卡承担失败兜底。新增 2 项纯函数回归并与相关投影/平滑测试共 17 项通过，等待独立复审。
 - 2026-08-02 23:31：采纳 Round 8 对第二次 pointer-lock 请求的补充 finding。安全实现移入共享 `controllers/pointerLock.ts`，开始点击与 `BattleRoyaleSession.resumeInput()` 均复用；session 仅在 canvas 尚未锁定时请求，任何 unsupported/sync throw/void/reject 均不再冒泡至加载失败分支。app typecheck、3 files / 17 targeted tests、browser build、预算和 diff check 通过；最新 browser entry 1,036,268 bytes、CSS 44,894 bytes，均未放宽预算。等待独立复审。
+- 2026-08-02 23:44：Round 9 独立复审无 blocker/high/medium，gameplay commit `3c09969` 已推送。GitHub Actions run `30754671946`（含 Docker image/health smoke）、GitHub Pages、Cloudflare Pages/custom domain 均成功；因自动 Worker 未更新，完整 fallback 部署与 production smoke 通过，当前 Worker version `c66622dc-05bc-46d4-b396-1443501067ab`。单机 pointer-lock、单机死亡双按钮以及保持联机死亡不变的改动已随生产客户端上线。
 
 ## Review
 
@@ -106,3 +107,9 @@
 - 结论：通过，本次审查未发现 blocker/high/medium；Round 8 pointer-lock Medium 已关闭。共享 helper 对 API 缺失、同步异常、legacy void 和可 catch rejection 均不向调用方冒泡；GameApp 仍在真实用户手势内同步请求并无条件继续启动，session 已持锁时不重复请求，未持锁时同样使用安全 helper，因此失败后能够完成 start/redeploy 并显示既有 resume fallback。
 - 兼容性复核：触控路径仍由 `supportsTouchInput()`/`HumanController.usesTouchControls()` 隔离，不触发 pointer lock；新 helper 无 imports，是 GameApp 与 BattleRoyaleSession 共同依赖的叶子模块，不形成循环依赖或新增启动副作用。单机淘汰仍为 `重新部署` + `返回大厅`，联机淘汰仍只有 `返回联机大厅`。
 - 验证依据：接受 23:31 已记录的 app typecheck、17 项 targeted tests、browser build、预算和 diff check，以及此前完整门禁与浏览器证据；本轮仅做静态复审。
+
+### 2026-08-02 — Final deployment-record review (Round 10)
+
+- 审查范围：仅复核相对 gameplay commit `3c09969` 新增的 23:44 Build 部署记录；排除 staged `.gitignore` 与暂停中的 version-injection 文件，不复审实现且未运行 tests/builds。
+- 结论：通过，本次事实一致性审查未发现 blocker/high/medium。`3c09969` 已推送且 `HEAD`/`main`/`origin/main` 一致；GitHub Actions run `30754671946`、production Docker health smoke、GitHub Pages、Cloudflare Pages/custom domain 客户端发布，以及自动 Worker stale 后的 fallback 部署与 production smoke 状态均与已提供事实一致。
+- 发布标识复核：公开客户端为 `index-Cqv7dPoB.js`，fallback 包含 Worker typecheck、31 tests、dry-run、部署和 protocol-3 smoke，新 Worker version 为 `c66622dc-05bc-46d4-b396-1443501067ab`。

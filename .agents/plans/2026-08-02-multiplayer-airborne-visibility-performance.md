@@ -33,6 +33,7 @@
 - 2026-08-02 22:57：用户生产复验确认水平 60m 高空 footprint 仍几乎看不到物资，并补充开局飞机阶段会闪现。重新核对正式站已部署 `4da0c78` 客户端；生产探针确认 `match.full` 在航线起点包含 0 件物资，60m 方案沿航线同屏仅约 3–5 件，未达到实际可见性目标。开局闪现根因确认为地图加载期间服务端已推进、客户端却先渲染旧 full 后再应用合并后的最新 snapshot，加载越久首帧追赶距离越大并触发 24m snap。当前修正为 session 首帧前吸收积压快照并重置展示时间线；飞机/跳伞物资 footprint 扩至与 actor replication 相同的水平 400m，落地仍保持 60m，steady frame 仍只发 transition delta。seed 2026 全航线确定性探针峰值 47 件、累计 116 件、单步最多 5 件进入或 2 件离开；代表初始投影约 31KB，仍低于现有 50KB full-state 上限。针对性 3 files / 32 tests 与 app typecheck 已通过，尚待完整门禁和最终浏览器验收。
 - 2026-08-02 23:17：完整自动门禁通过：`npm run typecheck`；unit 40 files / 362 tests、Worker 4/31、standalone 3/20；Worker dry-run、browser/standalone server builds、YAML 解析和 `git diff --check`。预算最终为 browser entry 1,036,163/1,075,000、CSS 44,894/45,000、Worker 395,454/400,000、standalone 417,300/425,000，全部通过；首次 CSS 超限 35 bytes 后未调高预算，改为复用既有双按钮布局并重新构建通过。本地 production standalone 双客户端确认高空物资通过真实 WebSocket 以 transition delta 持续进入，快照稳态仍约 10Hz；5 秒 RAF 窗口平均 8.33ms、最大 10.3ms、0 个 >25ms，console 无 error/warn。浏览器页/context、standalone 与临时数据均已清理，仅保留 `about:blank`。本机无 Docker，真实 image smoke 留给推送后的 GitHub runner。
 - 2026-08-02 23:26：采纳 Round 7 Medium。HUD 现在于同一个同步 `start()` 调用中先创建，再消费加载期积压消息，随后才重置 correction/remote pose/render tick；因此浏览器仍不会在中间绘制旧 full，但积压的本地死亡、赛果和 connection feed 事件已有展示目标，不再被静默消费。针对性 app typecheck 与 3 files / 17 tests 通过，等待独立复审。
+- 2026-08-02 23:44：Round 9 独立复审通过后，gameplay commit `3c09969`（`fix: improve airborne loot and match startup`）已推送 `main`。GitHub Actions run `30754671946` 的 typecheck、完整 tests、browser/Worker/server builds、budgets、production Docker build 与只读非 root `/health` smoke 全部成功；GitHub Pages 和 Cloudflare Pages/custom domain 均已上线新客户端 `index-Cqv7dPoB.js`。自动 Worker deployment 仍停旧版本，按规则执行 `npm run deploy:worker` fallback，Worker typecheck、31 tests、dry-run、正式部署与 production protocol-3 smoke 全部通过；当前 Worker version `c66622dc-05bc-46d4-b396-1443501067ab`。本次实现、审查、提交、推送、Pages/Worker 部署与生产 smoke 已完成。
 
 ## Review
 
@@ -72,3 +73,9 @@
 - 审查范围：沿用 Round 7/8 的 `main@3f17b4a` gameplay/UX 范围与排除项；复核最终 pointer-lock follow-up 未影响 `MultiplayerSession` bootstrap，并再次对照 400m airborne/60m grounded loot、transition lifecycle、交互距离与性能边界。未重复运行完整门禁。
 - 结论：通过，本次审查未发现 blocker/high/medium。Round 7 的积压事件/首帧 finding 继续保持关闭：HUD、消息消费、bootstrap pose/correction/render-tick reset 和首次视觉同步仍处于同一同步调用栈，最新 snapshot 在任何浏览器帧前生效；pointer-lock helper 改动不进入该联机状态链路。
 - 验证依据：沿用已记录的完整 typecheck/tests/build/budgets、浏览器/standalone 探针，以及 23:31 的 app typecheck、17 项 targeted tests、browser build、预算和 diff check；本轮仅做静态复审。
+
+### 2026-08-02 — Final deployment-record review (Round 10)
+
+- 审查范围：仅复核相对 gameplay commit `3c09969` 新增的 23:44 Build 部署记录；排除 staged `.gitignore` 与暂停中的 version-injection 文件，不复审实现且未运行 tests/builds。
+- 结论：通过，本次事实一致性审查未发现 blocker/high/medium。`HEAD`、`main`、`origin/main` 均为 `3c09969`；记录与已提供事实一致：GitHub Actions run `30754671946` 完整检查、production Docker build/health smoke 成功，GitHub Pages 成功，Cloudflare Pages/custom domain 提供 `index-Cqv7dPoB.js`。
+- Worker 记录一致：自动 deployment 保持旧版本后执行完整 `npm run deploy:worker` fallback，Worker typecheck、31 tests、dry-run、部署和 production protocol-3 smoke 均成功；新版本为 `c66622dc-05bc-46d4-b396-1443501067ab`。
