@@ -303,7 +303,6 @@ h1 {
   font-weight: 700;
 }
 
-.settings-grid .ai-sniper-setting,
 .settings-grid .loot-model-setting {
   grid-column: 1 / -1;
 }
@@ -2555,13 +2554,10 @@ h1 {
     line-height: 1.55;
   }
 
-  .settings-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .settings-grid .ai-sniper-setting,
-  .settings-grid .loot-model-setting {
-    grid-column: auto;
+  .settings-grid .starter-option {
+    gap: 6px;
+    font-size: 10px;
+    letter-spacing: 0;
   }
 
   .menu-actions,

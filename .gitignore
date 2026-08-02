@@ -10,3 +10,4 @@ test-results/
 .env.standalone
 .DS_Store
 *.tsbuildinfo
+.opencode
