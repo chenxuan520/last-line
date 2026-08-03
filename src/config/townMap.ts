@@ -59,6 +59,9 @@ interface TownBuildingGeometry {
 interface TownStreetGrid {
   verticalRoads: number[];
   horizontalRoads: number[];
+  verticalEdges: boolean[][];
+  horizontalEdges: boolean[][];
+  roadSegments: Array<readonly [number, number, number, number]>;
 }
 
 const CORE_BLOCK_COUNT = 8;
@@ -67,6 +70,9 @@ const CORE_ROAD_EXTENT = 720;
 const MINIMUM_BLOCK_SPAN = 150;
 const MAXIMUM_BLOCK_SPAN = 205;
 const ROAD_BUILDING_SETBACK = 14.25;
+const MERGED_BLOCK_SETBACK = 7;
+const PUBLIC_SPACE_STRIP_DEPTH = 24;
+const ROAD_NODE_JITTER = 7;
 const MINIMUM_PARCEL_SPAN = 34;
 const MINIMUM_PARCEL_AREA = 1_450;
 const MINIMUM_BUILDING_SPAN = 28;
@@ -137,6 +143,14 @@ const SECONDARY_POINT_BLOCKS = [
   [2, 0],
   [5, 0],
 ] as const;
+const POINT_BLOCKS = new Set(
+  [...MAP_POINT_BLOCKS, ...SECONDARY_POINT_BLOCKS].map(([x, z]) => `${x}:${z}`),
+);
+const BLOCK_BUILDING_KINDS: readonly (readonly TownBuildingKind[])[] = [
+  ["factory", "warehouse", "factory", "commercial", "warehouse", "tower"],
+  ["rowhouse", "commercial", "corner", "rowhouse", "commercial", "tower"],
+  BUILDING_KINDS,
+];
 
 export function createTownMapBlueprint(seed: number): TownMapBlueprint {
   const random = createSeededRandom(seed ^ 0x4f1bbcdc);
@@ -149,6 +163,7 @@ export function createTownMapBlueprint(seed: number): TownMapBlueprint {
       streetGrid,
       MAP_POINT_BLOCKS[index] ?? [3, 3],
       buildings,
+      streetGrid.roadSegments,
       mapPointRandom,
     )
   );
@@ -158,6 +173,7 @@ export function createTownMapBlueprint(seed: number): TownMapBlueprint {
       streetGrid,
       SECONDARY_POINT_BLOCKS[index] ?? [3, 3],
       buildings,
+      streetGrid.roadSegments,
       mapPointRandom,
     )
   );
@@ -205,63 +221,45 @@ function pointForBlock(
   streetGrid: TownStreetGrid,
   block: readonly [number, number],
   buildings: readonly TownBuildingSpec[],
+  roads: readonly (readonly [number, number, number, number])[],
   random: () => number,
 ): TownPointSpec {
   const minimumX = streetGrid.verticalRoads[block[0]];
   const maximumX = streetGrid.verticalRoads[block[0] + 1];
   const minimumZ = streetGrid.horizontalRoads[block[1]];
   const maximumZ = streetGrid.horizontalRoads[block[1] + 1];
-  if (
-    minimumX === undefined ||
-    maximumX === undefined ||
-    minimumZ === undefined ||
-    maximumZ === undefined
-  ) {
+  if (minimumX === undefined || maximumX === undefined || minimumZ === undefined || maximumZ === undefined) {
     throw new Error(`Town point block missing: ${point.name}`);
   }
-  const minimumPointX = minimumX +
-    TOWN_ROAD_SHOULDER_HALF_WIDTH +
-    TOWN_POINT_OBSTACLE_CLEARANCE +
-    TOWN_POINT_HALF_WIDTH;
-  const maximumPointX = maximumX -
-    TOWN_ROAD_SHOULDER_HALF_WIDTH -
-    TOWN_POINT_OBSTACLE_CLEARANCE -
-    TOWN_POINT_HALF_WIDTH;
-  const minimumPointZ = minimumZ +
-    TOWN_ROAD_SHOULDER_HALF_WIDTH +
-    TOWN_POINT_OBSTACLE_CLEARANCE +
-    TOWN_POINT_HALF_DEPTH;
-  const maximumPointZ = maximumZ -
-    TOWN_ROAD_SHOULDER_HALF_WIDTH -
-    TOWN_POINT_OBSTACLE_CLEARANCE -
-    TOWN_POINT_HALF_DEPTH;
+  const horizontalPadding = TOWN_ROAD_SHOULDER_HALF_WIDTH + TOWN_POINT_OBSTACLE_CLEARANCE;
+  const minimumPointX = minimumX + horizontalPadding + TOWN_POINT_HALF_WIDTH;
+  const maximumPointX = maximumX - horizontalPadding - TOWN_POINT_HALF_WIDTH;
+  const minimumPointZ = minimumZ + horizontalPadding + TOWN_POINT_HALF_DEPTH;
+  const maximumPointZ = maximumZ - horizontalPadding - TOWN_POINT_HALF_DEPTH;
+  const pointClearsMap = (candidate: { x: number; z: number }): boolean =>
+    buildings.every((building) => pointClearsTownBuilding(candidate, building)) &&
+    townFootprintClearsRoads(
+      roads,
+      candidate.x,
+      candidate.z,
+      TOWN_POINT_HALF_WIDTH * 2,
+      TOWN_POINT_HALF_DEPTH * 2,
+      TOWN_POINT_OBSTACLE_CLEARANCE,
+    );
   for (let attempt = 0; attempt < TOWN_POINT_CANDIDATE_COUNT; attempt += 1) {
-    const edge = attempt < TOWN_POINT_CANDIDATE_COUNT * 0.75
-      ? Math.floor(random() * 4)
-      : -1;
+    const edge = attempt < TOWN_POINT_CANDIDATE_COUNT * 0.75 ? Math.floor(random() * 4) : -1;
     const inset = randomBetween(random, 0, 4);
     const candidate = {
-      x: edge === 0
-        ? minimumPointX + inset
-        : edge === 1
-          ? maximumPointX - inset
-          : randomBetween(random, minimumPointX, maximumPointX),
-      z: edge === 2
-        ? minimumPointZ + inset
-        : edge === 3
-          ? maximumPointZ - inset
-          : randomBetween(random, minimumPointZ, maximumPointZ),
+      x: edge === 0 ? minimumPointX + inset : edge === 1 ? maximumPointX - inset :
+        randomBetween(random, minimumPointX, maximumPointX),
+      z: edge === 2 ? minimumPointZ + inset : edge === 3 ? maximumPointZ - inset :
+        randomBetween(random, minimumPointZ, maximumPointZ),
     };
-    if (buildings.every((building) => pointClearsTownBuilding(candidate, building))) {
-      return { ...point, ...candidate };
-    }
+    if (pointClearsMap(candidate)) return { ...point, ...candidate };
   }
-  const fallbackStep = 4;
-  for (let x = minimumPointX; x <= maximumPointX; x += fallbackStep) {
-    for (let z = minimumPointZ; z <= maximumPointZ; z += fallbackStep) {
-      if (buildings.every((building) => pointClearsTownBuilding({ x, z }, building))) {
-        return { ...point, x, z };
-      }
+  for (let x = minimumPointX; x <= maximumPointX; x += 4) {
+    for (let z = minimumPointZ; z <= maximumPointZ; z += 4) {
+      if (pointClearsMap({ x, z })) return { ...point, x, z };
     }
   }
   throw new Error(`Town point block has no clear public space: ${point.name}`);
@@ -288,6 +286,11 @@ function pointClearsTownBuilding(
 
 function createBuildingSpecs(streetGrid: TownStreetGrid, random: () => number): TownBuildingSpec[] {
   const buildings: TownBuildingSpec[] = [];
+  const blockStyles = Array.from(
+    { length: CORE_BLOCK_COUNT * CORE_BLOCK_COUNT },
+    (_, index) => index % BLOCK_BUILDING_KINDS.length,
+  );
+  shuffleInPlace(blockStyles, random);
   for (let blockZ = 0; blockZ < CORE_BLOCK_COUNT; blockZ += 1) {
     for (let blockX = 0; blockX < CORE_BLOCK_COUNT; blockX += 1) {
       const blockIndex = blockZ * CORE_BLOCK_COUNT + blockX;
@@ -303,12 +306,27 @@ function createBuildingSpecs(streetGrid: TownStreetGrid, random: () => number): 
       ) {
         throw new Error(`Town street block missing: ${blockIndex}`);
       }
+      const style = blockStyles[blockIndex] ?? 2;
+      const leftSetback = streetGrid.verticalEdges[blockX]?.[blockZ]
+        ? ROAD_BUILDING_SETBACK
+        : MERGED_BLOCK_SETBACK;
+      const rightSetback = streetGrid.verticalEdges[blockX + 1]?.[blockZ]
+        ? ROAD_BUILDING_SETBACK
+        : MERGED_BLOCK_SETBACK;
+      const lowerSetback = streetGrid.horizontalEdges[blockZ]?.[blockX]
+        ? ROAD_BUILDING_SETBACK
+        : MERGED_BLOCK_SETBACK;
+      const upperSetback = streetGrid.horizontalEdges[blockZ + 1]?.[blockX]
+        ? ROAD_BUILDING_SETBACK
+        : MERGED_BLOCK_SETBACK;
       const geometries = createCoreBlockGeometries({
-        minimumX: minimumRoadX + ROAD_BUILDING_SETBACK,
-        maximumX: maximumRoadX - ROAD_BUILDING_SETBACK,
-        minimumZ: minimumRoadZ + ROAD_BUILDING_SETBACK,
-        maximumZ: maximumRoadZ - ROAD_BUILDING_SETBACK,
-      }, random);
+        minimumX: minimumRoadX + leftSetback,
+        maximumX: maximumRoadX - rightSetback,
+        minimumZ: minimumRoadZ + lowerSetback,
+        maximumZ: maximumRoadZ - upperSetback -
+          (POINT_BLOCKS.has(`${blockX}:${blockZ}`) ? PUBLIC_SPACE_STRIP_DEPTH : 0),
+      }, random, style, streetGrid.roadSegments);
+      const kinds = BLOCK_BUILDING_KINDS[style] ?? BUILDING_KINDS;
       for (const [localIndex, geometry] of geometries.entries()) {
         buildings.push(buildingSpec(
           coreBuildingId(blockIndex, localIndex),
@@ -318,6 +336,7 @@ function createBuildingSpecs(streetGrid: TownStreetGrid, random: () => number): 
           geometry.depth,
           buildings.length,
           random,
+          kinds[localIndex] ?? "factory",
         ));
       }
     }
@@ -379,6 +398,7 @@ function buildingSpec(
   depth: number,
   index: number,
   random: () => number,
+  kind: TownBuildingKind = buildingKind(index),
 ): TownBuildingSpec {
   return {
     id,
@@ -390,7 +410,7 @@ function buildingSpec(
     storyHeight: STORY_HEIGHT,
     color: TOWN_COLORS[index % TOWN_COLORS.length] ?? "#59605f",
     stairwellSide: random() < 0.5 ? -1 : 1,
-    kind: buildingKind(index),
+    kind,
   };
 }
 
@@ -401,8 +421,10 @@ function buildingKind(index: number): TownBuildingKind {
 function createCoreBlockGeometries(
   root: TownParcel,
   random: () => number,
+  style: number,
+  roads: readonly (readonly [number, number, number, number])[],
 ): TownBuildingGeometry[] {
-  for (let attempt = 0; attempt < 96; attempt += 1) {
+  for (let attempt = 0; attempt < 256; attempt += 1) {
     const rootSplits = parcelSplitOptions(root, CORE_BUILDINGS_PER_BLOCK)
       .filter((option) =>
         option.axis === "x" &&
@@ -420,8 +442,8 @@ function createCoreBlockGeometries(
       random,
     );
     if (!leftParcels || !rightParcels) continue;
-    const left = leftParcels.map((parcel) => buildingGeometry(parcel, random));
-    const right = rightParcels.map((parcel) => buildingGeometry(parcel, random));
+    const left = leftParcels.map((parcel) => buildingGeometry(parcel, random, style));
+    const right = rightParcels.map((parcel) => buildingGeometry(parcel, random, style));
     const bridgePairs = left.flatMap((leftGeometry, leftIndex) =>
       right.flatMap((rightGeometry, rightIndex) => {
         const gap = rightGeometry.x - rightGeometry.width / 2 -
@@ -457,7 +479,16 @@ function createCoreBlockGeometries(
       ...right.filter((_, index) => index !== bridgePair.rightIndex),
     ];
     shuffleInPlace(remaining, random);
-    return [from, to, ...remaining];
+    const result = [from, to, ...remaining];
+    if (result.some((geometry) => !townFootprintClearsRoads(
+      roads,
+      geometry.x,
+      geometry.z,
+      geometry.width,
+      geometry.depth,
+      0.5,
+    ))) continue;
+    return result;
   }
   throw new Error("Town core block cannot generate a valid random layout");
 }
@@ -540,11 +571,13 @@ function splitParcel(
   ];
 }
 
-function buildingGeometry(parcel: TownParcel, random: () => number): TownBuildingGeometry {
-  const leftInset = randomBetween(random, 3, 7.5);
-  const rightInset = randomBetween(random, 3, 7.5);
-  const frontInset = randomBetween(random, 3, 7.5);
-  const backInset = randomBetween(random, 3, 7.5);
+function buildingGeometry(parcel: TownParcel, random: () => number, style: number): TownBuildingGeometry {
+  const minimumInset = style === 1 ? 2 : style === 0 ? 4 : 3;
+  const maximumInset = style === 1 ? 5 : style === 0 ? 8.5 : 7.5;
+  const leftInset = randomBetween(random, minimumInset, maximumInset);
+  const rightInset = randomBetween(random, minimumInset, maximumInset);
+  const frontInset = randomBetween(random, minimumInset, maximumInset);
+  const backInset = randomBetween(random, minimumInset, maximumInset);
   const minimumX = parcel.minimumX + leftInset;
   const maximumX = parcel.maximumX - rightInset;
   const minimumZ = parcel.minimumZ + frontInset;
@@ -621,10 +654,54 @@ function assignStories(
 }
 
 function createStreetGrid(random: () => number): TownStreetGrid {
-  return {
-    verticalRoads: createRoadAxes(random),
-    horizontalRoads: createRoadAxes(random),
-  };
+  const verticalRoads = createRoadAxes(random);
+  const horizontalRoads = createRoadAxes(random);
+  const nodes = horizontalRoads.map((z) =>
+    verticalRoads.map((x) => ({
+      x: x + randomBetween(random, -ROAD_NODE_JITTER, ROAD_NODE_JITTER),
+      z: z + randomBetween(random, -ROAD_NODE_JITTER, ROAD_NODE_JITTER),
+    }))
+  );
+  const horizontalEdges = Array.from({ length: CORE_BLOCK_COUNT + 1 }, (_, row) =>
+    row % 2 === 0 ? Array.from({ length: CORE_BLOCK_COUNT }, () => true) : createLocalRoadEdges(random)
+  );
+  const verticalEdges = Array.from({ length: CORE_BLOCK_COUNT + 1 }, (_, column) =>
+    column % 2 === 0 ? Array.from({ length: CORE_BLOCK_COUNT }, () => true) : createLocalRoadEdges(random)
+  );
+  const roadSegments: Array<readonly [number, number, number, number]> = [];
+  for (let row = 0; row <= CORE_BLOCK_COUNT; row += 1) {
+    for (let column = 0; column < CORE_BLOCK_COUNT; column += 1) {
+      if (!horizontalEdges[row]?.[column]) continue;
+      const start = nodes[row]?.[column];
+      const end = nodes[row]?.[column + 1];
+      if (start && end) roadSegments.push([start.x, start.z, end.x, end.z]);
+    }
+    if (row % 2 !== 0) continue;
+    const first = nodes[row]?.[0];
+    const last = nodes[row]?.[CORE_BLOCK_COUNT];
+    if (first) roadSegments.push([-850, first.z, first.x, first.z]);
+    if (last) roadSegments.push([last.x, last.z, 850, last.z]);
+  }
+  for (let column = 0; column <= CORE_BLOCK_COUNT; column += 1) {
+    for (let row = 0; row < CORE_BLOCK_COUNT; row += 1) {
+      if (!verticalEdges[column]?.[row]) continue;
+      const start = nodes[row]?.[column];
+      const end = nodes[row + 1]?.[column];
+      if (start && end) roadSegments.push([start.x, start.z, end.x, end.z]);
+    }
+    if (column % 2 !== 0) continue;
+    const first = nodes[0]?.[column];
+    const last = nodes[CORE_BLOCK_COUNT]?.[column];
+    if (first) roadSegments.push([first.x, -850, first.x, first.z]);
+    if (last) roadSegments.push([last.x, last.z, last.x, 850]);
+  }
+  return { verticalRoads, horizontalRoads, verticalEdges, horizontalEdges, roadSegments };
+}
+
+function createLocalRoadEdges(random: () => number): boolean[] {
+  const edgeCount = 3 + Math.floor(random() * 4);
+  const selected = new Set(shuffledIndexes(CORE_BLOCK_COUNT, random).slice(0, edgeCount));
+  return Array.from({ length: CORE_BLOCK_COUNT }, (_, index) => selected.has(index));
 }
 
 function createRoadAxes(random: () => number): number[] {
@@ -647,10 +724,52 @@ function createRoadAxes(random: () => number): number[] {
 }
 
 function createRoadSegments(streetGrid: TownStreetGrid): Array<readonly [number, number, number, number]> {
-  return [
-    ...streetGrid.verticalRoads.map((x) => [x, -850, x, 850] as const),
-    ...streetGrid.horizontalRoads.map((z) => [-850, z, 850, z] as const),
-  ];
+  return streetGrid.roadSegments;
+}
+
+export function townFootprintClearsRoads(
+  roads: readonly (readonly [number, number, number, number])[],
+  centerX: number,
+  centerZ: number,
+  width: number,
+  depth: number,
+  clearance = 0,
+): boolean {
+  const padding = TOWN_ROAD_SHOULDER_HALF_WIDTH + clearance;
+  return roads.every((road) => !segmentIntersectsRectangle(
+    road,
+    centerX - width / 2 - padding,
+    centerX + width / 2 + padding,
+    centerZ - depth / 2 - padding,
+    centerZ + depth / 2 + padding,
+  ));
+}
+
+function segmentIntersectsRectangle(
+  road: readonly [number, number, number, number],
+  minimumX: number,
+  maximumX: number,
+  minimumZ: number,
+  maximumZ: number,
+): boolean {
+  const [startX, startZ, endX, endZ] = road;
+  let minimumProgress = 0;
+  let maximumProgress = 1;
+  for (const [start, delta, minimum, maximum] of [
+    [startX, endX - startX, minimumX, maximumX],
+    [startZ, endZ - startZ, minimumZ, maximumZ],
+  ] as const) {
+    if (Math.abs(delta) < 1e-9) {
+      if (start < minimum || start > maximum) return false;
+      continue;
+    }
+    const first = (minimum - start) / delta;
+    const second = (maximum - start) / delta;
+    minimumProgress = Math.max(minimumProgress, Math.min(first, second));
+    maximumProgress = Math.min(maximumProgress, Math.max(first, second));
+    if (minimumProgress > maximumProgress) return false;
+  }
+  return true;
 }
 
 function coreBuildingId(blockIndex: number, localIndex: number): string {

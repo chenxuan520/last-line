@@ -27,6 +27,7 @@ import {
   TOWN_POINT_HALF_DEPTH,
   TOWN_POINT_HALF_WIDTH,
   TOWN_POINT_OBSTACLE_CLEARANCE,
+  TOWN_ROAD_SHOULDER_HALF_WIDTH,
 } from "../../src/config/townMap";
 import { createIdleCommand } from "../../src/game/commands/ActorCommand";
 import { createBattleRoyaleState, createBattleRoyaleStateForHumans } from "../../src/game/modes/BattleRoyaleMode";
@@ -1216,6 +1217,16 @@ describe("IslandScene lifecycle", () => {
           Math.abs(placement.z - point.position.z) >
             horizontalRadius + TOWN_POINT_HALF_DEPTH + TOWN_POINT_OBSTACLE_CLEARANCE
         ), `${seed}:${quality}:${placement.name}`).toBe(true);
+        expect(layout.roadSegments.every((road) =>
+          !roadIntersectsFootprint(
+            road,
+            placement.x,
+            placement.z,
+            horizontalRadius * 2,
+            horizontalRadius * 2,
+            TOWN_ROAD_SHOULDER_HALF_WIDTH + 0.5,
+          )
+        ), `${seed}:${quality}:${placement.name}:road`).toBe(true);
       }
     },
   );
@@ -1252,6 +1263,34 @@ describe("IslandScene lifecycle", () => {
     engine.dispose();
   }, 30_000);
 });
+
+function roadIntersectsFootprint(
+  road: readonly [number, number, number, number],
+  centerX: number,
+  centerZ: number,
+  width: number,
+  depth: number,
+  padding: number,
+): boolean {
+  const [startX, startZ, endX, endZ] = road;
+  let minimumProgress = 0;
+  let maximumProgress = 1;
+  for (const [start, delta, minimum, maximum] of [
+    [startX, endX - startX, centerX - width / 2 - padding, centerX + width / 2 + padding],
+    [startZ, endZ - startZ, centerZ - depth / 2 - padding, centerZ + depth / 2 + padding],
+  ] as const) {
+    if (Math.abs(delta) < 1e-9) {
+      if (start < minimum || start > maximum) return false;
+      continue;
+    }
+    const first = (minimum - start) / delta;
+    const second = (maximum - start) / delta;
+    minimumProgress = Math.max(minimumProgress, Math.min(first, second));
+    maximumProgress = Math.min(maximumProgress, Math.max(first, second));
+    if (minimumProgress > maximumProgress) return false;
+  }
+  return true;
+}
 
 function createAssets(): AssetCatalog {
   const iconAssetIds = [

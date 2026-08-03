@@ -41,7 +41,7 @@ describe("MultiplayerConnection lifecycle", () => {
   });
 
   it("accepts only the seeded-town protocol version", async () => {
-    expect(MULTIPLAYER_PROTOCOL_VERSION).toBe(5);
+    expect(MULTIPLAYER_PROTOCOL_VERSION).toBe(6);
     const sockets: FakeWebSocket[] = [];
     const connection = new MultiplayerConnection(
       "https://example.test",

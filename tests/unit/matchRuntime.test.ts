@@ -84,7 +84,7 @@ describe("MatchRuntime", () => {
     });
     const checkpoint = runtime.checkpoint();
 
-    expect(MATCH_CHECKPOINT_VERSION).toBe(4);
+    expect(MATCH_CHECKPOINT_VERSION).toBe(5);
     expect(isMatchCheckpointCompatible(checkpoint)).toBe(true);
     expect(isMatchCheckpointCompatible({
       ...checkpoint,

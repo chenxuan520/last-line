@@ -43,7 +43,8 @@ describe("town map layout", () => {
     expect(first.obstacles.filter((building) => building.storyCount > 1)).toHaveLength(233);
     expect(first.obstacles.filter((building) => building.storyCount >= 4)).toHaveLength(54);
     expect(first.skybridges).toHaveLength(32);
-    expect(first.roadSegments).toHaveLength(18);
+    expect(first.roadSegments.length).toBeGreaterThanOrEqual(100);
+    expect(first.roadSegments.length).toBeLessThanOrEqual(170);
     expect(first.lootSpawnPoints).toHaveLength(TOTAL_LOOT_POINTS);
     expect(first.treeTrunks).toHaveLength(96);
     expect(first.coverObstacles).toHaveLength(168);
@@ -59,9 +60,16 @@ describe("town map layout", () => {
     expect(first.obstacles.filter((building) => building.storyCount >= 4)
       .every((building) => building.townKind === "tower")).toBe(true);
     const core = first.obstacles.slice(0, 384);
+    const coreCoverage = core.reduce((total, building) => total + building.width * building.depth, 0) /
+      (1_400 * 1_400);
+    expect(coreCoverage).toBeGreaterThanOrEqual(0.45);
+    expect(coreCoverage).toBeLessThanOrEqual(0.6);
     expect(core.every((building) =>
       Math.max(building.width / building.depth, building.depth / building.width) <= 3.21
     )).toBe(true);
+    const kindPatterns = Array.from({ length: 64 }, (_, blockIndex) =>
+      core.slice(blockIndex * 6, blockIndex * 6 + 6).map((building) => building.townKind).join(":"));
+    expect(new Set(kindPatterns).size).toBeGreaterThanOrEqual(3);
     expect(core.every((building, index) =>
       core.slice(index + 1).every((other) =>
         Math.abs(building.center.x - other.center.x) >= (building.width + other.width) / 2 ||
@@ -69,6 +77,25 @@ describe("town map layout", () => {
       )
     )).toBe(true);
   });
+
+  it.each([1, 42, 2026])(
+    "builds one connected staggered road network for seed %i instead of a full orthogonal grid",
+    (seed) => {
+      const roads = createMapLayout("town", seed).roadSegments;
+      const topology = roadTopology(roads);
+
+      expect(topology.componentCount).toBe(1);
+      expect(topology.tJunctionCount).toBeGreaterThanOrEqual(12);
+      expect(topology.bendCount).toBeGreaterThanOrEqual(12);
+      expect(topology.fourWayJunctionCount).toBeLessThan(40);
+      expect(topology.nonAxisSegmentCount).toBeGreaterThanOrEqual(40);
+      expect(topology.longestSegment).toBeLessThan(260);
+      expect(topology.minimumX).toBeLessThanOrEqual(-850);
+      expect(topology.maximumX).toBeGreaterThanOrEqual(850);
+      expect(topology.minimumZ).toBeLessThanOrEqual(-850);
+      expect(topology.maximumZ).toBeGreaterThanOrEqual(850);
+    },
+  );
 
   it("keeps every building floor and ramp authoritative through five stories", () => {
     const layout = createMapLayout("town", 2026);
@@ -109,6 +136,18 @@ describe("town map layout", () => {
           Math.min(ramp.startZ, ramp.endZ) >= cover.center.z + cover.depth / 2 + 0.5
         ), `${seed}:${cover.id}:ramp`).toBe(true);
       }
+      for (const obstacle of [...layout.coverObstacles, ...layout.treeTrunks]) {
+        expect(layout.roadSegments.every((road) =>
+          !roadIntersectsFootprint(
+            road,
+            obstacle.center.x,
+            obstacle.center.z,
+            obstacle.width,
+            obstacle.depth,
+            TOWN_ROAD_SHOULDER_HALF_WIDTH + 0.25,
+          )
+        ), `${seed}:${obstacle.id}:road`).toBe(true);
+      }
     }
   });
 
@@ -120,6 +159,12 @@ describe("town map layout", () => {
       expect(layout.landingZones).toHaveLength(16);
 
       for (const point of layout.landingZones) {
+        const anchor = TOWN_POINT_ANCHORS[point.name];
+        if (!anchor) throw new Error(`Town point anchor missing: ${point.name}`);
+        expect(Math.hypot(
+          point.position.x - anchor[0],
+          point.position.z - anchor[1],
+        ), `${seed}:${point.name}:anchor`).toBeLessThan(330);
         expect(layout.obstacles.every((building) =>
           Math.abs(point.position.x - building.center.x) >
             building.width / 2 + TOWN_POINT_HALF_WIDTH + TOWN_POINT_OBSTACLE_CLEARANCE ||
@@ -134,14 +179,15 @@ describe("town map layout", () => {
           point.position.z - TOWN_POINT_HALF_DEPTH - TOWN_POINT_OBSTACLE_CLEARANCE >
             Math.max(ramp.startZ, ramp.endZ)
         ), `${seed}:${point.name}:ramp`).toBe(true);
-        for (const [startX, startZ, , endZ] of layout.roadSegments) {
-          const horizontal = startZ === endZ;
-          const distance = horizontal
-            ? Math.abs(point.position.z - startZ) - TOWN_POINT_HALF_DEPTH
-            : Math.abs(point.position.x - startX) - TOWN_POINT_HALF_WIDTH;
-          expect(distance, `${seed}:${point.name}:road`).toBeGreaterThanOrEqual(
+        for (const road of layout.roadSegments) {
+          expect(roadIntersectsFootprint(
+            road,
+            point.position.x,
+            point.position.z,
+            TOWN_POINT_HALF_WIDTH * 2,
+            TOWN_POINT_HALF_DEPTH * 2,
             TOWN_ROAD_SHOULDER_HALF_WIDTH + TOWN_POINT_OBSTACLE_CLEARANCE,
-          );
+          ), `${seed}:${point.name}:road`).toBe(false);
         }
         for (const obstacle of [
           ...layout.coverObstacles,
@@ -182,6 +228,17 @@ describe("town map layout", () => {
             Math.abs(point.position.z - outwardZ) >
               entranceDepth / 2 + TOWN_POINT_HALF_DEPTH + TOWN_POINT_OBSTACLE_CLEARANCE,
             `${seed}:${point.name}:${opening.obstacleId}:entrance`,
+          ).toBe(true);
+        }
+      }
+      for (const [index, point] of layout.landingZones.entries()) {
+        for (const other of layout.landingZones.slice(index + 1)) {
+          expect(
+            Math.abs(point.position.x - other.position.x) >
+              TOWN_POINT_HALF_WIDTH * 2 + TOWN_POINT_OBSTACLE_CLEARANCE ||
+            Math.abs(point.position.z - other.position.z) >
+              TOWN_POINT_HALF_DEPTH * 2 + TOWN_POINT_OBSTACLE_CLEARANCE,
+            `${seed}:${point.name}:${other.name}:public-space`,
           ).toBe(true);
         }
       }
@@ -323,18 +380,17 @@ describe("town map layout", () => {
     "keeps the street grid clear and fragments standable core sightlines for seed %i",
     (seed) => {
       const layout = createMapLayout("town", seed);
-      for (const [startX, startZ, endX, endZ] of layout.roadSegments) {
-        const vertical = startX === endX;
-        expect(layout.obstacles.every((building) => {
-          if (vertical) {
-            const overlapsLength = Math.abs(building.center.z - (startZ + endZ) / 2) <
-              Math.abs(endZ - startZ) / 2 + building.depth / 2;
-            return !overlapsLength || Math.abs(building.center.x - startX) > building.width / 2 + 8;
-          }
-          const overlapsLength = Math.abs(building.center.x - (startX + endX) / 2) <
-            Math.abs(endX - startX) / 2 + building.width / 2;
-          return !overlapsLength || Math.abs(building.center.z - startZ) > building.depth / 2 + 8;
-        })).toBe(true);
+      for (const road of layout.roadSegments) {
+        expect(layout.obstacles.every((building) =>
+          !roadIntersectsFootprint(
+            road,
+            building.center.x,
+            building.center.z,
+            building.width,
+            building.depth,
+            TOWN_ROAD_SHOULDER_HALF_WIDTH + 0.5,
+          )
+        )).toBe(true);
       }
 
       const blockers = [
@@ -403,20 +459,7 @@ describe("town map layout", () => {
     expect(first.coverObstacles.map(({ center }) => center)).not.toEqual(
       second.coverObstacles.map(({ center }) => center),
     );
-    const verticalRoads = first.roadSegments
-      .filter(([startX, , endX]) => startX === endX)
-      .map(([x]) => x)
-      .sort((left, right) => left - right);
-    const horizontalRoads = first.roadSegments
-      .filter(([, startZ, , endZ]) => startZ === endZ)
-      .map(([, z]) => z)
-      .sort((left, right) => left - right);
-    expect(new Set(verticalRoads.slice(1).map((road, index) =>
-      Math.round((road - (verticalRoads[index] ?? road)) * 10)
-    )).size).toBeGreaterThanOrEqual(5);
-    expect(new Set(horizontalRoads.slice(1).map((road, index) =>
-      Math.round((road - (horizontalRoads[index] ?? road)) * 10)
-    )).size).toBeGreaterThanOrEqual(5);
+    expect(roadTopology(first.roadSegments).headingBinCount).toBeGreaterThanOrEqual(5);
     expect(first.obstacles.map((building) => building.storyCount)).not.toEqual(
       second.obstacles.map((building) => building.storyCount),
     );
@@ -435,10 +478,58 @@ describe("town map layout", () => {
         .join("|");
     });
     expect(new Set(localPatternKeys).size).toBeGreaterThanOrEqual(48);
+    const crossBlockGaps = adjacentCoreBlockGaps(firstCore);
+    expect(crossBlockGaps.filter((gap) => gap < 22).length).toBeGreaterThanOrEqual(10);
+    expect(Math.max(...crossBlockGaps)).toBeGreaterThan(45);
   });
 });
 
 const TOWN_POINT_ENTRANCE_DEPTH = 10;
+const TOWN_POINT_ANCHORS: Readonly<Record<string, readonly [number, number]>> = {
+  灰炉广场: [0, 0],
+  铸造工业园: [-540, -540],
+  旧火车站: [540, -540],
+  工人住宅区: [-540, 540],
+  仓储港区: [540, 540],
+  老城区: [0, 540],
+  商业街: [0, -540],
+  城市公园: [540, 0],
+  北部货场: [-270, 810],
+  炉渣仓库: [270, 810],
+  西侧厂区: [-810, -270],
+  旧供电站: [-810, 270],
+  东部车场: [810, -270],
+  废水工场: [810, 270],
+  南部工棚: [-270, -810],
+  物流站场: [270, -810],
+};
+
+function adjacentCoreBlockGaps(core: readonly MapObstacle[]): number[] {
+  const blocks = Array.from({ length: 64 }, (_, blockIndex) =>
+    core.filter((building) => building.id.startsWith(`town-building-${blockIndex}-`)));
+  const gaps: number[] = [];
+  for (let blockZ = 0; blockZ < 8; blockZ += 1) {
+    for (let blockX = 0; blockX < 7; blockX += 1) {
+      const left = blocks[blockZ * 8 + blockX] ?? [];
+      const right = blocks[blockZ * 8 + blockX + 1] ?? [];
+      gaps.push(
+        Math.min(...right.map((building) => building.center.x - building.width / 2)) -
+        Math.max(...left.map((building) => building.center.x + building.width / 2)),
+      );
+    }
+  }
+  for (let blockZ = 0; blockZ < 7; blockZ += 1) {
+    for (let blockX = 0; blockX < 8; blockX += 1) {
+      const lower = blocks[blockZ * 8 + blockX] ?? [];
+      const upper = blocks[(blockZ + 1) * 8 + blockX] ?? [];
+      gaps.push(
+        Math.min(...upper.map((building) => building.center.z - building.depth / 2)) -
+        Math.max(...lower.map((building) => building.center.z + building.depth / 2)),
+      );
+    }
+  }
+  return gaps;
+}
 
 function distanceToBlocker(
   originX: number,
@@ -467,6 +558,128 @@ function pointInsideFootprint(
     Math.abs(point.x - blocker.center.x) <= blocker.width / 2 + padding &&
     Math.abs(point.z - blocker.center.z) <= blocker.depth / 2 + padding
   );
+}
+
+function roadIntersectsFootprint(
+  road: readonly [number, number, number, number],
+  centerX: number,
+  centerZ: number,
+  width: number,
+  depth: number,
+  padding: number,
+): boolean {
+  const [startX, startZ, endX, endZ] = road;
+  const minimumX = centerX - width / 2 - padding;
+  const maximumX = centerX + width / 2 + padding;
+  const minimumZ = centerZ - depth / 2 - padding;
+  const maximumZ = centerZ + depth / 2 + padding;
+  let minimumProgress = 0;
+  let maximumProgress = 1;
+  for (const [start, delta, minimum, maximum] of [
+    [startX, endX - startX, minimumX, maximumX],
+    [startZ, endZ - startZ, minimumZ, maximumZ],
+  ] as const) {
+    if (Math.abs(delta) < 1e-9) {
+      if (start < minimum || start > maximum) return false;
+      continue;
+    }
+    const first = (minimum - start) / delta;
+    const second = (maximum - start) / delta;
+    minimumProgress = Math.max(minimumProgress, Math.min(first, second));
+    maximumProgress = Math.min(maximumProgress, Math.max(first, second));
+    if (minimumProgress > maximumProgress) return false;
+  }
+  return true;
+}
+
+function roadTopology(roads: readonly (readonly [number, number, number, number])[]): {
+  componentCount: number;
+  tJunctionCount: number;
+  fourWayJunctionCount: number;
+  bendCount: number;
+  nonAxisSegmentCount: number;
+  headingBinCount: number;
+  longestSegment: number;
+  minimumX: number;
+  maximumX: number;
+  minimumZ: number;
+  maximumZ: number;
+} {
+  const positions = new Map<string, readonly [number, number]>();
+  const neighbors = new Map<string, Set<string>>();
+  const connect = (from: string, to: string): void => {
+    const entries = neighbors.get(from) ?? new Set<string>();
+    entries.add(to);
+    neighbors.set(from, entries);
+  };
+  let nonAxisSegmentCount = 0;
+  let longestSegment = 0;
+  let minimumX = Number.POSITIVE_INFINITY;
+  let maximumX = Number.NEGATIVE_INFINITY;
+  let minimumZ = Number.POSITIVE_INFINITY;
+  let maximumZ = Number.NEGATIVE_INFINITY;
+  const headingBins = new Set<number>();
+  for (const [startX, startZ, endX, endZ] of roads) {
+    const startKey = roadNodeKey(startX, startZ);
+    const endKey = roadNodeKey(endX, endZ);
+    positions.set(startKey, [startX, startZ]);
+    positions.set(endKey, [endX, endZ]);
+    connect(startKey, endKey);
+    connect(endKey, startKey);
+    const deltaX = endX - startX;
+    const deltaZ = endZ - startZ;
+    if (Math.abs(deltaX) > 0.01 && Math.abs(deltaZ) > 0.01) nonAxisSegmentCount += 1;
+    longestSegment = Math.max(longestSegment, Math.hypot(deltaX, deltaZ));
+    const heading = (Math.atan2(deltaZ, deltaX) + Math.PI) % Math.PI;
+    headingBins.add(Math.round(heading / (Math.PI / 36)));
+    minimumX = Math.min(minimumX, startX, endX);
+    maximumX = Math.max(maximumX, startX, endX);
+    minimumZ = Math.min(minimumZ, startZ, endZ);
+    maximumZ = Math.max(maximumZ, startZ, endZ);
+  }
+  let componentCount = 0;
+  const visited = new Set<string>();
+  for (const node of neighbors.keys()) {
+    if (visited.has(node)) continue;
+    componentCount += 1;
+    const pending = [node];
+    while (pending.length > 0) {
+      const current = pending.pop();
+      if (!current || visited.has(current)) continue;
+      visited.add(current);
+      for (const neighbor of neighbors.get(current) ?? []) pending.push(neighbor);
+    }
+  }
+  let bendCount = 0;
+  for (const [node, adjacent] of neighbors) {
+    if (adjacent.size !== 2) continue;
+    const center = positions.get(node);
+    const endpoints = [...adjacent].map((neighbor) => positions.get(neighbor));
+    if (!center || !endpoints[0] || !endpoints[1]) continue;
+    const firstX = endpoints[0][0] - center[0];
+    const firstZ = endpoints[0][1] - center[1];
+    const secondX = endpoints[1][0] - center[0];
+    const secondZ = endpoints[1][1] - center[1];
+    const cross = Math.abs(firstX * secondZ - firstZ * secondX);
+    if (cross > Math.hypot(firstX, firstZ) * Math.hypot(secondX, secondZ) * 0.01) bendCount += 1;
+  }
+  return {
+    componentCount,
+    tJunctionCount: [...neighbors.values()].filter((adjacent) => adjacent.size === 3).length,
+    fourWayJunctionCount: [...neighbors.values()].filter((adjacent) => adjacent.size === 4).length,
+    bendCount,
+    nonAxisSegmentCount,
+    headingBinCount: headingBins.size,
+    longestSegment,
+    minimumX,
+    maximumX,
+    minimumZ,
+    maximumZ,
+  };
+}
+
+function roadNodeKey(x: number, z: number): string {
+  return `${x.toFixed(6)}:${z.toFixed(6)}`;
 }
 
 function matchState(seed: number, ...actors: ReturnType<typeof createActorState>[]): MatchState {
