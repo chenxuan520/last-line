@@ -11,12 +11,8 @@
   --signal-bright: #d0dba8;
   --signal-warm: #c8b978;
   --armor: #819ca0;
-  --panel: rgb(13 18 16 / 82%);
-  --panel-soft: rgb(16 22 19 / 66%);
-  --panel-faint: rgb(14 20 17 / 48%);
   --line: rgb(191 204 173 / 19%);
   --line-strong: rgb(197 211 174 / 34%);
-  --shadow: rgb(0 0 0 / 42%);
   --tactical-font: "Bahnschrift", "DIN Alternate", "Arial Narrow", sans-serif;
 }
 
@@ -828,7 +824,7 @@ h1 {
   padding: 28px 30px 30px;
   border: 1px solid var(--line);
   background: linear-gradient(120deg, rgb(24 31 25 / 89%), rgb(10 15 12 / 86%));
-  box-shadow: 0 24px 70px var(--shadow);
+  box-shadow: 0 24px 70px rgb(0 0 0 / 42%);
   clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 0 100%);
 }
 
@@ -1858,9 +1854,9 @@ h1 {
   content: "";
 }
 
-#ui-root.is-high-quality-hud .weapon-status,
-#ui-root.is-high-quality-hud .vitals > div,
-#ui-root.is-high-quality-hud .minimap-card {
+.is-high-quality-hud .weapon-status,
+.is-high-quality-hud .vitals > div,
+.is-high-quality-hud .minimap-card {
   border-color: rgb(214 224 198 / 28%);
   filter: saturate(1.08) contrast(1.04);
 }
@@ -1917,7 +1913,7 @@ h1 {
   display: none;
 }
 
-#ui-root.is-touch-input {
+.is-touch-input {
   touch-action: none;
   -webkit-touch-callout: none;
 }
@@ -2078,12 +2074,12 @@ h1 {
   display: none;
 }
 
-#ui-root.is-touch-input .inventory-card {
+.is-touch-input .inventory-card {
   display: none;
 }
 
 @media (orientation: landscape) {
-  #ui-root.is-touch-input .mobile-inventory-backdrop.is-visible {
+  .is-touch-input .mobile-inventory-backdrop.is-visible {
     position: absolute;
     inset: 0;
     z-index: 17;
@@ -2093,7 +2089,7 @@ h1 {
     touch-action: manipulation;
   }
 
-  #ui-root.is-touch-input .inventory-card.is-mobile-visible {
+  .is-touch-input .inventory-card.is-mobile-visible {
     position: absolute;
     top: 50%;
     right: auto;
@@ -2116,7 +2112,7 @@ h1 {
     touch-action: manipulation;
   }
 
-  #ui-root.is-touch-input .mobile-inventory-heading {
+  .is-touch-input .mobile-inventory-heading {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -2125,7 +2121,7 @@ h1 {
     letter-spacing: 0.1em;
   }
 
-  #ui-root.is-touch-input .mobile-inventory-heading button {
+  .is-touch-input .mobile-inventory-heading button {
     display: grid;
     width: 44px;
     height: 44px;
@@ -2139,8 +2135,8 @@ h1 {
     touch-action: manipulation;
   }
 
-  #ui-root.is-touch-input .inventory-card .weapon-slots,
-  #ui-root.is-touch-input .inventory-card .backpack {
+  .is-touch-input .inventory-card .weapon-slots,
+  .is-touch-input .inventory-card .backpack {
     justify-content: flex-start;
     flex-wrap: nowrap;
     overflow-x: auto;
@@ -2149,12 +2145,12 @@ h1 {
     text-align: left;
   }
 
-  #ui-root.is-touch-input .inventory-card .weapon-slots > :first-child,
-  #ui-root.is-touch-input .inventory-card .backpack > :first-child {
+  .is-touch-input .inventory-card .weapon-slots > :first-child,
+  .is-touch-input .inventory-card .backpack > :first-child {
     margin-inline-start: 0;
   }
 
-  #ui-root.is-touch-input .backpack-drop {
+  .is-touch-input .backpack-drop {
     min-height: 44px;
     padding: 8px 12px;
     border-color: rgb(219 112 91 / 42%);
@@ -2634,73 +2630,73 @@ h1 {
     padding: 15px 18px;
   }
 
-  #ui-root.is-touch-input .controls-card,
-  #ui-root.is-touch-input .kill-feed,
-  #ui-root.is-touch-input .performance,
-  #ui-root.is-touch-input .helmet-vital {
+  .is-touch-input .controls-card,
+  .is-touch-input .kill-feed,
+  .is-touch-input .performance,
+  .is-touch-input .helmet-vital {
     display: none;
   }
 
-  #ui-root.is-touch-input .hud-topbar {
+  .is-touch-input .hud-topbar {
     top: max(7px, env(safe-area-inset-top));
     right: max(8px, env(safe-area-inset-right));
     left: max(8px, env(safe-area-inset-left));
     height: 44px;
   }
 
-  #ui-root.is-touch-input .location-block,
-  #ui-root.is-touch-input .zone-block,
-  #ui-root.is-touch-input .alive-counter {
+  .is-touch-input .location-block,
+  .is-touch-input .zone-block,
+  .is-touch-input .alive-counter {
     height: 44px;
   }
 
-  #ui-root.is-touch-input .location-block {
+  .is-touch-input .location-block {
     min-width: 142px;
     padding: 5px 12px;
   }
 
-  #ui-root.is-touch-input .location-block strong {
+  .is-touch-input .location-block strong {
     font-size: 14px;
   }
 
-  #ui-root.is-touch-input .location-block small,
-  #ui-root.is-touch-input .hud-kicker {
+  .is-touch-input .location-block small,
+  .is-touch-input .hud-kicker {
     font-size: 7px;
   }
 
-  #ui-root.is-touch-input .zone-block {
+  .is-touch-input .zone-block {
     width: 154px;
     padding: 5px 12px;
   }
 
-  #ui-root.is-touch-input .zone-block strong {
+  .is-touch-input .zone-block strong {
     font-size: 18px;
   }
 
-  #ui-root.is-touch-input .alive-counter {
+  .is-touch-input .alive-counter {
     min-width: 104px;
     padding: 5px 10px;
   }
 
-  #ui-root.is-touch-input .alive-counter span {
+  .is-touch-input .alive-counter span {
     font-size: 20px;
   }
 
-  #ui-root.is-touch-input .minimap-card {
+  .is-touch-input .minimap-card {
     top: max(58px, calc(env(safe-area-inset-top) + 50px));
     right: max(8px, env(safe-area-inset-right));
     width: 112px;
     padding: 6px;
   }
 
-  #ui-root.is-touch-input .connection-feed {
+  .is-touch-input .connection-feed {
     top: max(58px, calc(env(safe-area-inset-top) + 50px));
     right: max(128px, calc(env(safe-area-inset-right) + 120px));
     z-index: 12;
     max-width: 210px;
   }
 
-  #ui-root.is-touch-input .connection-feed div {
+  .is-touch-input .connection-feed div {
     padding: 5px 9px;
     border-right: 1px solid rgb(183 197 139 / 32%);
     color: #d8dfd2;
@@ -2709,13 +2705,13 @@ h1 {
     text-align: right;
   }
 
-  #ui-root.is-touch-input .minimap-heading strong,
-  #ui-root.is-touch-input .minimap-heading span,
-  #ui-root.is-touch-input .minimap-scale {
+  .is-touch-input .minimap-heading strong,
+  .is-touch-input .minimap-heading span,
+  .is-touch-input .minimap-scale {
     font-size: 6px;
   }
 
-  #ui-root.is-touch-input .interaction-prompt {
+  .is-touch-input .interaction-prompt {
     top: calc(50% + 24px);
     bottom: auto;
     max-width: 240px;
@@ -2723,12 +2719,12 @@ h1 {
     font-size: 10px;
   }
 
-  #ui-root.is-touch-input .healing-progress {
+  .is-touch-input .healing-progress {
     top: calc(50% - 100px);
     bottom: auto;
   }
 
-  #ui-root.is-touch-input .hud-footer {
+  .is-touch-input .hud-footer {
     right: auto;
     bottom: max(7px, env(safe-area-inset-bottom));
     left: max(158px, calc(env(safe-area-inset-left) + 150px));
@@ -2736,21 +2732,21 @@ h1 {
     height: 46px;
   }
 
-  #ui-root.is-touch-input .vitals {
+  .is-touch-input .vitals {
     gap: 5px;
   }
 
-  #ui-root.is-touch-input .vital-block {
+  .is-touch-input .vital-block {
     width: 100px;
     height: 46px;
     padding: 6px 8px;
   }
 
-  #ui-root.is-touch-input .vital-block strong {
+  .is-touch-input .vital-block strong {
     font-size: 16px;
   }
 
-  #ui-root.is-touch-input .weapon-status {
+  .is-touch-input .weapon-status {
     position: fixed;
     right: max(178px, calc(env(safe-area-inset-right) + 160px));
     bottom: max(78px, calc(env(safe-area-inset-bottom) + 60px));
@@ -2759,27 +2755,27 @@ h1 {
     padding: 6px 10px;
   }
 
-  #ui-root.is-touch-input .weapon-status img {
+  .is-touch-input .weapon-status img {
     width: 42px;
   }
 
-  #ui-root.is-touch-input .weapon-status strong {
+  .is-touch-input .weapon-status strong {
     font-size: 18px;
   }
 
-  #ui-root.is-touch-input .touch-joystick {
+  .is-touch-input .touch-joystick {
     width: 116px;
     height: 116px;
   }
 
-  #ui-root.is-touch-input .pause-card,
-  #ui-root.is-touch-input .result-card {
+  .is-touch-input .pause-card,
+  .is-touch-input .result-card {
     width: min(360px, calc(100vw - 24px));
     min-height: 170px;
     padding: 22px 28px;
   }
 
-  #ui-root.is-touch-input .pause-actions button {
+  .is-touch-input .pause-actions button {
     min-height: 44px;
   }
 }
