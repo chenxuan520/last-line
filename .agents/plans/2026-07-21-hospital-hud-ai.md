@@ -40,6 +40,9 @@
 - 2026-07-21 10:49：最终门禁通过：应用 25 files / 246 tests、Worker 3 files / 26 tests、`npm run typecheck`、`npm run build`、`npm run build:worker`、`git diff --check` 全部成功，构建仅保留既有大 chunk warning。静音 production preview 确认医院标记不再包含十字 path，改为半径 2 的普通圆点和“医院”文字，颜色与其他 POI 完全一致；控制台无 error/warn，截图保存为 `hospital-map-marker-fix.png`（临时目录，不提交）。医院白色天花板和门底 sill 渲染修复由 NullEngine 回归覆盖，权威门体与 AI 导航保持不变，等待提交推送。
 - 2026-07-21 10:50：医院视觉修复已提交并推送 `main`，实现提交为 `52ddebb fix: refine hospital visuals`；未跟踪参考文件 `session-ses_082c.md` 保持本地且未提交。等待主分支 CI 与自动部署完成。
 - 2026-07-21 10:57：记录提交 `9670033 docs: record hospital visual fix` 后，主分支 CI `29796911283`、GitHub Pages 和 Cloudflare Pages production deployment `cf769b48-8212-442c-aca9-8302b38c184c` 均成功。正式域名已加载新静态包 `index-DJ8ssN9F.js`；静音实测医院 marker 为普通圆点加文字、无十字 path，样式与其他 POI 一致，约 119 FPS，控制台无 error/warn。
+- 2026-08-03 22:17：按用户要求统一苍岬岛与灰炉城医院外观。医院渲染表面调整为纯白；外墙不再叠加灰色普通墙纹理；楼板、屋面及灰炉城医院屋顶构件合并使用无纹理白色材质，同时保持普通建筑墙面/屋面纹理和静态批处理。先更新 `tests/unit/islandScene.test.ts`，确认旧实现有 2 项失败，再修改 `src/client/render/scenes/IslandScene.ts`；定向 IslandScene 19 项测试通过，等待完整验证与独立审查。
+- 2026-08-03 22:25：完整验证闭环。首次完整测试发现直接把 `HOSPITAL_WALL_COLOR` 改为纯白会改变岛屿权威 layout payload 的兼容哈希，已撤回该数据变更，改为仅在 Babylon 展示层使用纯白材质；`mapSelection` 5 项和 IslandScene 19 项定向回归通过。最终 `npm run typecheck`、应用 43 files / 405 tests、Worker 4 files / 32 tests、standalone 3 files / 21 tests、`npm run build`、`npm run check:budgets` 与 `git diff --check` 全部通过；浏览器入口 1,060,651 / 1,075,000 bytes，CSS 44,804 / 45,000 bytes。静音 production preview 成功进入灰炉城对局，控制台无 error/warn；页面与 preview 服务已清理，仅保留 `about:blank`。等待独立 reviewer。
+- 2026-08-03 22:29：独立 reviewer 静态审查通过，无 blocker/high/medium/low finding；确认两张地图医院外墙、屋面和灰炉城屋顶构件均使用无纹理纯白展示材质，普通建筑材质、权威 payload、碰撞及 gameplay 保持不变。本记录将与实现和测试同一提交并普通推送 `main`，不创建独立 plan-only commit。
 
 ## Review
 
@@ -74,3 +77,13 @@
 - 性能闭环：zone path 复用仍有效；失败重试使用不随动态 center/radius 重置的绝对时间。reviewer 以终局单 Bot、current radius 每 tick 缩小 0.1、navigator 恒失败复现 1 秒仅 10 次候选搜索，符合 2 秒节流预期。
 - 验证：reviewer 实跑 `npm run typecheck`、6 个相关 Vitest 文件（103 tests）、Worker 全套（26 tests）及 `git diff --check c444cf7`，均通过；plan 中既有完整测试、构建、静音浏览器和性能验收记录继续有效。
 - 残余风险：本轮未重复完整 25-file app suite、生产 build 或浏览器验收，参考了 Build 记录；未发现业务源码中的 `context.Background()`。
+
+### 2026-08-03 22:28 CST 医院白色外观独立审查
+
+- 审查范围：当前工作区相对 `main@defcd2f` 的完整 3 文件 diff，重点检查 `src/client/render/scenes/IslandScene.ts` 的医院墙面、楼板/屋面、灰炉城屋顶构件材质与静态合批，以及 `tests/unit/islandScene.test.ts` 的风险覆盖；已确认本地 `HEAD`、`main`、`origin/main` 均为 `defcd2f`。
+- 对照计划：`.agents/plans/2026-07-21-hospital-hud-ai.md`，并以本轮用户要求“苍岬岛与灰炉城医院外墙和屋顶纯白，不改变权威地图 payload、碰撞或 gameplay”为验收基线。
+- 审查结论：**通过。本次审查未发现 blocker、high、medium 或 low finding。**
+- 静态核对：医院墙批次仍按既有 `HOSPITAL_WALL_COLOR` layout 标识分组，但展示材质改为 `#ffffff` 且不绑定灰墙纹理；医院全部 floor/roof slab 与灰炉城医院 rooftop silhouette 使用同一个无纹理白色材质并独立合批。普通墙仍共享 `texture.building.wall`，普通屋面仍使用 `texture.building.roof`，非医院城镇屋顶构件仍按 kind 合批并使用原材质。
+- 权威语义：业务改动仅位于 Babylon 展示层；`src/config/map.ts`、layout descriptor/payload、墙体/楼板几何、碰撞和 gameplay 链路均无 diff，因此既有兼容哈希和 authoritative semantics 保持不变。
+- 测试与验证证据：新增 NullEngine 断言同时覆盖苍岬岛和灰炉城医院墙材质颜色/无纹理、医院楼板与屋面、灰炉城各类型医院屋顶构件计数，以及普通墙/普通屋面材质和静态批次数量。未重复执行 outer agent 已记录的 typecheck、405+32+21 tests、build、budgets 或静音浏览器验收；基线采集时执行了一次 `git diff --check`，结果通过。
+- 残余风险：本轮为静态审查，运行时视觉结果依赖 Build 中已记录的静音 production preview；未发现未解决 blocker/high/medium。

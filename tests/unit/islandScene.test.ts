@@ -182,20 +182,30 @@ describe("IslandScene lifecycle", () => {
           .filter((opening) => opening.obstacleId === layout.hospital.buildingId && opening.kind === "door")
           .map((opening) => `${opening.obstacleId}-wall-${opening.side}-${opening.storyIndex}-sill`),
       );
-      const hospitalWallBatch = bundle.scene.getMeshByName("building-walls-eef2ef");
+      const hospitalWallBatch = bundle.scene.getMeshByName(
+        `building-walls-${HOSPITAL_WALL_COLOR.replace("#", "")}`,
+      );
       expect(hospitalWallBatch?.metadata?.sourceCount).toBe(
         hospitalWalls.filter((wall) => !hospitalDoorSills.has(wall.id)).length,
       );
       expect(hospitalWallBatch?.getTotalVertices()).toBe(
         hospitalWalls.filter((wall) => !hospitalDoorSills.has(wall.id)).length * 24,
       );
+      expect((hospitalWallBatch?.material as StandardMaterial).diffuseColor.toHexString().toLowerCase()).toBe(
+        "#ffffff",
+      );
+      expect((hospitalWallBatch?.material as StandardMaterial).diffuseTexture).toBeNull();
       const wallMaterials = bundle.scene.materials.filter((sceneMaterial) =>
         sceneMaterial.name.startsWith("building-material-")
       ) as StandardMaterial[];
-      expect(wallMaterials.every((sceneMaterial) =>
+      expect(wallMaterials.filter((sceneMaterial) => sceneMaterial !== hospitalWallBatch?.material).every((sceneMaterial) =>
         sceneMaterial.diffuseTexture?.name === "texture.building.wall"
       )).toBe(true);
-      expect(new Set(wallMaterials.map((sceneMaterial) => sceneMaterial.diffuseTexture)).size).toBe(1);
+      expect(new Set(
+        wallMaterials
+          .filter((sceneMaterial) => sceneMaterial !== hospitalWallBatch?.material)
+          .map((sceneMaterial) => sceneMaterial.diffuseTexture),
+      ).size).toBe(1);
       expect(treeFoliage.every((mesh) =>
         mesh.getBoundingInfo().boundingBox.maximumWorld.y - getTerrainHeight(mesh.position.x, mesh.position.z, layout) > 15
       )).toBe(true);
@@ -255,28 +265,31 @@ describe("IslandScene lifecycle", () => {
       expect(decorations.every((mesh) => !mesh.isPickable && !mesh.checkCollisions)).toBe(true);
       expect(collisionMeshes).toHaveLength(new Set(layout.wallSegments.map((wall) => wall.color)).size + 1);
       expect(bundle.scene.meshes.length).toBeLessThan(4_000);
-      const hospitalFloors = layout.floorSlabs.filter((slab) =>
-        slab.obstacleId === layout.hospital.buildingId && slab.kind === "floor"
+      const hospitalSurfaces = layout.floorSlabs.filter((slab) =>
+        slab.obstacleId === layout.hospital.buildingId
       );
       const regularFloors = layout.floorSlabs.filter((slab) =>
         slab.obstacleId !== layout.hospital.buildingId && slab.kind === "floor"
       );
-      const roofs = layout.floorSlabs.filter((slab) => slab.kind === "roof");
+      const regularRoofs = layout.floorSlabs.filter((slab) =>
+        slab.obstacleId !== layout.hospital.buildingId && slab.kind === "roof"
+      );
       const floorBatch = bundle.scene.getMeshByName("building-floor-slabs-batch");
       const roofBatch = bundle.scene.getMeshByName("building-roof-slabs-batch");
-      const hospitalFloorBatch = bundle.scene.getMeshByName("hospital-floor-slabs-batch");
+      const hospitalSurfaceBatch = bundle.scene.getMeshByName("hospital-surfaces-batch");
       expect(floorBatch?.metadata?.sourceCount).toBe(regularFloors.length);
       expect(floorBatch?.getTotalVertices()).toBe(regularFloors.length * 24);
       expect((floorBatch?.material as StandardMaterial).diffuseTexture).toBeNull();
-      expect(roofBatch?.metadata?.sourceCount).toBe(roofs.length);
-      expect(roofBatch?.getTotalVertices()).toBe(roofs.length * 24);
+      expect(roofBatch?.metadata?.sourceCount).toBe(regularRoofs.length);
+      expect(roofBatch?.getTotalVertices()).toBe(regularRoofs.length * 24);
       expect((roofBatch?.material as StandardMaterial).diffuseTexture?.name).toBe("texture.building.roof");
-      expect(hospitalFloorBatch?.metadata?.sourceCount).toBe(hospitalFloors.length);
-      expect(hospitalFloorBatch?.getTotalVertices()).toBe(hospitalFloors.length * 24);
-      expect(hospitalFloorBatch?.material).toBeInstanceOf(StandardMaterial);
-      expect((hospitalFloorBatch?.material as StandardMaterial).diffuseColor.toHexString().toLowerCase()).toBe(
-        HOSPITAL_WALL_COLOR,
+      expect(hospitalSurfaceBatch?.metadata?.sourceCount).toBe(hospitalSurfaces.length);
+      expect(hospitalSurfaceBatch?.getTotalVertices()).toBe(hospitalSurfaces.length * 24);
+      expect(hospitalSurfaceBatch?.material).toBeInstanceOf(StandardMaterial);
+      expect((hospitalSurfaceBatch?.material as StandardMaterial).diffuseColor.toHexString().toLowerCase()).toBe(
+        "#ffffff",
       );
+      expect((hospitalSurfaceBatch?.material as StandardMaterial).diffuseTexture).toBeNull();
       const openingPieceCount =
         layout.wallOpenings.filter((opening) => opening.kind === "window").length * 4 +
         layout.wallOpenings.filter((opening) => opening.kind === "door").length * 3;
@@ -992,6 +1005,30 @@ describe("IslandScene lifecycle", () => {
       .filter((mesh) => mesh.name.startsWith("building-walls-"))
       .reduce((total, mesh) => total + Number(mesh.metadata?.sourceCount ?? 0), 0))
       .toBe(layout.wallSegments.filter((wall) => !doorSillIds.has(wall.id)).length);
+    const hospital = layout.obstacles.find((building) => building.id === layout.hospital.buildingId);
+    if (!hospital?.townKind) throw new Error("Town hospital building missing");
+    const hospitalWallBatch = bundle.scene.getMeshByName(
+      `building-walls-${HOSPITAL_WALL_COLOR.replace("#", "")}`,
+    );
+    expect((hospitalWallBatch?.material as StandardMaterial).diffuseColor.toHexString().toLowerCase()).toBe(
+      "#ffffff",
+    );
+    expect((hospitalWallBatch?.material as StandardMaterial).diffuseTexture).toBeNull();
+    const hospitalSlabs = layout.floorSlabs.filter((slab) => slab.obstacleId === hospital.id);
+    const rooftopPieceCount = {
+      factory: 2,
+      warehouse: 1,
+      rowhouse: 2,
+      commercial: 1,
+      corner: 1,
+      tower: 2,
+    }[hospital.townKind];
+    const hospitalSurfaceBatch = bundle.scene.getMeshByName("hospital-surfaces-batch");
+    expect(hospitalSurfaceBatch?.metadata?.sourceCount).toBe(hospitalSlabs.length + rooftopPieceCount);
+    expect((hospitalSurfaceBatch?.material as StandardMaterial).diffuseColor.toHexString().toLowerCase()).toBe(
+      "#ffffff",
+    );
+    expect((hospitalSurfaceBatch?.material as StandardMaterial).diffuseTexture).toBeNull();
     expect(bundle.scene.meshes.length).toBeLessThan(900);
 
     bundle.scene.dispose();

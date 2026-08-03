@@ -57,6 +57,7 @@ import { getPoiVisualType } from "../../poiVisuals";
 import { getBrandSignPlacements } from "../../brandSigns";
 
 const INITIAL_SAFE_ZONE_RADIUS = MAP_SIZE * 0.36;
+const HOSPITAL_SURFACE_COLOR = "#ffffff";
 const SKY_ASSET_IDS = ["texture.sky.clearing", "texture.sky.overcast", "texture.sky.storm"] as const;
 const TERRAIN_PATCHES: ReadonlyArray<readonly [number, number, number, number, number, "mud" | "grass"]> = [
   [-620, -380, 184, 116, 0.2, "grass"],
@@ -106,7 +107,7 @@ interface IslandMaterials {
   poiDark: StandardMaterial;
   floor: StandardMaterial;
   roof: StandardMaterial;
-  hospitalCeiling: StandardMaterial;
+  hospitalSurface: StandardMaterial;
   wallTrim: StandardMaterial;
   hospitalCross: StandardMaterial;
   window: StandardMaterial;
@@ -565,7 +566,7 @@ function createMaterials(scene: Scene, assets: AssetCatalog): IslandMaterials {
     poiDark: material(scene, "poi-dark-material", "#434b4f"),
     floor: material(scene, "building-floor-material", "#343b3b"),
     roof: texturedMaterial(scene, assets, "building-roof-material", "#69706d", "texture.building.roof", 2),
-    hospitalCeiling: material(scene, "hospital-ceiling-material", HOSPITAL_WALL_COLOR),
+    hospitalSurface: material(scene, "hospital-surface-material", HOSPITAL_SURFACE_COLOR),
     wallTrim: material(scene, "building-trim-material", "#8a8069"),
     hospitalCross: material(scene, "hospital-cross-material", "#d8473f"),
     window: windowMaterial,
@@ -614,8 +615,12 @@ function createIslandEnvironment(
     if (doorSillIds.has(wall.id)) continue;
     let buildingMaterial = buildingMaterials.get(wall.color);
     if (!buildingMaterial) {
-      buildingMaterial = material(scene, `building-material-${buildingMaterials.size}`, wall.color);
-      buildingMaterial.diffuseTexture = materials.wallTexture;
+      buildingMaterial = material(
+        scene,
+        `building-material-${buildingMaterials.size}`,
+        wall.color === HOSPITAL_WALL_COLOR ? HOSPITAL_SURFACE_COLOR : wall.color,
+      );
+      if (wall.color !== HOSPITAL_WALL_COLOR) buildingMaterial.diffuseTexture = materials.wallTexture;
       buildingMaterials.set(wall.color, buildingMaterial);
     }
 
@@ -642,7 +647,7 @@ function createIslandEnvironment(
   createHospitalCross(scene, materials.hospitalCross, layout);
 
   createBuildingDetails(scene, materials, layout);
-  createTownBuildingSilhouettes(scene, layout);
+  createTownBuildingSilhouettes(scene, materials, layout);
   createRoofRamps(scene, materials, layout);
   createCoverProps(scene, materials, layout);
   createVegetation(scene, materials.trunk, materials.foliage, layout, quality);
@@ -659,18 +664,24 @@ function createIslandEnvironment(
     scene,
     "building-roof-slabs-batch",
     (mesh) => mesh.metadata?.decoration === "building-detail" &&
-      mesh.metadata?.detailType === "roof",
+      mesh.metadata?.detailType === "roof" &&
+      mesh.metadata?.obstacleId !== layout.hospital.buildingId,
     { decoration: "building-detail", detailType: "roof-slabs" },
   );
   mergeStaticBatch(
     scene,
-    "hospital-floor-slabs-batch",
-    (mesh) => mesh.metadata?.decoration === "building-detail" &&
-      mesh.metadata?.detailType === "floor" &&
-      mesh.metadata?.obstacleId === layout.hospital.buildingId,
+    "hospital-surfaces-batch",
+    (mesh) => mesh.metadata?.obstacleId === layout.hospital.buildingId &&
+      (
+        mesh.metadata?.decoration === "town-building-silhouette" ||
+        (
+          mesh.metadata?.decoration === "building-detail" &&
+          (mesh.metadata?.detailType === "floor" || mesh.metadata?.detailType === "roof")
+        )
+      ),
     {
       decoration: "building-detail",
-      detailType: "hospital-floor-slabs",
+      detailType: "hospital-surfaces",
       obstacleId: layout.hospital.buildingId,
     },
   );
@@ -1009,10 +1020,10 @@ function createBuildingDetails(scene: Scene, materials: IslandMaterials, layout:
     if (!mesh) continue;
     mesh.position.set(slab.center.x, slab.center.y, slab.center.z);
     mesh.scaling.set(slab.width, slab.height, slab.depth);
-    mesh.material = slab.kind === "roof"
-      ? materials.roof
-      : slab.obstacleId === layout.hospital.buildingId
-        ? materials.hospitalCeiling
+    mesh.material = slab.obstacleId === layout.hospital.buildingId
+      ? materials.hospitalSurface
+      : slab.kind === "roof"
+        ? materials.roof
         : materials.floor;
     mesh.isVisible = true;
     markBuildingDetail(mesh, slab.obstacleId, slab.kind);
@@ -1021,7 +1032,7 @@ function createBuildingDetails(scene: Scene, materials: IslandMaterials, layout:
   layout.wallOpenings.forEach((opening, index) => createWallOpeningFrame(trimTemplate, opening, index));
 }
 
-function createTownBuildingSilhouettes(scene: Scene, layout: MapLayout): void {
+function createTownBuildingSilhouettes(scene: Scene, materials: IslandMaterials, layout: MapLayout): void {
   if (layout.mapId !== "town") return;
   const rooftopMaterial = material(scene, "town-industrial-rooftop-material", "#514b43");
   for (const building of layout.obstacles) {
@@ -1042,7 +1053,9 @@ function createTownBuildingSilhouettes(scene: Scene, layout: MapLayout): void {
         scene,
       );
       mesh.position.set(building.center.x + offsetX, roofY + height / 2, building.center.z + offsetZ);
-      mesh.material = rooftopMaterial;
+      mesh.material = building.id === layout.hospital.buildingId
+        ? materials.hospitalSurface
+        : rooftopMaterial;
       markTownBuildingSilhouette(mesh, building, kind);
     };
 
@@ -1082,7 +1095,8 @@ function createTownBuildingSilhouettes(scene: Scene, layout: MapLayout): void {
       scene,
       `town-building-silhouettes-${kind}`,
       (mesh) => mesh.metadata?.decoration === "town-building-silhouette" &&
-        mesh.metadata?.townKind === kind,
+        mesh.metadata?.townKind === kind &&
+        mesh.metadata?.obstacleId !== layout.hospital.buildingId,
       { decoration: "town-building-silhouette", townKind: kind },
     );
   }
