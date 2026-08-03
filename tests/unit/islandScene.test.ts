@@ -91,7 +91,7 @@ describe("IslandScene lifecycle", () => {
       expect(bundle.viewWeaponRoot.isEnabled()).toBe(false);
       expect(bundle.viewWeaponRoot.getChildMeshes(false)
         .filter((mesh) => mesh.metadata?.actorVisual === "view-arm"))
-        .toHaveLength(4);
+        .toHaveLength(8);
       expect(bundle.viewWeaponRoot.getChildMeshes(false)
         .filter((mesh) => mesh.metadata?.actorVisual === "view-arm")
         .every((mesh) => !mesh.isPickable && !mesh.checkCollisions)).toBe(true);
@@ -916,6 +916,9 @@ describe("IslandScene lifecycle", () => {
     expect(fetchMock.mock.calls.some(([input]) => input.toString().endsWith(".glb"))).toBe(false);
     expect(bundle.scene.getMeshByName("body-bot-1")).not.toBeNull();
     expect(bundle.scene.meshes.some((mesh) => mesh.metadata?.visualModel)).toBe(false);
+    expect(bundle.viewWeaponRoot.getChildMeshes(false)
+      .some((mesh) => mesh.metadata?.actorVisual === "view-arm")).toBe(false);
+    expect(bundle.scene.meshes.some((mesh) => mesh.metadata?.actorVisual === "high-detail-gear")).toBe(false);
 
     bundle.scene.dispose();
     engine.dispose();
@@ -1059,6 +1062,10 @@ describe("IslandScene lifecycle", () => {
       .filter((mesh) => mesh.name.startsWith("town-building-silhouettes-"))
       .map((mesh) => mesh.metadata?.townKind)
       .sort()).toEqual(["commercial", "corner", "factory", "rowhouse", "tower", "warehouse"]);
+    expect(bundle.viewWeaponRoot.getChildMeshes(false)
+      .filter((mesh) => mesh.metadata?.actorVisual === "view-arm"))
+      .toHaveLength(8);
+    expect(bundle.scene.meshes.some((mesh) => mesh.metadata?.actorVisual === "high-detail-gear")).toBe(true);
 
     bundle.scene.dispose();
     engine.dispose();

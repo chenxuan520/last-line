@@ -196,7 +196,7 @@ export async function createIslandScene(
   createPois(scene, materials, layout);
   createBrandSigns(scene, assets, layout);
 
-  const { actorRoots, actorVisualRoots } = createActors(scene, actors, materials, player.id);
+  const { actorRoots, actorVisualRoots } = createActors(scene, actors, materials, player.id, highPresentation);
   const camera = createCamera(scene, player);
   const aircraftInteriorRoot = createAircraftInterior(scene, camera, materials);
   aircraftInteriorRoot.setEnabled(player.deployment === "aircraft");
@@ -213,7 +213,7 @@ export async function createIslandScene(
     const enabled = visible && progress < 1;
     if (aircraftVisualRoot.isEnabled() !== enabled) aircraftVisualRoot.setEnabled(enabled);
   };
-  const viewWeaponRoot = createViewWeapon(scene, camera, materials);
+  const viewWeaponRoot = createViewWeapon(scene, camera, materials, highPresentation);
   setActorWeaponVisual(viewWeaponRoot, getActiveWeapon(player)?.weaponId ?? null);
   viewWeaponRoot.setEnabled(Boolean(getActiveWeapon(player)));
   if (quality !== "low") {
@@ -2122,6 +2122,7 @@ function createActors(
   actors: Readonly<Record<EntityId, ActorState>>,
   materials: IslandMaterials,
   localActorId: EntityId,
+  highPresentation: boolean,
 ): { actorRoots: Map<EntityId, TransformNode>; actorVisualRoots: Map<EntityId, TransformNode> } {
   const actorRoots = new Map<EntityId, TransformNode>();
   const actorVisualRoots = new Map<EntityId, TransformNode>();
@@ -2138,7 +2139,7 @@ function createActors(
     if (actor.id === localActorId) {
       createPlayerHitbox(scene, root, actor.id, materials.playerHitbox);
     } else {
-      createBot(scene, visualRoot, actor.id, materials);
+      createBot(scene, visualRoot, actor.id, materials, highPresentation);
       setActorWeaponVisual(root, getActiveWeapon(actor)?.weaponId ?? null);
       setActorParachuteVisual(root, actor.deployment === "parachuting");
       setActorEquipmentVisual(root, actor.inventory.armorLevel, actor.inventory.helmetLevel);
@@ -2173,7 +2174,13 @@ function createPlayerHitbox(
   markActor(hitbox, actorId);
 }
 
-function createBot(scene: Scene, root: TransformNode, actorId: EntityId, materials: IslandMaterials): void {
+function createBot(
+  scene: Scene,
+  root: TransformNode,
+  actorId: EntityId,
+  materials: IslandMaterials,
+  highPresentation: boolean,
+): void {
   const body = CreateCapsule(
     `body-${actorId}`,
     { height: 1.42, radius: 0.38, tessellation: 7, subdivisions: 1 },
@@ -2214,6 +2221,10 @@ function createBot(scene: Scene, root: TransformNode, actorId: EntityId, materia
   backpack.material = materials.gear;
   markActorVisual(backpack, actorId, "backpack");
 
+  if (highPresentation) {
+    createHighQualityActorGear(scene, root, actorId, materials);
+  }
+
   for (const side of [-1, 1] as const) {
     const arm = CreateCapsule(
       `arm-${actorId}-${side}`,
@@ -2240,6 +2251,42 @@ function createBot(scene: Scene, root: TransformNode, actorId: EntityId, materia
   createWeaponModel(scene, root, `bot-${actorId}`, "smg", materials, false);
   createWeaponModel(scene, root, `bot-${actorId}`, "shotgun", materials, false);
   createWeaponModel(scene, root, `bot-${actorId}`, "sniper", materials, false);
+}
+
+function createHighQualityActorGear(
+  scene: Scene,
+  root: TransformNode,
+  actorId: EntityId,
+  materials: IslandMaterials,
+): void {
+  for (const side of [-1, 1] as const) {
+    const shoulder = CreateBox(
+      `shoulder-plate-${actorId}-${side}`,
+      { width: 0.23, height: 0.12, depth: 0.28 },
+      scene,
+    );
+    shoulder.parent = root;
+    shoulder.position.set(side * 0.43, -0.28, 0.05);
+    shoulder.rotation.z = side * 0.16;
+    shoulder.material = materials.actorArmor;
+    markActorVisual(shoulder, actorId, "high-detail-gear");
+
+    const knee = CreateBox(
+      `knee-pad-${actorId}-${side}`,
+      { width: 0.18, height: 0.14, depth: 0.08 },
+      scene,
+    );
+    knee.parent = root;
+    knee.position.set(side * 0.16, -1.22, 0.3);
+    knee.material = materials.gear;
+    markActorVisual(knee, actorId, "high-detail-gear");
+  }
+
+  const belt = CreateBox(`utility-belt-${actorId}`, { width: 0.72, height: 0.12, depth: 0.18 }, scene);
+  belt.parent = root;
+  belt.position.set(0, -0.87, 0.18);
+  belt.material = materials.gear;
+  markActorVisual(belt, actorId, "high-detail-gear");
 }
 
 export function setActorWeaponVisual(root: TransformNode, weaponId: string | null): void {
@@ -2374,10 +2421,15 @@ function createAircraftVisual(scene: Scene, materials: IslandMaterials): Transfo
   return root;
 }
 
-function createViewWeapon(scene: Scene, camera: UniversalCamera, materials: IslandMaterials): TransformNode {
+function createViewWeapon(
+  scene: Scene,
+  camera: UniversalCamera,
+  materials: IslandMaterials,
+  highPresentation: boolean,
+): TransformNode {
   const root = new TransformNode("view-weapon-root", scene);
   root.parent = camera;
-  createViewArms(scene, root, materials);
+  if (highPresentation) createViewArms(scene, root, materials);
   createWeaponModel(scene, root, "view", "rifle", materials, true);
   createWeaponModel(scene, root, "view", "smg", materials, true);
   createWeaponModel(scene, root, "view", "shotgun", materials, true);
@@ -2410,6 +2462,30 @@ function createViewArms(scene: Scene, root: TransformNode, materials: IslandMate
     glove.material = materials.gear;
     glove.isPickable = false;
     glove.metadata = { actorVisual: "view-arm" };
+
+    const wrist = CreateCylinder(
+      `view-wrist-wrap-${side < 0 ? "left" : "right"}`,
+      { height: 0.18, diameter: 0.17, tessellation: 8 },
+      scene,
+    );
+    wrist.parent = root;
+    wrist.position.set(side * 0.24, -0.36, 0.62);
+    wrist.rotation.set(Math.PI / 2 + 0.42, side * 0.12, 0);
+    wrist.material = materials.actorArmor;
+    wrist.isPickable = false;
+    wrist.metadata = { actorVisual: "view-arm" };
+
+    const knuckle = CreateBox(
+      `view-knuckle-guard-${side < 0 ? "left" : "right"}`,
+      { width: 0.15, height: 0.035, depth: 0.09 },
+      scene,
+    );
+    knuckle.parent = root;
+    knuckle.position.set(side * 0.2, -0.25, 0.86);
+    knuckle.rotation.set(0.28, side * 0.08, side * 0.04);
+    knuckle.material = materials.actorArmor;
+    knuckle.isPickable = false;
+    knuckle.metadata = { actorVisual: "view-arm" };
   }
 }
 

@@ -1858,6 +1858,13 @@ h1 {
   content: "";
 }
 
+#ui-root.is-high-quality-hud .weapon-status,
+#ui-root.is-high-quality-hud .vitals > div,
+#ui-root.is-high-quality-hud .minimap-card {
+  border-color: rgb(214 224 198 / 28%);
+  filter: saturate(1.08) contrast(1.04);
+}
+
 .weapon-status img {
   width: clamp(54px, 4vw, 72px);
   height: 45px;

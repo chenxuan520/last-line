@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { leaderboardScrollPixels, pauseExitLabel } from "../../src/client/ui/GameHud";
+import { hudRootClassName, leaderboardScrollPixels, pauseExitLabel } from "../../src/client/ui/GameHud";
 
 describe("GameHud actions", () => {
   it("uses mode-specific pause exit labels", () => {
@@ -11,5 +11,12 @@ describe("GameHud actions", () => {
     expect(leaderboardScrollPixels(12, 0, 400)).toBe(12);
     expect(leaderboardScrollPixels(3, 1, 400)).toBe(48);
     expect(leaderboardScrollPixels(-1, 2, 400)).toBe(-400);
+  });
+
+  it("adds the high-quality HUD layer only for high quality", () => {
+    expect(hudRootClassName(false, "high")).toBe("is-playing is-high-quality-hud");
+    expect(hudRootClassName(true, "high")).toBe("is-playing is-touch-input is-high-quality-hud");
+    expect(hudRootClassName(false, "medium")).toBe("is-playing");
+    expect(hudRootClassName(true, "low")).toBe("is-playing is-touch-input");
   });
 });
