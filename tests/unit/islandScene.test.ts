@@ -1,5 +1,6 @@
 import { NullEngine } from "@babylonjs/core/Engines/nullEngine";
 import { BackgroundMaterial } from "@babylonjs/core/Materials/Background/backgroundMaterial";
+import { ImageProcessingConfiguration } from "@babylonjs/core/Materials/imageProcessingConfiguration";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { MultiMaterial } from "@babylonjs/core/Materials/multiMaterial";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
@@ -88,6 +89,12 @@ describe("IslandScene lifecycle", () => {
       expect(bundle.lootMeshes.get("death")?.material).not.toBe(spawnMaterial);
       expect(bundle.lootMeshes.get("death")?.metadata?.lootSource).toBe("death");
       expect(bundle.viewWeaponRoot.isEnabled()).toBe(false);
+      expect(bundle.viewWeaponRoot.getChildMeshes(false)
+        .filter((mesh) => mesh.metadata?.actorVisual === "view-arm"))
+        .toHaveLength(4);
+      expect(bundle.viewWeaponRoot.getChildMeshes(false)
+        .filter((mesh) => mesh.metadata?.actorVisual === "view-arm")
+        .every((mesh) => !mesh.isPickable && !mesh.checkCollisions)).toBe(true);
       expect(bundle.camera.minZ).toBeGreaterThanOrEqual(0.1);
       expect(bundle.camera.ellipsoid.asArray()).toEqual([ACTOR_RADIUS, ACTOR_EYE_HEIGHT / 2, ACTOR_RADIUS]);
       expect(bundle.camera.ellipsoidOffset.y).toBe(-ACTOR_EYE_HEIGHT / 2);
@@ -121,6 +128,11 @@ describe("IslandScene lifecycle", () => {
       const collisionMeshes = bundle.scene.meshes.filter((mesh) => mesh.metadata?.collision);
       const ground = bundle.scene.getMeshByName("island-ground");
       const sky = bundle.scene.getMeshByName("island-sky-dome");
+      expect(bundle.scene.imageProcessingConfiguration.toneMappingEnabled).toBe(true);
+      expect(bundle.scene.imageProcessingConfiguration.toneMappingType).toBe(
+        ImageProcessingConfiguration.TONEMAPPING_ACES,
+      );
+      expect(bundle.scene.imageProcessingConfiguration.ditheringEnabled).toBe(true);
       expect(sky).toMatchObject({ isPickable: false, checkCollisions: false, infiniteDistance: true });
       expect(sky?.metadata).toMatchObject({ decoration: "sky", skyAssetId: getSkyAssetId(state.mapSeed) });
       expect(sky?.material).toBeInstanceOf(BackgroundMaterial);
@@ -945,10 +957,8 @@ describe("IslandScene lifecycle", () => {
     expect(bundle.scene.meshes.some((mesh) => mesh.name === "island-beach")).toBe(false);
     expect(bundle.scene.meshes.some((mesh) => mesh.name === "island-wet-shore")).toBe(false);
     expect(bundle.scene.meshes.some((mesh) => mesh.name === "building-floor-slabs-batch")).toBe(true);
-    expect(bundle.scene.meshes
-      .filter((mesh) => mesh.name.startsWith("town-building-silhouettes-"))
-      .map((mesh) => mesh.metadata?.townKind)
-      .sort()).toEqual(["commercial", "corner", "factory", "rowhouse", "tower", "warehouse"]);
+    expect(bundle.scene.meshes.some((mesh) => mesh.name.startsWith("town-building-silhouettes-"))).toBe(false);
+    expect(bundle.scene.meshes.some((mesh) => mesh.metadata?.decoration === "town-visual-detail")).toBe(false);
     expect(new Set(bundle.scene.meshes
       .filter((mesh) => mesh.metadata?.decoration === "poi")
       .map((mesh) => mesh.metadata?.poiName)
@@ -992,7 +1002,63 @@ describe("IslandScene lifecycle", () => {
       .filter((mesh) => mesh.name.startsWith("building-walls-"))
       .reduce((total, mesh) => total + Number(mesh.metadata?.sourceCount ?? 0), 0))
       .toBe(layout.wallSegments.filter((wall) => !doorSillIds.has(wall.id)).length);
-    expect(bundle.scene.meshes.length).toBeLessThan(900);
+    expect(bundle.scene.meshes.length).toBeLessThan(930);
+
+    bundle.scene.dispose();
+    engine.dispose();
+  }, 60_000);
+
+  it("enables dense realistic town presentation only on high quality", async () => {
+    const engine = new NullEngine();
+    const assets = createAssets();
+    const state = createBattleRoyaleState("player", {
+      participantCount: 2,
+      flightSeconds: 1,
+      safeZoneStages: [{ waitSeconds: 1, shrinkSeconds: 1, radius: 100, damagePerSecond: 1 }],
+    }, () => 0.5, { mapId: "town" });
+    const layout = createMapLayout("town", state.mapSeed);
+    const bundle = await createIslandScene(
+      engine,
+      assets,
+      state.actors,
+      state.groundLoot,
+      state.mapSeed,
+      false,
+      undefined,
+      "high",
+      state.mapId,
+    );
+
+    const townVisualBatches = bundle.scene.meshes.filter((mesh) =>
+      mesh.metadata?.decoration === "town-visual-detail"
+    );
+    expect(new Set(townVisualBatches.map((mesh) => mesh.metadata?.detailType))).toEqual(new Set([
+      "facade-weathering",
+      "industrial-light",
+      "industrial-pipe",
+      "industrial-skyline",
+      "industrial-smoke",
+      "overhead-cable",
+      "road-marking",
+      "road-wet-patch",
+      "road-weathering",
+      "roof-weathering",
+      "rooftop-equipment",
+      "street-furniture",
+      "street-light",
+      "window-glass",
+    ]));
+    expect(townVisualBatches.every((mesh) =>
+      !mesh.isPickable &&
+      !mesh.checkCollisions &&
+      Number(mesh.metadata?.sourceCount ?? 0) > 0
+    )).toBe(true);
+    expect(townVisualBatches.find((mesh) => mesh.metadata?.detailType === "window-glass")?.metadata?.sourceCount)
+      .toBe(layout.wallOpenings.filter((opening) => opening.kind === "window").length);
+    expect(bundle.scene.meshes
+      .filter((mesh) => mesh.name.startsWith("town-building-silhouettes-"))
+      .map((mesh) => mesh.metadata?.townKind)
+      .sort()).toEqual(["commercial", "corner", "factory", "rowhouse", "tower", "warehouse"]);
 
     bundle.scene.dispose();
     engine.dispose();
