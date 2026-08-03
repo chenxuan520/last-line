@@ -1,6 +1,5 @@
 import { NullEngine } from "@babylonjs/core/Engines/nullEngine";
 import { BackgroundMaterial } from "@babylonjs/core/Materials/Background/backgroundMaterial";
-import { ImageProcessingConfiguration } from "@babylonjs/core/Materials/imageProcessingConfiguration";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { MultiMaterial } from "@babylonjs/core/Materials/multiMaterial";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
@@ -128,11 +127,14 @@ describe("IslandScene lifecycle", () => {
       const collisionMeshes = bundle.scene.meshes.filter((mesh) => mesh.metadata?.collision);
       const ground = bundle.scene.getMeshByName("island-ground");
       const sky = bundle.scene.getMeshByName("island-sky-dome");
-      expect(bundle.scene.imageProcessingConfiguration.toneMappingEnabled).toBe(true);
-      expect(bundle.scene.imageProcessingConfiguration.toneMappingType).toBe(
-        ImageProcessingConfiguration.TONEMAPPING_ACES,
-      );
-      expect(bundle.scene.imageProcessingConfiguration.ditheringEnabled).toBe(true);
+      expect(bundle.scene.imageProcessingConfiguration.isEnabled).toBe(false);
+      expect(bundle.scene.imageProcessingConfiguration.toneMappingEnabled).toBe(false);
+      expect(bundle.scene.imageProcessingConfiguration.ditheringEnabled).toBe(false);
+      expect(bundle.scene.imageProcessingConfiguration.vignetteEnabled).toBe(false);
+      expect(bundle.scene.clearColor.asArray()).toEqual([0.36, 0.44, 0.46, 1]);
+      expect(bundle.scene.fogStart).toBeCloseTo(MAP_SIZE * 0.65, 5);
+      expect(bundle.scene.fogEnd).toBeCloseTo(MAP_SIZE * 1.1, 5);
+      expect(bundle.scene.fogColor.asArray()).toEqual([0.46, 0.53, 0.53]);
       expect(sky).toMatchObject({ isPickable: false, checkCollisions: false, infiniteDistance: true });
       expect(sky?.metadata).toMatchObject({ decoration: "sky", skyAssetId: getSkyAssetId(state.mapSeed) });
       expect(sky?.material).toBeInstanceOf(BackgroundMaterial);
@@ -943,10 +945,49 @@ describe("IslandScene lifecycle", () => {
     expect(bundle.scene.meshes.some((mesh) => mesh.metadata?.actorVisual === "high-detail-gear")).toBe(false);
     expect(bundle.scene.meshes.some((mesh) => mesh.metadata?.decoration === "island-visual-detail")).toBe(false);
     expect(bundle.scene.meshes.some((mesh) => mesh.name.startsWith("island-shore-foam-"))).toBe(false);
+    expect(bundle.scene.imageProcessingConfiguration.isEnabled).toBe(false);
+    expect(bundle.scene.imageProcessingConfiguration.toneMappingEnabled).toBe(false);
+    expect(bundle.scene.imageProcessingConfiguration.ditheringEnabled).toBe(false);
+    expect(bundle.scene.imageProcessingConfiguration.vignetteEnabled).toBe(false);
 
     bundle.scene.dispose();
     engine.dispose();
   }, 30_000);
+
+  it("does not apply high-quality color grading on medium quality", async () => {
+    const engine = new NullEngine();
+    const assets = createAssets();
+    const state = createBattleRoyaleState("player", {
+      participantCount: 2,
+      flightSeconds: 1,
+      safeZoneStages: [{ waitSeconds: 1, shrinkSeconds: 1, radius: 100, damagePerSecond: 1 }],
+    }, () => 0.5, { mapId: "town" });
+
+    const bundle = await createIslandScene(
+      engine,
+      assets,
+      state.actors,
+      state.groundLoot,
+      state.mapSeed,
+      false,
+      undefined,
+      "medium",
+      state.mapId,
+    );
+
+    expect(bundle.scene.imageProcessingConfiguration.isEnabled).toBe(false);
+    expect(bundle.scene.imageProcessingConfiguration.toneMappingEnabled).toBe(false);
+    expect(bundle.scene.imageProcessingConfiguration.ditheringEnabled).toBe(false);
+    expect(bundle.scene.imageProcessingConfiguration.vignetteEnabled).toBe(false);
+    expect(bundle.scene.clearColor.asArray()).toEqual([0.36, 0.44, 0.46, 1]);
+    expect(bundle.scene.fogStart).toBeCloseTo(MAP_SIZE * 0.65, 5);
+    expect(bundle.scene.fogEnd).toBeCloseTo(MAP_SIZE * 1.1, 5);
+    expect(bundle.scene.fogColor.asArray()).toEqual([0.46, 0.53, 0.53]);
+    expect(bundle.scene.meshes.some((mesh) => mesh.metadata?.decoration === "town-visual-detail")).toBe(false);
+
+    bundle.scene.dispose();
+    engine.dispose();
+  }, 60_000);
 
   it("selects all sky panoramas deterministically from the map seed", () => {
     expect([0, 1, 2, 3, -1].map(getSkyAssetId)).toEqual([
@@ -1075,6 +1116,14 @@ describe("IslandScene lifecycle", () => {
     const townVisualBatches = bundle.scene.meshes.filter((mesh) =>
       mesh.metadata?.decoration === "town-visual-detail"
     );
+    expect(bundle.scene.imageProcessingConfiguration.isEnabled).toBe(false);
+    expect(bundle.scene.imageProcessingConfiguration.toneMappingEnabled).toBe(false);
+    expect(bundle.scene.imageProcessingConfiguration.ditheringEnabled).toBe(false);
+    expect(bundle.scene.imageProcessingConfiguration.vignetteEnabled).toBe(false);
+    expect(bundle.scene.clearColor.asArray()).toEqual([0.36, 0.44, 0.46, 1]);
+    expect(bundle.scene.fogStart).toBeCloseTo(MAP_SIZE * 0.65, 5);
+    expect(bundle.scene.fogEnd).toBeCloseTo(MAP_SIZE * 1.1, 5);
+    expect(bundle.scene.fogColor.asArray()).toEqual([0.46, 0.53, 0.53]);
     expect(new Set(townVisualBatches.map((mesh) => mesh.metadata?.detailType))).toEqual(new Set([
       "facade-weathering",
       "facade-canopy",
@@ -1101,6 +1150,26 @@ describe("IslandScene lifecycle", () => {
     )).toBe(true);
     expect(townVisualBatches.find((mesh) => mesh.metadata?.detailType === "window-glass")?.metadata?.sourceCount)
       .toBe(layout.wallOpenings.filter((opening) => opening.kind === "window").length);
+    const windowBatchMaterial = townVisualBatches.find((mesh) =>
+      mesh.metadata?.detailType === "window-glass"
+    )?.material as StandardMaterial | undefined;
+    expect(windowBatchMaterial?.alpha).toBe(0.16);
+    expect(windowBatchMaterial?.name).toBe("town-window-material");
+    expect(windowBatchMaterial?.diffuseColor.toHexString().toLowerCase()).toBe("#8fb8bd");
+    const facadeWeatheringMaterial = townVisualBatches.find((mesh) =>
+      mesh.metadata?.detailType === "facade-weathering"
+    )?.material as StandardMaterial | undefined;
+    expect(facadeWeatheringMaterial?.alpha).toBe(0.24);
+    expect(facadeWeatheringMaterial?.diffuseColor.toHexString().toLowerCase()).toBe("#55584e");
+    const cockpitMaterial = bundle.scene.getMeshByName("aircraft-cockpit")?.material as StandardMaterial | undefined;
+    expect(cockpitMaterial?.name).toBe("building-window-material");
+    expect(cockpitMaterial?.alpha).toBe(1);
+    expect(cockpitMaterial?.diffuseColor.toHexString().toLowerCase()).toBe("#26383b");
+    expect(cockpitMaterial?.emissiveColor.asArray()).toEqual([0.025, 0.035, 0.034]);
+    expect(cockpitMaterial?.specularColor.r).toBeCloseTo(38 / 255 * 0.08, 8);
+    expect(cockpitMaterial?.specularColor.g).toBeCloseTo(56 / 255 * 0.08, 8);
+    expect(cockpitMaterial?.specularColor.b).toBeCloseTo(59 / 255 * 0.08, 8);
+    expect(cockpitMaterial?.backFaceCulling).toBe(true);
     expect(bundle.scene.meshes
       .filter((mesh) => mesh.name.startsWith("town-building-silhouettes-"))
       .map((mesh) => mesh.metadata?.townKind)

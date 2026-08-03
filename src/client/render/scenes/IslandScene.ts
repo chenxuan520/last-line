@@ -57,8 +57,6 @@ import { getPoiVisualType } from "../../poiVisuals";
 import { getBrandSignPlacements } from "../../brandSigns";
 
 const INITIAL_SAFE_ZONE_RADIUS = MAP_SIZE * 0.36;
-const TONE_MAPPING_ACES = 1;
-const VIGNETTE_MODE_MULTIPLY = 0;
 const HOSPITAL_SURFACE_COLOR = "#ffffff";
 const SKY_ASSET_IDS = ["texture.sky.clearing", "texture.sky.overcast", "texture.sky.storm"] as const;
 const TERRAIN_PATCHES: ReadonlyArray<readonly [number, number, number, number, number, "mud" | "grass"]> = [
@@ -116,6 +114,7 @@ interface IslandMaterials {
   wallTrim: StandardMaterial;
   hospitalCross: StandardMaterial;
   window: StandardMaterial;
+  townWindow: StandardMaterial;
   industrialLight: StandardMaterial;
   door: StandardMaterial;
   botBody: StandardMaterial;
@@ -169,26 +168,18 @@ export async function createIslandScene(
   const scene = new Scene(engine);
   scene.collisionsEnabled = true;
   scene.skipPointerMovePicking = true;
-  configureScenePresentation(scene, layout.mapId, highPresentation);
+  configureScenePresentation(scene);
 
   const ambient = new HemisphericLight("island-ambient", new Vector3(0.2, 1, 0.12), scene);
-  ambient.intensity = highPresentation && layout.mapId === "town" ? 0.56 : 0.74;
-  ambient.diffuse = highPresentation && layout.mapId === "town"
-    ? new Color3(0.72, 0.78, 0.82)
-    : new Color3(0.78, 0.82, 0.72);
-  ambient.groundColor = highPresentation && layout.mapId === "town"
-    ? new Color3(0.11, 0.14, 0.16)
-    : new Color3(0.16, 0.2, 0.18);
+  ambient.intensity = 0.74;
+  ambient.diffuse = new Color3(0.78, 0.82, 0.72);
+  ambient.groundColor = new Color3(0.16, 0.2, 0.18);
 
   const sun = new DirectionalLight("island-sun", new Vector3(-0.55, -1, 0.35), scene);
   sun.position = new Vector3(180, 260, -140);
-  sun.intensity = highPresentation && layout.mapId === "town" ? 1.24 : 0.98;
-  sun.diffuse = highPresentation && layout.mapId === "town"
-    ? new Color3(1, 0.9, 0.72)
-    : new Color3(0.94, 0.88, 0.73);
-  sun.specular = highPresentation && layout.mapId === "town"
-    ? new Color3(0.64, 0.66, 0.58)
-    : new Color3(0.42, 0.46, 0.43);
+  sun.intensity = 0.98;
+  sun.diffuse = new Color3(0.94, 0.88, 0.73);
+  sun.specular = new Color3(0.42, 0.46, 0.43);
 
   const materials = createMaterials(scene, assets, highPresentation);
   createSkyDome(scene, assets, mapSeed);
@@ -260,27 +251,18 @@ export function getSkyAssetId(mapSeed: number): (typeof SKY_ASSET_IDS)[number] {
   return SKY_ASSET_IDS[(mapSeed >>> 0) % SKY_ASSET_IDS.length] ?? SKY_ASSET_IDS[0];
 }
 
-function configureScenePresentation(scene: Scene, mapId: MapId, highPresentation: boolean): void {
-  const town = highPresentation && mapId === "town";
-  scene.clearColor = town ? new Color4(0.24, 0.29, 0.31, 1) : new Color4(0.34, 0.42, 0.43, 1);
+function configureScenePresentation(scene: Scene): void {
+  scene.clearColor = new Color4(0.36, 0.44, 0.46, 1);
   scene.fogMode = Scene.FOGMODE_LINEAR;
-  scene.fogStart = MAP_SIZE * (town ? 0.42 : 0.6);
-  scene.fogEnd = MAP_SIZE * (town ? 0.88 : 1.08);
-  scene.fogColor = town ? new Color3(0.42, 0.48, 0.49) : new Color3(0.47, 0.53, 0.52);
+  scene.fogStart = MAP_SIZE * 0.65;
+  scene.fogEnd = MAP_SIZE * 1.1;
+  scene.fogColor = new Color3(0.46, 0.53, 0.53);
 
   const processing = scene.imageProcessingConfiguration;
-  processing.isEnabled = true;
-  processing.toneMappingEnabled = true;
-  processing.toneMappingType = TONE_MAPPING_ACES;
-  processing.exposure = town ? 1.08 : 1.04;
-  processing.contrast = town ? 1.34 : 1.2;
-  processing.ditheringEnabled = true;
-  processing.ditheringIntensity = 0.006;
-  processing.vignetteEnabled = highPresentation;
-  processing.vignetteWeight = town ? 1.35 : 1.08;
-  processing.vignetteStretch = 0.62;
-  processing.vignetteColor = town ? new Color4(0.03, 0.05, 0.055, 1) : new Color4(0.04, 0.055, 0.045, 1);
-  processing.vignetteBlendMode = VIGNETTE_MODE_MULTIPLY;
+  processing.isEnabled = false;
+  processing.toneMappingEnabled = false;
+  processing.ditheringEnabled = false;
+  processing.vignetteEnabled = false;
 }
 
 async function replaceCatalogModels(
@@ -535,9 +517,13 @@ function createMaterials(scene: Scene, assets: AssetCatalog, highPresentation: b
   const lootColor = assetColor(assets, "ui.weapon.rifle", "svg", "#e2c66d");
 
   const windowMaterial = material(scene, "building-window-material", "#26383b");
-  windowMaterial.diffuseColor = new Color3(0.09, 0.16, 0.18);
-  windowMaterial.emissiveColor = new Color3(0.018, 0.045, 0.052);
-  windowMaterial.specularColor = new Color3(0.55, 0.7, 0.72);
+  windowMaterial.emissiveColor = new Color3(0.025, 0.035, 0.034);
+  const townWindow = material(scene, "town-window-material", "#a9d3d5");
+  townWindow.diffuseColor = new Color3(0.56, 0.72, 0.74);
+  townWindow.emissiveColor = new Color3(0.05, 0.075, 0.08);
+  townWindow.specularColor = new Color3(0.78, 0.88, 0.9);
+  townWindow.alpha = 0.16;
+  townWindow.backFaceCulling = false;
 
   const playerHitbox = material(scene, "player-hitbox-material", playerColor);
   playerHitbox.alpha = 0.001;
@@ -598,9 +584,9 @@ function createMaterials(scene: Scene, assets: AssetCatalog, highPresentation: b
     roadMarking.alpha = 0.62;
     roadMarking.emissiveColor = Color3.FromHexString("#d0c68b").scale(0.08);
   }
-  const weathering = highPresentation ? material(scene, "town-weathering-material", "#151b19") : poiDark;
+  const weathering = highPresentation ? material(scene, "town-weathering-material", "#55584e") : poiDark;
   if (highPresentation) {
-    weathering.alpha = 0.58;
+    weathering.alpha = 0.24;
     weathering.specularColor = Color3.Black();
   }
   const industrialLight = highPresentation ? material(scene, "town-industrial-light-material", "#f0c76e") : poiAccent;
@@ -632,6 +618,7 @@ function createMaterials(scene: Scene, assets: AssetCatalog, highPresentation: b
     wallTrim,
     hospitalCross: material(scene, "hospital-cross-material", "#d8473f"),
     window: windowMaterial,
+    townWindow,
     industrialLight,
     door: material(scene, "building-door-material", "#4c3d31"),
     botBody: material(scene, "bot-body-material", botColor),
@@ -1369,7 +1356,7 @@ function createTownFacadeDetail(
       opening.center.y + opening.height * 0.02,
       opening.center.z + outward.z * 0.22,
     );
-    pane.material = materials.window;
+    pane.material = materials.townWindow;
     markTownVisualDetail(pane, "window-glass");
 
     if (index % 5 !== 0) return;
@@ -1644,8 +1631,8 @@ function createTownWeatheringDetails(
       const side = (index + layout.seed) % 3 === 0 ? "left" : (index + layout.seed) % 3 === 1 ? "front" : "back";
       const horizontalAlongX = side === "front" || side === "back";
       const outward = facadeOutward(side);
-      const width = Math.min(horizontalAlongX ? building.width * 0.34 : building.depth * 0.34, 7.5);
-      const height = Math.min(building.height * 0.28, 5.5);
+      const width = Math.min(horizontalAlongX ? building.width * 0.22 : building.depth * 0.22, 5.4);
+      const height = Math.min(building.height * 0.22, 4.2);
       const y = building.baseY + Math.min(building.height - height / 2 - 0.45, building.storyHeight * (0.65 + random() * 1.6));
       const x = horizontalAlongX
         ? building.center.x + (random() - 0.5) * Math.max(0, building.width - width - 1)
@@ -1653,18 +1640,18 @@ function createTownWeatheringDetails(
       const z = horizontalAlongX
         ? building.center.z + outward.z * (building.depth / 2 + 0.05)
         : building.center.z + (random() - 0.5) * Math.max(0, building.depth - width - 1);
-      const stain = CreateBox(
-        `${building.id}-facade-grime`,
+      const runoff = CreateBox(
+        `${building.id}-wall-runoff`,
         {
-          width: horizontalAlongX ? width : 0.055,
+          width: horizontalAlongX ? Math.max(0.18, width * 0.14) : 0.055,
           height,
-          depth: horizontalAlongX ? 0.055 : width,
+          depth: horizontalAlongX ? 0.055 : Math.max(0.18, width * 0.14),
         },
         scene,
       );
-      stain.position.set(x, y, z);
-      stain.material = materials.weathering;
-      markTownVisualDetail(stain, "facade-weathering");
+      runoff.position.set(x, y, z);
+      runoff.material = materials.weathering;
+      markTownVisualDetail(runoff, "facade-weathering");
 
       if (index % (facadeStride * 2) === 0) {
         const rust = CreateBox(

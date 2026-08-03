@@ -13,10 +13,10 @@ const MUZZLE_CAPACITY = 4;
 const IMPACT_CAPACITY = 12;
 const PARTICLE_CAPACITY = 32;
 const DECAL_CAPACITY = 20;
-const PARTICLES_PER_ENVIRONMENT_HIT = 5;
+const PARTICLES_PER_ENVIRONMENT_HIT = 4;
 
 const TRACER_LIFETIME_SECONDS = 0.08;
-const MUZZLE_LIFETIME_SECONDS = 0.075;
+const MUZZLE_LIFETIME_SECONDS = 0.06;
 const IMPACT_LIFETIME_SECONDS = 0.16;
 const DECAL_LIFETIME_SECONDS = 8;
 
@@ -250,8 +250,7 @@ export class CombatEffects {
       event.origin.y + dy / length * 0.62,
       event.origin.z + dz / length * 0.62,
     );
-    slot.mesh.scaling.set(0.95, 0.42, 1.85);
-    slot.mesh.lookAt(this.lookTarget.set(event.end.x, event.end.y, event.end.z));
+    slot.mesh.scaling.setAll(1);
     activate(slot, MUZZLE_LIFETIME_SECONDS);
   }
 
@@ -306,23 +305,23 @@ export class CombatEffects {
     const index = acquireIndex(this.particles, this.particleCursor);
     this.particleCursor = (index + 1) % this.particles.length;
     const slot = this.particles[index];
-    const dust = sequence % 2 === 1 || sequence === PARTICLES_PER_ENVIRONMENT_HIT - 1;
+    const dust = sequence % 2 === 1;
     const angle = sequence * 2.399963;
-    const spread = dust ? 0.72 : 1.45;
-    const normalSpeed = dust ? 0.38 + sequence * 0.04 : 1.8;
+    const spread = dust ? 0.55 : 1.2;
+    const normalSpeed = dust ? 0.45 : 1.65;
 
     slot.mesh.position.set(
       event.end.x + this.surfaceNormal.x * 0.035,
       event.end.y + this.surfaceNormal.y * 0.035,
       event.end.z + this.surfaceNormal.z * 0.035,
     );
-    slot.mesh.scaling.setAll(dust ? 1.55 + sequence * 0.08 : 0.5);
+    slot.mesh.scaling.setAll(dust ? 1.35 : 0.58);
     slot.mesh.material = dust ? this.materials.dust : this.materials.spark;
     slot.velocityX = this.surfaceNormal.x * normalSpeed + Math.cos(angle) * spread;
-    slot.velocityY = this.surfaceNormal.y * normalSpeed + (dust ? 0.18 : 0.62);
+    slot.velocityY = this.surfaceNormal.y * normalSpeed + (dust ? 0.22 : 0.55);
     slot.velocityZ = this.surfaceNormal.z * normalSpeed + Math.sin(angle) * spread;
     slot.gravity = dust ? 0.8 : 4.8;
-    activate(slot, dust ? 0.46 : 0.22);
+    activate(slot, dust ? 0.42 : 0.24);
   }
 
   private setSurfaceNormal(event: ShotTracedEvent): void {
