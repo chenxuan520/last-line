@@ -49,6 +49,7 @@ import {
   TOWN_POINT_OBSTACLE_CLEARANCE,
   TOWN_ROAD_HALF_WIDTH,
   TOWN_ROAD_SHOULDER_HALF_WIDTH,
+  townFootprintClearsRoads,
 } from "../../../config/townMap";
 import { syncLootMarkerViews, type LootMarkerViewAdapter } from "../LootMarkerViewAdapter";
 import { clearDynamicChunkRecoveryAttempts } from "../../dynamicChunkRecovery";
@@ -2386,6 +2387,14 @@ function isNaturalPositionBlocked(x: number, z: number, layout: MapLayout, clear
         TOWN_POINT_HALF_WIDTH + clearance + TOWN_POINT_OBSTACLE_CLEARANCE &&
       Math.abs(z - point.position.z) <=
         TOWN_POINT_HALF_DEPTH + clearance + TOWN_POINT_OBSTACLE_CLEARANCE
+    ) ||
+    layout.mapId === "town" && !townFootprintClearsRoads(
+      layout.roadSegments,
+      x,
+      z,
+      clearance * 2,
+      clearance * 2,
+      0.5,
     )
   );
 }

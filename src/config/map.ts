@@ -8,6 +8,7 @@ import {
   TOWN_POINT_HALF_DEPTH,
   TOWN_POINT_HALF_WIDTH,
   TOWN_POINT_OBSTACLE_CLEARANCE,
+  townFootprintClearsRoads,
 } from "./townMap";
 
 export interface MapObstacle {
@@ -489,6 +490,8 @@ function createTownMapLayout(seed: number): MapLayout {
     obstacles,
     lootSpawnPoints,
     blueprint.landingZones,
+    blueprint.roadSegments,
+    blueprint.mapPoints.find((point) => point.name === "城市公园"),
   );
   return {
     mapId: "town",
@@ -710,12 +713,18 @@ function createTownCoverObstacles(
     const road = roads[(index * 7 + attempt) % roads.length];
     if (!road) continue;
     const [startX, startZ, endX, endZ] = road;
-    const horizontal = startZ === endZ;
+    const deltaX = endX - startX;
+    const deltaZ = endZ - startZ;
+    const length = Math.hypot(deltaX, deltaZ);
+    if (length < 1) continue;
+    const normalX = -deltaZ / length;
+    const normalZ = deltaX / length;
+    const horizontal = Math.abs(deltaX) >= Math.abs(deltaZ);
     const progress = randomBetween(random, 0.03, 0.97);
     const side = random() < 0.5 ? -1 : 1;
     const edgeOffset = randomBetween(random, 8.5, 11.5);
-    const x = round(startX + (endX - startX) * progress + (horizontal ? 0 : side * edgeOffset));
-    const z = round(startZ + (endZ - startZ) * progress + (horizontal ? side * edgeOffset : 0));
+    const x = round(startX + deltaX * progress + normalX * side * edgeOffset);
+    const z = round(startZ + deltaZ * progress + normalZ * side * edgeOffset);
     const kind = index % 3 === 0 ? "hay" as const : "fence" as const;
     const longSize = round(randomBetween(random, 7, 12));
     const width = kind === "fence"
@@ -737,6 +746,7 @@ function createTownCoverObstacles(
     };
     if (buildings.some((building) => buildingsOverlap(candidate, building, 1.2))) continue;
     if (ramps.some((ramp) => rampIntersectsBuilding(ramp, candidate, 1.2))) continue;
+    if (!townFootprintClearsRoads(roads, x, z, width, depth, 0.25)) continue;
     if (reservedPoints.some((point) =>
       Math.abs(candidate.center.x - point.x) <=
         candidate.width / 2 + TOWN_POINT_HALF_WIDTH + TOWN_POINT_OBSTACLE_CLEARANCE &&
@@ -828,13 +838,20 @@ function createTownTreeTrunks(
   buildings: readonly MapBuilding[],
   loot: readonly Vector3State[],
   reservedPoints: readonly { x: number; z: number }[],
+  roads: readonly (readonly [number, number, number, number])[],
+  parkPoint: { x: number; z: number } | undefined,
 ): MapTreeTrunk[] {
   const random = createSeededRandom(seed ^ 0x68bc21eb);
   const trees: MapTreeTrunk[] = [];
   for (let attempt = 0; attempt < 20_000 && trees.length < 96; attempt += 1) {
-    const parkTree = trees.length < 48;
-    const x = round(parkTree ? randomBetween(random, 690, 850) : randomBetween(random, -1_120, 1_120));
-    const z = round(parkTree ? randomBetween(random, -130, 130) : randomBetween(random, -1_120, 1_120));
+    const parkTree = trees.length < 48 && attempt < 8_000;
+    const parkX = parkPoint?.x ?? 770;
+    const parkZ = parkPoint?.z ?? 0;
+    const x = round(parkTree ? randomBetween(random, parkX - 80, parkX + 80) : randomBetween(random, -1_120, 1_120));
+    const z = round(parkTree ? randomBetween(random, parkZ - 130, parkZ + 130) : randomBetween(random, -1_120, 1_120));
+    const width = round(randomBetween(random, 2.2, 3.2));
+    const height = round(randomBetween(random, 9, 14));
+    const depth = round(randomBetween(random, 2.2, 3.2));
     if (
       buildings.some((building) => buildingsOverlap(
         building,
@@ -846,11 +863,9 @@ function createTownTreeTrunks(
         Math.abs(point.x - x) <= TOWN_POINT_HALF_WIDTH + 4 &&
         Math.abs(point.z - z) <= TOWN_POINT_HALF_DEPTH + 4
       ) ||
+      !townFootprintClearsRoads(roads, x, z, width, depth, 0.25) ||
       trees.some((tree) => Math.hypot(tree.center.x - x, tree.center.z - z) < 12)
     ) continue;
-    const width = round(randomBetween(random, 2.2, 3.2));
-    const height = round(randomBetween(random, 9, 14));
-    const depth = round(randomBetween(random, 2.2, 3.2));
     const ground = terrainHeightFromHills(x, z, terrainHills);
     trees.push({
       id: `town-tree-${trees.length}`,
