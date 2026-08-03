@@ -707,6 +707,7 @@ function createIslandEnvironment(
 
   createBuildingDetails(scene, materials, layout);
   if (qualityLevel === "high") {
+    createIslandHighQualityDetails(scene, materials, layout);
     createTownBuildingSilhouettes(scene, layout);
     createTownRoadDetails(scene, materials, layout);
     createTownFacadeDetail(scene, materials, layout);
@@ -925,6 +926,53 @@ function createIslandPerimeter(scene: Scene, materials: IslandMaterials): void {
   const islandHalfSize = MAP_SIZE / 2;
   createSquareBand(scene, "island-beach", islandHalfSize, islandHalfSize + 10, -0.28, materials.beach);
   createSquareBand(scene, "island-wet-shore", islandHalfSize + 10, islandHalfSize + 20, -0.34, materials.shoreWet);
+}
+
+function createIslandHighQualityDetails(scene: Scene, materials: IslandMaterials, layout: MapLayout): void {
+  if (layout.mapId !== "island") return;
+  const halfSize = MAP_SIZE / 2;
+  const random = createVisualRandom(layout.seed ^ 0x4c8d2f11);
+  createSquareBand(scene, "island-shore-foam", halfSize - 7, halfSize - 4, -0.235, materials.aircraftTrail);
+
+  layout.roadSegments.forEach(([startX, startZ, endX, endZ], index) => {
+    if (index % 3 !== 0) return;
+    const progress = 0.18 + random() * 0.64;
+    const x = lerp(startX, endX, progress);
+    const z = lerp(startZ, endZ, progress);
+    const yaw = Math.atan2(endX - startX, endZ - startZ);
+    const patch = CreateBox(
+      `island-road-wet-${index}`,
+      { width: 2.4 + random() * 2.8, height: 0.035, depth: 7 + random() * 9 },
+      scene,
+    );
+    patch.position.set(x, getTerrainHeight(x, z, layout) + 0.06, z);
+    patch.rotation.y = yaw + (random() - 0.5) * 0.24;
+    patch.material = materials.roadWet;
+    markIslandVisualDetail(patch, "road-wet-patch");
+  });
+
+  layout.mapPoints.forEach((point, index) => {
+    if (index % 2 !== 0) return;
+    const light = CreateBox(
+      `island-poi-light-${index}`,
+      { width: 1.2, height: 0.18, depth: 0.18 },
+      scene,
+    );
+    light.position.set(point.position.x, getTerrainHeight(point.position.x, point.position.z, layout) + 2.8, point.position.z);
+    light.rotation.y = random() * Math.PI;
+    light.material = materials.industrialLight;
+    markIslandVisualDetail(light, "poi-light");
+  });
+
+  for (const detailType of ["road-wet-patch", "poi-light"] as const) {
+    mergeStaticBatch(
+      scene,
+      `island-${detailType}-batch`,
+      (mesh) => mesh.metadata?.decoration === "island-visual-detail" &&
+        mesh.metadata?.detailType === detailType,
+      { decoration: "island-visual-detail", detailType },
+    );
+  }
 }
 
 function createTownPoiPaving(scene: Scene, materials: IslandMaterials, layout: MapLayout): void {
@@ -3005,6 +3053,13 @@ function markTownVisualDetail(mesh: Mesh, detailType: string): void {
   mesh.checkCollisions = false;
   mesh.isPickable = false;
   mesh.metadata = { decoration: "town-visual-detail", detailType };
+  mesh.freezeWorldMatrix();
+}
+
+function markIslandVisualDetail(mesh: Mesh, detailType: string): void {
+  mesh.checkCollisions = false;
+  mesh.isPickable = false;
+  mesh.metadata = { decoration: "island-visual-detail", detailType };
   mesh.freezeWorldMatrix();
 }
 

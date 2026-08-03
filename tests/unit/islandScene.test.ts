@@ -123,6 +123,9 @@ describe("IslandScene lifecycle", () => {
 
       const layeredSurfaces = bundle.scene.meshes.filter((mesh) => mesh.metadata?.surfaceType);
       const decorations = bundle.scene.meshes.filter((mesh) => mesh.metadata?.decoration);
+      const islandVisualDetails = bundle.scene.meshes.filter((mesh) =>
+        mesh.metadata?.decoration === "island-visual-detail"
+      );
       const hospitalCrosses = decorations.filter((mesh) => mesh.metadata?.decoration === "hospital-cross");
       const brandSigns = decorations.filter((mesh) => mesh.metadata?.decoration === "brand-sign");
       const collisionMeshes = bundle.scene.meshes.filter((mesh) => mesh.metadata?.collision);
@@ -239,6 +242,15 @@ describe("IslandScene lifecycle", () => {
       expect(bundle.scene.meshes.filter((mesh) => /^shrub-\d+$/.test(mesh.name))).toHaveLength(180);
       expect(layeredSurfaces).toHaveLength(0);
       expect(bundle.scene.meshes.filter((mesh) => mesh.name.startsWith("ocean-"))).toHaveLength(0);
+      expect(bundle.scene.meshes.filter((mesh) => mesh.name.startsWith("island-shore-foam-"))).toHaveLength(4);
+      expect(new Set(islandVisualDetails.map((mesh) => mesh.metadata?.detailType))).toEqual(
+        new Set(["poi-light", "road-wet-patch"]),
+      );
+      expect(islandVisualDetails.every((mesh) =>
+        !mesh.isPickable &&
+        !mesh.checkCollisions &&
+        Number(mesh.metadata?.sourceCount ?? 0) > 0
+      )).toBe(true);
       const floorMeshes = bundle.scene.meshes.filter(
         (mesh) =>
           mesh.name === "island-ground" ||
@@ -919,6 +931,8 @@ describe("IslandScene lifecycle", () => {
     expect(bundle.viewWeaponRoot.getChildMeshes(false)
       .some((mesh) => mesh.metadata?.actorVisual === "view-arm")).toBe(false);
     expect(bundle.scene.meshes.some((mesh) => mesh.metadata?.actorVisual === "high-detail-gear")).toBe(false);
+    expect(bundle.scene.meshes.some((mesh) => mesh.metadata?.decoration === "island-visual-detail")).toBe(false);
+    expect(bundle.scene.meshes.some((mesh) => mesh.name.startsWith("island-shore-foam-"))).toBe(false);
 
     bundle.scene.dispose();
     engine.dispose();
