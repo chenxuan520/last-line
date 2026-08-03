@@ -10,6 +10,7 @@
     "dev": "vite --host 127.0.0.1",
     "dev:worker": "wrangler dev --config wrangler.worker.jsonc --ip 127.0.0.1 --port 8787",
     "dev:server": "node --env-file-if-exists=.env.standalone --watch --import tsx standalone/index.ts",
+    "prepare": "if git rev-parse --git-dir >/dev/null 2>&1; then git config core.hooksPath .githooks; fi",
     "deploy:worker": "npm run typecheck:worker && npm run test:worker && npm run build:worker && wrangler deploy --config wrangler.worker.jsonc && npm run test:multiplayer:production",
     "build": "tsc -b && vite build",
     "build:worker": "wrangler deploy --config wrangler.worker.jsonc --dry-run --outdir dist-worker",
