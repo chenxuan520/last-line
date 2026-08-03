@@ -214,7 +214,7 @@ export async function createIslandScene(
     const enabled = visible && progress < 1;
     if (aircraftVisualRoot.isEnabled() !== enabled) aircraftVisualRoot.setEnabled(enabled);
   };
-  const viewWeaponRoot = createViewWeapon(scene, camera, materials, highPresentation);
+  const viewWeaponRoot = createViewWeapon(scene, camera, materials);
   setActorWeaponVisual(viewWeaponRoot, getActiveWeapon(player)?.weaponId ?? null);
   viewWeaponRoot.setEnabled(Boolean(getActiveWeapon(player)));
   if (quality !== "low") {
@@ -1243,9 +1243,11 @@ function createTownRoadDetails(
     depth: number,
     yaw: number,
     detailType: string,
+    height = 0.035,
+    yOffset = 0.055,
   ): void => {
-    const mesh = CreateBox(name, { width, height: 0.035, depth }, scene);
-    mesh.position.set(x, getTerrainHeight(x, z, layout) + 0.055, z);
+    const mesh = CreateBox(name, { width, height, depth }, scene);
+    mesh.position.set(x, getTerrainHeight(x, z, layout) + yOffset, z);
     mesh.rotation.y = yaw;
     mesh.material = material;
     markTownVisualDetail(mesh, detailType);
@@ -1257,6 +1259,24 @@ function createTownRoadDetails(
     const length = Math.hypot(deltaX, deltaZ);
     if (length < 28) return;
     const yaw = Math.atan2(deltaX, deltaZ);
+    const normalX = Math.cos(yaw);
+    const normalZ = -Math.sin(yaw);
+
+    const edgeDepth = Math.min(116, Math.max(24, length * 0.82));
+    for (const side of [-1, 1] as const) {
+      addRoadBox(
+        `town-road-edge-${roadIndex}-${side}`,
+        materials.wallTrim,
+        (startX + endX) / 2 + normalX * side * (TOWN_ROAD_HALF_WIDTH + 0.38),
+        (startZ + endZ) / 2 + normalZ * side * (TOWN_ROAD_HALF_WIDTH + 0.38),
+        0.24,
+        edgeDepth,
+        yaw,
+        "road-edge",
+        0.16,
+        0.11,
+      );
+    }
 
     if (roadIndex % roadStride === 0 && markings < markingLimit) {
       const dashCount = Math.min(5, Math.max(1, Math.floor(length / 70)));
@@ -1283,8 +1303,6 @@ function createTownRoadDetails(
     for (let patch = 0; patch < patchCount && wetPatches < wetPatchLimit; patch += 1) {
       const progress = 0.16 + random() * 0.68;
       const sideOffset = (random() - 0.5) * TOWN_ROAD_HALF_WIDTH * 1.3;
-      const normalX = Math.cos(yaw);
-      const normalZ = -Math.sin(yaw);
       const x = lerp(startX, endX, progress) + normalX * sideOffset;
       const z = lerp(startZ, endZ, progress) + normalZ * sideOffset;
       addRoadBox(
@@ -1301,6 +1319,13 @@ function createTownRoadDetails(
     }
   });
 
+  mergeStaticBatch(
+    scene,
+    "town-road-edges-batch",
+    (mesh) => mesh.metadata?.decoration === "town-visual-detail" &&
+      mesh.metadata?.detailType === "road-edge",
+    { decoration: "town-visual-detail", detailType: "road-edge" },
+  );
   mergeStaticBatch(
     scene,
     "town-road-markings-batch",
@@ -1418,6 +1443,33 @@ function createTownFacadeDetail(
       sign.material = materials.industrialLight;
       markTownVisualDetail(sign, "industrial-light");
     }
+
+    if (
+      (building.townKind === "factory" || building.townKind === "warehouse" || building.townKind === "commercial") &&
+      index % 2 === 0
+    ) {
+      const bayWidth = Math.min(8.4, building.width * 0.42);
+      const bayHeight = Math.min(3.25, building.storyHeight * 0.72);
+      const bayX = building.center.x + (random() - 0.5) * Math.max(0, building.width - bayWidth - 2) * 0.55;
+      const frontZ = building.center.z - building.depth / 2 - 0.1;
+      const bay = CreateBox(
+        `${building.id}-loading-bay`,
+        { width: bayWidth, height: bayHeight, depth: 0.12 },
+        scene,
+      );
+      bay.position.set(bayX, building.baseY + bayHeight / 2 + 0.1, frontZ);
+      bay.material = materials.door;
+      markTownVisualDetail(bay, "loading-bay");
+
+      const canopy = CreateBox(
+        `${building.id}-loading-canopy`,
+        { width: bayWidth + 1.3, height: 0.18, depth: 1.15 },
+        scene,
+      );
+      canopy.position.set(bayX, building.baseY + bayHeight + 0.48, frontZ - 0.52);
+      canopy.material = materials.wallTrim;
+      markTownVisualDetail(canopy, "facade-canopy");
+    }
   });
 
   mergeStaticBatch(
@@ -1441,6 +1493,20 @@ function createTownFacadeDetail(
       mesh.metadata?.detailType === "rooftop-equipment",
     { decoration: "town-visual-detail", detailType: "rooftop-equipment" },
   );
+  mergeStaticBatch(
+    scene,
+    "town-loading-bays-batch",
+    (mesh) => mesh.metadata?.decoration === "town-visual-detail" &&
+      mesh.metadata?.detailType === "loading-bay",
+    { decoration: "town-visual-detail", detailType: "loading-bay" },
+  );
+  mergeStaticBatch(
+    scene,
+    "town-facade-canopies-batch",
+    (mesh) => mesh.metadata?.decoration === "town-visual-detail" &&
+      mesh.metadata?.detailType === "facade-canopy",
+    { decoration: "town-visual-detail", detailType: "facade-canopy" },
+  );
 }
 
 function facadeOutward(side: MapWallOpening["side"]): { x: number; z: number } {
@@ -1457,8 +1523,8 @@ function createTownStreetFurniture(
 ): void {
   if (layout.mapId !== "town") return;
   const random = createVisualRandom(layout.seed ^ 0xb73341ac);
-  const lampStride = 3;
-  const pipeStride = 6;
+  const lampStride = 2;
+  const pipeStride = 4;
   let lampCount = 0;
   let cableCount = 0;
 
@@ -1469,7 +1535,6 @@ function createTownStreetFurniture(
     const normalX = Math.cos(yaw);
     const normalZ = -Math.sin(yaw);
     for (const side of [-1, 1] as const) {
-      if ((index + side + layout.seed) % 2 !== 0) continue;
       const progress = 0.18 + random() * 0.64;
       const x = lerp(startX, endX, progress) + normalX * side * (TOWN_ROAD_SHOULDER_HALF_WIDTH + 1.6);
       const z = lerp(startZ, endZ, progress) + normalZ * side * (TOWN_ROAD_SHOULDER_HALF_WIDTH + 1.6);
@@ -1536,7 +1601,7 @@ function createTownStreetFurniture(
   });
 
   const cableRoads = layout.roadSegments.filter(([, startZ, , endZ]) => Math.abs(startZ - endZ) < 0.01);
-  for (let index = 0; index + 1 < cableRoads.length && cableCount < 32; index += 2) {
+  for (let index = 0; index + 1 < cableRoads.length && cableCount < 52; index += 2) {
     const [startX, startZ, endX] = cableRoads[index] ?? [0, 0, 0];
     const centerX = (startX + endX) / 2;
     const centerZ = startZ + (random() - 0.5) * TOWN_ROAD_HALF_WIDTH;
@@ -1569,9 +1634,9 @@ function createTownWeatheringDetails(
 ): void {
   if (layout.mapId !== "town") return;
   const random = createVisualRandom(layout.seed ^ 0x2fb87d4c);
-  const facadeStride = 3;
-  const roofStride = 4;
-  const crackLimit = 88;
+  const facadeStride = 2;
+  const roofStride = 3;
+  const crackLimit = 132;
 
   layout.obstacles.forEach((building, index) => {
     if (!building.townKind) return;
@@ -1686,7 +1751,7 @@ function createTownIndustrialSkyline(scene: Scene, materials: IslandMaterials, l
   const random = createVisualRandom(layout.seed ^ 0x71d83b21);
   const factories = layout.obstacles
     .filter((building) => building.townKind === "factory" || building.townKind === "warehouse" || building.storyCount >= 4)
-    .slice(0, 42);
+    .slice(0, 58);
 
   factories.forEach((building, index) => {
     const roofY = building.baseY + building.storyHeight * building.storyCount + BUILDING_ROOF_CAP_HEIGHT;
@@ -2487,68 +2552,14 @@ function createViewWeapon(
   scene: Scene,
   camera: UniversalCamera,
   materials: IslandMaterials,
-  highPresentation: boolean,
 ): TransformNode {
   const root = new TransformNode("view-weapon-root", scene);
   root.parent = camera;
-  if (highPresentation) createViewArms(scene, root, materials);
   createWeaponModel(scene, root, "view", "rifle", materials, true);
   createWeaponModel(scene, root, "view", "smg", materials, true);
   createWeaponModel(scene, root, "view", "shotgun", materials, true);
   createWeaponModel(scene, root, "view", "sniper", materials, true);
   return root;
-}
-
-function createViewArms(scene: Scene, root: TransformNode, materials: IslandMaterials): void {
-  for (const side of [-1, 1] as const) {
-    const forearm = CreateCapsule(
-      `view-arm-${side < 0 ? "left" : "right"}`,
-      { height: 0.62, radius: 0.075, tessellation: 8, subdivisions: 1 },
-      scene,
-    );
-    forearm.parent = root;
-    forearm.position.set(side * 0.27, -0.42, 0.48);
-    forearm.rotation.set(0.98, side * 0.2, side * 0.18);
-    forearm.material = materials.botBody;
-    forearm.isPickable = false;
-    forearm.metadata = { actorVisual: "view-arm" };
-
-    const glove = CreateBox(
-      `view-glove-${side < 0 ? "left" : "right"}`,
-      { width: 0.16, height: 0.1, depth: 0.18 },
-      scene,
-    );
-    glove.parent = root;
-    glove.position.set(side * 0.2, -0.31, 0.78);
-    glove.rotation.set(0.32, side * 0.12, side * 0.08);
-    glove.material = materials.gear;
-    glove.isPickable = false;
-    glove.metadata = { actorVisual: "view-arm" };
-
-    const wrist = CreateCylinder(
-      `view-wrist-wrap-${side < 0 ? "left" : "right"}`,
-      { height: 0.18, diameter: 0.17, tessellation: 8 },
-      scene,
-    );
-    wrist.parent = root;
-    wrist.position.set(side * 0.24, -0.36, 0.62);
-    wrist.rotation.set(Math.PI / 2 + 0.42, side * 0.12, 0);
-    wrist.material = materials.actorArmor;
-    wrist.isPickable = false;
-    wrist.metadata = { actorVisual: "view-arm" };
-
-    const knuckle = CreateBox(
-      `view-knuckle-guard-${side < 0 ? "left" : "right"}`,
-      { width: 0.15, height: 0.035, depth: 0.09 },
-      scene,
-    );
-    knuckle.parent = root;
-    knuckle.position.set(side * 0.2, -0.25, 0.86);
-    knuckle.rotation.set(0.28, side * 0.08, side * 0.04);
-    knuckle.material = materials.actorArmor;
-    knuckle.isPickable = false;
-    knuckle.metadata = { actorVisual: "view-arm" };
-  }
 }
 
 function createWeaponModel(

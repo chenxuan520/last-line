@@ -91,10 +91,7 @@ describe("IslandScene lifecycle", () => {
       expect(bundle.viewWeaponRoot.isEnabled()).toBe(false);
       expect(bundle.viewWeaponRoot.getChildMeshes(false)
         .filter((mesh) => mesh.metadata?.actorVisual === "view-arm"))
-        .toHaveLength(8);
-      expect(bundle.viewWeaponRoot.getChildMeshes(false)
-        .filter((mesh) => mesh.metadata?.actorVisual === "view-arm")
-        .every((mesh) => !mesh.isPickable && !mesh.checkCollisions)).toBe(true);
+        .toHaveLength(0);
       expect(bundle.camera.minZ).toBeGreaterThanOrEqual(0.1);
       expect(bundle.camera.ellipsoid.asArray()).toEqual([ACTOR_RADIUS, ACTOR_EYE_HEIGHT / 2, ACTOR_RADIUS]);
       expect(bundle.camera.ellipsoidOffset.y).toBe(-ACTOR_EYE_HEIGHT / 2);
@@ -1042,16 +1039,8 @@ describe("IslandScene lifecycle", () => {
     );
     expect((hospitalWallBatch?.material as StandardMaterial).diffuseTexture).toBeNull();
     const hospitalSlabs = layout.floorSlabs.filter((slab) => slab.obstacleId === hospital.id);
-    const rooftopPieceCount = {
-      factory: 2,
-      warehouse: 1,
-      rowhouse: 2,
-      commercial: 1,
-      corner: 1,
-      tower: 2,
-    }[hospital.townKind];
     const hospitalSurfaceBatch = bundle.scene.getMeshByName("hospital-surfaces-batch");
-    expect(hospitalSurfaceBatch?.metadata?.sourceCount).toBe(hospitalSlabs.length + rooftopPieceCount);
+    expect(hospitalSurfaceBatch?.metadata?.sourceCount).toBe(hospitalSlabs.length);
     expect((hospitalSurfaceBatch?.material as StandardMaterial).diffuseColor.toHexString().toLowerCase()).toBe(
       "#ffffff",
     );
@@ -1088,11 +1077,14 @@ describe("IslandScene lifecycle", () => {
     );
     expect(new Set(townVisualBatches.map((mesh) => mesh.metadata?.detailType))).toEqual(new Set([
       "facade-weathering",
+      "facade-canopy",
       "industrial-light",
       "industrial-pipe",
       "industrial-skyline",
       "industrial-smoke",
+      "loading-bay",
       "overhead-cable",
+      "road-edge",
       "road-marking",
       "road-wet-patch",
       "road-weathering",
@@ -1113,9 +1105,21 @@ describe("IslandScene lifecycle", () => {
       .filter((mesh) => mesh.name.startsWith("town-building-silhouettes-"))
       .map((mesh) => mesh.metadata?.townKind)
       .sort()).toEqual(["commercial", "corner", "factory", "rowhouse", "tower", "warehouse"]);
+    const hospital = layout.obstacles.find((building) => building.id === layout.hospital.buildingId);
+    if (!hospital?.townKind) throw new Error("Town hospital building missing");
+    const hospitalSlabs = layout.floorSlabs.filter((slab) => slab.obstacleId === hospital.id);
+    const rooftopPieceCount = {
+      factory: 2,
+      warehouse: 1,
+      rowhouse: 2,
+      commercial: 1,
+      corner: 1,
+      tower: 2,
+    }[hospital.townKind];
+    expect(bundle.scene.getMeshByName("hospital-surfaces-batch")?.metadata?.sourceCount)
+      .toBe(hospitalSlabs.length + rooftopPieceCount);
     expect(bundle.viewWeaponRoot.getChildMeshes(false)
-      .filter((mesh) => mesh.metadata?.actorVisual === "view-arm"))
-      .toHaveLength(8);
+      .some((mesh) => mesh.metadata?.actorVisual === "view-arm")).toBe(false);
     expect(bundle.scene.meshes.some((mesh) => mesh.metadata?.actorVisual === "high-detail-gear")).toBe(true);
 
     bundle.scene.dispose();
