@@ -660,6 +660,8 @@ describe("IslandScene lifecycle", () => {
       .filter((mesh) => mesh.metadata?.actorVisual === "weapon");
     const botMeshes = botRoot.getChildMeshes(false)
       .filter((mesh) => mesh.metadata?.actorVisual === "weapon");
+    const highDetailGear = botRoot.getChildMeshes(false)
+      .filter((mesh) => mesh.metadata?.actorVisual === "high-detail-gear");
 
     for (const weaponId of ["rifle", "smg", "shotgun", "sniper"] as const) {
       expect(viewMeshes.filter((mesh) => mesh.metadata?.weaponId === weaponId)
@@ -684,10 +686,13 @@ describe("IslandScene lifecycle", () => {
     bundle.scene.render();
     expect(baseCharacter?.isEnabled()).toBe(true);
     expect(lodCharacter?.isEnabled()).toBe(false);
+    expect(highDetailGear).toHaveLength(5);
+    expect(highDetailGear.every((mesh) => mesh.isEnabled(false))).toBe(true);
     bundle.camera.position.set(1_000, 200, 1_000);
     bundle.scene.render();
     expect(baseCharacter?.isEnabled()).toBe(false);
     expect(lodCharacter?.isEnabled()).toBe(true);
+    expect(highDetailGear.every((mesh) => mesh.isEnabled(false))).toBe(true);
     expect(botRoot.getChildMeshes(false).filter((mesh) => mesh.metadata?.actorVisual === "parachute")
       .every((mesh) => mesh.isEnabled(false))).toBe(true);
     expect(botMeshes.filter((mesh) => mesh.metadata?.weaponId === "smg" && mesh.metadata?.weaponFallback === true)

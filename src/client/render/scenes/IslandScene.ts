@@ -59,6 +59,8 @@ import { getBrandSignPlacements } from "../../brandSigns";
 
 const INITIAL_SAFE_ZONE_RADIUS = MAP_SIZE * 0.36;
 const HOSPITAL_SURFACE_COLOR = "#ffffff";
+const TOWN_VISUAL_DETAIL = "town-visual-detail";
+const ISLAND_VISUAL_DETAIL = "island-visual-detail";
 const SKY_ASSET_IDS = ["texture.sky.clearing", "texture.sky.overcast", "texture.sky.storm"] as const;
 const TERRAIN_PATCHES: ReadonlyArray<readonly [number, number, number, number, number, "mud" | "grass"]> = [
   [-620, -380, 184, 116, 0.2, "grass"],
@@ -447,7 +449,7 @@ function findImportedNode(nodes: readonly Node[], name: string): TransformNode |
 function suppressProceduralCharacter(root: TransformNode): void {
   for (const mesh of root.getChildMeshes(false)) {
     if (mesh.metadata?.visualModel) continue;
-    if (!["weapon", "parachute", "vest", "helmet"].includes(mesh.metadata?.actorVisual)) {
+    if (!["weapon", "parachute", "vest", "helmet", "high-detail-gear"].includes(mesh.metadata?.actorVisual)) {
       mesh.setEnabled(false);
     }
   }
@@ -865,6 +867,20 @@ function mergeStaticBatch(
   merged.freezeWorldMatrix();
 }
 
+function mergeVisualDetailBatch(
+  scene: Scene,
+  name: string,
+  decoration: string,
+  detailType: string,
+): void {
+  mergeStaticBatch(
+    scene,
+    name,
+    (mesh) => mesh.metadata?.decoration === decoration && mesh.metadata?.detailType === detailType,
+    { decoration, detailType },
+  );
+}
+
 function applyTerrainSurface(ground: Mesh, layout: MapLayout, groundMaterial: MultiMaterial): void {
   const positions = ground.getVerticesData(VertexBuffer.PositionKind);
   if (!positions) return;
@@ -964,13 +980,7 @@ function createIslandHighQualityDetails(scene: Scene, materials: IslandMaterials
   });
 
   for (const detailType of ["road-wet-patch", "poi-light"] as const) {
-    mergeStaticBatch(
-      scene,
-      `island-${detailType}-batch`,
-      (mesh) => mesh.metadata?.decoration === "island-visual-detail" &&
-        mesh.metadata?.detailType === detailType,
-      { decoration: "island-visual-detail", detailType },
-    );
+    mergeVisualDetailBatch(scene, `island-${detailType}-batch`, ISLAND_VISUAL_DETAIL, detailType);
   }
 }
 
@@ -1307,27 +1317,9 @@ function createTownRoadDetails(
     }
   });
 
-  mergeStaticBatch(
-    scene,
-    "town-road-edges-batch",
-    (mesh) => mesh.metadata?.decoration === "town-visual-detail" &&
-      mesh.metadata?.detailType === "road-edge",
-    { decoration: "town-visual-detail", detailType: "road-edge" },
-  );
-  mergeStaticBatch(
-    scene,
-    "town-road-markings-batch",
-    (mesh) => mesh.metadata?.decoration === "town-visual-detail" &&
-      mesh.metadata?.detailType === "road-marking",
-    { decoration: "town-visual-detail", detailType: "road-marking" },
-  );
-  mergeStaticBatch(
-    scene,
-    "town-road-wet-patches-batch",
-    (mesh) => mesh.metadata?.decoration === "town-visual-detail" &&
-      mesh.metadata?.detailType === "road-wet-patch",
-    { decoration: "town-visual-detail", detailType: "road-wet-patch" },
-  );
+  mergeVisualDetailBatch(scene, "town-road-edges-batch", TOWN_VISUAL_DETAIL, "road-edge");
+  mergeVisualDetailBatch(scene, "town-road-markings-batch", TOWN_VISUAL_DETAIL, "road-marking");
+  mergeVisualDetailBatch(scene, "town-road-wet-patches-batch", TOWN_VISUAL_DETAIL, "road-wet-patch");
 }
 
 function createTownFacadeDetail(
@@ -1460,41 +1452,11 @@ function createTownFacadeDetail(
     }
   });
 
-  mergeStaticBatch(
-    scene,
-    "town-window-glass-batch",
-    (mesh) => mesh.metadata?.decoration === "town-visual-detail" &&
-      mesh.metadata?.detailType === "window-glass",
-    { decoration: "town-visual-detail", detailType: "window-glass" },
-  );
-  mergeStaticBatch(
-    scene,
-    "town-industrial-lights-batch",
-    (mesh) => mesh.metadata?.decoration === "town-visual-detail" &&
-      mesh.metadata?.detailType === "industrial-light",
-    { decoration: "town-visual-detail", detailType: "industrial-light" },
-  );
-  mergeStaticBatch(
-    scene,
-    "town-rooftop-equipment-batch",
-    (mesh) => mesh.metadata?.decoration === "town-visual-detail" &&
-      mesh.metadata?.detailType === "rooftop-equipment",
-    { decoration: "town-visual-detail", detailType: "rooftop-equipment" },
-  );
-  mergeStaticBatch(
-    scene,
-    "town-loading-bays-batch",
-    (mesh) => mesh.metadata?.decoration === "town-visual-detail" &&
-      mesh.metadata?.detailType === "loading-bay",
-    { decoration: "town-visual-detail", detailType: "loading-bay" },
-  );
-  mergeStaticBatch(
-    scene,
-    "town-facade-canopies-batch",
-    (mesh) => mesh.metadata?.decoration === "town-visual-detail" &&
-      mesh.metadata?.detailType === "facade-canopy",
-    { decoration: "town-visual-detail", detailType: "facade-canopy" },
-  );
+  mergeVisualDetailBatch(scene, "town-window-glass-batch", TOWN_VISUAL_DETAIL, "window-glass");
+  mergeVisualDetailBatch(scene, "town-industrial-lights-batch", TOWN_VISUAL_DETAIL, "industrial-light");
+  mergeVisualDetailBatch(scene, "town-rooftop-equipment-batch", TOWN_VISUAL_DETAIL, "rooftop-equipment");
+  mergeVisualDetailBatch(scene, "town-loading-bays-batch", TOWN_VISUAL_DETAIL, "loading-bay");
+  mergeVisualDetailBatch(scene, "town-facade-canopies-batch", TOWN_VISUAL_DETAIL, "facade-canopy");
 }
 
 function facadeOutward(side: MapWallOpening["side"]): { x: number; z: number } {
@@ -1605,13 +1567,7 @@ function createTownStreetFurniture(
   }
 
   for (const detailType of ["street-furniture", "street-light", "industrial-pipe", "overhead-cable"] as const) {
-    mergeStaticBatch(
-      scene,
-      `town-${detailType}-batch`,
-      (mesh) => mesh.metadata?.decoration === "town-visual-detail" &&
-        mesh.metadata?.detailType === detailType,
-      { decoration: "town-visual-detail", detailType },
-    );
+    mergeVisualDetailBatch(scene, `town-${detailType}-batch`, TOWN_VISUAL_DETAIL, detailType);
   }
 }
 
@@ -1724,13 +1680,7 @@ function createTownWeatheringDetails(
   }
 
   for (const detailType of ["facade-weathering", "roof-weathering", "road-weathering"] as const) {
-    mergeStaticBatch(
-      scene,
-      `town-${detailType}-batch`,
-      (mesh) => mesh.metadata?.decoration === "town-visual-detail" &&
-        mesh.metadata?.detailType === detailType,
-      { decoration: "town-visual-detail", detailType },
-    );
+    mergeVisualDetailBatch(scene, `town-${detailType}-batch`, TOWN_VISUAL_DETAIL, detailType);
   }
 }
 
@@ -1819,20 +1769,8 @@ function createTownIndustrialSkyline(scene: Scene, materials: IslandMaterials, l
     markTownVisualDetail(pipe, "industrial-skyline");
   });
 
-  mergeStaticBatch(
-    scene,
-    "town-industrial-skyline-batch",
-    (mesh) => mesh.metadata?.decoration === "town-visual-detail" &&
-      mesh.metadata?.detailType === "industrial-skyline",
-    { decoration: "town-visual-detail", detailType: "industrial-skyline" },
-  );
-  mergeStaticBatch(
-    scene,
-    "town-industrial-smoke-batch",
-    (mesh) => mesh.metadata?.decoration === "town-visual-detail" &&
-      mesh.metadata?.detailType === "industrial-smoke",
-    { decoration: "town-visual-detail", detailType: "industrial-smoke" },
-  );
+  mergeVisualDetailBatch(scene, "town-industrial-skyline-batch", TOWN_VISUAL_DETAIL, "industrial-skyline");
+  mergeVisualDetailBatch(scene, "town-industrial-smoke-batch", TOWN_VISUAL_DETAIL, "industrial-smoke");
 }
 
 function createWallOpeningFrame(template: Mesh, opening: MapWallOpening, index: number): void {
@@ -3065,14 +3003,14 @@ function markPoiDecoration(mesh: Mesh, poiName: string, poiType: string): void {
 function markTownVisualDetail(mesh: Mesh, detailType: string): void {
   mesh.checkCollisions = false;
   mesh.isPickable = false;
-  mesh.metadata = { decoration: "town-visual-detail", detailType };
+  mesh.metadata = { decoration: TOWN_VISUAL_DETAIL, detailType };
   mesh.freezeWorldMatrix();
 }
 
 function markIslandVisualDetail(mesh: Mesh, detailType: string): void {
   mesh.checkCollisions = false;
   mesh.isPickable = false;
-  mesh.metadata = { decoration: "island-visual-detail", detailType };
+  mesh.metadata = { decoration: ISLAND_VISUAL_DETAIL, detailType };
   mesh.freezeWorldMatrix();
 }
 
