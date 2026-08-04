@@ -15,6 +15,7 @@ import { AssetCatalog } from "../../src/assets/AssetCatalog";
 import type { AssetEntry } from "../../src/assets/types";
 import {
   applyActorVisualPose,
+  createLoadingBayLayout,
   createNaturalDetailPlacements,
   createIslandScene,
   getSkyAssetId,
@@ -1131,6 +1132,7 @@ describe("IslandScene lifecycle", () => {
     expect(bundle.scene.fogEnd).toBeCloseTo(MAP_SIZE * 1.1, 5);
     expect(bundle.scene.fogColor.asArray()).toEqual([0.46, 0.53, 0.53]);
     expect(new Set(townVisualBatches.map((mesh) => mesh.metadata?.detailType))).toEqual(new Set([
+      "facade-rust",
       "facade-weathering",
       "facade-canopy",
       "industrial-light",
@@ -1167,6 +1169,48 @@ describe("IslandScene lifecycle", () => {
     )?.material as StandardMaterial | undefined;
     expect(facadeWeatheringMaterial?.alpha).toBe(0.24);
     expect(facadeWeatheringMaterial?.diffuseColor.toHexString().toLowerCase()).toBe("#55584e");
+    const facadeRustMaterial = townVisualBatches.find((mesh) =>
+      mesh.metadata?.detailType === "facade-rust"
+    )?.material as StandardMaterial | undefined;
+    expect(facadeRustMaterial?.diffuseColor.toHexString().toLowerCase()).toBe("#a37848");
+    const loadingBayBuildingIds = new Set(layout.obstacles.flatMap((building, index) =>
+      index % 2 === 0 &&
+      (building.townKind === "factory" ||
+        building.townKind === "warehouse" ||
+        building.townKind === "commercial")
+        ? [building.id]
+        : []
+    ));
+    const loadingBayOpenings = layout.wallOpenings.filter((opening) =>
+      loadingBayBuildingIds.has(opening.obstacleId) &&
+      opening.kind === "door" &&
+      opening.side === "front" &&
+      opening.storyIndex === 0
+    );
+    expect(townVisualBatches.find((mesh) => mesh.metadata?.detailType === "loading-bay")?.metadata?.sourceCount)
+      .toBe(loadingBayOpenings.length * 2);
+    expect(townVisualBatches.find((mesh) => mesh.metadata?.detailType === "facade-canopy")?.metadata?.sourceCount)
+      .toBe(loadingBayOpenings.length);
+    for (const opening of loadingBayOpenings) {
+      const loadingBay = createLoadingBayLayout(opening);
+      const openingLeft = opening.center.x - opening.width / 2;
+      const openingRight = opening.center.x + opening.width / 2;
+      expect(loadingBay.frameXs[0] + loadingBay.frameWidth / 2).toBeCloseTo(openingLeft, 8);
+      expect(loadingBay.frameXs[1] - loadingBay.frameWidth / 2).toBeCloseTo(openingRight, 8);
+      expect(loadingBay.canopyY - 0.09)
+        .toBeGreaterThan(opening.center.y + opening.height / 2);
+    }
+    const openingFixture = loadingBayOpenings[0];
+    if (!openingFixture) throw new Error("loading bay door fixture missing");
+    const offsetLoadingBay = createLoadingBayLayout({
+      ...openingFixture,
+      center: { x: 17.5, y: 3.2, z: -44 },
+      width: 4.2,
+      height: 3,
+    });
+    expect(offsetLoadingBay.frameXs[0]).toBeCloseTo(15.29, 8);
+    expect(offsetLoadingBay.frameXs[1]).toBeCloseTo(19.71, 8);
+    expect(offsetLoadingBay.canopyY - 0.09).toBeGreaterThan(4.7);
     const cockpitMaterial = bundle.scene.getMeshByName("aircraft-cockpit")?.material as StandardMaterial | undefined;
     expect(cockpitMaterial?.name).toBe("building-window-material");
     expect(cockpitMaterial?.alpha).toBe(1);

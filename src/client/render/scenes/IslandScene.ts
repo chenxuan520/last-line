@@ -1428,25 +1428,31 @@ function createTownFacadeDetail(
       (building.townKind === "factory" || building.townKind === "warehouse" || building.townKind === "commercial") &&
       index % 2 === 0
     ) {
-      const bayWidth = Math.min(8.4, building.width * 0.42);
-      const bayHeight = Math.min(3.25, building.storyHeight * 0.72);
-      const bayX = building.center.x + (random() - 0.5) * Math.max(0, building.width - bayWidth - 2) * 0.55;
-      const frontZ = building.center.z - building.depth / 2 - 0.1;
-      const bay = CreateBox(
-        `${building.id}-loading-bay`,
-        { width: bayWidth, height: bayHeight, depth: 0.12 },
-        scene,
+      const opening = layout.wallOpenings.find((candidate) =>
+        candidate.obstacleId === building.id &&
+        candidate.kind === "door" &&
+        candidate.side === "front" &&
+        candidate.storyIndex === 0
       );
-      bay.position.set(bayX, building.baseY + bayHeight / 2 + 0.1, frontZ);
-      bay.material = materials.door;
-      markTownVisualDetail(bay, "loading-bay");
+      if (!opening) return;
+      const loadingBay = createLoadingBayLayout(opening);
+      loadingBay.frameXs.forEach((x, frameIndex) => {
+        const frame = CreateBox(
+          `${building.id}-loading-bay-frame-${frameIndex === 0 ? "left" : "right"}`,
+          { width: loadingBay.frameWidth, height: opening.height, depth: 0.12 },
+          scene,
+        );
+        frame.position.set(x, opening.center.y, loadingBay.frontZ);
+        frame.material = materials.door;
+        markTownVisualDetail(frame, "loading-bay");
+      });
 
       const canopy = CreateBox(
         `${building.id}-loading-canopy`,
-        { width: bayWidth + 1.3, height: 0.18, depth: 1.15 },
+        { width: loadingBay.canopyWidth, height: 0.18, depth: 1.15 },
         scene,
       );
-      canopy.position.set(bayX, building.baseY + bayHeight + 0.48, frontZ - 0.52);
+      canopy.position.set(opening.center.x, loadingBay.canopyY, loadingBay.frontZ - 0.52);
       canopy.material = materials.wallTrim;
       markTownVisualDetail(canopy, "facade-canopy");
     }
@@ -1457,6 +1463,24 @@ function createTownFacadeDetail(
   mergeVisualDetailBatch(scene, "town-rooftop-equipment-batch", TOWN_VISUAL_DETAIL, "rooftop-equipment");
   mergeVisualDetailBatch(scene, "town-loading-bays-batch", TOWN_VISUAL_DETAIL, "loading-bay");
   mergeVisualDetailBatch(scene, "town-facade-canopies-batch", TOWN_VISUAL_DETAIL, "facade-canopy");
+}
+
+export function createLoadingBayLayout(opening: MapWallOpening): {
+  frameXs: readonly [number, number];
+  frameWidth: number;
+  frontZ: number;
+  canopyWidth: number;
+  canopyY: number;
+} {
+  const frameWidth = 0.22;
+  const frameOffset = (opening.width + frameWidth) / 2;
+  return {
+    frameXs: [opening.center.x - frameOffset, opening.center.x + frameOffset],
+    frameWidth,
+    frontZ: opening.center.z - 0.1,
+    canopyWidth: opening.width + 1.3,
+    canopyY: opening.center.y + opening.height / 2 + 0.48,
+  };
 }
 
 function facadeOutward(side: MapWallOpening["side"]): { x: number; z: number } {
@@ -1626,7 +1650,7 @@ function createTownWeatheringDetails(
           z + (horizontalAlongX ? 0 : width * (random() - 0.5) * 0.55),
         );
         rust.material = materials.poiAccent;
-        markTownVisualDetail(rust, "facade-weathering");
+        markTownVisualDetail(rust, "facade-rust");
       }
     }
 
@@ -1682,6 +1706,7 @@ function createTownWeatheringDetails(
   for (const detailType of ["facade-weathering", "roof-weathering", "road-weathering"] as const) {
     mergeVisualDetailBatch(scene, `town-${detailType}-batch`, TOWN_VISUAL_DETAIL, detailType);
   }
+  mergeVisualDetailBatch(scene, "town-facade-rust-batch", TOWN_VISUAL_DETAIL, "facade-rust");
 }
 
 function createTownIndustrialSkyline(scene: Scene, materials: IslandMaterials, layout: MapLayout): void {
