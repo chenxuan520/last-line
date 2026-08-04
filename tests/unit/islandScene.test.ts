@@ -318,7 +318,9 @@ describe("IslandScene lifecycle", () => {
       const openingPieceCount =
         layout.wallOpenings.filter((opening) => opening.kind === "window").length * 4 +
         layout.wallOpenings.filter((opening) => opening.kind === "door").length * 3;
-      expect(bundle.scene.getMeshByName("building-openings-batch")?.metadata?.sourceCount).toBe(openingPieceCount);
+      const openingsBatch = bundle.scene.getMeshByName("building-openings-batch");
+      expect(openingsBatch?.metadata?.sourceCount).toBe(openingPieceCount);
+      expect(openingsBatch?.material).toBeInstanceOf(StandardMaterial);
       expect(bundle.scene.getMeshByName("building-ramps-batch")?.metadata?.sourceCount).toBe(layout.roofRamps.length);
       const ringPositions = bundle.safeZoneRing.getVerticesData("position") ?? [];
       for (let ringIndex = 0; ringIndex < ringPositions.length; ringIndex += 6 * 12) {
@@ -1173,6 +1175,22 @@ describe("IslandScene lifecycle", () => {
       mesh.metadata?.detailType === "facade-rust"
     )?.material as StandardMaterial | undefined;
     expect(facadeRustMaterial?.diffuseColor.toHexString().toLowerCase()).toBe("#a37848");
+    const expectBatchMaterials = (detailType: string, expectedNames: readonly string[]): void => {
+      const batch = townVisualBatches.find((mesh) => mesh.metadata?.detailType === detailType);
+      if (!batch) throw new Error(`${detailType} batch missing`);
+      expect(batch.material).toBeInstanceOf(MultiMaterial);
+      const batchMaterial = batch.material as MultiMaterial;
+      expect(new Set(batch.subMeshes.map((subMesh) =>
+        batchMaterial.subMaterials[subMesh.materialIndex]?.name
+      ))).toEqual(new Set(expectedNames));
+    };
+    expectBatchMaterials("rooftop-equipment", ["poi-dark-material", "building-trim-material"]);
+    expectBatchMaterials("industrial-pipe", ["building-trim-material", "fence-material"]);
+    expectBatchMaterials("industrial-skyline", [
+      "poi-dark-material",
+      "fence-material",
+      "building-trim-material",
+    ]);
     const loadingBayBuildingIds = new Set(layout.obstacles.flatMap((building, index) =>
       index % 2 === 0 &&
       (building.townKind === "factory" ||

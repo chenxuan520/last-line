@@ -853,14 +853,20 @@ function mergeStaticBatch(
   name: string,
   predicate: (mesh: Mesh) => boolean,
   metadata: Record<string, unknown>,
+  preserveMaterials = false,
 ): void {
   const meshes = scene.meshes.filter((mesh): mesh is Mesh => mesh instanceof Mesh && predicate(mesh));
-  if (meshes.length === 0) return;
-  const material = meshes[0]?.material ?? null;
-  const merged = Mesh.MergeMeshes(meshes, true, true);
+  if (!meshes.length) return;
+  const merged = Mesh.MergeMeshes(
+    meshes,
+    true,
+    true,
+    undefined,
+    false,
+    preserveMaterials && meshes.some((mesh) => mesh.material !== meshes[0]!.material),
+  );
   if (!merged) throw new Error(`Unable to merge ${name}`);
   merged.name = name;
-  merged.material = material;
   merged.checkCollisions = false;
   merged.isPickable = false;
   merged.metadata = { ...metadata, sourceCount: meshes.length };
@@ -870,14 +876,15 @@ function mergeStaticBatch(
 function mergeVisualDetailBatch(
   scene: Scene,
   name: string,
-  decoration: string,
   detailType: string,
+  decoration = TOWN_VISUAL_DETAIL,
 ): void {
   mergeStaticBatch(
     scene,
     name,
     (mesh) => mesh.metadata?.decoration === decoration && mesh.metadata?.detailType === detailType,
     { decoration, detailType },
+    decoration === TOWN_VISUAL_DETAIL,
   );
 }
 
@@ -980,7 +987,7 @@ function createIslandHighQualityDetails(scene: Scene, materials: IslandMaterials
   });
 
   for (const detailType of ["road-wet-patch", "poi-light"] as const) {
-    mergeVisualDetailBatch(scene, `island-${detailType}-batch`, ISLAND_VISUAL_DETAIL, detailType);
+    mergeVisualDetailBatch(scene, `island-${detailType}-batch`, detailType, ISLAND_VISUAL_DETAIL);
   }
 }
 
@@ -1317,9 +1324,9 @@ function createTownRoadDetails(
     }
   });
 
-  mergeVisualDetailBatch(scene, "town-road-edges-batch", TOWN_VISUAL_DETAIL, "road-edge");
-  mergeVisualDetailBatch(scene, "town-road-markings-batch", TOWN_VISUAL_DETAIL, "road-marking");
-  mergeVisualDetailBatch(scene, "town-road-wet-patches-batch", TOWN_VISUAL_DETAIL, "road-wet-patch");
+  mergeVisualDetailBatch(scene, "town-road-edges-batch", "road-edge");
+  mergeVisualDetailBatch(scene, "town-road-markings-batch", "road-marking");
+  mergeVisualDetailBatch(scene, "town-road-wet-patches-batch", "road-wet-patch");
 }
 
 function createTownFacadeDetail(
@@ -1458,11 +1465,11 @@ function createTownFacadeDetail(
     }
   });
 
-  mergeVisualDetailBatch(scene, "town-window-glass-batch", TOWN_VISUAL_DETAIL, "window-glass");
-  mergeVisualDetailBatch(scene, "town-industrial-lights-batch", TOWN_VISUAL_DETAIL, "industrial-light");
-  mergeVisualDetailBatch(scene, "town-rooftop-equipment-batch", TOWN_VISUAL_DETAIL, "rooftop-equipment");
-  mergeVisualDetailBatch(scene, "town-loading-bays-batch", TOWN_VISUAL_DETAIL, "loading-bay");
-  mergeVisualDetailBatch(scene, "town-facade-canopies-batch", TOWN_VISUAL_DETAIL, "facade-canopy");
+  mergeVisualDetailBatch(scene, "town-window-glass-batch", "window-glass");
+  mergeVisualDetailBatch(scene, "town-industrial-lights-batch", "industrial-light");
+  mergeVisualDetailBatch(scene, "town-rooftop-equipment-batch", "rooftop-equipment");
+  mergeVisualDetailBatch(scene, "town-loading-bays-batch", "loading-bay");
+  mergeVisualDetailBatch(scene, "town-facade-canopies-batch", "facade-canopy");
 }
 
 export function createLoadingBayLayout(opening: MapWallOpening): {
@@ -1591,7 +1598,7 @@ function createTownStreetFurniture(
   }
 
   for (const detailType of ["street-furniture", "street-light", "industrial-pipe", "overhead-cable"] as const) {
-    mergeVisualDetailBatch(scene, `town-${detailType}-batch`, TOWN_VISUAL_DETAIL, detailType);
+    mergeVisualDetailBatch(scene, `town-${detailType}-batch`, detailType);
   }
 }
 
@@ -1704,9 +1711,9 @@ function createTownWeatheringDetails(
   }
 
   for (const detailType of ["facade-weathering", "roof-weathering", "road-weathering"] as const) {
-    mergeVisualDetailBatch(scene, `town-${detailType}-batch`, TOWN_VISUAL_DETAIL, detailType);
+    mergeVisualDetailBatch(scene, `town-${detailType}-batch`, detailType);
   }
-  mergeVisualDetailBatch(scene, "town-facade-rust-batch", TOWN_VISUAL_DETAIL, "facade-rust");
+  mergeVisualDetailBatch(scene, "town-facade-rust-batch", "facade-rust");
 }
 
 function createTownIndustrialSkyline(scene: Scene, materials: IslandMaterials, layout: MapLayout): void {
@@ -1794,8 +1801,8 @@ function createTownIndustrialSkyline(scene: Scene, materials: IslandMaterials, l
     markTownVisualDetail(pipe, "industrial-skyline");
   });
 
-  mergeVisualDetailBatch(scene, "town-industrial-skyline-batch", TOWN_VISUAL_DETAIL, "industrial-skyline");
-  mergeVisualDetailBatch(scene, "town-industrial-smoke-batch", TOWN_VISUAL_DETAIL, "industrial-smoke");
+  mergeVisualDetailBatch(scene, "town-industrial-skyline-batch", "industrial-skyline");
+  mergeVisualDetailBatch(scene, "town-industrial-smoke-batch", "industrial-smoke");
 }
 
 function createWallOpeningFrame(template: Mesh, opening: MapWallOpening, index: number): void {
