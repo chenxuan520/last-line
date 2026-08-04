@@ -4,6 +4,7 @@ import { BATTLE_ROYALE_CONFIG } from "../../config/battleRoyale";
 import { ITEMS } from "../../config/items";
 import { createMapLayout, MAP_SIZE } from "../../config/map";
 import type { MapId } from "../../config/maps";
+import type { QualityLevel } from "../../config/settings";
 import { WEAPONS } from "../../config/weapons";
 import { getItemIconAssetId } from "../itemIcon";
 import {
@@ -50,6 +51,7 @@ export class GameHud {
       onDropBackpackItem?: (index: number, itemId: string, snapshot: string) => void;
       onExit?: () => void;
       mapId?: MapId;
+      quality?: QualityLevel;
     } = {},
   ) {
     const crosshair = assets.resolve("ui.crosshair", "svg");
@@ -61,7 +63,7 @@ export class GameHud {
       const end = projectToMinimap({ x: endX, y: 0, z: endZ });
       return `M${start.x} ${start.y}L${end.x} ${end.y}`;
     }).join(" ");
-    root.className = options.touchInput ? "is-playing is-touch-input" : "is-playing";
+    root.className = hudRootClassName(options.touchInput === true, options.quality);
     root.innerHTML = `
       <section class="hud" aria-label="游戏状态">
         <header class="hud-topbar">
@@ -611,6 +613,14 @@ export class GameHud {
 
 export function pauseExitLabel(online: boolean): string {
   return online ? "返回联机大厅" : "返回大厅";
+}
+
+export function hudRootClassName(touchInput: boolean, quality?: QualityLevel): string {
+  return [
+    "is-playing",
+    touchInput ? "is-touch-input" : "",
+    quality === "high" ? "is-high-quality-hud" : "",
+  ].filter(Boolean).join(" ");
 }
 
 export function leaderboardScrollPixels(deltaY: number, deltaMode: number, pageHeight: number): number {

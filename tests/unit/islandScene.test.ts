@@ -15,6 +15,7 @@ import { AssetCatalog } from "../../src/assets/AssetCatalog";
 import type { AssetEntry } from "../../src/assets/types";
 import {
   applyActorVisualPose,
+  createLoadingBayLayout,
   createNaturalDetailPlacements,
   createIslandScene,
   getSkyAssetId,
@@ -89,6 +90,9 @@ describe("IslandScene lifecycle", () => {
       expect(bundle.lootMeshes.get("death")?.material).not.toBe(spawnMaterial);
       expect(bundle.lootMeshes.get("death")?.metadata?.lootSource).toBe("death");
       expect(bundle.viewWeaponRoot.isEnabled()).toBe(false);
+      expect(bundle.viewWeaponRoot.getChildMeshes(false)
+        .filter((mesh) => mesh.metadata?.actorVisual === "view-arm"))
+        .toHaveLength(0);
       expect(bundle.camera.minZ).toBeGreaterThanOrEqual(0.1);
       expect(bundle.camera.ellipsoid.asArray()).toEqual([ACTOR_RADIUS, ACTOR_EYE_HEIGHT / 2, ACTOR_RADIUS]);
       expect(bundle.camera.ellipsoidOffset.y).toBe(-ACTOR_EYE_HEIGHT / 2);
@@ -117,11 +121,22 @@ describe("IslandScene lifecycle", () => {
 
       const layeredSurfaces = bundle.scene.meshes.filter((mesh) => mesh.metadata?.surfaceType);
       const decorations = bundle.scene.meshes.filter((mesh) => mesh.metadata?.decoration);
+      const islandVisualDetails = bundle.scene.meshes.filter((mesh) =>
+        mesh.metadata?.decoration === "island-visual-detail"
+      );
       const hospitalCrosses = decorations.filter((mesh) => mesh.metadata?.decoration === "hospital-cross");
       const brandSigns = decorations.filter((mesh) => mesh.metadata?.decoration === "brand-sign");
       const collisionMeshes = bundle.scene.meshes.filter((mesh) => mesh.metadata?.collision);
       const ground = bundle.scene.getMeshByName("island-ground");
       const sky = bundle.scene.getMeshByName("island-sky-dome");
+      expect(bundle.scene.imageProcessingConfiguration.isEnabled).toBe(false);
+      expect(bundle.scene.imageProcessingConfiguration.toneMappingEnabled).toBe(false);
+      expect(bundle.scene.imageProcessingConfiguration.ditheringEnabled).toBe(false);
+      expect(bundle.scene.imageProcessingConfiguration.vignetteEnabled).toBe(false);
+      expect(bundle.scene.clearColor.asArray()).toEqual([0.36, 0.44, 0.46, 1]);
+      expect(bundle.scene.fogStart).toBeCloseTo(MAP_SIZE * 0.65, 5);
+      expect(bundle.scene.fogEnd).toBeCloseTo(MAP_SIZE * 1.1, 5);
+      expect(bundle.scene.fogColor.asArray()).toEqual([0.46, 0.53, 0.53]);
       expect(sky).toMatchObject({ isPickable: false, checkCollisions: false, infiniteDistance: true });
       expect(sky?.metadata).toMatchObject({ decoration: "sky", skyAssetId: getSkyAssetId(state.mapSeed) });
       expect(sky?.material).toBeInstanceOf(BackgroundMaterial);
@@ -238,6 +253,15 @@ describe("IslandScene lifecycle", () => {
       expect(bundle.scene.meshes.filter((mesh) => /^shrub-\d+$/.test(mesh.name))).toHaveLength(180);
       expect(layeredSurfaces).toHaveLength(0);
       expect(bundle.scene.meshes.filter((mesh) => mesh.name.startsWith("ocean-"))).toHaveLength(0);
+      expect(bundle.scene.meshes.filter((mesh) => mesh.name.startsWith("island-shore-foam-"))).toHaveLength(4);
+      expect(new Set(islandVisualDetails.map((mesh) => mesh.metadata?.detailType))).toEqual(
+        new Set(["poi-light", "road-wet-patch"]),
+      );
+      expect(islandVisualDetails.every((mesh) =>
+        !mesh.isPickable &&
+        !mesh.checkCollisions &&
+        Number(mesh.metadata?.sourceCount ?? 0) > 0
+      )).toBe(true);
       const floorMeshes = bundle.scene.meshes.filter(
         (mesh) =>
           mesh.name === "island-ground" ||
@@ -294,7 +318,9 @@ describe("IslandScene lifecycle", () => {
       const openingPieceCount =
         layout.wallOpenings.filter((opening) => opening.kind === "window").length * 4 +
         layout.wallOpenings.filter((opening) => opening.kind === "door").length * 3;
-      expect(bundle.scene.getMeshByName("building-openings-batch")?.metadata?.sourceCount).toBe(openingPieceCount);
+      const openingsBatch = bundle.scene.getMeshByName("building-openings-batch");
+      expect(openingsBatch?.metadata?.sourceCount).toBe(openingPieceCount);
+      expect(openingsBatch?.material).toBeInstanceOf(StandardMaterial);
       expect(bundle.scene.getMeshByName("building-ramps-batch")?.metadata?.sourceCount).toBe(layout.roofRamps.length);
       const ringPositions = bundle.safeZoneRing.getVerticesData("position") ?? [];
       for (let ringIndex = 0; ringIndex < ringPositions.length; ringIndex += 6 * 12) {
@@ -637,6 +663,8 @@ describe("IslandScene lifecycle", () => {
       .filter((mesh) => mesh.metadata?.actorVisual === "weapon");
     const botMeshes = botRoot.getChildMeshes(false)
       .filter((mesh) => mesh.metadata?.actorVisual === "weapon");
+    const highDetailGear = botRoot.getChildMeshes(false)
+      .filter((mesh) => mesh.metadata?.actorVisual === "high-detail-gear");
 
     for (const weaponId of ["rifle", "smg", "shotgun", "sniper"] as const) {
       expect(viewMeshes.filter((mesh) => mesh.metadata?.weaponId === weaponId)
@@ -661,10 +689,13 @@ describe("IslandScene lifecycle", () => {
     bundle.scene.render();
     expect(baseCharacter?.isEnabled()).toBe(true);
     expect(lodCharacter?.isEnabled()).toBe(false);
+    expect(highDetailGear).toHaveLength(5);
+    expect(highDetailGear.every((mesh) => mesh.isEnabled(false))).toBe(true);
     bundle.camera.position.set(1_000, 200, 1_000);
     bundle.scene.render();
     expect(baseCharacter?.isEnabled()).toBe(false);
     expect(lodCharacter?.isEnabled()).toBe(true);
+    expect(highDetailGear.every((mesh) => mesh.isEnabled(false))).toBe(true);
     expect(botRoot.getChildMeshes(false).filter((mesh) => mesh.metadata?.actorVisual === "parachute")
       .every((mesh) => mesh.isEnabled(false))).toBe(true);
     expect(botMeshes.filter((mesh) => mesh.metadata?.weaponId === "smg" && mesh.metadata?.weaponFallback === true)
@@ -918,10 +949,54 @@ describe("IslandScene lifecycle", () => {
     expect(fetchMock.mock.calls.some(([input]) => input.toString().endsWith(".glb"))).toBe(false);
     expect(bundle.scene.getMeshByName("body-bot-1")).not.toBeNull();
     expect(bundle.scene.meshes.some((mesh) => mesh.metadata?.visualModel)).toBe(false);
+    expect(bundle.viewWeaponRoot.getChildMeshes(false)
+      .some((mesh) => mesh.metadata?.actorVisual === "view-arm")).toBe(false);
+    expect(bundle.scene.meshes.some((mesh) => mesh.metadata?.actorVisual === "high-detail-gear")).toBe(false);
+    expect(bundle.scene.meshes.some((mesh) => mesh.metadata?.decoration === "island-visual-detail")).toBe(false);
+    expect(bundle.scene.meshes.some((mesh) => mesh.name.startsWith("island-shore-foam-"))).toBe(false);
+    expect(bundle.scene.imageProcessingConfiguration.isEnabled).toBe(false);
+    expect(bundle.scene.imageProcessingConfiguration.toneMappingEnabled).toBe(false);
+    expect(bundle.scene.imageProcessingConfiguration.ditheringEnabled).toBe(false);
+    expect(bundle.scene.imageProcessingConfiguration.vignetteEnabled).toBe(false);
 
     bundle.scene.dispose();
     engine.dispose();
   }, 30_000);
+
+  it("does not apply high-quality color grading on medium quality", async () => {
+    const engine = new NullEngine();
+    const assets = createAssets();
+    const state = createBattleRoyaleState("player", {
+      participantCount: 2,
+      flightSeconds: 1,
+      safeZoneStages: [{ waitSeconds: 1, shrinkSeconds: 1, radius: 100, damagePerSecond: 1 }],
+    }, () => 0.5, { mapId: "town" });
+
+    const bundle = await createIslandScene(
+      engine,
+      assets,
+      state.actors,
+      state.groundLoot,
+      state.mapSeed,
+      false,
+      undefined,
+      "medium",
+      state.mapId,
+    );
+
+    expect(bundle.scene.imageProcessingConfiguration.isEnabled).toBe(false);
+    expect(bundle.scene.imageProcessingConfiguration.toneMappingEnabled).toBe(false);
+    expect(bundle.scene.imageProcessingConfiguration.ditheringEnabled).toBe(false);
+    expect(bundle.scene.imageProcessingConfiguration.vignetteEnabled).toBe(false);
+    expect(bundle.scene.clearColor.asArray()).toEqual([0.36, 0.44, 0.46, 1]);
+    expect(bundle.scene.fogStart).toBeCloseTo(MAP_SIZE * 0.65, 5);
+    expect(bundle.scene.fogEnd).toBeCloseTo(MAP_SIZE * 1.1, 5);
+    expect(bundle.scene.fogColor.asArray()).toEqual([0.46, 0.53, 0.53]);
+    expect(bundle.scene.meshes.some((mesh) => mesh.metadata?.decoration === "town-visual-detail")).toBe(false);
+
+    bundle.scene.dispose();
+    engine.dispose();
+  }, 60_000);
 
   it("selects all sky panoramas deterministically from the map seed", () => {
     expect([0, 1, 2, 3, -1].map(getSkyAssetId)).toEqual([
@@ -959,10 +1034,8 @@ describe("IslandScene lifecycle", () => {
     expect(bundle.scene.meshes.some((mesh) => mesh.name === "island-beach")).toBe(false);
     expect(bundle.scene.meshes.some((mesh) => mesh.name === "island-wet-shore")).toBe(false);
     expect(bundle.scene.meshes.some((mesh) => mesh.name === "building-floor-slabs-batch")).toBe(true);
-    expect(bundle.scene.meshes
-      .filter((mesh) => mesh.name.startsWith("town-building-silhouettes-"))
-      .map((mesh) => mesh.metadata?.townKind)
-      .sort()).toEqual(["commercial", "corner", "factory", "rowhouse", "tower", "warehouse"]);
+    expect(bundle.scene.meshes.some((mesh) => mesh.name.startsWith("town-building-silhouettes-"))).toBe(false);
+    expect(bundle.scene.meshes.some((mesh) => mesh.metadata?.decoration === "town-visual-detail")).toBe(false);
     expect(new Set(bundle.scene.meshes
       .filter((mesh) => mesh.metadata?.decoration === "poi")
       .map((mesh) => mesh.metadata?.poiName)
@@ -1016,6 +1089,162 @@ describe("IslandScene lifecycle", () => {
     );
     expect((hospitalWallBatch?.material as StandardMaterial).diffuseTexture).toBeNull();
     const hospitalSlabs = layout.floorSlabs.filter((slab) => slab.obstacleId === hospital.id);
+    const hospitalSurfaceBatch = bundle.scene.getMeshByName("hospital-surfaces-batch");
+    expect(hospitalSurfaceBatch?.metadata?.sourceCount).toBe(hospitalSlabs.length);
+    expect((hospitalSurfaceBatch?.material as StandardMaterial).diffuseColor.toHexString().toLowerCase()).toBe(
+      "#ffffff",
+    );
+    expect((hospitalSurfaceBatch?.material as StandardMaterial).diffuseTexture).toBeNull();
+    expect(bundle.scene.meshes.length).toBeLessThan(930);
+
+    bundle.scene.dispose();
+    engine.dispose();
+  }, 60_000);
+
+  it("enables dense realistic town presentation only on high quality", async () => {
+    const engine = new NullEngine();
+    const assets = createAssets();
+    const state = createBattleRoyaleState("player", {
+      participantCount: 2,
+      flightSeconds: 1,
+      safeZoneStages: [{ waitSeconds: 1, shrinkSeconds: 1, radius: 100, damagePerSecond: 1 }],
+    }, () => 0.5, { mapId: "town" });
+    const layout = createMapLayout("town", state.mapSeed);
+    const bundle = await createIslandScene(
+      engine,
+      assets,
+      state.actors,
+      state.groundLoot,
+      state.mapSeed,
+      false,
+      undefined,
+      "high",
+      state.mapId,
+    );
+
+    const townVisualBatches = bundle.scene.meshes.filter((mesh) =>
+      mesh.metadata?.decoration === "town-visual-detail"
+    );
+    expect(bundle.scene.imageProcessingConfiguration.isEnabled).toBe(false);
+    expect(bundle.scene.imageProcessingConfiguration.toneMappingEnabled).toBe(false);
+    expect(bundle.scene.imageProcessingConfiguration.ditheringEnabled).toBe(false);
+    expect(bundle.scene.imageProcessingConfiguration.vignetteEnabled).toBe(false);
+    expect(bundle.scene.clearColor.asArray()).toEqual([0.36, 0.44, 0.46, 1]);
+    expect(bundle.scene.fogStart).toBeCloseTo(MAP_SIZE * 0.65, 5);
+    expect(bundle.scene.fogEnd).toBeCloseTo(MAP_SIZE * 1.1, 5);
+    expect(bundle.scene.fogColor.asArray()).toEqual([0.46, 0.53, 0.53]);
+    expect(new Set(townVisualBatches.map((mesh) => mesh.metadata?.detailType))).toEqual(new Set([
+      "facade-rust",
+      "facade-weathering",
+      "facade-canopy",
+      "industrial-light",
+      "industrial-pipe",
+      "industrial-skyline",
+      "industrial-smoke",
+      "loading-bay",
+      "overhead-cable",
+      "road-edge",
+      "road-marking",
+      "road-wet-patch",
+      "road-weathering",
+      "roof-weathering",
+      "rooftop-equipment",
+      "street-furniture",
+      "street-light",
+      "window-glass",
+    ]));
+    expect(townVisualBatches.every((mesh) =>
+      !mesh.isPickable &&
+      !mesh.checkCollisions &&
+      Number(mesh.metadata?.sourceCount ?? 0) > 0
+    )).toBe(true);
+    expect(townVisualBatches.find((mesh) => mesh.metadata?.detailType === "window-glass")?.metadata?.sourceCount)
+      .toBe(layout.wallOpenings.filter((opening) => opening.kind === "window").length);
+    const windowBatchMaterial = townVisualBatches.find((mesh) =>
+      mesh.metadata?.detailType === "window-glass"
+    )?.material as StandardMaterial | undefined;
+    expect(windowBatchMaterial?.alpha).toBe(0.16);
+    expect(windowBatchMaterial?.name).toBe("town-window-material");
+    expect(windowBatchMaterial?.diffuseColor.toHexString().toLowerCase()).toBe("#8fb8bd");
+    const facadeWeatheringMaterial = townVisualBatches.find((mesh) =>
+      mesh.metadata?.detailType === "facade-weathering"
+    )?.material as StandardMaterial | undefined;
+    expect(facadeWeatheringMaterial?.alpha).toBe(0.24);
+    expect(facadeWeatheringMaterial?.diffuseColor.toHexString().toLowerCase()).toBe("#55584e");
+    const facadeRustMaterial = townVisualBatches.find((mesh) =>
+      mesh.metadata?.detailType === "facade-rust"
+    )?.material as StandardMaterial | undefined;
+    expect(facadeRustMaterial?.diffuseColor.toHexString().toLowerCase()).toBe("#a37848");
+    const expectBatchMaterials = (detailType: string, expectedNames: readonly string[]): void => {
+      const batch = townVisualBatches.find((mesh) => mesh.metadata?.detailType === detailType);
+      if (!batch) throw new Error(`${detailType} batch missing`);
+      expect(batch.material).toBeInstanceOf(MultiMaterial);
+      const batchMaterial = batch.material as MultiMaterial;
+      expect(new Set(batch.subMeshes.map((subMesh) =>
+        batchMaterial.subMaterials[subMesh.materialIndex]?.name
+      ))).toEqual(new Set(expectedNames));
+    };
+    expectBatchMaterials("rooftop-equipment", ["poi-dark-material", "building-trim-material"]);
+    expectBatchMaterials("industrial-pipe", ["building-trim-material", "fence-material"]);
+    expectBatchMaterials("industrial-skyline", [
+      "poi-dark-material",
+      "fence-material",
+      "building-trim-material",
+    ]);
+    const loadingBayBuildingIds = new Set(layout.obstacles.flatMap((building, index) =>
+      index % 2 === 0 &&
+      (building.townKind === "factory" ||
+        building.townKind === "warehouse" ||
+        building.townKind === "commercial")
+        ? [building.id]
+        : []
+    ));
+    const loadingBayOpenings = layout.wallOpenings.filter((opening) =>
+      loadingBayBuildingIds.has(opening.obstacleId) &&
+      opening.kind === "door" &&
+      opening.side === "front" &&
+      opening.storyIndex === 0
+    );
+    expect(townVisualBatches.find((mesh) => mesh.metadata?.detailType === "loading-bay")?.metadata?.sourceCount)
+      .toBe(loadingBayOpenings.length * 2);
+    expect(townVisualBatches.find((mesh) => mesh.metadata?.detailType === "facade-canopy")?.metadata?.sourceCount)
+      .toBe(loadingBayOpenings.length);
+    for (const opening of loadingBayOpenings) {
+      const loadingBay = createLoadingBayLayout(opening);
+      const openingLeft = opening.center.x - opening.width / 2;
+      const openingRight = opening.center.x + opening.width / 2;
+      expect(loadingBay.frameXs[0] + loadingBay.frameWidth / 2).toBeCloseTo(openingLeft, 8);
+      expect(loadingBay.frameXs[1] - loadingBay.frameWidth / 2).toBeCloseTo(openingRight, 8);
+      expect(loadingBay.canopyY - 0.09)
+        .toBeGreaterThan(opening.center.y + opening.height / 2);
+    }
+    const openingFixture = loadingBayOpenings[0];
+    if (!openingFixture) throw new Error("loading bay door fixture missing");
+    const offsetLoadingBay = createLoadingBayLayout({
+      ...openingFixture,
+      center: { x: 17.5, y: 3.2, z: -44 },
+      width: 4.2,
+      height: 3,
+    });
+    expect(offsetLoadingBay.frameXs[0]).toBeCloseTo(15.29, 8);
+    expect(offsetLoadingBay.frameXs[1]).toBeCloseTo(19.71, 8);
+    expect(offsetLoadingBay.canopyY - 0.09).toBeGreaterThan(4.7);
+    const cockpitMaterial = bundle.scene.getMeshByName("aircraft-cockpit")?.material as StandardMaterial | undefined;
+    expect(cockpitMaterial?.name).toBe("building-window-material");
+    expect(cockpitMaterial?.alpha).toBe(1);
+    expect(cockpitMaterial?.diffuseColor.toHexString().toLowerCase()).toBe("#26383b");
+    expect(cockpitMaterial?.emissiveColor.asArray()).toEqual([0.025, 0.035, 0.034]);
+    expect(cockpitMaterial?.specularColor.r).toBeCloseTo(38 / 255 * 0.08, 8);
+    expect(cockpitMaterial?.specularColor.g).toBeCloseTo(56 / 255 * 0.08, 8);
+    expect(cockpitMaterial?.specularColor.b).toBeCloseTo(59 / 255 * 0.08, 8);
+    expect(cockpitMaterial?.backFaceCulling).toBe(true);
+    expect(bundle.scene.meshes
+      .filter((mesh) => mesh.name.startsWith("town-building-silhouettes-"))
+      .map((mesh) => mesh.metadata?.townKind)
+      .sort()).toEqual(["commercial", "corner", "factory", "rowhouse", "tower", "warehouse"]);
+    const hospital = layout.obstacles.find((building) => building.id === layout.hospital.buildingId);
+    if (!hospital?.townKind) throw new Error("Town hospital building missing");
+    const hospitalSlabs = layout.floorSlabs.filter((slab) => slab.obstacleId === hospital.id);
     const rooftopPieceCount = {
       factory: 2,
       warehouse: 1,
@@ -1024,13 +1253,11 @@ describe("IslandScene lifecycle", () => {
       corner: 1,
       tower: 2,
     }[hospital.townKind];
-    const hospitalSurfaceBatch = bundle.scene.getMeshByName("hospital-surfaces-batch");
-    expect(hospitalSurfaceBatch?.metadata?.sourceCount).toBe(hospitalSlabs.length + rooftopPieceCount);
-    expect((hospitalSurfaceBatch?.material as StandardMaterial).diffuseColor.toHexString().toLowerCase()).toBe(
-      "#ffffff",
-    );
-    expect((hospitalSurfaceBatch?.material as StandardMaterial).diffuseTexture).toBeNull();
-    expect(bundle.scene.meshes.length).toBeLessThan(900);
+    expect(bundle.scene.getMeshByName("hospital-surfaces-batch")?.metadata?.sourceCount)
+      .toBe(hospitalSlabs.length + rooftopPieceCount);
+    expect(bundle.viewWeaponRoot.getChildMeshes(false)
+      .some((mesh) => mesh.metadata?.actorVisual === "view-arm")).toBe(false);
+    expect(bundle.scene.meshes.some((mesh) => mesh.metadata?.actorVisual === "high-detail-gear")).toBe(true);
 
     bundle.scene.dispose();
     engine.dispose();

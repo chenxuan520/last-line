@@ -113,7 +113,7 @@ npm run preview
 ## Deployment Rules
 
 - Keep `.github/workflows/ci.yml` on Node.js 24 and lockfile installs.
-- Pull requests run checks only; `main` deploys the verified `dist/` artifact to GitHub Pages.
+- Pull requests and every branch push run the core CI checks; only `main` deploys the verified `dist/` artifact to GitHub Pages.
 - Cloudflare Pages uses dashboard Git integration with `main`, `npm run build`, and output directory `dist`.
 - Cloudflare Workers Builds must also track `main` and run the documented Worker build and deploy commands. A successful repository push or Pages deployment never proves that the Worker deployed.
 - Any change touching `worker/`, shared multiplayer server code, or `MULTIPLAYER_PROTOCOL_VERSION` is incomplete until `wrangler deployments status` shows a new production Worker version created for that release and `npm run test:multiplayer:production` passes against the public endpoint. Deployment verification never grants permission to modify the repository after the implementation commit. If a Worker version ID or smoke result is already known before that commit, it may be recorded in the plan and included with the implementation. Otherwise it must exist only in the user-facing report: never edit the plan, never create a follow-up documentation commit, and never amend or rewrite the implementation commit to insert it. If automatic Worker deployment did not occur, report it as a blocker and use the verified `npm run deploy:worker` fallback; never silently leave Pages and Worker on different revisions.

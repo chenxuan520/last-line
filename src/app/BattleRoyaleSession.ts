@@ -80,7 +80,7 @@ export class BattleRoyaleSession {
     private readonly canvas: HTMLCanvasElement,
     private readonly uiRoot: HTMLDivElement,
     private readonly assets: AssetCatalog,
-    settings: GameSettings,
+    private readonly settings: GameSettings,
     audio: AudioFeedback,
     private readonly mobileFullscreen: MobileFullscreenController,
     private readonly onRestart: () => void,
@@ -171,6 +171,7 @@ export class BattleRoyaleSession {
         onDropBackpackItem: (index, itemId, snapshot) =>
           this.humanController.requestDropBackpackItem(index, itemId, snapshot),
         onExit: this.onExit,
+        quality: this.settings.quality,
       },
     );
     this.audio.start();

@@ -59,6 +59,8 @@ import { getBrandSignPlacements } from "../../brandSigns";
 
 const INITIAL_SAFE_ZONE_RADIUS = MAP_SIZE * 0.36;
 const HOSPITAL_SURFACE_COLOR = "#ffffff";
+const TOWN_VISUAL_DETAIL = "town-visual-detail";
+const ISLAND_VISUAL_DETAIL = "island-visual-detail";
 const SKY_ASSET_IDS = ["texture.sky.clearing", "texture.sky.overcast", "texture.sky.storm"] as const;
 const TERRAIN_PATCHES: ReadonlyArray<readonly [number, number, number, number, number, "mud" | "grass"]> = [
   [-620, -380, 184, 116, 0.2, "grass"],
@@ -98,6 +100,8 @@ interface IslandMaterials {
   beach: StandardMaterial;
   shoreWet: StandardMaterial;
   roadShoulder: StandardMaterial;
+  roadWet: StandardMaterial;
+  roadMarking: StandardMaterial;
   trunk: StandardMaterial;
   foliage: StandardMaterial;
   shrub: StandardMaterial;
@@ -106,12 +110,15 @@ interface IslandMaterials {
   hay: StandardMaterial;
   poiAccent: StandardMaterial;
   poiDark: StandardMaterial;
+  weathering: StandardMaterial;
   floor: StandardMaterial;
   roof: StandardMaterial;
   hospitalSurface: StandardMaterial;
   wallTrim: StandardMaterial;
   hospitalCross: StandardMaterial;
   window: StandardMaterial;
+  townWindow: StandardMaterial;
+  industrialLight: StandardMaterial;
   door: StandardMaterial;
   botBody: StandardMaterial;
   actorArmor: StandardMaterial;
@@ -160,14 +167,11 @@ export async function createIslandScene(
   }
   const layout = createMapLayout(mapId, mapSeed);
 
+  const highPresentation = quality === "high";
   const scene = new Scene(engine);
-  scene.clearColor = new Color4(0.36, 0.44, 0.46, 1);
   scene.collisionsEnabled = true;
-  scene.fogMode = Scene.FOGMODE_LINEAR;
-  scene.fogStart = MAP_SIZE * 0.65;
-  scene.fogEnd = MAP_SIZE * 1.1;
-  scene.fogColor = new Color3(0.46, 0.53, 0.53);
   scene.skipPointerMovePicking = true;
+  configureScenePresentation(scene);
 
   const ambient = new HemisphericLight("island-ambient", new Vector3(0.2, 1, 0.12), scene);
   ambient.intensity = 0.74;
@@ -180,14 +184,14 @@ export async function createIslandScene(
   sun.diffuse = new Color3(0.94, 0.88, 0.73);
   sun.specular = new Color3(0.42, 0.46, 0.43);
 
-  const materials = createMaterials(scene, assets);
+  const materials = createMaterials(scene, assets, highPresentation);
   createSkyDome(scene, assets, mapSeed);
   const qualityProfile = QUALITY_PROFILES[quality];
-  createIslandEnvironment(scene, materials, layout, qualityProfile);
+  createIslandEnvironment(scene, materials, layout, qualityProfile, quality);
   createPois(scene, materials, layout);
   createBrandSigns(scene, assets, layout);
 
-  const { actorRoots, actorVisualRoots } = createActors(scene, actors, materials, player.id);
+  const { actorRoots, actorVisualRoots } = createActors(scene, actors, materials, player.id, highPresentation);
   const camera = createCamera(scene, player);
   const aircraftInteriorRoot = createAircraftInterior(scene, camera, materials);
   aircraftInteriorRoot.setEnabled(player.deployment === "aircraft");
@@ -248,6 +252,20 @@ export async function createIslandScene(
 
 export function getSkyAssetId(mapSeed: number): (typeof SKY_ASSET_IDS)[number] {
   return SKY_ASSET_IDS[(mapSeed >>> 0) % SKY_ASSET_IDS.length] ?? SKY_ASSET_IDS[0];
+}
+
+function configureScenePresentation(scene: Scene): void {
+  scene.clearColor = new Color4(0.36, 0.44, 0.46, 1);
+  scene.fogMode = Scene.FOGMODE_LINEAR;
+  scene.fogStart = MAP_SIZE * 0.65;
+  scene.fogEnd = MAP_SIZE * 1.1;
+  scene.fogColor = new Color3(0.46, 0.53, 0.53);
+
+  const processing = scene.imageProcessingConfiguration;
+  processing.isEnabled = false;
+  processing.toneMappingEnabled = false;
+  processing.ditheringEnabled = false;
+  processing.vignetteEnabled = false;
 }
 
 async function replaceCatalogModels(
@@ -431,7 +449,7 @@ function findImportedNode(nodes: readonly Node[], name: string): TransformNode |
 function suppressProceduralCharacter(root: TransformNode): void {
   for (const mesh of root.getChildMeshes(false)) {
     if (mesh.metadata?.visualModel) continue;
-    if (!["weapon", "parachute", "vest", "helmet"].includes(mesh.metadata?.actorVisual)) {
+    if (!["weapon", "parachute", "vest", "helmet", "high-detail-gear"].includes(mesh.metadata?.actorVisual)) {
       mesh.setEnabled(false);
     }
   }
@@ -491,7 +509,7 @@ function matchesImportedName(actualName: string, expectedNames: readonly string[
   return expectedNames.some((expected) => actualName === expected || actualName.endsWith(`-${expected}`));
 }
 
-function createMaterials(scene: Scene, assets: AssetCatalog): IslandMaterials {
+function createMaterials(scene: Scene, assets: AssetCatalog, highPresentation: boolean): IslandMaterials {
   const playerColor = assetColor(assets, "model.character.player", "model", "#809d5e");
   const botColor = assetColor(assets, "model.character.enemy", "model", "#bd6357");
   const rifleColor = assetColor(assets, "model.weapon.rifle", "model", "#283126");
@@ -503,6 +521,12 @@ function createMaterials(scene: Scene, assets: AssetCatalog): IslandMaterials {
 
   const windowMaterial = material(scene, "building-window-material", "#26383b");
   windowMaterial.emissiveColor = new Color3(0.025, 0.035, 0.034);
+  const townWindow = material(scene, "town-window-material", "#a9d3d5");
+  townWindow.diffuseColor = new Color3(0.56, 0.72, 0.74);
+  townWindow.emissiveColor = new Color3(0.05, 0.075, 0.08);
+  townWindow.specularColor = new Color3(0.78, 0.88, 0.9);
+  townWindow.alpha = 0.16;
+  townWindow.backFaceCulling = false;
 
   const playerHitbox = material(scene, "player-hitbox-material", playerColor);
   playerHitbox.alpha = 0.001;
@@ -550,6 +574,29 @@ function createMaterials(scene: Scene, assets: AssetCatalog): IslandMaterials {
   ground.subMaterials = [groundGrass, groundMud, groundRoad];
   const roadShoulder = material(scene, "road-shoulder-material", "#746b52");
   const wallTexture = catalogTexture(scene, assets, "texture.building.wall", 2.5);
+  const poiAccent = material(scene, "poi-accent-material", "#a37848");
+  const poiDark = material(scene, "poi-dark-material", "#434b4f");
+  const wallTrim = material(scene, "building-trim-material", "#8a8069");
+  const roadWet = highPresentation ? material(scene, "road-wet-detail-material", "#202a2b") : roadShoulder;
+  if (highPresentation) {
+    roadWet.alpha = 0.48;
+    roadWet.specularColor = new Color3(0.35, 0.45, 0.44);
+  }
+  const roadMarking = highPresentation ? material(scene, "road-marking-material", "#d0c68b") : roadShoulder;
+  if (highPresentation) {
+    roadMarking.alpha = 0.62;
+    roadMarking.emissiveColor = Color3.FromHexString("#d0c68b").scale(0.08);
+  }
+  const weathering = highPresentation ? material(scene, "town-weathering-material", "#55584e") : poiDark;
+  if (highPresentation) {
+    weathering.alpha = 0.24;
+    weathering.specularColor = Color3.Black();
+  }
+  const industrialLight = highPresentation ? material(scene, "town-industrial-light-material", "#f0c76e") : poiAccent;
+  if (highPresentation) {
+    industrialLight.emissiveColor = Color3.FromHexString("#f0c76e").scale(0.75);
+    industrialLight.specularColor = Color3.FromHexString("#ffe4a6").scale(0.28);
+  }
 
   return {
     ground,
@@ -557,20 +604,25 @@ function createMaterials(scene: Scene, assets: AssetCatalog): IslandMaterials {
     beach: material(scene, "island-beach-material", "#a99b70"),
     shoreWet: material(scene, "island-wet-shore-material", "#746f59"),
     roadShoulder,
+    roadWet,
+    roadMarking,
     trunk: material(scene, "tree-trunk-material", "#5d4b38"),
     foliage: material(scene, "tree-foliage-material", "#34533a"),
     shrub: material(scene, "shrub-material", "#496545"),
     rock: material(scene, "rock-material", "#65685e"),
     fence: material(scene, "fence-material", "#655443"),
     hay: material(scene, "hay-material", "#b86b22"),
-    poiAccent: material(scene, "poi-accent-material", "#a37848"),
-    poiDark: material(scene, "poi-dark-material", "#434b4f"),
+    poiAccent,
+    poiDark,
+    weathering,
     floor: material(scene, "building-floor-material", "#343b3b"),
     roof: texturedMaterial(scene, assets, "building-roof-material", "#69706d", "texture.building.roof", 2),
     hospitalSurface: material(scene, "hospital-surface-material", HOSPITAL_SURFACE_COLOR),
-    wallTrim: material(scene, "building-trim-material", "#8a8069"),
+    wallTrim,
     hospitalCross: material(scene, "hospital-cross-material", "#d8473f"),
     window: windowMaterial,
+    townWindow,
+    industrialLight,
     door: material(scene, "building-door-material", "#4c3d31"),
     botBody: material(scene, "bot-body-material", botColor),
     actorArmor: material(scene, "actor-armor-material", "#465248"),
@@ -592,6 +644,7 @@ function createIslandEnvironment(
   materials: IslandMaterials,
   layout: MapLayout,
   quality: QualityProfile,
+  qualityLevel: QualityLevel,
 ): void {
   if (layout.mapId === "island") createIslandPerimeter(scene, materials);
 
@@ -648,7 +701,15 @@ function createIslandEnvironment(
   createHospitalCross(scene, materials.hospitalCross, layout);
 
   createBuildingDetails(scene, materials, layout);
-  createTownBuildingSilhouettes(scene, materials, layout);
+  if (qualityLevel === "high") {
+    createIslandHighQualityDetails(scene, materials, layout);
+    createTownBuildingSilhouettes(scene, materials, layout);
+    createTownRoadDetails(scene, materials, layout);
+    createTownFacadeDetail(scene, materials, layout);
+    createTownStreetFurniture(scene, materials, layout);
+    createTownWeatheringDetails(scene, materials, layout);
+    createTownIndustrialSkyline(scene, materials, layout);
+  }
   createRoofRamps(scene, materials, layout);
   createCoverProps(scene, materials, layout);
   createVegetation(scene, materials.trunk, materials.foliage, layout, quality);
@@ -792,18 +853,39 @@ function mergeStaticBatch(
   name: string,
   predicate: (mesh: Mesh) => boolean,
   metadata: Record<string, unknown>,
+  preserveMaterials = false,
 ): void {
   const meshes = scene.meshes.filter((mesh): mesh is Mesh => mesh instanceof Mesh && predicate(mesh));
-  if (meshes.length === 0) return;
-  const material = meshes[0]?.material ?? null;
-  const merged = Mesh.MergeMeshes(meshes, true, true);
+  if (!meshes.length) return;
+  const merged = Mesh.MergeMeshes(
+    meshes,
+    true,
+    true,
+    undefined,
+    false,
+    preserveMaterials && meshes.some((mesh) => mesh.material !== meshes[0]!.material),
+  );
   if (!merged) throw new Error(`Unable to merge ${name}`);
   merged.name = name;
-  merged.material = material;
   merged.checkCollisions = false;
   merged.isPickable = false;
   merged.metadata = { ...metadata, sourceCount: meshes.length };
   merged.freezeWorldMatrix();
+}
+
+function mergeVisualDetailBatch(
+  scene: Scene,
+  name: string,
+  detailType: string,
+  decoration = TOWN_VISUAL_DETAIL,
+): void {
+  mergeStaticBatch(
+    scene,
+    name,
+    (mesh) => mesh.metadata?.decoration === decoration && mesh.metadata?.detailType === detailType,
+    { decoration, detailType },
+    decoration === TOWN_VISUAL_DETAIL,
+  );
 }
 
 function applyTerrainSurface(ground: Mesh, layout: MapLayout, groundMaterial: MultiMaterial): void {
@@ -866,6 +948,47 @@ function createIslandPerimeter(scene: Scene, materials: IslandMaterials): void {
   const islandHalfSize = MAP_SIZE / 2;
   createSquareBand(scene, "island-beach", islandHalfSize, islandHalfSize + 10, -0.28, materials.beach);
   createSquareBand(scene, "island-wet-shore", islandHalfSize + 10, islandHalfSize + 20, -0.34, materials.shoreWet);
+}
+
+function createIslandHighQualityDetails(scene: Scene, materials: IslandMaterials, layout: MapLayout): void {
+  if (layout.mapId !== "island") return;
+  const halfSize = MAP_SIZE / 2;
+  const random = createVisualRandom(layout.seed ^ 0x4c8d2f11);
+  createSquareBand(scene, "island-shore-foam", halfSize - 7, halfSize - 4, -0.235, materials.aircraftTrail);
+
+  layout.roadSegments.forEach(([startX, startZ, endX, endZ], index) => {
+    if (index % 3 !== 0) return;
+    const progress = 0.18 + random() * 0.64;
+    const x = lerp(startX, endX, progress);
+    const z = lerp(startZ, endZ, progress);
+    const yaw = Math.atan2(endX - startX, endZ - startZ);
+    const patch = CreateBox(
+      `island-road-wet-${index}`,
+      { width: 2.4 + random() * 2.8, height: 0.035, depth: 7 + random() * 9 },
+      scene,
+    );
+    patch.position.set(x, getTerrainHeight(x, z, layout) + 0.06, z);
+    patch.rotation.y = yaw + (random() - 0.5) * 0.24;
+    patch.material = materials.roadWet;
+    markIslandVisualDetail(patch, "road-wet-patch");
+  });
+
+  layout.mapPoints.forEach((point, index) => {
+    if (index % 2 !== 0) return;
+    const light = CreateBox(
+      `island-poi-light-${index}`,
+      { width: 1.2, height: 0.18, depth: 0.18 },
+      scene,
+    );
+    light.position.set(point.position.x, getTerrainHeight(point.position.x, point.position.z, layout) + 2.8, point.position.z);
+    light.rotation.y = random() * Math.PI;
+    light.material = materials.industrialLight;
+    markIslandVisualDetail(light, "poi-light");
+  });
+
+  for (const detailType of ["road-wet-patch", "poi-light"] as const) {
+    mergeVisualDetailBatch(scene, `island-${detailType}-batch`, detailType, ISLAND_VISUAL_DETAIL);
+  }
 }
 
 function createTownPoiPaving(scene: Scene, materials: IslandMaterials, layout: MapLayout): void {
@@ -1101,6 +1224,585 @@ function createTownBuildingSilhouettes(scene: Scene, materials: IslandMaterials,
       { decoration: "town-building-silhouette", townKind: kind },
     );
   }
+}
+
+function createTownRoadDetails(
+  scene: Scene,
+  materials: IslandMaterials,
+  layout: MapLayout,
+): void {
+  if (layout.mapId !== "town") return;
+  const random = createVisualRandom(layout.seed ^ 0x46d1a3f7);
+  const roadStride = 2;
+  const markingLimit = 168;
+  const wetPatchLimit = 72;
+  let markings = 0;
+  let wetPatches = 0;
+
+  const addRoadBox = (
+    name: string,
+    material: StandardMaterial,
+    x: number,
+    z: number,
+    width: number,
+    depth: number,
+    yaw: number,
+    detailType: string,
+    height = 0.035,
+    yOffset = 0.055,
+  ): void => {
+    const mesh = CreateBox(name, { width, height, depth }, scene);
+    mesh.position.set(x, getTerrainHeight(x, z, layout) + yOffset, z);
+    mesh.rotation.y = yaw;
+    mesh.material = material;
+    markTownVisualDetail(mesh, detailType);
+  };
+
+  layout.roadSegments.forEach(([startX, startZ, endX, endZ], roadIndex) => {
+    const deltaX = endX - startX;
+    const deltaZ = endZ - startZ;
+    const length = Math.hypot(deltaX, deltaZ);
+    if (length < 28) return;
+    const yaw = Math.atan2(deltaX, deltaZ);
+    const normalX = Math.cos(yaw);
+    const normalZ = -Math.sin(yaw);
+
+    const edgeDepth = Math.min(116, Math.max(24, length * 0.82));
+    for (const side of [-1, 1] as const) {
+      addRoadBox(
+        `town-road-edge-${roadIndex}-${side}`,
+        materials.wallTrim,
+        (startX + endX) / 2 + normalX * side * (TOWN_ROAD_HALF_WIDTH + 0.38),
+        (startZ + endZ) / 2 + normalZ * side * (TOWN_ROAD_HALF_WIDTH + 0.38),
+        0.24,
+        edgeDepth,
+        yaw,
+        "road-edge",
+        0.16,
+        0.11,
+      );
+    }
+
+    if (roadIndex % roadStride === 0 && markings < markingLimit) {
+      const dashCount = Math.min(5, Math.max(1, Math.floor(length / 70)));
+      for (let dash = 0; dash < dashCount && markings < markingLimit; dash += 1) {
+        const progress = (dash + 0.5) / dashCount;
+        const x = lerp(startX, endX, progress);
+        const z = lerp(startZ, endZ, progress);
+        addRoadBox(
+          `town-road-marking-${roadIndex}-${dash}`,
+          materials.roadMarking,
+          x,
+          z,
+          0.28,
+          Math.min(10, length / (dashCount * 2.4)),
+          yaw,
+          "road-marking",
+        );
+        markings += 1;
+      }
+    }
+
+    if (wetPatches >= wetPatchLimit || roadIndex % 2 !== 0) return;
+    const patchCount = length > 120 ? 2 : 1;
+    for (let patch = 0; patch < patchCount && wetPatches < wetPatchLimit; patch += 1) {
+      const progress = 0.16 + random() * 0.68;
+      const sideOffset = (random() - 0.5) * TOWN_ROAD_HALF_WIDTH * 1.3;
+      const x = lerp(startX, endX, progress) + normalX * sideOffset;
+      const z = lerp(startZ, endZ, progress) + normalZ * sideOffset;
+      addRoadBox(
+        `town-road-wet-${roadIndex}-${patch}`,
+        materials.roadWet,
+        x,
+        z,
+        2.4 + random() * 3.8,
+        6 + random() * 12,
+        yaw + (random() - 0.5) * 0.18,
+        "road-wet-patch",
+      );
+      wetPatches += 1;
+    }
+  });
+
+  mergeVisualDetailBatch(scene, "town-road-edges-batch", "road-edge");
+  mergeVisualDetailBatch(scene, "town-road-markings-batch", "road-marking");
+  mergeVisualDetailBatch(scene, "town-road-wet-patches-batch", "road-wet-patch");
+}
+
+function createTownFacadeDetail(
+  scene: Scene,
+  materials: IslandMaterials,
+  layout: MapLayout,
+): void {
+  if (layout.mapId !== "town") return;
+  const random = createVisualRandom(layout.seed ^ 0x94d049bb);
+  const openingStride = 1;
+
+  layout.wallOpenings.forEach((opening, index) => {
+    if (opening.kind !== "window" || index % openingStride !== 0) return;
+    const horizontalAlongX = opening.side === "front" || opening.side === "back";
+    const outward = facadeOutward(opening.side);
+    const pane = CreateBox(
+      `town-window-glass-${index}`,
+      {
+        width: horizontalAlongX ? opening.width * 0.72 : 0.055,
+        height: Math.max(0.35, opening.height * 0.56),
+        depth: horizontalAlongX ? 0.055 : opening.width * 0.72,
+      },
+      scene,
+    );
+    pane.position.set(
+      opening.center.x + outward.x * 0.22,
+      opening.center.y + opening.height * 0.02,
+      opening.center.z + outward.z * 0.22,
+    );
+    pane.material = materials.townWindow;
+    markTownVisualDetail(pane, "window-glass");
+
+    if (index % 5 !== 0) return;
+    const light = CreateBox(
+      `town-window-light-${index}`,
+      {
+        width: horizontalAlongX ? opening.width * 0.6 : 0.07,
+        height: 0.16,
+        depth: horizontalAlongX ? 0.07 : opening.width * 0.6,
+      },
+      scene,
+    );
+    light.position.set(
+      opening.center.x + outward.x * 0.3,
+      opening.center.y + opening.height * 0.43,
+      opening.center.z + outward.z * 0.3,
+    );
+    light.material = materials.industrialLight;
+    markTownVisualDetail(light, "industrial-light");
+  });
+
+  layout.obstacles.forEach((building, index) => {
+    if (!building.townKind) return;
+    const roofY = building.baseY + building.storyHeight * building.storyCount + BUILDING_ROOF_CAP_HEIGHT;
+    const detailEvery = 2;
+    if (index % detailEvery === 0 || building.storyCount >= 4) {
+      const hvacHeight = 0.82 + (index % 3) * 0.16;
+      const box = CreateBox(
+        `${building.id}-roof-hvac`,
+        {
+          width: Math.min(5.8, building.width * 0.24),
+          height: hvacHeight,
+          depth: Math.min(4.4, building.depth * 0.2),
+        },
+        scene,
+      );
+      box.position.set(
+        building.center.x + (random() - 0.5) * Math.max(0, building.width - 8) * 0.42,
+        roofY + hvacHeight / 2 + 0.38,
+        building.center.z + (random() - 0.5) * Math.max(0, building.depth - 8) * 0.42,
+      );
+      box.rotation.y = random() * Math.PI;
+      box.material = materials.poiDark;
+      markTownVisualDetail(box, "rooftop-equipment");
+
+      const vent = CreateCylinder(
+        `${building.id}-roof-vent`,
+        { height: 1.2 + random() * 1.2, diameter: 0.62, tessellation: 8 },
+        scene,
+      );
+      vent.position.set(
+        building.center.x - building.width * 0.18,
+        roofY + 0.95,
+        building.center.z + building.depth * 0.18,
+      );
+      vent.material = materials.wallTrim;
+      markTownVisualDetail(vent, "rooftop-equipment");
+    }
+
+    if ((building.townKind === "commercial" || building.townKind === "factory") && index % 5 === 0) {
+      const sign = CreateBox(
+        `${building.id}-facade-lightbox`,
+        { width: Math.min(9, building.width * 0.46), height: 0.72, depth: 0.08 },
+        scene,
+      );
+      sign.position.set(
+        building.center.x,
+        building.baseY + Math.min(building.height - 1, building.storyHeight * 0.78),
+        building.center.z - building.depth / 2 - 0.08,
+      );
+      sign.material = materials.industrialLight;
+      markTownVisualDetail(sign, "industrial-light");
+    }
+
+    if (
+      (building.townKind === "factory" || building.townKind === "warehouse" || building.townKind === "commercial") &&
+      index % 2 === 0
+    ) {
+      const opening = layout.wallOpenings.find((candidate) =>
+        candidate.obstacleId === building.id &&
+        candidate.kind === "door" &&
+        candidate.side === "front" &&
+        candidate.storyIndex === 0
+      );
+      if (!opening) return;
+      const loadingBay = createLoadingBayLayout(opening);
+      loadingBay.frameXs.forEach((x, frameIndex) => {
+        const frame = CreateBox(
+          `${building.id}-loading-bay-frame-${frameIndex === 0 ? "left" : "right"}`,
+          { width: loadingBay.frameWidth, height: opening.height, depth: 0.12 },
+          scene,
+        );
+        frame.position.set(x, opening.center.y, loadingBay.frontZ);
+        frame.material = materials.door;
+        markTownVisualDetail(frame, "loading-bay");
+      });
+
+      const canopy = CreateBox(
+        `${building.id}-loading-canopy`,
+        { width: loadingBay.canopyWidth, height: 0.18, depth: 1.15 },
+        scene,
+      );
+      canopy.position.set(opening.center.x, loadingBay.canopyY, loadingBay.frontZ - 0.52);
+      canopy.material = materials.wallTrim;
+      markTownVisualDetail(canopy, "facade-canopy");
+    }
+  });
+
+  mergeVisualDetailBatch(scene, "town-window-glass-batch", "window-glass");
+  mergeVisualDetailBatch(scene, "town-industrial-lights-batch", "industrial-light");
+  mergeVisualDetailBatch(scene, "town-rooftop-equipment-batch", "rooftop-equipment");
+  mergeVisualDetailBatch(scene, "town-loading-bays-batch", "loading-bay");
+  mergeVisualDetailBatch(scene, "town-facade-canopies-batch", "facade-canopy");
+}
+
+export function createLoadingBayLayout(opening: MapWallOpening): {
+  frameXs: readonly [number, number];
+  frameWidth: number;
+  frontZ: number;
+  canopyWidth: number;
+  canopyY: number;
+} {
+  const frameWidth = 0.22;
+  const frameOffset = (opening.width + frameWidth) / 2;
+  return {
+    frameXs: [opening.center.x - frameOffset, opening.center.x + frameOffset],
+    frameWidth,
+    frontZ: opening.center.z - 0.1,
+    canopyWidth: opening.width + 1.3,
+    canopyY: opening.center.y + opening.height / 2 + 0.48,
+  };
+}
+
+function facadeOutward(side: MapWallOpening["side"]): { x: number; z: number } {
+  if (side === "front") return { x: 0, z: -1 };
+  if (side === "back") return { x: 0, z: 1 };
+  if (side === "left") return { x: -1, z: 0 };
+  return { x: 1, z: 0 };
+}
+
+function createTownStreetFurniture(
+  scene: Scene,
+  materials: IslandMaterials,
+  layout: MapLayout,
+): void {
+  if (layout.mapId !== "town") return;
+  const random = createVisualRandom(layout.seed ^ 0xb73341ac);
+  const lampStride = 2;
+  const pipeStride = 4;
+  let lampCount = 0;
+  let cableCount = 0;
+
+  layout.roadSegments.forEach(([startX, startZ, endX, endZ], index) => {
+    const length = Math.hypot(endX - startX, endZ - startZ);
+    if (length < 70 || index % lampStride !== 0) return;
+    const yaw = Math.atan2(endX - startX, endZ - startZ);
+    const normalX = Math.cos(yaw);
+    const normalZ = -Math.sin(yaw);
+    for (const side of [-1, 1] as const) {
+      const progress = 0.18 + random() * 0.64;
+      const x = lerp(startX, endX, progress) + normalX * side * (TOWN_ROAD_SHOULDER_HALF_WIDTH + 1.6);
+      const z = lerp(startZ, endZ, progress) + normalZ * side * (TOWN_ROAD_SHOULDER_HALF_WIDTH + 1.6);
+      const terrainY = getTerrainHeight(x, z, layout);
+
+      const post = CreateCylinder(
+        `town-street-lamp-post-${lampCount}`,
+        { height: 5.8, diameter: 0.22, tessellation: 7 },
+        scene,
+      );
+      post.position.set(x, terrainY + 2.9, z);
+      post.material = materials.fence;
+      markTownVisualDetail(post, "street-furniture");
+
+      const arm = CreateBox(
+        `town-street-lamp-arm-${lampCount}`,
+        { width: 0.16, height: 0.12, depth: 1.6 },
+        scene,
+      );
+      arm.position.set(x - normalX * side * 0.74, terrainY + 5.55, z - normalZ * side * 0.74);
+      arm.rotation.y = yaw;
+      arm.material = materials.fence;
+      markTownVisualDetail(arm, "street-furniture");
+
+      const lamp = CreateBox(
+        `town-street-lamp-head-${lampCount}`,
+        { width: 0.48, height: 0.18, depth: 0.7 },
+        scene,
+      );
+      lamp.position.set(x - normalX * side * 1.45, terrainY + 5.45, z - normalZ * side * 1.45);
+      lamp.rotation.y = yaw;
+      lamp.material = materials.industrialLight;
+      markTownVisualDetail(lamp, "street-light");
+      lampCount += 1;
+    }
+  });
+
+  layout.obstacles.forEach((building, index) => {
+    if (!building.townKind || index % pipeStride !== 0) return;
+    const frontZ = building.center.z - building.depth / 2 - 0.12;
+    const y = building.baseY + Math.min(building.height - 1.2, building.storyHeight * (0.55 + (index % 3) * 0.48));
+    const pipe = CreateCylinder(
+      `${building.id}-facade-pipe`,
+      { height: Math.min(11, building.width * 0.58), diameter: 0.18, tessellation: 8 },
+      scene,
+    );
+    pipe.position.set(building.center.x, y, frontZ);
+    pipe.rotation.z = Math.PI / 2;
+    pipe.material = materials.wallTrim;
+    markTownVisualDetail(pipe, "industrial-pipe");
+
+    const bracketCount = 3;
+    for (let bracketIndex = 0; bracketIndex < bracketCount; bracketIndex += 1) {
+      const offset = (bracketIndex - (bracketCount - 1) / 2) * Math.min(3.2, building.width * 0.18);
+      const bracket = CreateBox(
+        `${building.id}-pipe-bracket-${bracketIndex}`,
+        { width: 0.12, height: 0.42, depth: 0.12 },
+        scene,
+      );
+      bracket.position.set(building.center.x + offset, y, frontZ - 0.08);
+      bracket.material = materials.fence;
+      markTownVisualDetail(bracket, "industrial-pipe");
+    }
+  });
+
+  const cableRoads = layout.roadSegments.filter(([, startZ, , endZ]) => Math.abs(startZ - endZ) < 0.01);
+  for (let index = 0; index + 1 < cableRoads.length && cableCount < 52; index += 2) {
+    const [startX, startZ, endX] = cableRoads[index] ?? [0, 0, 0];
+    const centerX = (startX + endX) / 2;
+    const centerZ = startZ + (random() - 0.5) * TOWN_ROAD_HALF_WIDTH;
+    const cable = CreateBox(
+      `town-overhead-cable-${cableCount}`,
+      { width: Math.min(80, Math.abs(endX - startX) * 0.36), height: 0.055, depth: 0.055 },
+      scene,
+    );
+    cable.position.set(centerX, getTerrainHeight(centerX, centerZ, layout) + 7.4 + random() * 1.1, centerZ);
+    cable.material = materials.gear;
+    markTownVisualDetail(cable, "overhead-cable");
+    cableCount += 1;
+  }
+
+  for (const detailType of ["street-furniture", "street-light", "industrial-pipe", "overhead-cable"] as const) {
+    mergeVisualDetailBatch(scene, `town-${detailType}-batch`, detailType);
+  }
+}
+
+function createTownWeatheringDetails(
+  scene: Scene,
+  materials: IslandMaterials,
+  layout: MapLayout,
+): void {
+  if (layout.mapId !== "town") return;
+  const random = createVisualRandom(layout.seed ^ 0x2fb87d4c);
+  const facadeStride = 2;
+  const roofStride = 3;
+  const crackLimit = 132;
+
+  layout.obstacles.forEach((building, index) => {
+    if (!building.townKind) return;
+    if (index % facadeStride === 0 || building.storyCount >= 4) {
+      const side = (index + layout.seed) % 3 === 0 ? "left" : (index + layout.seed) % 3 === 1 ? "front" : "back";
+      const horizontalAlongX = side === "front" || side === "back";
+      const outward = facadeOutward(side);
+      const width = Math.min(horizontalAlongX ? building.width * 0.22 : building.depth * 0.22, 5.4);
+      const height = Math.min(building.height * 0.22, 4.2);
+      const y = building.baseY + Math.min(building.height - height / 2 - 0.45, building.storyHeight * (0.65 + random() * 1.6));
+      const x = horizontalAlongX
+        ? building.center.x + (random() - 0.5) * Math.max(0, building.width - width - 1)
+        : building.center.x + outward.x * (building.width / 2 + 0.05);
+      const z = horizontalAlongX
+        ? building.center.z + outward.z * (building.depth / 2 + 0.05)
+        : building.center.z + (random() - 0.5) * Math.max(0, building.depth - width - 1);
+      const runoff = CreateBox(
+        `${building.id}-wall-runoff`,
+        {
+          width: horizontalAlongX ? Math.max(0.18, width * 0.14) : 0.055,
+          height,
+          depth: horizontalAlongX ? 0.055 : Math.max(0.18, width * 0.14),
+        },
+        scene,
+      );
+      runoff.position.set(x, y, z);
+      runoff.material = materials.weathering;
+      markTownVisualDetail(runoff, "facade-weathering");
+
+      if (index % (facadeStride * 2) === 0) {
+        const rust = CreateBox(
+          `${building.id}-rust-runoff`,
+          {
+            width: horizontalAlongX ? Math.max(0.22, width * 0.18) : 0.06,
+            height: height * 0.9,
+            depth: horizontalAlongX ? 0.06 : Math.max(0.22, width * 0.18),
+          },
+          scene,
+        );
+        rust.position.set(
+          x + (horizontalAlongX ? width * (random() - 0.5) * 0.55 : 0),
+          y - height * 0.12,
+          z + (horizontalAlongX ? 0 : width * (random() - 0.5) * 0.55),
+        );
+        rust.material = materials.poiAccent;
+        markTownVisualDetail(rust, "facade-rust");
+      }
+    }
+
+    if (index % roofStride === 0) {
+      const roofY = building.baseY + building.storyHeight * building.storyCount + BUILDING_ROOF_CAP_HEIGHT + 0.065;
+      const patch = CreateBox(
+        `${building.id}-roof-patch`,
+        {
+          width: Math.min(9, building.width * (0.22 + random() * 0.16)),
+          height: 0.045,
+          depth: Math.min(7, building.depth * (0.18 + random() * 0.14)),
+        },
+        scene,
+      );
+      patch.position.set(
+        building.center.x + (random() - 0.5) * Math.max(0, building.width - 9) * 0.55,
+        roofY,
+        building.center.z + (random() - 0.5) * Math.max(0, building.depth - 7) * 0.55,
+      );
+      patch.rotation.y = random() * Math.PI;
+      patch.material = materials.weathering;
+      markTownVisualDetail(patch, "roof-weathering");
+    }
+  });
+
+  let crackCount = 0;
+  for (const [roadIndex, [startX, startZ, endX, endZ]] of layout.roadSegments.entries()) {
+    if (crackCount >= crackLimit || roadIndex % 2 !== 0) continue;
+    const length = Math.hypot(endX - startX, endZ - startZ);
+    if (length < 45) continue;
+    const yaw = Math.atan2(endX - startX, endZ - startZ);
+    const cracksOnRoad = length > 120 ? 2 : 1;
+    for (let crack = 0; crack < cracksOnRoad && crackCount < crackLimit; crack += 1) {
+      const progress = 0.12 + random() * 0.76;
+      const sideOffset = (random() - 0.5) * TOWN_ROAD_HALF_WIDTH * 1.6;
+      const normalX = Math.cos(yaw);
+      const normalZ = -Math.sin(yaw);
+      const x = lerp(startX, endX, progress) + normalX * sideOffset;
+      const z = lerp(startZ, endZ, progress) + normalZ * sideOffset;
+      const crackMesh = CreateBox(
+        `town-asphalt-crack-${roadIndex}-${crack}`,
+        { width: 0.08 + random() * 0.08, height: 0.04, depth: 3.8 + random() * 7.5 },
+        scene,
+      );
+      crackMesh.position.set(x, getTerrainHeight(x, z, layout) + 0.07, z);
+      crackMesh.rotation.y = yaw + (random() - 0.5) * 0.9;
+      crackMesh.material = materials.weathering;
+      markTownVisualDetail(crackMesh, "road-weathering");
+      crackCount += 1;
+    }
+  }
+
+  for (const detailType of ["facade-weathering", "roof-weathering", "road-weathering"] as const) {
+    mergeVisualDetailBatch(scene, `town-${detailType}-batch`, detailType);
+  }
+  mergeVisualDetailBatch(scene, "town-facade-rust-batch", "facade-rust");
+}
+
+function createTownIndustrialSkyline(scene: Scene, materials: IslandMaterials, layout: MapLayout): void {
+  if (layout.mapId !== "town") return;
+  const random = createVisualRandom(layout.seed ^ 0x71d83b21);
+  const factories = layout.obstacles
+    .filter((building) => building.townKind === "factory" || building.townKind === "warehouse" || building.storyCount >= 4)
+    .slice(0, 58);
+
+  factories.forEach((building, index) => {
+    const roofY = building.baseY + building.storyHeight * building.storyCount + BUILDING_ROOF_CAP_HEIGHT;
+    if (index % 3 === 0) {
+      const height = 8 + random() * 8 + (building.storyCount >= 4 ? 3 : 0);
+      const stack = CreateCylinder(
+        `${building.id}-industrial-stack`,
+        { height, diameter: 1.2 + random() * 0.9, tessellation: 10 },
+        scene,
+      );
+      stack.position.set(
+        building.center.x + (random() - 0.5) * building.width * 0.42,
+        roofY + height / 2,
+        building.center.z + (random() - 0.5) * building.depth * 0.42,
+      );
+      stack.material = materials.poiDark;
+      markTownVisualDetail(stack, "industrial-skyline");
+
+      for (let puffIndex = 0; puffIndex < 3; puffIndex += 1) {
+        const puff = CreateSphere(
+          `${building.id}-stack-smoke-${puffIndex}`,
+          { diameter: 2.2 + puffIndex * 1.6, segments: 7 },
+          scene,
+        );
+        puff.position.set(
+          stack.position.x + (puffIndex - 1) * 1.8 + random() * 0.8,
+          roofY + height + 1.6 + puffIndex * 2.8,
+          stack.position.z - puffIndex * 2.2 + random() * 0.8,
+        );
+        puff.scaling.y = 0.52;
+        puff.material = materials.aircraftTrail;
+        markTownVisualDetail(puff, "industrial-smoke");
+      }
+    }
+
+    if (index % 5 === 0) {
+      const gantryHeight = 7 + random() * 4;
+      const span = Math.min(32, Math.max(16, building.width * 0.92));
+      const x = building.center.x;
+      const z = building.center.z + building.depth * 0.45 + 5;
+      const uprightA = CreateBox(
+        `${building.id}-gantry-upright-a`,
+        { width: 0.42, height: gantryHeight, depth: 0.42 },
+        scene,
+      );
+      uprightA.position.set(x - span / 2, roofY + gantryHeight / 2, z);
+      uprightA.material = materials.fence;
+      markTownVisualDetail(uprightA, "industrial-skyline");
+      const uprightB = CreateBox(
+        `${building.id}-gantry-upright-b`,
+        { width: 0.42, height: gantryHeight, depth: 0.42 },
+        scene,
+      );
+      uprightB.position.set(x + span / 2, roofY + gantryHeight / 2, z);
+      uprightB.material = materials.fence;
+      markTownVisualDetail(uprightB, "industrial-skyline");
+      const beam = CreateBox(
+        `${building.id}-gantry-beam`,
+        { width: span + 2, height: 0.38, depth: 0.5 },
+        scene,
+      );
+      beam.position.set(x, roofY + gantryHeight, z);
+      beam.material = materials.fence;
+      markTownVisualDetail(beam, "industrial-skyline");
+    }
+  });
+
+  const bridgeCandidates = layout.skybridges.slice(0, 20);
+  bridgeCandidates.forEach((bridge, index) => {
+    const pipe = CreateBox(
+      `town-elevated-pipe-${index}`,
+      { width: bridge.width * 0.9, height: 0.34, depth: 0.34 },
+      scene,
+    );
+    pipe.position.set(bridge.center.x, bridge.floorY + bridge.height + 0.62, bridge.center.z);
+    pipe.material = materials.wallTrim;
+    markTownVisualDetail(pipe, "industrial-skyline");
+  });
+
+  mergeVisualDetailBatch(scene, "town-industrial-skyline-batch", "industrial-skyline");
+  mergeVisualDetailBatch(scene, "town-industrial-smoke-batch", "industrial-smoke");
 }
 
 function createWallOpeningFrame(template: Mesh, opening: MapWallOpening, index: number): void {
@@ -1505,6 +2207,7 @@ function createActors(
   actors: Readonly<Record<EntityId, ActorState>>,
   materials: IslandMaterials,
   localActorId: EntityId,
+  highPresentation: boolean,
 ): { actorRoots: Map<EntityId, TransformNode>; actorVisualRoots: Map<EntityId, TransformNode> } {
   const actorRoots = new Map<EntityId, TransformNode>();
   const actorVisualRoots = new Map<EntityId, TransformNode>();
@@ -1521,7 +2224,7 @@ function createActors(
     if (actor.id === localActorId) {
       createPlayerHitbox(scene, root, actor.id, materials.playerHitbox);
     } else {
-      createBot(scene, visualRoot, actor.id, materials);
+      createBot(scene, visualRoot, actor.id, materials, highPresentation);
       setActorWeaponVisual(root, getActiveWeapon(actor)?.weaponId ?? null);
       setActorParachuteVisual(root, actor.deployment === "parachuting");
       setActorEquipmentVisual(root, actor.inventory.armorLevel, actor.inventory.helmetLevel);
@@ -1556,7 +2259,13 @@ function createPlayerHitbox(
   markActor(hitbox, actorId);
 }
 
-function createBot(scene: Scene, root: TransformNode, actorId: EntityId, materials: IslandMaterials): void {
+function createBot(
+  scene: Scene,
+  root: TransformNode,
+  actorId: EntityId,
+  materials: IslandMaterials,
+  highPresentation: boolean,
+): void {
   const body = CreateCapsule(
     `body-${actorId}`,
     { height: 1.42, radius: 0.38, tessellation: 7, subdivisions: 1 },
@@ -1597,6 +2306,10 @@ function createBot(scene: Scene, root: TransformNode, actorId: EntityId, materia
   backpack.material = materials.gear;
   markActorVisual(backpack, actorId, "backpack");
 
+  if (highPresentation) {
+    createHighQualityActorGear(scene, root, actorId, materials);
+  }
+
   for (const side of [-1, 1] as const) {
     const arm = CreateCapsule(
       `arm-${actorId}-${side}`,
@@ -1623,6 +2336,42 @@ function createBot(scene: Scene, root: TransformNode, actorId: EntityId, materia
   createWeaponModel(scene, root, `bot-${actorId}`, "smg", materials, false);
   createWeaponModel(scene, root, `bot-${actorId}`, "shotgun", materials, false);
   createWeaponModel(scene, root, `bot-${actorId}`, "sniper", materials, false);
+}
+
+function createHighQualityActorGear(
+  scene: Scene,
+  root: TransformNode,
+  actorId: EntityId,
+  materials: IslandMaterials,
+): void {
+  for (const side of [-1, 1] as const) {
+    const shoulder = CreateBox(
+      `shoulder-plate-${actorId}-${side}`,
+      { width: 0.23, height: 0.12, depth: 0.28 },
+      scene,
+    );
+    shoulder.parent = root;
+    shoulder.position.set(side * 0.43, -0.28, 0.05);
+    shoulder.rotation.z = side * 0.16;
+    shoulder.material = materials.actorArmor;
+    markActorVisual(shoulder, actorId, "high-detail-gear");
+
+    const knee = CreateBox(
+      `knee-pad-${actorId}-${side}`,
+      { width: 0.18, height: 0.14, depth: 0.08 },
+      scene,
+    );
+    knee.parent = root;
+    knee.position.set(side * 0.16, -1.22, 0.3);
+    knee.material = materials.gear;
+    markActorVisual(knee, actorId, "high-detail-gear");
+  }
+
+  const belt = CreateBox(`utility-belt-${actorId}`, { width: 0.72, height: 0.12, depth: 0.18 }, scene);
+  belt.parent = root;
+  belt.position.set(0, -0.87, 0.18);
+  belt.material = materials.gear;
+  markActorVisual(belt, actorId, "high-detail-gear");
 }
 
 export function setActorWeaponVisual(root: TransformNode, weaponId: string | null): void {
@@ -1757,7 +2506,11 @@ function createAircraftVisual(scene: Scene, materials: IslandMaterials): Transfo
   return root;
 }
 
-function createViewWeapon(scene: Scene, camera: UniversalCamera, materials: IslandMaterials): TransformNode {
+function createViewWeapon(
+  scene: Scene,
+  camera: UniversalCamera,
+  materials: IslandMaterials,
+): TransformNode {
   const root = new TransformNode("view-weapon-root", scene);
   root.parent = camera;
   createWeaponModel(scene, root, "view", "rifle", materials, true);
@@ -2276,6 +3029,20 @@ function markPoiDecoration(mesh: Mesh, poiName: string, poiType: string): void {
   mesh.checkCollisions = false;
   mesh.isPickable = false;
   mesh.metadata = { decoration: "poi", poiName, poiType };
+  mesh.freezeWorldMatrix();
+}
+
+function markTownVisualDetail(mesh: Mesh, detailType: string): void {
+  mesh.checkCollisions = false;
+  mesh.isPickable = false;
+  mesh.metadata = { decoration: TOWN_VISUAL_DETAIL, detailType };
+  mesh.freezeWorldMatrix();
+}
+
+function markIslandVisualDetail(mesh: Mesh, detailType: string): void {
+  mesh.checkCollisions = false;
+  mesh.isPickable = false;
+  mesh.metadata = { decoration: ISLAND_VISUAL_DETAIL, detailType };
   mesh.freezeWorldMatrix();
 }
 

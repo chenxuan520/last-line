@@ -110,7 +110,7 @@ export class MultiplayerSession implements GameSession {
     private readonly canvas: HTMLCanvasElement,
     private readonly uiRoot: HTMLDivElement,
     private readonly assets: AssetCatalog,
-    settings: GameSettings,
+    private readonly settings: GameSettings,
     private readonly audio: AudioFeedback,
     private readonly mobileFullscreen: MobileFullscreenController,
     private readonly connection: MultiplayerConnection,
@@ -206,6 +206,7 @@ export class MultiplayerSession implements GameSession {
         onDropBackpackItem: (index, itemId, snapshot) =>
           this.humanController.requestDropBackpackItem(index, itemId, snapshot),
         onExit: () => this.onExit(),
+        quality: this.settings.quality,
       },
     );
     if (!this.processMessages()) {
