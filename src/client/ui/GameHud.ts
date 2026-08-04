@@ -379,9 +379,7 @@ export class GameHud {
       this.options.touchInput
         ? `${spectatingKiller ? "正在观察击杀者" : "正在观察存活角色"} · 使用箭头切换目标`
         : `${spectatingKiller ? "正在观察击杀者" : "正在观察存活角色"} · 空格或滚轮切换目标`,
-      this.options.online || !this.options.onExit
-        ? undefined
-        : { label: "返回大厅", action: this.options.onExit },
+      this.options.online ? undefined : this.options.onExit,
     );
     this.requireElement("result").classList.add("is-eliminated");
   }
@@ -392,6 +390,8 @@ export class GameHud {
       victory ? "最后防线" : "对局结束",
       victory ? `成功存活 · ${kills} 次淘汰` : `胜者 ${result.winnerId ?? "无"}`,
       this.options.online ? "返回联机大厅" : "再来一局",
+      undefined,
+      this.options.online ? undefined : this.options.onExit,
     );
   }
 
@@ -408,7 +408,7 @@ export class GameHud {
     detail: string,
     buttonLabel: string,
     hint?: string,
-    secondaryAction?: { label: string; action: () => void },
+    secondaryAction?: () => void,
   ): void {
     if (this.resultVisible) return;
     this.setMobileInventoryVisible(false);
@@ -432,8 +432,8 @@ export class GameHud {
       secondaryButton.type = "button";
       secondaryButton.className = "is-secondary";
       secondaryButton.dataset.action = "exit";
-      secondaryButton.textContent = secondaryAction.label;
-      secondaryButton.addEventListener("click", secondaryAction.action);
+      secondaryButton.textContent = "返回大厅";
+      secondaryButton.addEventListener("click", secondaryAction);
       actions.append(secondaryButton);
     }
     const hintElement = document.createElement("small");

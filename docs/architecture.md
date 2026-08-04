@@ -52,6 +52,8 @@ The enemy character palette uses a dark blue-gray uniform while preserving autho
 
 Multi-story buildings use deterministic two-lane switchback ramps with authoritative cross-lane landings. Movement, combat, and navigation consume the same ramp/floor geometry, including paths that begin midway along a ramp. Decorative brand signs resolve deterministic clear positions near selected POIs but remain non-pickable, non-colliding presentation meshes. The menu's responsive ABOUT field manual exposes creator, repository, gameplay, desktop controls, and mobile controls without changing session state.
 
+Result actions preserve session ownership: a completed single-player victory offers both a fresh deployment and a return to the main menu, while multiplayer completion exposes only the existing return-to-online-lobby action and closes the match connection through the session exit callback.
+
 ## Multiplayer Services
 
 `LobbyDirectory` owns temporary guest sessions, public room summaries, quick matching, and private room-code lookup. Every room has a separate `GameRoom` service that owns lobby readiness, WebSockets, actor assignment, checkpoints, and one `MatchRuntime`.

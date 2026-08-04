@@ -1,12 +1,46 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
-import { hudRootClassName, leaderboardScrollPixels, pauseExitLabel } from "../../src/client/ui/GameHud";
+import { describe, expect, it, vi } from "vitest";
+import {
+  GameHud,
+  hudRootClassName,
+  leaderboardScrollPixels,
+  pauseExitLabel,
+} from "../../src/client/ui/GameHud";
 
 describe("GameHud actions", () => {
   it("uses mode-specific pause exit labels", () => {
     expect(pauseExitLabel(false)).toBe("返回大厅");
     expect(pauseExitLabel(true)).toBe("返回联机大厅");
+  });
+
+  it("adds a separate lobby exit only to single-player results", () => {
+    const onExit = vi.fn();
+    const singlePlayerCard = vi.fn();
+    GameHud.prototype.showResult.call({
+      options: { onExit },
+      showResultCard: singlePlayerCard,
+    } as unknown as GameHud, { winnerId: "player", reason: "last-alive" }, "player", 3);
+    expect(singlePlayerCard).toHaveBeenCalledWith(
+      "最后防线",
+      "成功存活 · 3 次淘汰",
+      "再来一局",
+      undefined,
+      onExit,
+    );
+
+    const multiplayerCard = vi.fn();
+    GameHud.prototype.showResult.call({
+      options: { online: true, onExit },
+      showResultCard: multiplayerCard,
+    } as unknown as GameHud, { winnerId: "player", reason: "last-alive" }, "player", 3);
+    expect(multiplayerCard).toHaveBeenCalledWith(
+      "最后防线",
+      "成功存活 · 3 次淘汰",
+      "返回联机大厅",
+      undefined,
+      undefined,
+    );
   });
 
   it("normalizes pixel, line, and page wheel deltas for leaderboard scrolling", () => {
