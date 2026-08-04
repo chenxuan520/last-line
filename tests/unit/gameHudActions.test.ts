@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { hudRootClassName, leaderboardScrollPixels, pauseExitLabel } from "../../src/client/ui/GameHud";
 
@@ -18,5 +20,13 @@ describe("GameHud actions", () => {
     expect(hudRootClassName(true, "high")).toBe("is-playing is-touch-input is-high-quality-hud");
     expect(hudRootClassName(false, "medium")).toBe("is-playing");
     expect(hudRootClassName(true, "low")).toBe("is-playing is-touch-input");
+  });
+
+  it("keeps native settings selects readable in dark menus", async () => {
+    const stylesheet = await readFile(resolve(process.cwd(), "src/styles/main.css"), "utf8");
+    expect(stylesheet).toMatch(/\.settings-grid select\s*\{[^}]*color-scheme:\s*dark;/s);
+    const optionRule = stylesheet.match(/\.settings-grid select option\s*\{(?<body>[^}]*)\}/s)?.groups?.body;
+    expect(optionRule).toMatch(/color:\s*var\(--ink\);/);
+    expect(optionRule).toMatch(/background:\s*#111714;/);
   });
 });

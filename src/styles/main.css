@@ -312,8 +312,14 @@ h1 {
   border-radius: 0;
   outline: none;
   color: var(--ink);
-  background: rgb(218 228 205 / 5%);
+  background: #111714;
+  color-scheme: dark;
   font-size: 11px;
+}
+
+.settings-grid select option {
+  color: var(--ink);
+  background: #111714;
 }
 
 .settings-grid select:focus-visible {
