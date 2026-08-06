@@ -19,10 +19,13 @@ import {
   createNaturalDetailPlacements,
   createIslandScene,
   getSkyAssetId,
+  selectTownPresentationRoads,
   setActorEquipmentVisual,
   setActorWeaponVisual,
 } from "../../src/client/render/scenes/IslandScene";
 import { createMapLayout, getTerrainHeight, HOSPITAL_WALL_COLOR, MAP_SIZE } from "../../src/config/map";
+import { mixedFootprintClearsRoads } from "../../src/config/mixedMap";
+import { createMixedMapBlueprint } from "../../src/config/mixedMap";
 import { QUALITY_PROFILES } from "../../src/config/settings";
 import {
   TOWN_POINT_HALF_DEPTH,
@@ -1100,6 +1103,105 @@ describe("IslandScene lifecycle", () => {
     bundle.scene.dispose();
     engine.dispose();
   }, 60_000);
+
+  it("renders mixed regions while isolating high-quality town details", async () => {
+    const engine = new NullEngine();
+    const assets = createAssets();
+    const state = createBattleRoyaleState("player", {
+      participantCount: 2,
+      flightSeconds: 1,
+      safeZoneStages: [{ waitSeconds: 1, shrinkSeconds: 1, radius: 100, damagePerSecond: 1 }],
+    }, () => 0.5, { mapId: "mixed" });
+    const layout = createMapLayout("mixed", state.mapSeed);
+    const low = await createIslandScene(
+      engine,
+      assets,
+      state.actors,
+      state.groundLoot,
+      state.mapSeed,
+      false,
+      undefined,
+      "low",
+      state.mapId,
+    );
+
+    expect(low.scene.meshes.some((mesh) => mesh.name === "island-beach")).toBe(false);
+    expect(low.scene.meshes.some((mesh) => mesh.metadata?.decoration === "town-poi-paving")).toBe(false);
+    expect(low.scene.meshes.some((mesh) => mesh.metadata?.decoration === "town-visual-detail")).toBe(false);
+    expect(new Set(low.scene.meshes
+      .filter((mesh) => mesh.metadata?.decoration === "poi")
+      .map((mesh) => mesh.metadata?.poiName)
+      .filter((name): name is string => typeof name === "string")))
+      .toEqual(new Set(layout.mapPoints.map((point) => point.name)));
+    expect(low.scene.meshes.filter((mesh) => mesh instanceof InstancedMesh && mesh.name.startsWith("mixed-tree-")))
+      .toHaveLength(layout.treeTrunks.length);
+    expect(low.scene.getMeshByName("hay-cover-batch")?.metadata?.sourceCount)
+      .toBe(layout.coverObstacles.filter((cover) => cover.kind === "hay").length * 3);
+    expect(low.scene.getMeshByName("hospital-medical-cross")?.metadata).toMatchObject({
+      poiName: "医院",
+      poiType: "hospital",
+      obstacleId: layout.hospital.buildingId,
+    });
+
+    low.scene.dispose();
+
+    const high = await createIslandScene(
+      engine,
+      assets,
+      state.actors,
+      state.groundLoot,
+      state.mapSeed,
+      false,
+      undefined,
+      "high",
+      state.mapId,
+    );
+    const townVisualBatches = high.scene.meshes.filter((mesh) =>
+      mesh.metadata?.decoration === "town-visual-detail"
+    );
+    expect(townVisualBatches.length).toBeGreaterThan(8);
+    const townBuildingIds = new Set(layout.obstacles
+      .filter((building) => Boolean(building.townKind))
+      .map((building) => building.id));
+    expect(townVisualBatches.find((mesh) => mesh.metadata?.detailType === "window-glass")?.metadata?.sourceCount)
+      .toBe(layout.wallOpenings.filter((opening) =>
+        opening.kind === "window" && townBuildingIds.has(opening.obstacleId)
+      ).length);
+    const placements = createNaturalDetailPlacements(layout, QUALITY_PROFILES.high);
+    expect(placements).toHaveLength(
+      QUALITY_PROFILES.high.decorativeRockCount + QUALITY_PROFILES.high.shrubCount,
+    );
+    for (const placement of placements) {
+      expect(layout.landingZones.every((point) =>
+        Math.hypot(placement.x - point.position.x, placement.z - point.position.z) > 20
+      ), placement.name).toBe(true);
+      expect(mixedFootprintClearsRoads(
+        layout.roadSegments,
+        placement.x,
+        placement.z,
+        placement.detailType === "rock" ? 6 : 4,
+        placement.detailType === "rock" ? 6 : 4,
+        0.5,
+      ), placement.name).toBe(true);
+    }
+
+    high.scene.dispose();
+    engine.dispose();
+  }, 60_000);
+
+  it("keeps mixed town presentation off rural and forest connector roads", () => {
+    for (const seed of [16, 38]) {
+      const layout = createMapLayout("mixed", seed);
+      const blueprint = createMixedMapBlueprint(seed);
+      expect(selectTownPresentationRoads(layout)).toEqual(blueprint.urbanRoadSegments);
+      expect(selectTownPresentationRoads(layout)).toEqual(layout.urbanRoadSegments);
+      expect(blueprint.roadSegments.slice(0, 7).every((road) =>
+        !blueprint.urbanRoadSegments.includes(road)
+      )).toBe(true);
+    }
+    expect(selectTownPresentationRoads(createMapLayout("mixed", 38))).toHaveLength(4);
+    expect(selectTownPresentationRoads(createMapLayout("mixed", 16))).toHaveLength(16);
+  });
 
   it("enables dense realistic town presentation only on high quality", async () => {
     const engine = new NullEngine();

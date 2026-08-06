@@ -137,7 +137,7 @@ export class GameApp {
         <h1 id="game-title"><span class="sr-only">最后防线</span><img class="game-logo" src="${logo.url}" alt="" /></h1>
         <p class="menu-description">穿越随机航线空降${MAP_DISPLAY_NAMES[this.settings.mapId]}，搜集武器和补给，在不断收缩的安全区内成为最后一名幸存者。</p>
         <div class="settings-grid" aria-label="游戏设置">
-          <label>地图选择<select name="map-id" data-setting="map-id"><option value="island">${MAP_DISPLAY_NAMES.island}</option><option value="town">${MAP_DISPLAY_NAMES.town}</option></select></label>
+          <label>地图选择<select name="map-id" data-setting="map-id"><option value="island">${MAP_DISPLAY_NAMES.island}</option><option value="town">${MAP_DISPLAY_NAMES.town}</option><option value="mixed">${MAP_DISPLAY_NAMES.mixed}</option></select></label>
           <label>画面质量<select name="quality" data-setting="quality"><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></label>
           <label class="volume-setting"><span>主音量 <output data-volume-output></output></span><input aria-label="主音量" data-setting="volume" type="range" min="0" max="1" step="0.1" value="${this.settings.volume}" /></label>
           <label class="sensitivity-setting"><span>视角灵敏度 <output data-sensitivity-output></output></span><input data-setting="sensitivity" type="range" min="0.4" max="2" step="0.1" value="${this.settings.sensitivity}" /></label>

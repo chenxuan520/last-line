@@ -3,6 +3,13 @@ import { ACTOR_EYE_HEIGHT } from "../game/rules/actorGeometry";
 import { GROUND_LOOT_POSITION_HEIGHT } from "../game/rules/loot";
 import { DEFAULT_MAP_ID, mapDisplayName, type MapId } from "./maps";
 import {
+  createMixedMapBlueprint,
+  mixedFootprintClearsRoads,
+  pointInMixedRegion,
+  type MixedMapBlueprint,
+  type MixedRegionSpec,
+} from "./mixedMap";
+import {
   createTownMapBlueprint,
   type TownBuildingKind,
   TOWN_POINT_HALF_DEPTH,
@@ -129,6 +136,7 @@ export interface MapLayout {
   readonly coverObstacles: readonly MapCoverObstacle[];
   readonly roofRamps: readonly RoofRamp[];
   readonly roadSegments: readonly (readonly [number, number, number, number])[];
+  readonly urbanRoadSegments: readonly (readonly [number, number, number, number])[];
   readonly skybridges: readonly MapSkybridge[];
   readonly hospital: HospitalPoi;
   readonly lootSpawnPoints: readonly Vector3State[];
@@ -142,6 +150,7 @@ export const BUILDING_ROOF_CAP_HEIGHT = 0.18;
 export const BUILDING_WINDOW_SILL_HEIGHT = 1.5;
 export const HOSPITAL_WALL_COLOR = "#eef2ef";
 export const DEFAULT_MAP_SEED = 0;
+export const MIXED_NATURAL_OBSTACLE_MAX_TERRAIN_DELTA = 0.798;
 
 export const MAP_POINT_COUNT = 8;
 export const LANDING_ZONE_COUNT = 16;
@@ -221,6 +230,9 @@ export function createMapLayout(mapIdOrSeed: MapId | number, explicitSeed?: numb
   }
   if (mapId === "town") {
     return cacheMapLayout(cacheKey, createTownMapLayout(normalizedSeed));
+  }
+  if (mapId === "mixed") {
+    return cacheMapLayout(cacheKey, createMixedMapLayout(normalizedSeed));
   }
 
   const terrainRandom = createSeededRandom(normalizedSeed ^ 0x9e3779b9);
@@ -371,6 +383,7 @@ export function createMapLayout(mapIdOrSeed: MapId | number, explicitSeed?: numb
     coverObstacles,
     roofRamps,
     roadSegments: createMapRoadSegments(landingZones),
+    urbanRoadSegments: [],
     skybridges: [],
     hospital,
     lootSpawnPoints,
@@ -509,11 +522,489 @@ function createTownMapLayout(seed: number): MapLayout {
     coverObstacles,
     roofRamps,
     roadSegments: blueprint.roadSegments,
+    urbanRoadSegments: blueprint.roadSegments,
     skybridges,
     hospital,
     lootSpawnPoints,
     lootZoneCounts,
   };
+}
+
+function createMixedMapLayout(seed: number): MapLayout {
+  const blueprint = createMixedMapBlueprint(seed);
+  const terrainHills = blueprint.terrainHills.map<TerrainHill>((hill) => ({
+    x: hill.x,
+    z: hill.z,
+    radius: hill.radius,
+    height: hill.height,
+  }));
+  const obstacles = blueprint.buildings.map<MapBuilding>((building) => {
+    const baseY = round(terrainHeightFromHills(building.x, building.z, terrainHills) - BUILDING_GROUND_EMBED);
+    const storyCount = building.id === blueprint.hospitalBuildingId
+      ? Math.max(2, building.storyCount) as 2 | 3 | 4
+      : building.storyCount;
+    const height = round(building.storyHeight * storyCount);
+    const base: MapBuilding = {
+      id: building.id,
+      center: { x: building.x, y: round(baseY + height / 2), z: building.z },
+      width: building.width,
+      height,
+      depth: building.depth,
+      color: building.id === blueprint.hospitalBuildingId ? HOSPITAL_WALL_COLOR : building.color,
+      baseY,
+      storyCount,
+      storyHeight: building.storyHeight,
+      stairwell: null,
+      ...(building.townKind ? { townKind: building.townKind } : {}),
+    };
+    return {
+      ...base,
+      stairwell: storyCount > 1 ? createBuildingStairwell(base, building.stairwellSide) : null,
+    };
+  });
+  const roofRamps = obstacles.flatMap((building) =>
+    building.storyCount > 1 ? createInternalRamps(building, terrainHills) : []
+  );
+  const { wallSegments, wallOpenings } = createWallSegments(obstacles, terrainHills);
+  const floorSlabs = obstacles.flatMap(createBuildingFloorSlabs);
+  const landingZones = blueprint.landingZones.map<MapPoint>((point) => ({
+    name: point.name,
+    position: {
+      x: point.x,
+      y: round(terrainHeightFromHills(point.x, point.z, terrainHills)),
+      z: point.z,
+    },
+  }));
+  const mapPoints = blueprint.mapPoints.map<MapPoint>((point) => ({
+    name: point.name,
+    position: {
+      x: point.x,
+      y: round(terrainHeightFromHills(point.x, point.z, terrainHills)),
+      z: point.z,
+    },
+  }));
+  const rockObstacles = createMixedRockObstacles(blueprint, terrainHills, obstacles, roofRamps, seed);
+  const coverObstacles = createMixedCoverObstacles(
+    blueprint,
+    terrainHills,
+    obstacles,
+    roofRamps,
+    rockObstacles,
+    seed,
+  );
+  const treeTrunks = createMixedTreeTrunks(
+    blueprint,
+    terrainHills,
+    obstacles,
+    roofRamps,
+    rockObstacles,
+    coverObstacles,
+    seed,
+  );
+  const lootZoneCounts = createMixedLootZoneCounts(landingZones.length);
+  const baseLootSpawnPoints = createMixedLootSpawnPoints(
+    blueprint,
+    landingZones,
+    lootZoneCounts,
+    terrainHills,
+    obstacles,
+    wallSegments,
+    roofRamps,
+    rockObstacles,
+    coverObstacles,
+    treeTrunks,
+    seed,
+  );
+  const hospitalBuilding = obstacles.find((building) => building.id === blueprint.hospitalBuildingId);
+  if (!hospitalBuilding) throw new Error("Mixed map hospital building missing");
+  const supplementalMedicalPoints = createMixedSupplementalMedicalPoints(
+    blueprint,
+    terrainHills,
+    obstacles,
+    wallSegments,
+    roofRamps,
+    rockObstacles,
+    coverObstacles,
+    treeTrunks,
+    baseLootSpawnPoints,
+    seed,
+  );
+  const hospitalMedicalPoints = createTownHospitalMedicalPoints(hospitalBuilding, terrainHills);
+  const lootSpawnPoints = [
+    ...baseLootSpawnPoints,
+    ...supplementalMedicalPoints,
+    ...hospitalMedicalPoints,
+  ];
+  const hospital: HospitalPoi = {
+    name: "医院",
+    buildingId: hospitalBuilding.id,
+    position: {
+      x: hospitalBuilding.center.x,
+      y: round(terrainHeightFromHills(hospitalBuilding.center.x, hospitalBuilding.center.z, terrainHills)),
+      z: hospitalBuilding.center.z,
+    },
+    bandageLootIndex: lootSpawnPoints.length - 2,
+    medkitLootIndex: lootSpawnPoints.length - 1,
+  };
+  return {
+    mapId: "mixed",
+    displayName: mapDisplayName("mixed"),
+    seed,
+    mapPoints,
+    landingZones,
+    terrainHills,
+    obstacles,
+    wallSegments,
+    wallOpenings,
+    floorSlabs,
+    rockObstacles,
+    treeTrunks,
+    coverObstacles,
+    roofRamps,
+    roadSegments: blueprint.roadSegments,
+    urbanRoadSegments: blueprint.urbanRoadSegments,
+    skybridges: [],
+    hospital,
+    lootSpawnPoints,
+    lootZoneCounts,
+  };
+}
+
+function createMixedRockObstacles(
+  blueprint: MixedMapBlueprint,
+  terrainHills: readonly TerrainHill[],
+  buildings: readonly MapBuilding[],
+  roofRamps: readonly RoofRamp[],
+  seed: number,
+): MapRockObstacle[] {
+  const rocks: MapRockObstacle[] = [];
+  for (const [regionIndex, region] of blueprint.regions.entries()) {
+    const targetCount = region.kind === "forest" ? 24 : region.kind === "rural" ? 10 : 4;
+    const random = createSeededRandom(seed ^ Math.imul(regionIndex + 1, 0x165667b1));
+    for (let attempt = 0; attempt < 60_000 && countRegionObstacles(rocks, region) < targetCount; attempt += 1) {
+      const x = round(randomBetween(random, region.centerX - region.width / 2 + 25, region.centerX + region.width / 2 - 25));
+      const z = round(randomBetween(random, region.centerZ - region.depth / 2 + 25, region.centerZ + region.depth / 2 - 25));
+      const width = round(randomBetween(random, region.kind === "forest" ? 3.8 : 3.5, region.kind === "forest" ? 6 : 7));
+      const depth = round(randomBetween(random, region.kind === "forest" ? 3.8 : 3.5, region.kind === "forest" ? 6 : 7));
+      const height = round(randomBetween(random, 2.4, 5.5));
+      const terrainRange = terrainFootprintRange(x, z, width, depth, terrainHills);
+      const baseY = (terrainRange.minimum + terrainRange.maximum) / 2;
+      const candidate: MapRockObstacle = {
+        id: `mixed-rock-${rocks.length}`,
+        center: { x, y: round(baseY + height / 2), z },
+        width,
+        height,
+        depth,
+        color: "#676a62",
+      };
+      if (terrainRange.maximum - terrainRange.minimum > MIXED_NATURAL_OBSTACLE_MAX_TERRAIN_DELTA) continue;
+      if (region.kind === "forest" && terrainRange.minimum < 3) continue;
+      if (!mixedPlacementIsClear(candidate, blueprint, buildings, roofRamps, rocks, [], 3)) continue;
+      rocks.push(candidate);
+    }
+    const actualCount = countRegionObstacles(rocks, region);
+    if (actualCount !== targetCount) {
+      throw new Error(`Mixed map rock generation failed: ${region.name} ${actualCount}/${targetCount}`);
+    }
+  }
+  return rocks;
+}
+
+function createMixedCoverObstacles(
+  blueprint: MixedMapBlueprint,
+  terrainHills: readonly TerrainHill[],
+  buildings: readonly MapBuilding[],
+  roofRamps: readonly RoofRamp[],
+  rocks: readonly MapRockObstacle[],
+  seed: number,
+): MapCoverObstacle[] {
+  const covers: MapCoverObstacle[] = [];
+  for (const [regionIndex, region] of blueprint.regions.entries()) {
+    const targetCount = region.kind === "rural" ? 30 : region.kind === "town" ? 12 : 0;
+    const random = createSeededRandom(seed ^ Math.imul(regionIndex + 1, 0xa24baed5));
+    for (let attempt = 0; attempt < 16_000 && countRegionObstacles(covers, region) < targetCount; attempt += 1) {
+      const kind = region.kind === "rural" || covers.length % 3 !== 0 ? "hay" : "fence";
+      const x = round(randomBetween(random, region.centerX - region.width / 2 + 22, region.centerX + region.width / 2 - 22));
+      const z = round(randomBetween(random, region.centerZ - region.depth / 2 + 22, region.centerZ + region.depth / 2 - 22));
+      const width = kind === "hay" ? round(randomBetween(random, 3.2, 5.2)) : round(randomBetween(random, 7, 12));
+      const depth = kind === "hay" ? width : 0.7;
+      const height = kind === "hay" ? round(randomBetween(random, 2.2, 3.6)) : 2.1;
+      const candidate: MapCoverObstacle = {
+        id: `mixed-cover-${covers.length}`,
+        kind,
+        center: { x, y: round(terrainHeightFromHills(x, z, terrainHills) + height / 2), z },
+        width,
+        height,
+        depth,
+        color: kind === "hay" ? "#a58b4f" : "#5a5348",
+      };
+      if (!mixedPlacementIsClear(candidate, blueprint, buildings, roofRamps, rocks, covers, 2.5)) continue;
+      covers.push(candidate);
+    }
+    const actualCount = countRegionObstacles(covers, region);
+    if (actualCount !== targetCount) {
+      throw new Error(`Mixed map cover generation failed: ${region.name} ${actualCount}/${targetCount}`);
+    }
+  }
+  return covers;
+}
+
+function createMixedTreeTrunks(
+  blueprint: MixedMapBlueprint,
+  terrainHills: readonly TerrainHill[],
+  buildings: readonly MapBuilding[],
+  roofRamps: readonly RoofRamp[],
+  rocks: readonly MapRockObstacle[],
+  covers: readonly MapCoverObstacle[],
+  seed: number,
+): MapTreeTrunk[] {
+  const trees: MapTreeTrunk[] = [];
+  for (const [regionIndex, region] of blueprint.regions.entries()) {
+    const targetCount = region.kind === "forest" ? 150 : region.kind === "rural" ? 36 : 12;
+    const minimumSpacing = region.kind === "forest" ? 10 : 17;
+    const random = createSeededRandom(seed ^ Math.imul(regionIndex + 1, 0x68bc21eb));
+    for (let attempt = 0; attempt < 80_000 && countRegionObstacles(trees, region) < targetCount; attempt += 1) {
+      const x = round(randomBetween(random, region.centerX - region.width / 2 + 18, region.centerX + region.width / 2 - 18));
+      const z = round(randomBetween(random, region.centerZ - region.depth / 2 + 18, region.centerZ + region.depth / 2 - 18));
+      const width = round(randomBetween(random, 2.2, 3.4));
+      const height = round(randomBetween(random, region.kind === "forest" ? 10 : 8, region.kind === "forest" ? 16 : 13));
+      const terrainRange = terrainFootprintRange(x, z, width, width, terrainHills);
+      const baseY = (terrainRange.minimum + terrainRange.maximum) / 2;
+      const candidate: MapTreeTrunk = {
+        id: `mixed-tree-${trees.length}`,
+        kind: "tree-trunk",
+        center: { x, y: round(baseY + height / 2), z },
+        width,
+        height,
+        depth: width,
+        color: "#594b38",
+      };
+      if (terrainRange.maximum - terrainRange.minimum > MIXED_NATURAL_OBSTACLE_MAX_TERRAIN_DELTA) continue;
+      if (region.kind === "forest" && terrainRange.minimum < 3) continue;
+      if (!mixedPlacementIsClear(candidate, blueprint, buildings, roofRamps, rocks, [...covers, ...trees], minimumSpacing)) {
+        continue;
+      }
+      trees.push(candidate);
+    }
+    const actualCount = countRegionObstacles(trees, region);
+    if (actualCount !== targetCount) {
+      throw new Error(`Mixed map tree generation failed: ${region.name} ${actualCount}/${targetCount}`);
+    }
+  }
+  return trees;
+}
+
+function createMixedLootZoneCounts(zoneCount: number): number[] {
+  return Array.from({ length: zoneCount }, (_, index) => index < 8 ? 16 : 14);
+}
+
+function createMixedLootSpawnPoints(
+  blueprint: MixedMapBlueprint,
+  landingZones: readonly MapPoint[],
+  counts: readonly number[],
+  terrainHills: readonly TerrainHill[],
+  buildings: readonly MapBuilding[],
+  wallSegments: readonly MapWallSegment[],
+  roofRamps: readonly RoofRamp[],
+  rocks: readonly MapRockObstacle[],
+  covers: readonly MapCoverObstacle[],
+  trees: readonly MapTreeTrunk[],
+  seed: number,
+): Vector3State[] {
+  const selected: Vector3State[] = [];
+  const buildingUseCounts = new Map<string, number>();
+  const random = createSeededRandom(seed ^ 0xc2b2ae35);
+  for (const [zoneIndex, zone] of landingZones.entries()) {
+    const source = blueprint.landingZones[zoneIndex];
+    const region = source && blueprint.regions.find((candidate) => candidate.id === source.regionId);
+    if (!region) throw new Error(`Mixed map loot region missing for zone ${zoneIndex}`);
+    const targetCount = counts[zoneIndex] ?? 0;
+    const regionBuildings = buildings
+      .filter((building) => pointInMixedRegion(region, building.center.x, building.center.z))
+      .sort((left, right) =>
+        distanceSquared2d(left.center.x, left.center.z, zone.position.x, zone.position.z) -
+          distanceSquared2d(right.center.x, right.center.z, zone.position.x, zone.position.z) ||
+        left.id.localeCompare(right.id)
+      );
+    const indoorSelection = selectMixedIndoorLootPoint(
+      regionBuildings,
+      terrainHills,
+      selected,
+      buildingUseCounts,
+      zoneIndex,
+    );
+    if (!indoorSelection) throw new Error(`Mixed map indoor loot spacing failed: ${region.name}`);
+    const { building: indoorBuilding, point: indoorPoint, useCount: buildingUseCount } = indoorSelection;
+    selected.push(indoorPoint);
+    buildingUseCounts.set(indoorBuilding.id, buildingUseCount + 1);
+    for (let slot = 1, attempt = 0; slot < targetCount && attempt < 80_000; attempt += 1) {
+      const x = round(randomBetween(random, region.centerX - region.width / 2 + 20, region.centerX + region.width / 2 - 20));
+      const z = round(randomBetween(random, region.centerZ - region.depth / 2 + 20, region.centerZ + region.depth / 2 - 20));
+      const point = {
+        x,
+        y: round(terrainHeightFromHills(x, z, terrainHills) + GROUND_LOOT_POSITION_HEIGHT),
+        z,
+      };
+      if (!isClearLootPoint(
+        point,
+        wallSegments,
+        roofRamps,
+        selected,
+        [...buildings, ...rocks, ...covers, ...trees],
+        12,
+      )) continue;
+      selected.push(point);
+      slot += 1;
+    }
+    const expectedTotal = counts.slice(0, zoneIndex + 1).reduce((total, count) => total + count, 0);
+    if (selected.length !== expectedTotal) {
+      throw new Error(`Mixed map loot generation failed: ${region.name} ${selected.length}/${expectedTotal}`);
+    }
+  }
+  return selected;
+}
+
+function selectMixedIndoorLootPoint(
+  buildings: readonly MapBuilding[],
+  terrainHills: readonly TerrainHill[],
+  selected: readonly Vector3State[],
+  buildingUseCounts: ReadonlyMap<string, number>,
+  zoneIndex: number,
+): { building: MapBuilding; point: Vector3State; useCount: number } | null {
+  for (let buildingOffset = 0; buildingOffset < buildings.length; buildingOffset += 1) {
+    const building = buildings[(zoneIndex + buildingOffset) % buildings.length];
+    if (!building) continue;
+    const initialUseCount = buildingUseCounts.get(building.id) ?? 0;
+    for (let useOffset = 0; useOffset < 4; useOffset += 1) {
+      const useCount = initialUseCount + useOffset;
+      const point = createMixedIndoorLootPoint(building, terrainHills, useCount);
+      if (selected.every((candidate) =>
+        Math.hypot(candidate.x - point.x, candidate.z - point.z) >= 12
+      )) {
+        return { building, point, useCount };
+      }
+    }
+  }
+  return null;
+}
+
+function createMixedIndoorLootPoint(
+  building: MapBuilding,
+  terrainHills: readonly TerrainHill[],
+  useCount: number,
+): Vector3State {
+  const offsets = [
+    [-building.width * 0.24, -building.depth * 0.24],
+    [building.width * 0.24, building.depth * 0.24],
+    [-building.width * 0.24, building.depth * 0.24],
+    [building.width * 0.24, -building.depth * 0.24],
+  ] as const;
+  const [offsetX, offsetZ] = offsets[useCount % offsets.length] ?? [0, 0];
+  const x = round(building.center.x + offsetX);
+  const z = round(building.center.z + offsetZ);
+  return {
+    x,
+    y: round(terrainHeightFromHills(x, z, terrainHills) + GROUND_LOOT_POSITION_HEIGHT),
+    z,
+  };
+}
+
+function createMixedSupplementalMedicalPoints(
+  blueprint: MixedMapBlueprint,
+  terrainHills: readonly TerrainHill[],
+  buildings: readonly MapBuilding[],
+  wallSegments: readonly MapWallSegment[],
+  roofRamps: readonly RoofRamp[],
+  rocks: readonly MapRockObstacle[],
+  covers: readonly MapCoverObstacle[],
+  trees: readonly MapTreeTrunk[],
+  selected: readonly Vector3State[],
+  seed: number,
+): Vector3State[] {
+  const points: Vector3State[] = [];
+  const random = createSeededRandom(seed ^ 0xd3a2646c);
+  for (let attempt = 0; attempt < 80_000 && points.length < RANDOM_MEDICAL_LOOT_POINTS; attempt += 1) {
+    const anchor = blueprint.landingZones[points.length % blueprint.landingZones.length];
+    if (!anchor) continue;
+    const angle = random() * Math.PI * 2;
+    const radius = randomBetween(random, 35, 90);
+    const x = round(anchor.x + Math.cos(angle) * radius);
+    const z = round(anchor.z + Math.sin(angle) * radius);
+    const point = {
+      x,
+      y: round(terrainHeightFromHills(x, z, terrainHills) + GROUND_LOOT_POSITION_HEIGHT),
+      z,
+    };
+    if (!isClearLootPoint(
+      point,
+      wallSegments,
+      roofRamps,
+      [...selected, ...points],
+      [...buildings, ...rocks, ...covers, ...trees],
+      12,
+    )) continue;
+    points.push(point);
+  }
+  if (points.length !== RANDOM_MEDICAL_LOOT_POINTS) throw new Error("Mixed map supplemental medical loot generation failed");
+  return points;
+}
+
+function mixedPlacementIsClear(
+  candidate: MapObstacle,
+  blueprint: MixedMapBlueprint,
+  buildings: readonly MapBuilding[],
+  roofRamps: readonly RoofRamp[],
+  fixedObstacles: readonly MapObstacle[],
+  placedObstacles: readonly MapObstacle[],
+  spacing: number,
+): boolean {
+  return (
+    mixedFootprintClearsRoads(
+      blueprint.roadSegments,
+      candidate.center.x,
+      candidate.center.z,
+      candidate.width,
+      candidate.depth,
+      0.5,
+    ) &&
+    blueprint.landingZones.every((point) =>
+      Math.hypot(point.x - candidate.center.x, point.z - candidate.center.z) >= 18
+    ) &&
+    buildings.every((building) => !buildingsOverlap(building, candidate, 4)) &&
+    roofRamps.every((ramp) => !rampIntersectsBuilding(ramp, candidate, 2)) &&
+    fixedObstacles.every((obstacle) => !buildingsOverlap(obstacle, candidate, spacing)) &&
+    placedObstacles.every((obstacle) => !buildingsOverlap(obstacle, candidate, spacing))
+  );
+}
+
+function countRegionObstacles(
+  obstacles: readonly MapObstacle[],
+  region: MixedRegionSpec,
+): number {
+  return obstacles.filter((obstacle) =>
+    pointInMixedRegion(region, obstacle.center.x, obstacle.center.z)
+  ).length;
+}
+
+function terrainFootprintRange(
+  x: number,
+  z: number,
+  width: number,
+  depth: number,
+  terrainHills: readonly TerrainHill[],
+): { minimum: number; maximum: number } {
+  let minimum = Number.POSITIVE_INFINITY;
+  let maximum = Number.NEGATIVE_INFINITY;
+  for (let xStep = 0; xStep <= 4; xStep += 1) {
+    for (let zStep = 0; zStep <= 4; zStep += 1) {
+      const sampleX = x - width / 2 + width * xStep / 4;
+      const sampleZ = z - depth / 2 + depth * zStep / 4;
+      const height = terrainHeightFromHills(sampleX, sampleZ, terrainHills);
+      minimum = Math.min(minimum, height);
+      maximum = Math.max(maximum, height);
+    }
+  }
+  return { minimum, maximum };
 }
 
 function cacheMapLayout(cacheKey: string, layout: MapLayout): MapLayout {

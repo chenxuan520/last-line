@@ -373,10 +373,11 @@ describe("admin control plane", () => {
 
     const latestCheckpointTick = await runInDurableObject(stub, async (instance, state) => {
       const room = await state.storage.get<{
-        checkpoint?: { tick: number; state: { elapsedSeconds: number } };
+        checkpoint?: { version: number; tick: number; state: { elapsedSeconds: number; mapId: string } };
       }>("room-v1");
       if (!room?.checkpoint) throw new Error("running checkpoint missing");
       const latest = structuredClone(room.checkpoint);
+      latest.version = MATCH_CHECKPOINT_VERSION - 1;
       latest.tick += 30;
       latest.state.elapsedSeconds += 1;
       await state.storage.put("checkpoint-v1", latest);
@@ -411,7 +412,7 @@ describe("admin control plane", () => {
       const room = await state.storage.get<Record<string, unknown>>("room-v1");
       if (!room) throw new Error("legacy room state missing");
       const legacy = {
-        version: MATCH_CHECKPOINT_VERSION - 1,
+        version: MATCH_CHECKPOINT_VERSION - 2,
         state: {},
         tick: 0,
         snapshotSequence: 0,

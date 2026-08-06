@@ -40,8 +40,8 @@ describe("MultiplayerConnection lifecycle", () => {
     expect(sockets[0]?.closeCalls).toBe(1);
   });
 
-  it("accepts only the seeded-town protocol version", async () => {
-    expect(MULTIPLAYER_PROTOCOL_VERSION).toBe(6);
+  it("accepts only the mixed-map protocol version", async () => {
+    expect(MULTIPLAYER_PROTOCOL_VERSION).toBe(7);
     const sockets: FakeWebSocket[] = [];
     const connection = new MultiplayerConnection(
       "https://example.test",

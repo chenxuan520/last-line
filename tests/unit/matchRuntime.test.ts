@@ -10,7 +10,7 @@ import {
 } from "../../src/server/MatchRuntime";
 
 describe("MatchRuntime", () => {
-  it("creates town matches explicitly and restores legacy states as island", () => {
+  it("creates non-default maps explicitly and restores legacy states as island", () => {
     const town = new MatchRuntime({
       humanActorIds: ["human-1", "human-2"],
       seed: 2026,
@@ -20,6 +20,24 @@ describe("MatchRuntime", () => {
     });
     expect(town.state.mapId).toBe("town");
     expect(town.state.mapSeed).toBeGreaterThanOrEqual(0);
+
+    const mixed = new MatchRuntime({
+      humanActorIds: ["human-1", "human-2"],
+      seed: 2026,
+      mapId: "mixed",
+      startWithBandage: true,
+      disableAiSnipers: true,
+    });
+    expect(mixed.state.mapId).toBe("mixed");
+    const mixedCheckpoint = mixed.checkpoint();
+    expect(mixedCheckpoint.version).toBe(MATCH_CHECKPOINT_VERSION);
+    expect(new MatchRuntime({
+      humanActorIds: ["human-1", "human-2"],
+      seed: 2026,
+      startWithBandage: true,
+      disableAiSnipers: true,
+      ...mixedCheckpoint,
+    }).state).toEqual(mixedCheckpoint.state);
 
     const legacyState = JSON.parse(JSON.stringify(town.state)) as Record<string, unknown>;
     delete legacyState.mapId;
@@ -31,7 +49,7 @@ describe("MatchRuntime", () => {
       state: legacyState as unknown as MatchRuntime["state"],
     });
     expect(restored.state.mapId).toBe("island");
-  });
+  }, 30_000);
 
   it("runs a 10-human authoritative room with 40 bots", () => {
     const humanActorIds = Array.from({ length: 10 }, (_, index) => `human-${index + 1}`);
@@ -74,7 +92,7 @@ describe("MatchRuntime", () => {
     expect(restored.state).toEqual(checkpoint.state);
   });
 
-  it("rejects checkpoints from the pre-random-town map contract", () => {
+  it("accepts version 5 island and town checkpoints while rejecting mixed and older maps", () => {
     const runtime = new MatchRuntime({
       humanActorIds: ["human-1", "human-2"],
       seed: 42,
@@ -84,11 +102,36 @@ describe("MatchRuntime", () => {
     });
     const checkpoint = runtime.checkpoint();
 
-    expect(MATCH_CHECKPOINT_VERSION).toBe(5);
+    expect(MATCH_CHECKPOINT_VERSION).toBe(6);
     expect(isMatchCheckpointCompatible(checkpoint)).toBe(true);
     expect(isMatchCheckpointCompatible({
       ...checkpoint,
+      state: { ...checkpoint.state, mapId: "invalid" as never },
+    })).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
       version: MATCH_CHECKPOINT_VERSION - 1,
+    })).toBe(true);
+    const islandCheckpoint = {
+      ...checkpoint,
+      version: MATCH_CHECKPOINT_VERSION - 1,
+      state: { ...checkpoint.state, mapId: "island" as const },
+    };
+    expect(isMatchCheckpointCompatible(islandCheckpoint)).toBe(true);
+    const mixedCheckpoint = {
+      ...checkpoint,
+      version: MATCH_CHECKPOINT_VERSION - 1,
+      state: { ...checkpoint.state, mapId: "mixed" as const },
+    };
+    expect(isMatchCheckpointCompatible(mixedCheckpoint)).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      version: MATCH_CHECKPOINT_VERSION - 1,
+      state: { ...checkpoint.state, mapId: "invalid" as never },
+    })).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      version: MATCH_CHECKPOINT_VERSION - 2,
     })).toBe(false);
   });
 

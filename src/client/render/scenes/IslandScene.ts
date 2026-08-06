@@ -44,6 +44,11 @@ import { GROUND_LOOT_POSITION_HEIGHT } from "../../../game/rules/loot";
 import { QUALITY_PROFILES, type QualityLevel, type QualityProfile } from "../../../config/settings";
 import type { MapId } from "../../../config/maps";
 import {
+  MIXED_ROAD_HALF_WIDTH,
+  MIXED_ROAD_SHOULDER_HALF_WIDTH,
+  mixedFootprintClearsRoads,
+} from "../../../config/mixedMap";
+import {
   TOWN_POINT_HALF_DEPTH,
   TOWN_POINT_HALF_WIDTH,
   TOWN_POINT_OBSTACLE_CLEARANCE,
@@ -1063,7 +1068,7 @@ function getTerrainSurface(
     }
   }
   if (roadSegments.some(([startX, startZ, endX, endZ]) =>
-    pointToSegmentDistance(x, z, startX, startZ, endX, endZ) <= TOWN_ROAD_SHOULDER_HALF_WIDTH
+    pointToSegmentDistance(x, z, startX, startZ, endX, endZ) <= roadShoulderHalfWidth(mapId)
   )) {
     color = TERRAIN_COLORS.roadShoulder;
     kind = "road";
@@ -1083,7 +1088,7 @@ function getTerrainSurface(
     });
   }
   if (roadSegments.some(([startX, startZ, endX, endZ]) =>
-    pointToSegmentDistance(x, z, startX, startZ, endX, endZ) <= TOWN_ROAD_HALF_WIDTH
+    pointToSegmentDistance(x, z, startX, startZ, endX, endZ) <= roadHalfWidth(mapId)
   )) {
     color = TERRAIN_COLORS.road;
     kind = "road";
@@ -1129,6 +1134,24 @@ function pointToSegmentDistance(
   return Math.hypot(x - lerp(startX, endX, progress), z - lerp(startZ, endZ, progress));
 }
 
+function roadHalfWidth(mapId: MapId): number {
+  return mapId === "mixed" ? MIXED_ROAD_HALF_WIDTH : TOWN_ROAD_HALF_WIDTH;
+}
+
+function roadShoulderHalfWidth(mapId: MapId): number {
+  return mapId === "mixed" ? MIXED_ROAD_SHOULDER_HALF_WIDTH : TOWN_ROAD_SHOULDER_HALF_WIDTH;
+}
+
+function hasTownPresentation(layout: MapLayout): boolean {
+  return layout.obstacles.some((building) => Boolean(building.townKind));
+}
+
+export function selectTownPresentationRoads(
+  layout: MapLayout,
+): ReadonlyArray<readonly [number, number, number, number]> {
+  return layout.urbanRoadSegments;
+}
+
 function createBuildingDetails(scene: Scene, materials: IslandMaterials, layout: MapLayout): void {
   const roofTemplate = CreateBox("building-roof-template", { size: 1 }, scene);
   roofTemplate.material = materials.roof;
@@ -1157,7 +1180,7 @@ function createBuildingDetails(scene: Scene, materials: IslandMaterials, layout:
 }
 
 function createTownBuildingSilhouettes(scene: Scene, materials: IslandMaterials, layout: MapLayout): void {
-  if (layout.mapId !== "town") return;
+  if (!hasTownPresentation(layout)) return;
   const rooftopMaterial = material(scene, "town-industrial-rooftop-material", "#514b43");
   for (const building of layout.obstacles) {
     const kind = building.townKind;
@@ -1231,11 +1254,12 @@ function createTownRoadDetails(
   materials: IslandMaterials,
   layout: MapLayout,
 ): void {
-  if (layout.mapId !== "town") return;
+  if (!hasTownPresentation(layout)) return;
   const random = createVisualRandom(layout.seed ^ 0x46d1a3f7);
   const roadStride = 2;
   const markingLimit = 168;
   const wetPatchLimit = 72;
+  const roadWidth = roadHalfWidth(layout.mapId);
   let markings = 0;
   let wetPatches = 0;
 
@@ -1258,7 +1282,7 @@ function createTownRoadDetails(
     markTownVisualDetail(mesh, detailType);
   };
 
-  layout.roadSegments.forEach(([startX, startZ, endX, endZ], roadIndex) => {
+  selectTownPresentationRoads(layout).forEach(([startX, startZ, endX, endZ], roadIndex) => {
     const deltaX = endX - startX;
     const deltaZ = endZ - startZ;
     const length = Math.hypot(deltaX, deltaZ);
@@ -1272,8 +1296,8 @@ function createTownRoadDetails(
       addRoadBox(
         `town-road-edge-${roadIndex}-${side}`,
         materials.wallTrim,
-        (startX + endX) / 2 + normalX * side * (TOWN_ROAD_HALF_WIDTH + 0.38),
-        (startZ + endZ) / 2 + normalZ * side * (TOWN_ROAD_HALF_WIDTH + 0.38),
+        (startX + endX) / 2 + normalX * side * (roadWidth + 0.38),
+        (startZ + endZ) / 2 + normalZ * side * (roadWidth + 0.38),
         0.24,
         edgeDepth,
         yaw,
@@ -1307,7 +1331,7 @@ function createTownRoadDetails(
     const patchCount = length > 120 ? 2 : 1;
     for (let patch = 0; patch < patchCount && wetPatches < wetPatchLimit; patch += 1) {
       const progress = 0.16 + random() * 0.68;
-      const sideOffset = (random() - 0.5) * TOWN_ROAD_HALF_WIDTH * 1.3;
+      const sideOffset = (random() - 0.5) * roadWidth * 1.3;
       const x = lerp(startX, endX, progress) + normalX * sideOffset;
       const z = lerp(startZ, endZ, progress) + normalZ * sideOffset;
       addRoadBox(
@@ -1334,12 +1358,15 @@ function createTownFacadeDetail(
   materials: IslandMaterials,
   layout: MapLayout,
 ): void {
-  if (layout.mapId !== "town") return;
+  if (!hasTownPresentation(layout)) return;
   const random = createVisualRandom(layout.seed ^ 0x94d049bb);
   const openingStride = 1;
 
   layout.wallOpenings.forEach((opening, index) => {
     if (opening.kind !== "window" || index % openingStride !== 0) return;
+    if (!layout.obstacles.some((building) =>
+      building.id === opening.obstacleId && Boolean(building.townKind)
+    )) return;
     const horizontalAlongX = opening.side === "front" || opening.side === "back";
     const outward = facadeOutward(opening.side);
     const pane = CreateBox(
@@ -1502,14 +1529,17 @@ function createTownStreetFurniture(
   materials: IslandMaterials,
   layout: MapLayout,
 ): void {
-  if (layout.mapId !== "town") return;
+  if (!hasTownPresentation(layout)) return;
   const random = createVisualRandom(layout.seed ^ 0xb73341ac);
   const lampStride = 2;
   const pipeStride = 4;
+  const roadWidth = roadHalfWidth(layout.mapId);
+  const shoulderWidth = roadShoulderHalfWidth(layout.mapId);
   let lampCount = 0;
   let cableCount = 0;
 
-  layout.roadSegments.forEach(([startX, startZ, endX, endZ], index) => {
+  const presentationRoads = selectTownPresentationRoads(layout);
+  presentationRoads.forEach(([startX, startZ, endX, endZ], index) => {
     const length = Math.hypot(endX - startX, endZ - startZ);
     if (length < 70 || index % lampStride !== 0) return;
     const yaw = Math.atan2(endX - startX, endZ - startZ);
@@ -1517,8 +1547,8 @@ function createTownStreetFurniture(
     const normalZ = -Math.sin(yaw);
     for (const side of [-1, 1] as const) {
       const progress = 0.18 + random() * 0.64;
-      const x = lerp(startX, endX, progress) + normalX * side * (TOWN_ROAD_SHOULDER_HALF_WIDTH + 1.6);
-      const z = lerp(startZ, endZ, progress) + normalZ * side * (TOWN_ROAD_SHOULDER_HALF_WIDTH + 1.6);
+      const x = lerp(startX, endX, progress) + normalX * side * (shoulderWidth + 1.6);
+      const z = lerp(startZ, endZ, progress) + normalZ * side * (shoulderWidth + 1.6);
       const terrainY = getTerrainHeight(x, z, layout);
 
       const post = CreateCylinder(
@@ -1581,11 +1611,11 @@ function createTownStreetFurniture(
     }
   });
 
-  const cableRoads = layout.roadSegments.filter(([, startZ, , endZ]) => Math.abs(startZ - endZ) < 0.01);
+  const cableRoads = presentationRoads.filter(([, startZ, , endZ]) => Math.abs(startZ - endZ) < 0.01);
   for (let index = 0; index + 1 < cableRoads.length && cableCount < 52; index += 2) {
     const [startX, startZ, endX] = cableRoads[index] ?? [0, 0, 0];
     const centerX = (startX + endX) / 2;
-    const centerZ = startZ + (random() - 0.5) * TOWN_ROAD_HALF_WIDTH;
+    const centerZ = startZ + (random() - 0.5) * roadWidth;
     const cable = CreateBox(
       `town-overhead-cable-${cableCount}`,
       { width: Math.min(80, Math.abs(endX - startX) * 0.36), height: 0.055, depth: 0.055 },
@@ -1607,11 +1637,12 @@ function createTownWeatheringDetails(
   materials: IslandMaterials,
   layout: MapLayout,
 ): void {
-  if (layout.mapId !== "town") return;
+  if (!hasTownPresentation(layout)) return;
   const random = createVisualRandom(layout.seed ^ 0x2fb87d4c);
   const facadeStride = 2;
   const roofStride = 3;
   const crackLimit = 132;
+  const roadWidth = roadHalfWidth(layout.mapId);
 
   layout.obstacles.forEach((building, index) => {
     if (!building.townKind) return;
@@ -1684,7 +1715,7 @@ function createTownWeatheringDetails(
   });
 
   let crackCount = 0;
-  for (const [roadIndex, [startX, startZ, endX, endZ]] of layout.roadSegments.entries()) {
+  for (const [roadIndex, [startX, startZ, endX, endZ]] of selectTownPresentationRoads(layout).entries()) {
     if (crackCount >= crackLimit || roadIndex % 2 !== 0) continue;
     const length = Math.hypot(endX - startX, endZ - startZ);
     if (length < 45) continue;
@@ -1692,7 +1723,7 @@ function createTownWeatheringDetails(
     const cracksOnRoad = length > 120 ? 2 : 1;
     for (let crack = 0; crack < cracksOnRoad && crackCount < crackLimit; crack += 1) {
       const progress = 0.12 + random() * 0.76;
-      const sideOffset = (random() - 0.5) * TOWN_ROAD_HALF_WIDTH * 1.6;
+      const sideOffset = (random() - 0.5) * roadWidth * 1.6;
       const normalX = Math.cos(yaw);
       const normalZ = -Math.sin(yaw);
       const x = lerp(startX, endX, progress) + normalX * sideOffset;
@@ -1717,7 +1748,7 @@ function createTownWeatheringDetails(
 }
 
 function createTownIndustrialSkyline(scene: Scene, materials: IslandMaterials, layout: MapLayout): void {
-  if (layout.mapId !== "town") return;
+  if (!hasTownPresentation(layout)) return;
   const random = createVisualRandom(layout.seed ^ 0x71d83b21);
   const factories = layout.obstacles
     .filter((building) => building.townKind === "factory" || building.townKind === "warehouse" || building.storyCount >= 4)
@@ -3155,13 +3186,32 @@ function isNaturalPositionBlocked(x: number, z: number, layout: MapLayout, clear
       Math.abs(z - point.position.z) <=
         TOWN_POINT_HALF_DEPTH + clearance + TOWN_POINT_OBSTACLE_CLEARANCE
     ) ||
-    layout.mapId === "town" && !townFootprintClearsRoads(
-      layout.roadSegments,
-      x,
-      z,
-      clearance * 2,
-      clearance * 2,
-      0.5,
+    (
+      layout.mapId === "town" &&
+      !townFootprintClearsRoads(
+        layout.roadSegments,
+        x,
+        z,
+        clearance * 2,
+        clearance * 2,
+        0.5,
+      )
+    ) ||
+    (
+      layout.mapId === "mixed" &&
+      (
+        layout.landingZones.some((point) =>
+          Math.hypot(x - point.position.x, z - point.position.z) <= 18 + clearance
+        ) ||
+        !mixedFootprintClearsRoads(
+          layout.roadSegments,
+          x,
+          z,
+          clearance * 2,
+          clearance * 2,
+          0.5,
+        )
+      )
     )
   );
 }
