@@ -1,6 +1,6 @@
 import { env, evictDurableObject, reset, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
-import { MATCH_CHECKPOINT_VERSION } from "../../src/server/MatchRuntime";
+import { MATCH_CHECKPOINT_VERSION, MatchRuntime } from "../../src/server/MatchRuntime";
 import worker from "../../worker/index";
 
 const ADMIN_PASSWORD = "Correct admin battery staple 1";
@@ -455,36 +455,36 @@ describe("admin control plane", () => {
       corruptMembers: true,
     },
   ])("expires a running room restored from $name", async ({ corrupt, corruptMembers }) => {
-    const firstGuest = await publicPost("/v1/guests", { displayName: "Corrupt One" });
-    const secondGuest = await publicPost("/v1/guests", { displayName: "Corrupt Two" });
-    const firstAdmission = await publicPost("/v1/matchmaking/quick", firstGuest);
-    const secondAdmission = await publicPost("/v1/matchmaking/quick", secondGuest);
-    const firstSocket = await connectAdmission(firstAdmission);
-    const secondSocket = await connectAdmission(secondAdmission);
-    const roomId = String(firstAdmission.roomId);
+    const roomId = `corrupt-room-${corruptMembers ? "members" : String(corrupt).length}`;
     const stub = env.GAME_ROOMS.getByName(roomId);
     await runInDurableObject(stub, async (_instance, state) => {
-      const room = await state.storage.get<Record<string, unknown>>("room-v1");
-      if (!room) throw new Error("corrupt room state missing");
-      room.countdownEndsAt = Date.now() - 1;
-      await state.storage.put("room-v1", room);
-      await state.storage.setAlarm(Date.now() - 1);
-    });
-    await evictDurableObject(stub);
-    await runDurableObjectAlarm(stub);
-    await runInDurableObject(stub, async (_instance, state) => {
-      const room = await state.storage.get<Record<string, unknown>>("room-v1");
-      if (!room?.checkpoint) throw new Error("running corrupt checkpoint missing");
-      const checkpoint = corrupt(structuredClone(room.checkpoint as Record<string, unknown>));
-      room.checkpoint = checkpoint;
-      if (corruptMembers) {
-        const members = room.members as Record<string, { actorId?: string | null }>;
-        const member = Object.values(members)[0];
-        if (!member) throw new Error("corrupt room member missing");
-        member.actorId = null;
-      }
+      const runtime = new MatchRuntime({
+        humanActorIds: ["human-1", "human-2"],
+        seed: 42,
+        startWithBandage: true,
+        disableAiSnipers: true,
+      });
+      const checkpoint = corrupt(runtime.checkpoint() as unknown as Record<string, unknown>);
+      const members = {
+        "player-1": persistedMember("player-1", corruptMembers ? null : "human-1", true),
+        "player-2": persistedMember("player-2", "human-2", false),
+      };
+      const room = {
+        roomId,
+        code: "BAD234",
+        visibility: "private",
+        status: "running",
+        revision: 1,
+        countdownEndsAt: null,
+        options: { mapId: "island", startWithBandage: true, disableAiSnipers: true },
+        seed: 42,
+        expiresAt: Date.now() + 60_000,
+        members,
+        checkpoint,
+      };
       await state.storage.put("room-v1", room);
       await state.storage.put("checkpoint-v1", checkpoint);
+      await state.storage.setAlarm(Date.now() + 60_000);
     });
 
     await evictDurableObject(stub);
@@ -493,10 +493,32 @@ describe("admin control plane", () => {
     );
 
     expect(remaining).toBeUndefined();
-    firstSocket.close(1000, "done");
-    secondSocket.close(1000, "done");
   }, 60_000);
 });
+
+function persistedMember(
+  playerId: string,
+  actorId: string | null,
+  host: boolean,
+) {
+  return {
+    playerId,
+    displayName: playerId,
+    accountId: null,
+    accountSessionRevision: null,
+    admissionToken: `admission-${playerId}`,
+    admissionExpiresAt: Date.now() + 60_000,
+    admissionConsumed: true,
+    reconnectToken: `reconnect-${playerId}`,
+    pendingReconnectToken: null,
+    ready: true,
+    connected: false,
+    host,
+    joinedAt: Date.now(),
+    connectionEpoch: 1,
+    actorId,
+  };
+}
 
 async function bootstrapAdministrator(): Promise<string> {
   const response = await post("/v1/admin/bootstrap", {
