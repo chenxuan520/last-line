@@ -11,7 +11,6 @@ import {
   createMapLayout,
   GLOBAL_LOOT_POINTS,
   MAP_HALF_SIZE,
-  TOTAL_LOOT_POINTS,
 } from "../../src/config/map";
 import { WEAPONS } from "../../src/config/weapons";
 import { BattleRoyaleMode, createBattleRoyaleState } from "../../src/game/modes/BattleRoyaleMode";
@@ -89,16 +88,18 @@ describe("BattleRoyaleMode", () => {
       quantity: 1,
       position: layout.lootSpawnPoints[layout.hospital.medkitLootIndex],
     });
-    for (const [offset, ammo] of AMMUNITION_DEPOT_AMMO.entries()) {
-      const lootIndex = layout.ammunitionDepot.lootIndices[offset];
-      if (lootIndex === undefined) throw new Error(`ammunition depot loot index missing: ${offset}`);
-      expect(state.groundLoot[`loot-${lootIndex}`]).toMatchObject({
-        itemId: ammo.itemId,
-        quantity: ammo.quantity,
-        position: layout.lootSpawnPoints[lootIndex],
-      });
+    for (const level of layout.ammunitionDepot.levels) {
+      for (const [offset, ammo] of AMMUNITION_DEPOT_AMMO.entries()) {
+        const lootIndex = level.lootIndices[offset];
+        if (lootIndex === undefined) throw new Error(`ammunition depot loot index missing: ${level.level}:${offset}`);
+        expect(state.groundLoot[`loot-${lootIndex}`]).toMatchObject({
+          itemId: ammo.itemId,
+          quantity: ammo.quantity,
+          position: layout.lootSpawnPoints[lootIndex],
+        });
+      }
     }
-    expect(Object.values(state.groundLoot)).toHaveLength(TOTAL_LOOT_POINTS);
+    expect(Object.values(state.groundLoot)).toHaveLength(layout.lootSpawnPoints.length);
     const supplemental = Object.values(state.groundLoot).slice(BASE_LOOT_POINTS, GLOBAL_LOOT_POINTS);
     expect(supplemental.filter((loot) => loot.itemId === "bandage")).toHaveLength(5);
     expect(supplemental.filter((loot) => loot.itemId === "medkit")).toHaveLength(5);
@@ -123,6 +124,38 @@ describe("BattleRoyaleMode", () => {
     expect(() => JSON.parse(JSON.stringify(state)) as unknown).not.toThrow();
   });
 
+  it.each([
+    ["island", 4, 3],
+    ["mixed", 5, 4],
+  ] as const)("initializes fixed ammunition through the final depot floor on %s", (mapId, mapSeed, stories) => {
+    const state = createBattleRoyaleState(
+      "player",
+      FAST_BATTLE_ROYALE_CONFIG,
+      mapSeedRandom(mapSeed),
+      { mapId },
+    );
+    const layout = createMapLayout(mapId, mapSeed);
+    const finalLevel = layout.ammunitionDepot.levels.at(-1);
+    if (!finalLevel) throw new Error(`ammunition depot level missing: ${mapId}:${mapSeed}`);
+
+    expect(state.mapSeed).toBe(mapSeed);
+    expect(layout.ammunitionDepot.levels).toHaveLength(stories);
+    expect(Object.values(state.groundLoot)).toHaveLength(layout.lootSpawnPoints.length);
+    for (const [offset, ammo] of AMMUNITION_DEPOT_AMMO.entries()) {
+      const lootIndex = finalLevel.lootIndices[offset];
+      if (lootIndex === undefined) throw new Error(`final ammunition index missing: ${mapId}:${mapSeed}:${offset}`);
+      expect(state.groundLoot[`loot-${lootIndex}`]).toEqual({
+        id: `loot-${lootIndex}`,
+        generation: 0,
+        itemId: ammo.itemId,
+        quantity: ammo.quantity,
+        position: layout.lootSpawnPoints[lootIndex],
+        available: true,
+        source: "spawn",
+      });
+    }
+  });
+
   it("can disable the shared starter bandage for both player and AI", () => {
     const state = createBattleRoyaleState("player", damageConfig, () => 0.5, { startWithBandage: false });
 
@@ -134,7 +167,7 @@ describe("BattleRoyaleMode", () => {
     const loot = Object.values(state.groundLoot);
     const layout = createMapLayout(state.mapSeed);
 
-    expect(loot).toHaveLength(TOTAL_LOOT_POINTS);
+    expect(loot).toHaveLength(layout.lootSpawnPoints.length);
     let start = 0;
     for (const zoneCount of layout.lootZoneCounts) {
       const poiLoot = loot.slice(start, start + zoneCount);
@@ -179,7 +212,9 @@ describe("BattleRoyaleMode", () => {
     expect(additionalMedical.filter((entry) => entry.itemId === "bandage")).toHaveLength(5);
     expect(additionalMedical.filter((entry) => entry.itemId === "medkit")).toHaveLength(5);
     expect(loot.slice(GLOBAL_LOOT_POINTS).map((entry) => [entry.itemId, entry.quantity])).toEqual(
-      AMMUNITION_DEPOT_AMMO.map((entry) => [entry.itemId, entry.quantity]),
+      layout.ammunitionDepot.levels.flatMap(() =>
+        AMMUNITION_DEPOT_AMMO.map((entry) => [entry.itemId, entry.quantity])
+      ),
     );
   });
 
@@ -440,5 +475,16 @@ function seededRandom(seed: number): () => number {
     result = Math.imul(result ^ (result >>> 15), result | 1);
     result ^= result + Math.imul(result ^ (result >>> 7), result | 61);
     return ((result ^ (result >>> 14)) >>> 0) / 4_294_967_296;
+  };
+}
+
+function mapSeedRandom(seed: number): () => number {
+  let first = true;
+  return () => {
+    if (first) {
+      first = false;
+      return seed / 4_294_967_296;
+    }
+    return 0.5;
   };
 }

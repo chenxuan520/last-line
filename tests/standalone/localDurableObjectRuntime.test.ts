@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { createMapLayout } from "../../src/config/map";
 import {
   DurableService,
   type PlatformDurableObjectState,
@@ -380,14 +381,17 @@ describe("LocalDurableObjectRuntime", () => {
       const state = await environment.rooms.getState(roomId);
       const runtime = new MatchRuntime({
         humanActorIds: ["human-1", "human-2"],
-        seed: 47,
+        seed: 0,
         mapId: "mixed",
         startWithBandage: true,
         disableAiSnipers: true,
       });
       const checkpoint = runtime.checkpoint();
+      const layout = createMapLayout(checkpoint.state.mapId, checkpoint.state.mapSeed);
+      expect(layout.ammunitionDepot.levels).toHaveLength(3);
+      const canonicalLootCount = layout.lootSpawnPoints.length;
       const groundLoot = structuredClone(checkpoint.state.groundLoot);
-      delete groundLoot["loot-250"];
+      delete groundLoot[`loot-${canonicalLootCount - 1}`];
       const corruptedCheckpoint = {
         ...checkpoint,
         state: { ...checkpoint.state, groundLoot },
@@ -400,7 +404,7 @@ describe("LocalDurableObjectRuntime", () => {
         revision: 1,
         countdownEndsAt: null,
         options: { mapId: "mixed", startWithBandage: true, disableAiSnipers: true },
-        seed: 47,
+        seed: 0,
         expiresAt: Date.now() + 60_000,
         members: persistedMatchMembers(),
         checkpoint: corruptedCheckpoint,

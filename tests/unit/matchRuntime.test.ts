@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getTerrainHeight, TOTAL_LOOT_POINTS } from "../../src/config/map";
+import { createMapLayout, getTerrainHeight } from "../../src/config/map";
 import { createIdleCommand } from "../../src/game/commands/ActorCommand";
 import { createWeaponState } from "../../src/game/state/types";
 import type { SequencedGameEvent, ServerMessage } from "../../src/network/protocol";
@@ -95,14 +95,16 @@ describe("MatchRuntime", () => {
   it("accepts only current version 7 checkpoints with explicit known map identities", () => {
     const runtime = new MatchRuntime({
       humanActorIds: ["human-1", "human-2"],
-      seed: 42,
-      mapId: "town",
+      seed: 0,
+      mapId: "mixed",
       startWithBandage: false,
       disableAiSnipers: true,
     });
     const checkpoint = runtime.checkpoint();
+    const checkpointLayout = createMapLayout(checkpoint.state.mapId, checkpoint.state.mapSeed);
 
     expect(MATCH_CHECKPOINT_VERSION).toBe(7);
+    expect(checkpointLayout.ammunitionDepot.levels).toHaveLength(3);
     expect(isMatchCheckpointCompatible(checkpoint)).toBe(true);
     expect(isMatchCheckpointCompatible({
       ...checkpoint,
@@ -173,8 +175,9 @@ describe("MatchRuntime", () => {
       ...checkpoint,
       state: { ...checkpoint.state, groundLoot: {} },
     })).toBe(false);
+    const canonicalLootCount = checkpointLayout.lootSpawnPoints.length;
     const missingCanonicalLoot = structuredClone(checkpoint.state.groundLoot);
-    delete missingCanonicalLoot["loot-250"];
+    delete missingCanonicalLoot[`loot-${canonicalLootCount - 1}`];
     expect(isMatchCheckpointCompatible({
       ...checkpoint,
       state: { ...checkpoint.state, groundLoot: missingCanonicalLoot },
@@ -519,7 +522,9 @@ describe("MatchRuntime", () => {
 
     expect(humanActorIds).toHaveLength(10);
     expect(Object.keys(runtime.state.actors)).toHaveLength(50);
-    expect(Object.keys(runtime.state.groundLoot)).toHaveLength(TOTAL_LOOT_POINTS);
+    expect(Object.keys(runtime.state.groundLoot)).toHaveLength(
+      createMapLayout(runtime.state.mapId, runtime.state.mapSeed).lootSpawnPoints.length,
+    );
 
     const localActorId = humanActorIds[0] ?? "human-1";
     const fullMessage = {

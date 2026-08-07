@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { GridNavigator } from "../../src/ai/navigation/GridNavigator";
 import {
+  AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL,
   BUILDING_ROOF_CAP_HEIGHT,
   createMapLayout,
+  GLOBAL_LOOT_POINTS,
   getTerrainHeight,
   MAP_HALF_SIZE,
-  TOTAL_LOOT_POINTS,
   type MapObstacle,
 } from "../../src/config/map";
 import {
@@ -45,7 +46,10 @@ describe("town map layout", () => {
     expect(first.skybridges).toHaveLength(32);
     expect(first.roadSegments.length).toBeGreaterThanOrEqual(100);
     expect(first.roadSegments.length).toBeLessThanOrEqual(170);
-    expect(first.lootSpawnPoints).toHaveLength(TOTAL_LOOT_POINTS);
+    expect(first.lootSpawnPoints).toHaveLength(
+      GLOBAL_LOOT_POINTS +
+      first.ammunitionDepot.levels.length * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL,
+    );
     expect(first.treeTrunks).toHaveLength(96);
     expect(first.coverObstacles).toHaveLength(168);
     expect(first.rockObstacles).toHaveLength(64);

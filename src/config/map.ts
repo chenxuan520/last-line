@@ -89,6 +89,11 @@ export interface HospitalPoi extends MapPoint {
 
 export interface AmmunitionDepotPoi extends MapPoint {
   buildingId: string;
+  levels: readonly AmmunitionDepotLevel[];
+}
+
+export interface AmmunitionDepotLevel {
+  level: number;
   lootIndices: readonly [number, number, number, number];
 }
 
@@ -169,8 +174,7 @@ export const LANDING_ZONE_COUNT = 16;
 export const BASE_LOOT_POINTS = 240;
 export const ADDITIONAL_MEDICAL_LOOT_POINTS = 10;
 export const GLOBAL_LOOT_POINTS = BASE_LOOT_POINTS + ADDITIONAL_MEDICAL_LOOT_POINTS;
-export const AMMUNITION_DEPOT_LOOT_POINTS = 4;
-export const TOTAL_LOOT_POINTS = GLOBAL_LOOT_POINTS + AMMUNITION_DEPOT_LOOT_POINTS;
+export const AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL = 4;
 export const AMMUNITION_DEPOT_AMMO = [
   { itemId: "ammo.rifle", quantity: 90 },
   { itemId: "ammo.light", quantity: 96 },
@@ -410,7 +414,6 @@ export function createMapLayout(mapIdOrSeed: MapId | number, explicitSeed?: numb
     wallSegments.filter((wall) => wall.obstacleId === depotBuilding.id),
     roofRamps.filter((ramp) => ramp.obstacleId === depotBuilding.id),
     globalLootSpawnPoints,
-    AMMUNITION_DEPOT_LOOT_POINTS,
   );
   const ammunitionDepot = createAmmunitionDepotPoi(depotBuilding, terrainHills, globalLootSpawnPoints.length);
   const lootSpawnPoints = [...globalLootSpawnPoints, ...depotLootPoints];
@@ -567,7 +570,6 @@ function createTownMapLayout(seed: number): MapLayout {
     wallSegments.filter((wall) => wall.obstacleId === depotBuilding.id),
     roofRamps.filter((ramp) => ramp.obstacleId === depotBuilding.id),
     globalLootSpawnPoints,
-    AMMUNITION_DEPOT_LOOT_POINTS,
   );
   const ammunitionDepot = createAmmunitionDepotPoi(depotBuilding, terrainHills, globalLootSpawnPoints.length);
   const lootSpawnPoints = [...globalLootSpawnPoints, ...depotLootPoints];
@@ -767,7 +769,6 @@ function createMixedMapLayout(seed: number): MapLayout {
     wallSegments.filter((wall) => wall.obstacleId === depotBuilding.id),
     roofRamps.filter((ramp) => ramp.obstacleId === depotBuilding.id),
     globalLootSpawnPoints,
-    AMMUNITION_DEPOT_LOOT_POINTS,
   );
   const ammunitionDepot = createAmmunitionDepotPoi(depotBuilding, terrainHills, globalLootSpawnPoints.length);
   const lootSpawnPoints = [...globalLootSpawnPoints, ...depotLootPoints];
@@ -2070,12 +2071,15 @@ function createAmmunitionDepotPoi(
       y: round(terrainHeightFromHills(building.center.x, building.center.z, terrainHills)),
       z: building.center.z,
     },
-    lootIndices: [
-      firstLootIndex,
-      firstLootIndex + 1,
-      firstLootIndex + 2,
-      firstLootIndex + 3,
-    ],
+    levels: Array.from({ length: building.storyCount }, (_, level) => ({
+      level,
+      lootIndices: [
+        firstLootIndex + level * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL,
+        firstLootIndex + level * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL + 1,
+        firstLootIndex + level * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL + 2,
+        firstLootIndex + level * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL + 3,
+      ],
+    })),
   };
 }
 
@@ -2829,30 +2833,37 @@ function createBuildingInteriorLootPoints(
   wallSegments: readonly MapWallSegment[],
   roofRamps: readonly RoofRamp[],
   existingLoot: readonly Vector3State[],
-  count: number,
 ): Vector3State[] {
   const xFractions = [-0.32, 0, 0.32];
   const zFractions = [-0.3, -0.12, 0.12, 0.3];
-  const candidates = xFractions.flatMap((xFraction) => zFractions.map((zFraction) => {
-    const x = round(building.center.x + building.width * xFraction);
-    const z = round(building.center.z + building.depth * zFraction);
-    return {
-      x,
-      y: round(terrainHeightFromHills(x, z, terrainHills) + GROUND_LOOT_POSITION_HEIGHT),
-      z,
-    };
-  })).filter((candidate) =>
-    !pointInsideStairwell(candidate, building, LOOT_OBSTACLE_CLEARANCE) &&
-    isClearLootPoint(candidate, wallSegments, roofRamps, existingLoot, [], 2.5)
-  );
-  const selected: Vector3State[] = [];
-  for (const candidate of candidates) {
-    if (selected.every((point) => Math.hypot(point.x - candidate.x, point.z - candidate.z) >= 4)) {
-      selected.push(candidate);
+  return Array.from({ length: building.storyCount }, (_, level) => {
+    const candidates = xFractions.flatMap((xFraction) => zFractions.map((zFraction) => {
+      const x = round(building.center.x + building.width * xFraction);
+      const z = round(building.center.z + building.depth * zFraction);
+      const supportY = level === 0
+        ? terrainHeightFromHills(x, z, terrainHills)
+        : building.baseY + level * building.storyHeight + BUILDING_ROOF_CAP_HEIGHT;
+      return {
+        x,
+        y: round(supportY + GROUND_LOOT_POSITION_HEIGHT),
+        z,
+      };
+    })).filter((candidate) =>
+      !pointInsideStairwell(candidate, building, LOOT_OBSTACLE_CLEARANCE) &&
+      isClearLootPoint(candidate, wallSegments, roofRamps, existingLoot, [], 2.5)
+    );
+    const selected: Vector3State[] = [];
+    for (const candidate of candidates) {
+      if (selected.every((point) => Math.hypot(point.x - candidate.x, point.z - candidate.z) >= 4)) {
+        selected.push(candidate);
+      }
+      if (selected.length === AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL) return selected;
     }
-    if (selected.length === count) return selected;
-  }
-  throw new Error(`${building.id} has no clear ground-floor special loot layout (${selected.length}/${count})`);
+    throw new Error(
+      `${building.id} has no clear level-${level} special loot layout ` +
+      `(${selected.length}/${AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL})`,
+    );
+  }).flat();
 }
 
 function hasGlobalLootClearance(candidate: Vector3State, selected: readonly Vector3State[]): boolean {

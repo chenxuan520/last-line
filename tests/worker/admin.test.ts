@@ -1,5 +1,6 @@
 import { env, evictDurableObject, reset, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
+import { createMapLayout } from "../../src/config/map";
 import { MATCH_CHECKPOINT_VERSION, MatchRuntime } from "../../src/server/MatchRuntime";
 import worker from "../../worker/index";
 
@@ -544,14 +545,17 @@ describe("admin control plane", () => {
       if (!room) throw new Error("corrupt loot room state missing");
       const runtime = new MatchRuntime({
         humanActorIds: ["human-1", "human-2"],
-        seed: 47,
+        seed: 0,
         mapId: "mixed",
         startWithBandage: true,
         disableAiSnipers: true,
       });
       const checkpoint = runtime.checkpoint();
+      const layout = createMapLayout(checkpoint.state.mapId, checkpoint.state.mapSeed);
+      expect(layout.ammunitionDepot.levels).toHaveLength(3);
+      const canonicalLootCount = layout.lootSpawnPoints.length;
       const groundLoot = structuredClone(checkpoint.state.groundLoot);
-      delete groundLoot["loot-250"];
+      delete groundLoot[`loot-${canonicalLootCount - 1}`];
       const corruptedCheckpoint = {
         ...checkpoint,
         state: { ...checkpoint.state, groundLoot },

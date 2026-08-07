@@ -446,22 +446,24 @@ function createGroundLoot(
       source: "spawn",
     };
   }
-  for (const [offset, ammo] of AMMUNITION_DEPOT_AMMO.entries()) {
-    const index = ammunitionDepot.lootIndices[offset];
-    const position = index === undefined ? undefined : lootSpawnPoints[index];
-    if (index === undefined || !position) {
-      throw new Error(`弹药库物资点缺失: ${offset}`);
+  for (const level of ammunitionDepot.levels) {
+    for (const [offset, ammo] of AMMUNITION_DEPOT_AMMO.entries()) {
+      const index = level.lootIndices[offset];
+      const position = index === undefined ? undefined : lootSpawnPoints[index];
+      if (index === undefined || !position) {
+        throw new Error(`弹药库物资点缺失: ${level.level}:${offset}`);
+      }
+      const id = `loot-${index}`;
+      groundLoot[id] = {
+        id,
+        generation: 0,
+        itemId: ammo.itemId,
+        quantity: ammo.quantity,
+        position: { ...position },
+        available: true,
+        source: "spawn",
+      };
     }
-    const id = `loot-${index}`;
-    groundLoot[id] = {
-      id,
-      generation: 0,
-      itemId: ammo.itemId,
-      quantity: ammo.quantity,
-      position: { ...position },
-      available: true,
-      source: "spawn",
-    };
   }
   return groundLoot;
 }

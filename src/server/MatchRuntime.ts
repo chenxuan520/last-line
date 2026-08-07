@@ -1,5 +1,4 @@
 import { BATTLE_ROYALE_CONFIG } from "../config/battleRoyale";
-import { TOTAL_LOOT_POINTS } from "../config/map";
 import { WEAPONS } from "../config/weapons";
 import { createMapLayout, type MapLayout } from "../config/map";
 import { DEFAULT_MAP_ID, normalizeMapId, type MapId } from "../config/maps";
@@ -352,15 +351,14 @@ export function isMatchCheckpointCompatible(
   checkpoint: unknown,
   requiredActorIds?: readonly EntityId[],
 ): checkpoint is MatchCheckpoint {
-  if (!isRecord(checkpoint) || !isRecoverableMatchState(checkpoint.state, requiredActorIds)) return false;
+  if (!isRecord(checkpoint)) return false;
   if (
     !isNonNegativeInteger(checkpoint.tick) ||
     !isNonNegativeInteger(checkpoint.snapshotSequence) ||
     !isNonNegativeInteger(checkpoint.eventSequence)
   ) return false;
   if (checkpoint.version !== MATCH_CHECKPOINT_VERSION) return false;
-  const mapId: unknown = checkpoint.state.mapId;
-  return mapId === "island" || mapId === "town" || mapId === "mixed";
+  return isRecoverableMatchState(checkpoint.state, requiredActorIds);
 }
 
 function isRecoverableMatchState(
@@ -370,6 +368,8 @@ function isRecoverableMatchState(
   if (!isRecord(value)) return false;
   if (!["ready", "flight", "combat", "finished"].includes(String(value.phase))) return false;
   if (!isFiniteNumber(value.elapsedSeconds) || !isUint32(value.mapSeed)) return false;
+  const mapId = value.mapId;
+  if (mapId !== "island" && mapId !== "town" && mapId !== "mixed") return false;
   const actors = value.actors;
   if (!isRecord(actors)) return false;
   const actorEntries = Object.entries(actors);
@@ -387,7 +387,13 @@ function isRecoverableMatchState(
       )
     ) return false;
   }
-  if (!isRecoverableGroundLoot(value.groundLoot)) return false;
+  let canonicalLootCount: number;
+  try {
+    canonicalLootCount = createMapLayout(mapId, value.mapSeed).lootSpawnPoints.length;
+  } catch {
+    return false;
+  }
+  if (!isRecoverableGroundLoot(value.groundLoot, canonicalLootCount)) return false;
   if (!isRecoverableSafeZone(value.safeZone) || !isRecoverableFlight(value.flight)) return false;
   return value.result === null || (
     isRecord(value.result) &&
@@ -442,11 +448,14 @@ function isRecoverableLoot(value: unknown): value is GroundLootState {
     (value.weapon === undefined || isRecoverableWeapon(value.weapon));
 }
 
-function isRecoverableGroundLoot(value: unknown): value is Record<EntityId, GroundLootState> {
+function isRecoverableGroundLoot(
+  value: unknown,
+  canonicalLootCount: number,
+): value is Record<EntityId, GroundLootState> {
   if (!isRecord(value)) return false;
   const entries = Object.entries(value);
   if (!entries.every(([lootId, loot]) => isRecoverableLoot(loot) && loot.id === lootId)) return false;
-  for (let index = 0; index < TOTAL_LOOT_POINTS; index += 1) {
+  for (let index = 0; index < canonicalLootCount; index += 1) {
     if (!Object.hasOwn(value, `loot-${index}`)) return false;
   }
   return true;
