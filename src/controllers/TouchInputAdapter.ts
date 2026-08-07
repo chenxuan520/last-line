@@ -5,6 +5,7 @@ export type TouchAction =
   | "interact"
   | "reload"
   | "switch-weapon"
+  | "grenade"
   | "bandage"
   | "medkit"
   | "pause"
@@ -15,6 +16,7 @@ export interface TouchInputSink {
   setTouchMovement(right: number, forward: number, magnitude: number): void;
   applyTouchLook(deltaX: number, deltaY: number): void;
   setTouchFire(held: boolean): void;
+  cancelTouchFire(): void;
   triggerTouchAction(action: Exclude<TouchAction, "fire">): void;
 }
 
@@ -65,9 +67,9 @@ export class TouchInputAdapter {
   ) {
     root.addEventListener("pointerdown", this.handlePointerDown, { passive: false });
     root.addEventListener("pointermove", this.handlePointerMove, { passive: false });
-    root.addEventListener("pointerup", this.handlePointerEnd, { passive: false });
-    root.addEventListener("pointercancel", this.handlePointerEnd, { passive: false });
-    root.addEventListener("lostpointercapture", this.handlePointerEnd, { passive: false });
+    root.addEventListener("pointerup", this.handlePointerUp, { passive: false });
+    root.addEventListener("pointercancel", this.handlePointerCancel, { passive: false });
+    root.addEventListener("lostpointercapture", this.handlePointerCancel, { passive: false });
   }
 
   public suppressMovementUntilRelease(): void {
@@ -83,7 +85,7 @@ export class TouchInputAdapter {
     this.firePointers.clear();
     this.movementSuppressed = false;
     this.sink.setTouchMovement(0, 0, 0);
-    this.sink.setTouchFire(false);
+    this.sink.cancelTouchFire();
     this.centerJoystick();
   }
 
@@ -91,9 +93,9 @@ export class TouchInputAdapter {
     this.reset();
     this.root.removeEventListener("pointerdown", this.handlePointerDown);
     this.root.removeEventListener("pointermove", this.handlePointerMove);
-    this.root.removeEventListener("pointerup", this.handlePointerEnd);
-    this.root.removeEventListener("pointercancel", this.handlePointerEnd);
-    this.root.removeEventListener("lostpointercapture", this.handlePointerEnd);
+    this.root.removeEventListener("pointerup", this.handlePointerUp);
+    this.root.removeEventListener("pointercancel", this.handlePointerCancel);
+    this.root.removeEventListener("lostpointercapture", this.handlePointerCancel);
   }
 
   private readonly handlePointerDown = (event: PointerEvent): void => {
@@ -158,7 +160,15 @@ export class TouchInputAdapter {
     }
   };
 
-  private readonly handlePointerEnd = (event: PointerEvent): void => {
+  private readonly handlePointerUp = (event: PointerEvent): void => {
+    this.endPointer(event, false);
+  };
+
+  private readonly handlePointerCancel = (event: PointerEvent): void => {
+    this.endPointer(event, true);
+  };
+
+  private endPointer(event: PointerEvent, cancelled: boolean): void {
     if (event.pointerId === this.movementPointerId) {
       event.preventDefault();
       this.movementPointerId = null;
@@ -172,9 +182,11 @@ export class TouchInputAdapter {
     }
     if (this.firePointers.delete(event.pointerId)) {
       event.preventDefault();
-      this.sink.setTouchFire(this.firePointers.size > 0);
+      if (cancelled) this.sink.cancelTouchFire();
+      else if (this.firePointers.size > 0) this.sink.setTouchFire(true);
+      else this.sink.setTouchFire(false);
     }
-  };
+  }
 
   private updateMovement(clientX: number, clientY: number): void {
     const bounds = this.movementElement?.getBoundingClientRect();

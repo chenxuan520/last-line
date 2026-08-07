@@ -17,6 +17,7 @@ describe("CombatEffects", () => {
       impactCapacity: 12,
       particleCapacity: 32,
       decalCapacity: 20,
+      explosionCapacity: 4,
     });
     expect(scene.meshes.every((mesh) => !mesh.isPickable && !mesh.checkCollisions)).toBe(true);
 
@@ -48,6 +49,32 @@ describe("CombatEffects", () => {
     effects.dispose();
     expect(scene.meshes).toHaveLength(0);
     expect(scene.materials).toHaveLength(0);
+    scene.dispose();
+    engine.dispose();
+  });
+
+  it("reuses a bounded grenade explosion pool", () => {
+    const engine = new NullEngine();
+    const scene = new Scene(engine);
+    const effects = new CombatEffects(scene);
+    const allocatedMeshCount = scene.meshes.length;
+    const events = Array.from({ length: 100 }, (_, index): GameEvent => ({
+      type: "grenade-exploded",
+      grenadeId: `grenade-${index}`,
+      actorId: "player",
+      position: { x: index, y: 1, z: 0 },
+    }));
+
+    effects.handleEvents(events, "player");
+
+    expect(scene.meshes).toHaveLength(allocatedMeshCount);
+    expect(effects.counters).toMatchObject({
+      activeExplosions: 4,
+      activeParticles: 32,
+    });
+    effects.update(1);
+    expect(effects.counters.activeExplosions).toBe(0);
+    effects.dispose();
     scene.dispose();
     engine.dispose();
   });

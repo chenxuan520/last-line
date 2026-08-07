@@ -1,3 +1,4 @@
+import type { GrenadeThrowMode } from "../../config/throwables";
 import type { EntityId, ItemStackState, Vector3State, WeaponSlot } from "../state/types";
 
 export interface ActorCommand {
@@ -13,6 +14,7 @@ export interface ActorCommand {
   switchWeapon: WeaponSlot | null;
   useItem: string | null;
   dropItem: string | null;
+  throwGrenade: GrenadeThrowMode | null;
 }
 
 export function createIdleCommand(): ActorCommand {
@@ -29,6 +31,7 @@ export function createIdleCommand(): ActorCommand {
     switchWeapon: null,
     useItem: null,
     dropItem: null,
+    throwGrenade: null,
   };
 }
 

@@ -430,6 +430,72 @@ describe("admin control plane", () => {
 
     expect(remaining).toBeUndefined();
   }, 60_000);
+
+  it.each([
+    {
+      name: "same-version truncated state",
+      corrupt: (checkpoint: Record<string, unknown>) => ({
+        ...checkpoint,
+        state: {},
+      }),
+    },
+    {
+      name: "same-version incomplete actor roster",
+      corrupt: (checkpoint: Record<string, unknown>) => ({
+        ...checkpoint,
+        state: {
+          ...(checkpoint.state as Record<string, unknown>),
+          actors: {},
+        },
+      }),
+    },
+    {
+      name: "same-version missing member assignment",
+      corrupt: (checkpoint: Record<string, unknown>) => checkpoint,
+      corruptMembers: true,
+    },
+  ])("expires a running room restored from $name", async ({ corrupt, corruptMembers }) => {
+    const firstGuest = await publicPost("/v1/guests", { displayName: "Corrupt One" });
+    const secondGuest = await publicPost("/v1/guests", { displayName: "Corrupt Two" });
+    const firstAdmission = await publicPost("/v1/matchmaking/quick", firstGuest);
+    const secondAdmission = await publicPost("/v1/matchmaking/quick", secondGuest);
+    const firstSocket = await connectAdmission(firstAdmission);
+    const secondSocket = await connectAdmission(secondAdmission);
+    const roomId = String(firstAdmission.roomId);
+    const stub = env.GAME_ROOMS.getByName(roomId);
+    await runInDurableObject(stub, async (_instance, state) => {
+      const room = await state.storage.get<Record<string, unknown>>("room-v1");
+      if (!room) throw new Error("corrupt room state missing");
+      room.countdownEndsAt = Date.now() - 1;
+      await state.storage.put("room-v1", room);
+      await state.storage.setAlarm(Date.now() - 1);
+    });
+    await evictDurableObject(stub);
+    await runDurableObjectAlarm(stub);
+    await runInDurableObject(stub, async (_instance, state) => {
+      const room = await state.storage.get<Record<string, unknown>>("room-v1");
+      if (!room?.checkpoint) throw new Error("running corrupt checkpoint missing");
+      const checkpoint = corrupt(structuredClone(room.checkpoint as Record<string, unknown>));
+      room.checkpoint = checkpoint;
+      if (corruptMembers) {
+        const members = room.members as Record<string, { actorId?: string | null }>;
+        const member = Object.values(members)[0];
+        if (!member) throw new Error("corrupt room member missing");
+        member.actorId = null;
+      }
+      await state.storage.put("room-v1", room);
+      await state.storage.put("checkpoint-v1", checkpoint);
+    });
+
+    await evictDurableObject(stub);
+    const remaining = await runInDurableObject(stub, async (_instance, state) =>
+      state.storage.get("room-v1")
+    );
+
+    expect(remaining).toBeUndefined();
+    firstSocket.close(1000, "done");
+    secondSocket.close(1000, "done");
+  }, 60_000);
 });
 
 async function bootstrapAdministrator(): Promise<string> {

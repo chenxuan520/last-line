@@ -275,7 +275,109 @@ describe("LocalDurableObjectRuntime", () => {
       await rm(directory, { force: true, recursive: true });
     }
   });
+
+  it.each([
+    {
+      name: "same-version truncated state",
+      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => ({
+        ...checkpoint,
+        state: {},
+      }),
+    },
+    {
+      name: "same-version incomplete actor roster",
+      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => ({
+        ...checkpoint,
+        state: { ...checkpoint.state, actors: {} },
+      }),
+    },
+    {
+      name: "same-version impossible safe-zone stage",
+      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => ({
+        ...checkpoint,
+        state: {
+          ...checkpoint.state,
+          safeZone: {
+            ...checkpoint.state.safeZone,
+            stageIndex: 999,
+            status: "waiting" as const,
+            secondsRemaining: 0,
+          },
+        },
+      }),
+    },
+    {
+      name: "missing persisted members",
+      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => checkpoint,
+      missingMembers: true,
+    },
+  ])("deletes a running room with $name", async ({ corrupt, missingMembers }) => {
+    const directory = await mkdtemp(resolve(tmpdir(), "last-line-corrupt-checkpoint-"));
+    const databasePath = resolve(directory, "rooms.sqlite");
+    const roomId = `room-00000000-0000-4000-8000-${missingMembers ? "000000000004" : "000000000003"}`;
+    let environment = await createStandaloneEnvironment({ databasePath });
+    try {
+      const state = await environment.rooms.getState(roomId);
+      const runtime = new MatchRuntime({
+        humanActorIds: ["human-1", "human-2"],
+        seed: 42,
+        startWithBandage: true,
+        disableAiSnipers: true,
+      });
+      const checkpoint = corrupt(runtime.checkpoint()) as ReturnType<MatchRuntime["checkpoint"]>;
+      const members = missingMembers
+        ? {}
+        : {
+            "player-1": persistedMember("player-1", "human-1", true),
+            "player-2": persistedMember("player-2", "human-2", false),
+          };
+      await state.storage.put("room-v1", {
+        roomId,
+        code: "BAD234",
+        visibility: "private",
+        status: "running",
+        revision: 1,
+        countdownEndsAt: null,
+        options: { mapId: "island", startWithBandage: true, disableAiSnipers: true },
+        seed: 42,
+        expiresAt: Date.now() + 60_000,
+        members,
+        checkpoint,
+      });
+      await state.storage.put("checkpoint-v1", checkpoint);
+      await state.storage.setAlarm(Date.now() + 60_000);
+      await environment.close();
+
+      environment = await createStandaloneEnvironment({ databasePath });
+      const restoredState = await environment.rooms.getState(roomId);
+      expect(await restoredState.storage.get("room-v1")).toBeUndefined();
+      expect(await restoredState.storage.get("checkpoint-v1")).toBeUndefined();
+    } finally {
+      await environment.close();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
 });
+
+function persistedMember(playerId: string, actorId: string, host: boolean) {
+  return {
+    playerId,
+    displayName: playerId,
+    accountId: null,
+    accountSessionRevision: null,
+    admissionToken: `admission-${playerId}`,
+    admissionExpiresAt: Date.now() + 60_000,
+    admissionConsumed: true,
+    reconnectToken: `reconnect-${playerId}`,
+    pendingReconnectToken: null,
+    ready: true,
+    connected: false,
+    host,
+    joinedAt: Date.now(),
+    connectionEpoch: 1,
+    actorId,
+  };
+}
 
 interface AlarmEnvironment {
   entered: Deferred<void>;

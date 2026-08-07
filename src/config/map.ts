@@ -133,6 +133,7 @@ export interface MapLayout {
   readonly hospital: HospitalPoi;
   readonly lootSpawnPoints: readonly Vector3State[];
   readonly lootZoneCounts: readonly number[];
+  readonly grenadeLootStartIndex: number;
 }
 
 export const MAP_SIZE = 2_400;
@@ -147,7 +148,9 @@ export const MAP_POINT_COUNT = 8;
 export const LANDING_ZONE_COUNT = 16;
 export const BASE_LOOT_POINTS = 240;
 export const ADDITIONAL_MEDICAL_LOOT_POINTS = 10;
-export const TOTAL_LOOT_POINTS = BASE_LOOT_POINTS + ADDITIONAL_MEDICAL_LOOT_POINTS;
+export const ADDITIONAL_GRENADE_LOOT_POINTS = 10;
+export const PRE_GRENADE_LOOT_POINTS = BASE_LOOT_POINTS + ADDITIONAL_MEDICAL_LOOT_POINTS;
+export const TOTAL_LOOT_POINTS = PRE_GRENADE_LOOT_POINTS + ADDITIONAL_GRENADE_LOOT_POINTS;
 export const TREE_TRUNK_COUNT = 384;
 const HOSPITAL_MEDICAL_LOOT_POINTS = 2;
 const RANDOM_MEDICAL_LOOT_POINTS = ADDITIONAL_MEDICAL_LOOT_POINTS - HOSPITAL_MEDICAL_LOOT_POINTS;
@@ -344,7 +347,7 @@ export function createMapLayout(mapIdOrSeed: MapId | number, explicitSeed?: numb
     bandageLootIndex: baseLootSpawnPoints.length,
     medkitLootIndex: baseLootSpawnPoints.length + 1,
   };
-  const lootSpawnPoints = [...baseLootSpawnPoints, ...hospitalMedicalPoints];
+  const existingLootSpawnPoints = [...baseLootSpawnPoints, ...hospitalMedicalPoints];
   const treeTrunks = createTreeTrunks(
     terrainHills,
     obstacles,
@@ -352,9 +355,19 @@ export function createMapLayout(mapIdOrSeed: MapId | number, explicitSeed?: numb
     rockObstacles,
     coverObstacles,
     landingZones,
-    lootSpawnPoints,
+    existingLootSpawnPoints,
     createSeededRandom(normalizedSeed ^ 0x68bc21eb),
   );
+  const grenadeLootSpawnPoints = createGrenadeLootSpawnPoints(
+    landingZones,
+    terrainHills,
+    wallSegments,
+    roofRamps,
+    [...obstacles, ...rockObstacles, ...coverObstacles, ...treeTrunks],
+    existingLootSpawnPoints,
+    createSeededRandom(normalizedSeed ^ 0x3c6ef372),
+  );
+  const lootSpawnPoints = [...existingLootSpawnPoints, ...grenadeLootSpawnPoints];
   const layout: MapLayout = {
     mapId,
     displayName: mapDisplayName(mapId),
@@ -375,6 +388,7 @@ export function createMapLayout(mapIdOrSeed: MapId | number, explicitSeed?: numb
     hospital,
     lootSpawnPoints,
     lootZoneCounts,
+    grenadeLootStartIndex: existingLootSpawnPoints.length,
   };
   return cacheMapLayout(cacheKey, layout);
 }
@@ -467,7 +481,7 @@ function createTownMapLayout(seed: number): MapLayout {
     bandageLootIndex: baseLootSpawnPoints.length,
     medkitLootIndex: baseLootSpawnPoints.length + 1,
   };
-  const lootSpawnPoints = [...baseLootSpawnPoints, ...hospitalMedicalPoints];
+  const existingLootSpawnPoints = [...baseLootSpawnPoints, ...hospitalMedicalPoints];
   const landingZones = blueprint.landingZones.map<MapPoint>((point) => ({
     name: point.name,
     position: {
@@ -488,10 +502,18 @@ function createTownMapLayout(seed: number): MapLayout {
     seed,
     terrainHills,
     obstacles,
-    lootSpawnPoints,
+    existingLootSpawnPoints,
     blueprint.landingZones,
     blueprint.roadSegments,
     blueprint.mapPoints.find((point) => point.name === "城市公园"),
+  );
+  const grenadeLootSpawnPoints = createTownGrenadeLootSpawnPoints(
+    blueprint.landingZones,
+    terrainHills,
+    obstacles,
+    wallOpenings,
+    existingLootSpawnPoints,
+    seed,
   );
   return {
     mapId: "town",
@@ -511,8 +533,9 @@ function createTownMapLayout(seed: number): MapLayout {
     roadSegments: blueprint.roadSegments,
     skybridges,
     hospital,
-    lootSpawnPoints,
+    lootSpawnPoints: [...existingLootSpawnPoints, ...grenadeLootSpawnPoints],
     lootZoneCounts,
+    grenadeLootStartIndex: existingLootSpawnPoints.length,
   };
 }
 
@@ -830,6 +853,61 @@ function createTownHospitalMedicalPoints(
       z,
     };
   }) as [Vector3State, Vector3State];
+}
+
+function createTownGrenadeLootSpawnPoints(
+  landingZones: readonly { name: string; x: number; z: number }[],
+  terrainHills: readonly TerrainHill[],
+  buildings: readonly MapBuilding[],
+  openings: readonly MapWallOpening[],
+  existingLoot: readonly Vector3State[],
+  seed: number,
+): Vector3State[] {
+  const random = createSeededRandom(seed ^ 0x3c6ef372);
+  const usedBuildingIds = new Set(buildings.flatMap((building) =>
+    existingLoot.some((point) =>
+      Math.abs(point.x - building.center.x) <= building.width / 2 &&
+      Math.abs(point.z - building.center.z) <= building.depth / 2
+    ) ? [building.id] : []
+  ));
+  const selected: Vector3State[] = [];
+  for (let slot = 0; slot < ADDITIONAL_GRENADE_LOOT_POINTS; slot += 1) {
+    const landingZone = landingZones[slot % landingZones.length] ?? landingZones[0];
+    if (!landingZone) throw new Error("Town grenade loot requires a landing zone");
+    const candidates = [...buildings].sort((left, right) =>
+      distanceSquared2d(left.center.x, left.center.z, landingZone.x, landingZone.z) -
+        distanceSquared2d(right.center.x, right.center.z, landingZone.x, landingZone.z) ||
+      left.id.localeCompare(right.id)
+    );
+    const candidateOffset = Math.floor(random() * Math.max(1, candidates.length));
+    const orderedCandidates = [
+      ...candidates.slice(candidateOffset),
+      ...candidates.slice(0, candidateOffset),
+    ];
+    const building = orderedCandidates.find((candidateBuilding) => {
+      if (usedBuildingIds.has(candidateBuilding.id)) return false;
+      if (!openings.some((opening) =>
+        opening.obstacleId === candidateBuilding.id &&
+        opening.storyIndex === 0 &&
+        opening.kind === "door"
+      )) return false;
+      const x = round(candidateBuilding.center.x);
+      const z = round(candidateBuilding.center.z);
+      return [...existingLoot, ...selected].every((point) =>
+        Math.hypot(point.x - x, point.z - z) >= 12
+      );
+    });
+    if (!building) throw new Error(`Town grenade loot building missing for slot ${slot}`);
+    usedBuildingIds.add(building.id);
+    const x = round(building.center.x);
+    const z = round(building.center.z);
+    selected.push({
+      x,
+      y: round(terrainHeightFromHills(x, z, terrainHills) + GROUND_LOOT_POSITION_HEIGHT),
+      z,
+    });
+  }
+  return selected;
 }
 
 function createTownTreeTrunks(
@@ -2008,6 +2086,49 @@ function createHospitalMedicalPoints(
     }
   }
   if (!selected) throw new Error(`Hospital ${hospital.id} has no clear ground-floor medical points`);
+  return selected;
+}
+
+function createGrenadeLootSpawnPoints(
+  landingZones: readonly MapPoint[],
+  terrainHills: readonly TerrainHill[],
+  wallSegments: readonly MapWallSegment[],
+  roofRamps: readonly RoofRamp[],
+  blockedFootprints: readonly MapObstacle[],
+  existingLoot: readonly Vector3State[],
+  random: () => number,
+): Vector3State[] {
+  const selected: Vector3State[] = [];
+  for (let slot = 0; slot < ADDITIONAL_GRENADE_LOOT_POINTS; slot += 1) {
+    const landingZone = landingZones[slot % landingZones.length] ?? landingZones[0];
+    if (!landingZone) throw new Error("Grenade loot requires a landing zone");
+    let placed = false;
+    for (let attempt = 0; attempt < 480; attempt += 1) {
+      const angle = random() * Math.PI * 2;
+      const radius = Math.sqrt(randomBetween(random, 80 ** 2, 360 ** 2));
+      const x = round(landingZone.position.x + Math.cos(angle) * radius);
+      const z = round(landingZone.position.z + Math.sin(angle) * radius);
+      const candidate = {
+        x,
+        y: round(terrainHeightFromHills(x, z, terrainHills) + GROUND_LOOT_POSITION_HEIGHT),
+        z,
+      };
+      if (
+        !isClearLootPoint(
+          candidate,
+          wallSegments,
+          roofRamps,
+          [...existingLoot, ...selected],
+          blockedFootprints,
+          12,
+        )
+      ) continue;
+      selected.push(candidate);
+      placed = true;
+      break;
+    }
+    if (!placed) throw new Error(`Not enough open grenade loot points for slot ${slot}`);
+  }
   return selected;
 }
 

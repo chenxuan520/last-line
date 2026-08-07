@@ -13,12 +13,15 @@ const MUZZLE_CAPACITY = 4;
 const IMPACT_CAPACITY = 12;
 const PARTICLE_CAPACITY = 32;
 const DECAL_CAPACITY = 20;
+const EXPLOSION_CAPACITY = 4;
 const PARTICLES_PER_ENVIRONMENT_HIT = 4;
+const PARTICLES_PER_GRENADE_EXPLOSION = 8;
 
 const TRACER_LIFETIME_SECONDS = 0.08;
 const MUZZLE_LIFETIME_SECONDS = 0.06;
 const IMPACT_LIFETIME_SECONDS = 0.16;
 const DECAL_LIFETIME_SECONDS = 8;
+const EXPLOSION_LIFETIME_SECONDS = 0.34;
 
 type ShotTracedEvent = Extract<GameEvent, { type: "shot-traced" }>;
 
@@ -44,6 +47,7 @@ interface EffectMaterials {
   readonly spark: StandardMaterial;
   readonly dust: StandardMaterial;
   readonly decal: StandardMaterial;
+  readonly explosion: StandardMaterial;
 }
 
 export interface CombatEffectsCounters {
@@ -52,12 +56,14 @@ export interface CombatEffectsCounters {
   readonly impactCapacity: number;
   readonly particleCapacity: number;
   readonly decalCapacity: number;
+  readonly explosionCapacity: number;
   readonly materialCapacity: number;
   readonly activeTracers: number;
   readonly activeMuzzles: number;
   readonly activeImpacts: number;
   readonly activeParticles: number;
   readonly activeDecals: number;
+  readonly activeExplosions: number;
 }
 
 export class CombatEffects {
@@ -68,6 +74,7 @@ export class CombatEffects {
   private readonly impacts: TimedMeshSlot[];
   private readonly particles: ParticleSlot[];
   private readonly decals: TimedMeshSlot[];
+  private readonly explosions: TimedMeshSlot[];
   private readonly lookTarget = new Vector3();
   private readonly surfaceNormal = new Vector3();
   private tracerCursor = 0;
@@ -75,6 +82,7 @@ export class CombatEffects {
   private impactCursor = 0;
   private particleCursor = 0;
   private decalCursor = 0;
+  private explosionCursor = 0;
   private disposed = false;
 
   public constructor(scene: Scene) {
@@ -88,6 +96,7 @@ export class CombatEffects {
       spark: effectMaterial(scene, "combat-effects-spark-material", "#ffd166", 0.96),
       dust: effectMaterial(scene, "combat-effects-dust-material", "#9d866a", 0.68),
       decal: effectMaterial(scene, "combat-effects-decal-material", "#24221f", 0.82),
+      explosion: effectMaterial(scene, "combat-effects-explosion-material", "#ff9d3f", 0.9),
     };
     this.materials.decal.backFaceCulling = false;
     this.materialPool = Object.values(this.materials);
@@ -127,6 +136,11 @@ export class CombatEffects {
       mesh.material = this.materials.decal;
       return pooledMesh(mesh);
     });
+    this.explosions = Array.from({ length: EXPLOSION_CAPACITY }, (_, index) => {
+      const mesh = CreateSphere(`combat-effect-explosion-${index}`, { diameter: 1, segments: 8 }, scene);
+      mesh.material = this.materials.explosion;
+      return pooledMesh(mesh);
+    });
   }
 
   public get counters(): CombatEffectsCounters {
@@ -136,12 +150,14 @@ export class CombatEffects {
       impactCapacity: this.impacts.length,
       particleCapacity: this.particles.length,
       decalCapacity: this.decals.length,
+      explosionCapacity: this.explosions.length,
       materialCapacity: this.materialPool.length,
       activeTracers: countActive(this.tracers),
       activeMuzzles: countActive(this.muzzleFlashes),
       activeImpacts: countActive(this.impacts),
       activeParticles: countActive(this.particles),
       activeDecals: countActive(this.decals),
+      activeExplosions: countActive(this.explosions),
     };
   }
 
@@ -150,6 +166,10 @@ export class CombatEffects {
 
     const flashedActors = new Set<EntityId>();
     for (const event of events) {
+      if (event.type === "grenade-exploded") {
+        this.showGrenadeExplosion(event.position);
+        continue;
+      }
       if (event.type !== "shot-traced") continue;
       if (!flashedActors.has(event.actorId)) {
         this.showMuzzleFlash(event);
@@ -183,6 +203,12 @@ export class CombatEffects {
     updateTimedPool(this.muzzleFlashes, deltaSeconds);
     updateTimedPool(this.impacts, deltaSeconds);
     updateTimedPool(this.decals, deltaSeconds);
+    for (const explosion of this.explosions) {
+      if (explosion.remainingSeconds <= 0) continue;
+      const progress = 1 - explosion.remainingSeconds / EXPLOSION_LIFETIME_SECONDS;
+      explosion.mesh.scaling.setAll(1.2 + progress * 7);
+    }
+    updateTimedPool(this.explosions, deltaSeconds);
 
     for (const particle of this.particles) {
       if (particle.remainingSeconds <= 0) continue;
@@ -208,6 +234,7 @@ export class CombatEffects {
     disposePool(this.impacts);
     disposePool(this.particles);
     disposePool(this.decals);
+    disposePool(this.explosions);
     for (const material of this.materialPool) material.dispose();
   }
 
@@ -235,6 +262,30 @@ export class CombatEffects {
     slot.mesh.lookAt(this.lookTarget.set(event.end.x, event.end.y, event.end.z));
     slot.mesh.material = event.actorId === playerId ? this.materials.localTracer : this.materials.remoteTracer;
     activate(slot, TRACER_LIFETIME_SECONDS);
+  }
+
+  private showGrenadeExplosion(position: { x: number; y: number; z: number }): void {
+    const index = acquireIndex(this.explosions, this.explosionCursor);
+    this.explosionCursor = (index + 1) % this.explosions.length;
+    const explosion = this.explosions[index];
+    explosion.mesh.position.set(position.x, position.y, position.z);
+    explosion.mesh.scaling.setAll(1.2);
+    activate(explosion, EXPLOSION_LIFETIME_SECONDS);
+
+    for (let sequence = 0; sequence < PARTICLES_PER_GRENADE_EXPLOSION; sequence += 1) {
+      const particleIndex = acquireIndex(this.particles, this.particleCursor);
+      this.particleCursor = (particleIndex + 1) % this.particles.length;
+      const particle = this.particles[particleIndex];
+      const angle = sequence / PARTICLES_PER_GRENADE_EXPLOSION * Math.PI * 2;
+      particle.mesh.position.set(position.x, position.y, position.z);
+      particle.mesh.scaling.setAll(1.4);
+      particle.mesh.material = sequence % 2 === 0 ? this.materials.spark : this.materials.dust;
+      particle.velocityX = Math.cos(angle) * (2.6 + sequence * 0.12);
+      particle.velocityY = 2.2 + (sequence % 3) * 0.6;
+      particle.velocityZ = Math.sin(angle) * (2.6 + sequence * 0.12);
+      particle.gravity = 5.5;
+      activate(particle, 0.52);
+    }
   }
 
   private showMuzzleFlash(event: ShotTracedEvent): void {

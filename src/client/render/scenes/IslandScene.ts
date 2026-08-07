@@ -27,6 +27,7 @@ import { Scene } from "@babylonjs/core/scene";
 import type { AssetCatalog } from "../../../assets/AssetCatalog";
 import type { AssetEntry } from "../../../assets/types";
 import { ITEMS } from "../../../config/items";
+import { FRAG_GRENADE_ITEM_ID } from "../../../config/throwables";
 import {
   BUILDING_ROOF_CAP_HEIGHT,
   createMapLayout,
@@ -2517,7 +2518,40 @@ function createViewWeapon(
   createWeaponModel(scene, root, "view", "smg", materials, true);
   createWeaponModel(scene, root, "view", "shotgun", materials, true);
   createWeaponModel(scene, root, "view", "sniper", materials, true);
+  createViewGrenadeModel(scene, root, materials);
   return root;
+}
+
+function createViewGrenadeModel(
+  scene: Scene,
+  root: TransformNode,
+  materials: IslandMaterials,
+): void {
+  const body = CreateSphere("view-grenade-body", { diameter: 0.3, segments: 10 }, scene);
+  body.parent = root;
+  body.position.set(0.38, -0.3, 0.76);
+  body.scaling.set(0.82, 1.12, 0.82);
+  body.material = materials.gear;
+  body.isPickable = false;
+  body.metadata = {
+    actorVisual: "weapon",
+    weaponId: FRAG_GRENADE_ITEM_ID,
+    weaponFallback: true,
+  };
+  body.setEnabled(false);
+
+  const lever = CreateBox("view-grenade-lever", { width: 0.06, height: 0.2, depth: 0.04 }, scene);
+  lever.parent = root;
+  lever.position.set(0.47, -0.16, 0.76);
+  lever.rotation.z = -0.22;
+  lever.material = materials.actorArmor;
+  lever.isPickable = false;
+  lever.metadata = {
+    actorVisual: "weapon",
+    weaponId: FRAG_GRENADE_ITEM_ID,
+    weaponFallback: true,
+  };
+  lever.setEnabled(false);
 }
 
 function createWeaponModel(
@@ -2793,6 +2827,10 @@ function createLootModelTemplate(scene: Scene, itemId: string, modelMaterial: St
     addBox("handle", 0.4, 0.12, 0.16, 0, 0.4, 0);
     addBox("cross-vertical", 0.14, 0.38, 0.08, 0, 0.02, -0.22);
     addBox("cross-horizontal", 0.38, 0.14, 0.08, 0, 0.02, -0.22);
+  } else if (item?.kind === "throwable") {
+    addCylinder("body", 0.72, 0.48, 0.58, 0, 0, 0, 10);
+    addCylinder("fuse", 0.2, 0.18, 0.22, 0, 0.45, 0, 8);
+    addBox("lever", 0.12, 0.42, 0.08, 0.2, 0.37, 0);
   } else {
     addBox("fallback", CLASSIC_LOOT_MARKER_SIZE, CLASSIC_LOOT_MARKER_SIZE, CLASSIC_LOOT_MARKER_SIZE);
   }

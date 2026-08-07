@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HumanController } from "../../src/controllers/HumanController";
+import { FRAG_GRENADE_ITEM_ID } from "../../src/config/throwables";
 import {
   backpackSnapshotSignature,
   parseBackpackStackDropRequest,
@@ -201,6 +202,70 @@ describe("HumanController weapon switching", () => {
     expect(command.switchWeapon).toBe(1);
     expect(command.reload).toBe(false);
     expect(controller.createCommand(actor).reload).toBe(false);
+    controller.dispose();
+  });
+
+  it("selects, prepares, toggles, throws, and cancels a grenade from desktop input", () => {
+    const canvas = new EventTarget() as HTMLCanvasElement;
+    const documentTarget = new EventTarget() as Document;
+    Object.defineProperty(documentTarget, "pointerLockElement", { configurable: true, value: canvas });
+    vi.stubGlobal("document", documentTarget);
+    const actor = createActorState("player", "player", { x: 0, y: 1.76, z: 0 });
+    actor.inventory.weaponSlots[1] = createWeaponState("smg");
+    actor.inventory.backpack = [{ itemId: FRAG_GRENADE_ITEM_ID, quantity: 2 }];
+    const controller = new HumanController(canvas, 1, { touchEnabled: false });
+    controller.rememberActor(actor);
+
+    documentTarget.dispatchEvent(keyEvent("Digit3"));
+    expect(controller.isGrenadeSelected()).toBe(true);
+    expect(controller.getGrenadeThrowMode()).toBe("high");
+    documentTarget.dispatchEvent(mouseEvent("mousedown", 2));
+    expect(controller.getGrenadeThrowMode()).toBe("low");
+
+    documentTarget.dispatchEvent(mouseEvent("mousedown", 0));
+    expect(controller.isGrenadePreparing()).toBe(true);
+    expect(controller.createCommand(actor)).toMatchObject({ fire: false, throwGrenade: null });
+    documentTarget.dispatchEvent(mouseEvent("mouseup", 0));
+    expect(controller.createCommand(actor).throwGrenade).toBe("low");
+    expect(controller.createCommand(actor).throwGrenade).toBeNull();
+    expect(controller.isGrenadeSelected()).toBe(false);
+
+    documentTarget.dispatchEvent(keyEvent("Digit3"));
+    documentTarget.dispatchEvent(mouseEvent("mousedown", 0));
+    documentTarget.dispatchEvent(keyEvent("Digit2"));
+    expect(controller.isGrenadeSelected()).toBe(false);
+    expect(controller.isGrenadePreparing()).toBe(false);
+    expect(controller.createCommand(actor)).toMatchObject({ switchWeapon: 1, throwGrenade: null });
+    controller.dispose();
+  });
+
+  it("does not select a grenade without inventory and supports touch hold-release throwing", () => {
+    const canvas = new EventTarget() as HTMLCanvasElement;
+    const documentTarget = new EventTarget() as Document;
+    Object.defineProperty(documentTarget, "pointerLockElement", { configurable: true, value: null });
+    vi.stubGlobal("document", documentTarget);
+    const actor = createActorState("player", "player", { x: 0, y: 1.76, z: 0 });
+    actor.inventory.backpack = [];
+    const controller = new HumanController(canvas, 1, { touchEnabled: true });
+    controller.rememberActor(actor);
+
+    controller.triggerTouchAction("grenade");
+    expect(controller.isGrenadeSelected()).toBe(false);
+
+    actor.inventory.backpack = [{ itemId: FRAG_GRENADE_ITEM_ID, quantity: 1 }];
+    controller.rememberActor(actor);
+    controller.triggerTouchAction("grenade");
+    controller.setTouchFire(true);
+    expect(controller.isGrenadePreparing()).toBe(true);
+    controller.triggerTouchAction("switch-weapon");
+    controller.setTouchFire(false);
+    expect(controller.createCommand(actor)).toMatchObject({ fire: false, throwGrenade: null });
+
+    controller.triggerTouchAction("grenade");
+    controller.setTouchFire(true);
+    controller.setTouchFire(false);
+    expect(controller.createCommand(actor).throwGrenade).toBe("high");
+    expect(controller.createCommand(actor).throwGrenade).toBeNull();
     controller.dispose();
   });
 
@@ -433,6 +498,33 @@ describe("HumanController weapon switching", () => {
     expect(controller.createCommand(actor).fire).toBe(false);
   });
 
+  it.each(["pointercancel", "lostpointercapture"] as const)(
+    "cancels grenade preparation on %s without consuming the grenade",
+    (eventType) => {
+      const canvas = new EventTarget() as HTMLCanvasElement;
+      const documentTarget = new EventTarget() as Document;
+      const windowTarget = createTouchWindow();
+      const touchRoot = createTouchRoot();
+      Object.defineProperty(documentTarget, "pointerLockElement", { configurable: true, value: null });
+      vi.stubGlobal("document", documentTarget);
+      vi.stubGlobal("window", windowTarget);
+      const actor = createActorState("player", "player", { x: 0, y: 1.76, z: 0 });
+      actor.inventory.backpack = [{ itemId: FRAG_GRENADE_ITEM_ID, quantity: 1 }];
+      const controller = new HumanController(canvas, 1, { touchEnabled: true, touchRoot });
+      controller.rememberActor(actor);
+
+      pressTouchAction(touchRoot, 1, "grenade");
+      pressTouchFire(touchRoot, 2, "fire-look");
+      expect(controller.isGrenadePreparing()).toBe(true);
+      touchRoot.dispatchEvent(touchPointerEvent(eventType, 2));
+
+      expect(controller.isGrenadePreparing()).toBe(false);
+      expect(controller.createCommand(actor).throwGrenade).toBeNull();
+      expect(actor.inventory.backpack).toEqual([{ itemId: FRAG_GRENADE_ITEM_ID, quantity: 1 }]);
+      controller.dispose();
+    },
+  );
+
   it("suppresses dual touch fire until every held pointer is released during healing", () => {
     const canvas = new EventTarget() as HTMLCanvasElement;
     const documentTarget = new EventTarget() as Document;
@@ -502,6 +594,8 @@ function createState(actor: ReturnType<typeof createActorState>): MatchState {
     elapsedSeconds: 0,
     actors: { [actor.id]: actor },
     groundLoot: {},
+    activeGrenades: {},
+    nextGrenadeSequence: 1,
     safeZone: {
       center: { x: 0, y: 0, z: 0 },
       radius: 100,
@@ -571,7 +665,7 @@ function pressTouchFire(root: TouchRoot, pointerId: number, role: "fire" | "fire
 function pressTouchAction(
   root: TouchRoot,
   pointerId: number,
-  action: "bandage" | "pause",
+  action: "bandage" | "grenade" | "pause",
 ): void {
   root.dataset.touchAction = action;
   delete root.dataset.touchRole;

@@ -135,7 +135,7 @@ export class GameRoom extends DurableService<WorkerEnv> {
       if (this.data) {
         if (
           (this.data.status === "running" || this.data.status === "finished") &&
-          !isMatchCheckpointCompatible(this.data.checkpoint)
+          !isPersistedRoomCompatible(this.data)
         ) {
           this.data.status = "finished";
           for (const socket of this.ctx.getWebSockets()) {
@@ -688,8 +688,8 @@ export class GameRoom extends DurableService<WorkerEnv> {
   private ensureRuntime(): MatchRuntime | null {
     const data = this.data;
     if (this.runtime || !data?.checkpoint) return this.runtime;
-    if (!isMatchCheckpointCompatible(data.checkpoint)) return null;
-    const humanActorIds = Object.values(data.members).flatMap((member) => member.actorId ? [member.actorId] : []);
+    const humanActorIds = persistedHumanActorIds(data);
+    if (!humanActorIds || !isMatchCheckpointCompatible(data.checkpoint, humanActorIds)) return null;
     this.runtime = new MatchRuntime({
       humanActorIds,
       seed: data.seed,
@@ -1020,6 +1020,64 @@ function createMember(guest: GuestRecord, host: boolean, ready: boolean): RoomMe
     connectionEpoch: 0,
     actorId: null,
   };
+}
+
+function isPersistedRoomCompatible(data: PersistedRoom): boolean {
+  const humanActorIds = persistedHumanActorIds(data);
+  return humanActorIds !== null &&
+    isMatchCheckpointCompatible(data.checkpoint, humanActorIds);
+}
+
+function persistedHumanActorIds(data: PersistedRoom): EntityId[] | null {
+  if (!isRecord(data.members)) return null;
+  const members = Object.entries(data.members);
+  if (members.length < MIN_HUMAN_PLAYERS || members.length > MAX_HUMAN_PLAYERS) return null;
+  const humanActorIds: EntityId[] = [];
+  const seenActorIds = new Set<EntityId>();
+  for (const [playerId, member] of members) {
+    if (
+      !isRoomMemberRecord(member) ||
+      member.playerId !== playerId ||
+      member.actorId === null ||
+      seenActorIds.has(member.actorId)
+    ) return null;
+    seenActorIds.add(member.actorId);
+    humanActorIds.push(member.actorId);
+  }
+  return humanActorIds;
+}
+
+function isRoomMemberRecord(value: unknown): value is RoomMemberRecord {
+  return isRecord(value) &&
+    typeof value.playerId === "string" && value.playerId.length > 0 &&
+    typeof value.displayName === "string" && value.displayName.length > 0 &&
+    (value.accountId === null || typeof value.accountId === "string") &&
+    (value.accountSessionRevision === null || isNonNegativeSafeInteger(value.accountSessionRevision)) &&
+    typeof value.admissionToken === "string" && value.admissionToken.length > 0 &&
+    isNonNegativeFiniteNumber(value.admissionExpiresAt) &&
+    typeof value.admissionConsumed === "boolean" &&
+    typeof value.reconnectToken === "string" && value.reconnectToken.length > 0 &&
+    (value.pendingReconnectToken === undefined ||
+      value.pendingReconnectToken === null ||
+      typeof value.pendingReconnectToken === "string") &&
+    typeof value.ready === "boolean" &&
+    typeof value.connected === "boolean" &&
+    typeof value.host === "boolean" &&
+    isNonNegativeFiniteNumber(value.joinedAt) &&
+    isNonNegativeSafeInteger(value.connectionEpoch) &&
+    (value.actorId === null || typeof value.actorId === "string");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isNonNegativeFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
 function randomUint32(): number {

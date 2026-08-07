@@ -11,6 +11,7 @@ import {
   LANDING_ZONE_COUNT,
   MAP_POINT_COUNT,
   MAP_HALF_SIZE,
+  PRE_GRENADE_LOOT_POINTS,
   TREE_TRUNK_COUNT,
   TOTAL_LOOT_POINTS,
 } from "../../src/config/map";
@@ -52,8 +53,9 @@ describe("map layouts", () => {
       expect(layout.lootSpawnPoints).toHaveLength(TOTAL_LOOT_POINTS);
       expect(hospital.storyCount).toBe(2);
       expect(hospital.color).toBe(HOSPITAL_WALL_COLOR);
-      expect(layout.hospital.bandageLootIndex).toBe(TOTAL_LOOT_POINTS - 2);
-      expect(layout.hospital.medkitLootIndex).toBe(TOTAL_LOOT_POINTS - 1);
+      expect(layout.grenadeLootStartIndex).toBe(PRE_GRENADE_LOOT_POINTS);
+      expect(layout.hospital.bandageLootIndex).toBe(PRE_GRENADE_LOOT_POINTS - 2);
+      expect(layout.hospital.medkitLootIndex).toBe(PRE_GRENADE_LOOT_POINTS - 1);
       for (const point of [bandagePoint, medkitPoint]) {
         expect(Math.abs(point.x - hospital.center.x)).toBeLessThan(hospital.width / 2);
         expect(Math.abs(point.z - hospital.center.z)).toBeLessThan(hospital.depth / 2);
@@ -419,6 +421,26 @@ describe("map layouts", () => {
           (layout.lootSpawnPoints[index]?.x ?? 0) - other.x,
           (layout.lootSpawnPoints[index]?.z ?? 0) - other.z,
         )).toBeGreaterThanOrEqual(hospitalPair ? 2.9 : 11.9);
+      }
+    }
+  }, 30_000);
+
+  it("appends ten deterministic grenade points without moving legacy loot indices", () => {
+    for (const [mapId, seed] of [["island", 86_753_009], ["town", 42]] as const) {
+      const layout = createMapLayout(mapId, seed);
+      const legacyPoints = layout.lootSpawnPoints.slice(0, PRE_GRENADE_LOOT_POINTS);
+      const grenadePoints = layout.lootSpawnPoints.slice(layout.grenadeLootStartIndex);
+
+      expect(layout.grenadeLootStartIndex).toBe(PRE_GRENADE_LOOT_POINTS);
+      expect(grenadePoints).toHaveLength(10);
+      expect(layout.hospital.bandageLootIndex).toBeLessThan(layout.grenadeLootStartIndex);
+      expect(layout.hospital.medkitLootIndex).toBeLessThan(layout.grenadeLootStartIndex);
+      expect(createMapLayout(mapId, seed).lootSpawnPoints).toEqual(layout.lootSpawnPoints);
+      for (const point of grenadePoints) {
+        expect(point.y).toBeCloseTo(getTerrainHeight(point.x, point.z, layout) + 0.45, 3);
+        expect(Math.min(...legacyPoints.map((legacy) =>
+          Math.hypot(point.x - legacy.x, point.z - legacy.z)
+        ))).toBeGreaterThanOrEqual(11.9);
       }
     }
   }, 30_000);

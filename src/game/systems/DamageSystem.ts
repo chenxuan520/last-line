@@ -1,5 +1,5 @@
 import { calculateProtectedDamage } from "../rules/damage";
-import type { EntityId, GameEvent, MatchState } from "../state/types";
+import type { EntityId, GameEvent, MatchState, Vector3State } from "../state/types";
 
 export class DamageSystem {
   public applyDamage(
@@ -11,6 +11,7 @@ export class DamageSystem {
     bypassArmor = false,
     minimumHealth = 0,
     weaponId: string | null = null,
+    damageOrigin?: Vector3State,
   ): number {
     const target = state.actors[targetId];
     if (!target?.alive || target.deployment === "aircraft" || amount <= 0) {
@@ -19,10 +20,11 @@ export class DamageSystem {
 
     const healthBefore = target.health;
     const source = sourceId ? state.actors[sourceId] : undefined;
-    if (source && source.id !== target.id) {
-      const x = source.position.x - target.position.x;
-      const y = source.position.y - target.position.y;
-      const z = source.position.z - target.position.z;
+    const directionOrigin = damageOrigin ?? (source && source.id !== target.id ? source.position : undefined);
+    if (directionOrigin) {
+      const x = directionOrigin.x - target.position.x;
+      const y = directionOrigin.y - target.position.y;
+      const z = directionOrigin.z - target.position.z;
       const length = Math.hypot(x, y, z);
       if (length > 0) {
         target.lastDamageDirection = { x: x / length, y: y / length, z: z / length };

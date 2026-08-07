@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { BATTLE_ROYALE_CONFIG } from "../../src/config/battleRoyale";
 import { getTerrainHeight } from "../../src/config/map";
 import { createIdleCommand } from "../../src/game/commands/ActorCommand";
 import { createWeaponState } from "../../src/game/state/types";
@@ -84,12 +85,125 @@ describe("MatchRuntime", () => {
     });
     const checkpoint = runtime.checkpoint();
 
-    expect(MATCH_CHECKPOINT_VERSION).toBe(5);
+    expect(MATCH_CHECKPOINT_VERSION).toBe(6);
     expect(isMatchCheckpointCompatible(checkpoint)).toBe(true);
     expect(isMatchCheckpointCompatible({
       ...checkpoint,
       version: MATCH_CHECKPOINT_VERSION - 1,
     })).toBe(false);
+  });
+
+  it("requires complete serializable grenade state in v6 checkpoints", () => {
+    const runtime = new MatchRuntime({
+      humanActorIds: ["human-1", "human-2"],
+      seed: 43,
+      startWithBandage: false,
+      disableAiSnipers: true,
+    });
+    const owner = runtime.state.actors["human-1"];
+    if (!owner) throw new Error("owner missing");
+    runtime.state.activeGrenades["grenade-1"] = {
+      id: "grenade-1",
+      ownerId: owner.id,
+      aiControlled: false,
+      position: { x: 1, y: 2, z: 3 },
+      velocity: { x: 4, y: 5, z: 6 },
+      fuseSeconds: 2,
+    };
+    runtime.state.nextGrenadeSequence = 2;
+    const checkpoint = runtime.checkpoint();
+    const humanActorIds = ["human-1", "human-2"] as const;
+
+    expect(isMatchCheckpointCompatible(checkpoint, humanActorIds)).toBe(true);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: {},
+    }, humanActorIds)).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: { ...checkpoint.state, phase: "ready" },
+    }, humanActorIds)).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: {
+        ...checkpoint.state,
+        safeZone: {
+          ...checkpoint.state.safeZone,
+          stageIndex: BATTLE_ROYALE_CONFIG.safeZoneStages.length,
+          status: "waiting",
+          secondsRemaining: 0,
+        },
+      },
+    }, humanActorIds)).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: { ...checkpoint.state, phase: "finished", result: null },
+    }, humanActorIds)).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: {
+        ...checkpoint.state,
+        actors: {},
+      },
+    }, humanActorIds)).toBe(false);
+    const mismatchedActorKeys = structuredClone(checkpoint.state.actors);
+    const mismatchedActor = mismatchedActorKeys["human-1"];
+    if (!mismatchedActor) throw new Error("human actor missing");
+    mismatchedActor.id = "wrong-id";
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: {
+        ...checkpoint.state,
+        actors: mismatchedActorKeys,
+      },
+    }, humanActorIds)).toBe(false);
+    expect(isMatchCheckpointCompatible(checkpoint, ["human-1", "bot-1"])).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: { ...checkpoint.state, activeGrenades: undefined },
+    } as unknown as typeof checkpoint)).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: { ...checkpoint.state, nextGrenadeSequence: 0 },
+    })).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: { ...checkpoint.state, nextGrenadeSequence: 1 },
+    })).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: {
+        ...checkpoint.state,
+        activeGrenades: {
+          "grenade-1": {
+            ...checkpoint.state.activeGrenades["grenade-1"],
+            id: "wrong-id",
+          },
+        },
+      },
+    } as typeof checkpoint)).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: {
+        ...checkpoint.state,
+        activeGrenades: {
+          "grenade-1": {
+            ...checkpoint.state.activeGrenades["grenade-1"],
+            ownerId: "missing-owner",
+          },
+        },
+      },
+    } as typeof checkpoint)).toBe(false);
+
+    const restored = new MatchRuntime({
+      humanActorIds: ["human-1", "human-2"],
+      seed: 43,
+      startWithBandage: false,
+      disableAiSnipers: true,
+      ...checkpoint,
+    });
+    expect(restored.state.activeGrenades).toEqual(checkpoint.state.activeGrenades);
+    expect(restored.state.nextGrenadeSequence).toBe(2);
   });
 
   it("redacts distant actors and expands only airborne loot replication", () => {
@@ -314,7 +428,7 @@ describe("MatchRuntime", () => {
 
     expect(humanActorIds).toHaveLength(10);
     expect(Object.keys(runtime.state.actors)).toHaveLength(50);
-    expect(Object.keys(runtime.state.groundLoot)).toHaveLength(250);
+    expect(Object.keys(runtime.state.groundLoot)).toHaveLength(260);
 
     const localActorId = humanActorIds[0] ?? "human-1";
     const fullMessage = {

@@ -40,8 +40,13 @@ describe("map selection", () => {
       displayName: _displayName,
       roadSegments: _roadSegments,
       skybridges: _skybridges,
-      ...legacyPayload
+      grenadeLootStartIndex: _grenadeLootStartIndex,
+      ...currentPayload
     } = layout;
+    const legacyPayload = {
+      ...currentPayload,
+      lootSpawnPoints: currentPayload.lootSpawnPoints.slice(0, layout.grenadeLootStartIndex),
+    };
 
     expect(createHash("sha256").update(JSON.stringify(legacyPayload)).digest("hex")).toBe(expectedHash);
   });

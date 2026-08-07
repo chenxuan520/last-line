@@ -28,10 +28,17 @@ export interface ShotResult {
   hitType: "actor" | "environment" | "miss";
 }
 
+export interface ThrowableCollision {
+  point: Vector3State;
+  normal: Vector3State;
+}
+
 export interface CombatWorld {
   traceShot(trace: ShotTrace): EntityId | null;
   traceShotDetailed?(trace: ShotTrace): ShotResult;
   hasLineOfSight?(observerId: EntityId, targetId: EntityId): boolean;
+  traceThrowable?(origin: Vector3State, displacement: Vector3State, radius: number): ThrowableCollision | null;
+  hasExplosionLineOfSight?(origin: Vector3State, target: Vector3State): boolean;
 }
 
 interface PendingDamage {
@@ -112,7 +119,7 @@ export class CombatSystem {
     if (command.reload) {
       this.startReload(actor, events);
     }
-    if (command.fire) {
+    if (command.fire && command.throwGrenade === null) {
       this.fire(actor, command, world, events, pendingDamage);
     }
   }

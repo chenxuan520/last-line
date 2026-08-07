@@ -6,6 +6,7 @@ import {
 import { ITEMS } from "../../config/items";
 import { createMapLayout, MAP_HALF_SIZE } from "../../config/map";
 import { DEFAULT_MAP_ID, type MapId } from "../../config/maps";
+import { FRAG_GRENADE_ITEM_ID } from "../../config/throwables";
 import type { GameMode } from "./GameMode";
 import { ACTOR_RADIUS } from "../rules/actorGeometry";
 import { selectSimultaneousSurvivor } from "../rules/resolveSimultaneous";
@@ -342,7 +343,15 @@ export function createBattleRoyaleStateForHumans(
     mapId,
     mapSeed,
     actors,
-    groundLoot: createGroundLoot(layout.lootSpawnPoints, layout.lootZoneCounts, layout.hospital, createLootRandom(mapSeed)),
+    groundLoot: createGroundLoot(
+      layout.lootSpawnPoints,
+      layout.lootZoneCounts,
+      layout.hospital,
+      layout.grenadeLootStartIndex,
+      createLootRandom(mapSeed),
+    ),
+    activeGrenades: {},
+    nextGrenadeSequence: 1,
     safeZone: createInitialSafeZone(config, random),
     flight,
     result: null,
@@ -369,6 +378,7 @@ function createGroundLoot(
   lootSpawnPoints: readonly Vector3State[],
   lootZoneCounts: readonly number[],
   hospital: ReturnType<typeof createMapLayout>["hospital"],
+  grenadeLootStartIndex: number,
   random: () => number,
 ): Record<EntityId, GroundLootState> {
   const groundLoot: Record<EntityId, GroundLootState> = {};
@@ -415,7 +425,7 @@ function createGroundLoot(
     }
     zoneStart += zoneCount;
   }
-  for (let index = zoneStart; index < lootSpawnPoints.length; index += 1) {
+  for (let index = zoneStart; index < grenadeLootStartIndex; index += 1) {
     const position = lootSpawnPoints[index];
     if (!position) continue;
     const itemId = index === hospital.bandageLootIndex
@@ -429,6 +439,20 @@ function createGroundLoot(
       generation: 0,
       itemId,
       quantity: itemId === "bandage" ? 2 : 1,
+      position: { ...position },
+      available: true,
+      source: "spawn",
+    };
+  }
+  for (let index = grenadeLootStartIndex; index < lootSpawnPoints.length; index += 1) {
+    const position = lootSpawnPoints[index];
+    if (!position) continue;
+    const id = `loot-${index}`;
+    groundLoot[id] = {
+      id,
+      generation: 0,
+      itemId: FRAG_GRENADE_ITEM_ID,
+      quantity: 2,
       position: { ...position },
       available: true,
       source: "spawn",

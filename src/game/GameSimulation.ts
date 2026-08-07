@@ -7,12 +7,14 @@ import type { CombatWorld } from "./systems/CombatSystem";
 import { CombatSystem } from "./systems/CombatSystem";
 import { InventorySystem } from "./systems/InventorySystem";
 import { MovementSystem } from "./systems/MovementSystem";
+import { ThrowableSystem } from "./systems/ThrowableSystem";
 import type { EntityId, GameEvent, MatchState } from "./state/types";
 
 export class GameSimulation {
   private readonly combat: CombatSystem;
   private readonly inventory: InventorySystem;
   private readonly movement: MovementSystem;
+  private readonly throwables: ThrowableSystem;
   private events: GameEvent[] = [];
 
   public constructor(
@@ -24,6 +26,7 @@ export class GameSimulation {
     this.combat = new CombatSystem(weapons);
     this.inventory = new InventorySystem(layout);
     this.movement = new MovementSystem(layout);
+    this.throwables = new ThrowableSystem();
   }
 
   public start(): void {
@@ -34,6 +37,11 @@ export class GameSimulation {
     deltaSeconds: number,
     commands: ReadonlyMap<EntityId, ActorCommand>,
     world: CombatWorld,
+    aiActorIds: ReadonlySet<EntityId> = new Set(
+      Object.values(this.state.actors)
+        .filter((actor) => actor.kind === "bot")
+        .map((actor) => actor.id),
+    ),
   ): void {
     if (this.state.phase === "ready" || this.state.phase === "finished") {
       return;
@@ -52,7 +60,9 @@ export class GameSimulation {
     for (const [actorId, command] of inventoryCommands) {
       this.inventory.processCommand(this.state, actorId, command, this.events);
     }
+    this.throwables.processCommands(this.state, commands, this.events, aiActorIds);
     this.combat.processCommands(this.state, commands, world, this.events, orderedCommands);
+    this.throwables.update(this.state, deltaSeconds, world, this.events);
     this.mode.update(this.state, deltaSeconds, this.events);
     this.inventory.dropDeadInventories(this.state, this.events);
   }

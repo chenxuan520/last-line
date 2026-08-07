@@ -180,12 +180,12 @@ export class GameApp {
             <article>
               <span class="about-index">03 // CONTROLS</span>
               <h3>桌面操作</h3>
-              <dl><div><dt>WASD / Shift</dt><dd>移动 / 冲刺</dd></div><div><dt>鼠标</dt><dd>视角 / 开火 / 瞄准</dd></div><div><dt>Space / F / R</dt><dd>跳跃 / 拾取 / 换弹</dd></div><div><dt>1·2 / 4–9 / G</dt><dd>切枪 / 丢背包物品 / 丢当前武器</dd></div><div><dt>Q / H</dt><dd>绷带 / 急救包</dd></div></dl>
+              <dl><div><dt>WASD / Shift</dt><dd>移动 / 冲刺</dd></div><div><dt>鼠标</dt><dd>视角 / 开火 / 瞄准；持雷时按住预览、松开投掷</dd></div><div><dt>Space / F / R</dt><dd>跳跃 / 拾取 / 换弹</dd></div><div><dt>1·2·3 / 4–9 / G</dt><dd>切枪 / 手雷 / 丢背包物品 / 丢当前武器</dd></div><div><dt>Q / H</dt><dd>绷带 / 急救包</dd></div></dl>
             </article>
             <article>
               <span class="about-index">04 // MOBILE</span>
               <h3>手机横屏</h3>
-              <p>左侧摇杆移动，右侧滑动视角；左右双开火键支持两指操作，右侧开火时可继续拖动瞄准。屏幕按钮还支持瞄准、跳跃、拾取、换弹、切枪、治疗和暂停。</p>
+              <p>左侧摇杆移动，右侧滑动视角；左右双开火键支持两指操作，右侧开火时可继续拖动瞄准。手雷按钮显示数量，选中后按住开火键拖动瞄准、松手投掷；切枪可取消。屏幕按钮还支持瞄准、跳跃、拾取、换弹、治疗和暂停。</p>
               <small>建议使用最新版 Chrome 或 Edge，并允许全屏横屏以获得完整操作空间。</small>
             </article>
           </div>

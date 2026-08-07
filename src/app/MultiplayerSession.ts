@@ -3,6 +3,7 @@ import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { AssetCatalog } from "../assets/AssetCatalog";
 import { AudioFeedback } from "../client/audio/AudioFeedback";
 import { CombatEffects } from "../client/render/CombatEffects";
+import { GrenadePresentation } from "../client/render/GrenadePresentation";
 import {
   applyActorVisualPose,
   createIslandScene,
@@ -13,7 +14,12 @@ import {
 import { GameHud } from "../client/ui/GameHud";
 import type { MobileFullscreenController } from "../client/ui/MobileFullscreenController";
 import { createMapLayout } from "../config/map";
+import { ITEMS } from "../config/items";
 import type { GameSettings } from "../config/settings";
+import {
+  createGrenadeThrowVelocity,
+  FRAG_GRENADE_ITEM_ID,
+} from "../config/throwables";
 import { WEAPONS } from "../config/weapons";
 import { HumanController } from "../controllers/HumanController";
 import { FixedStepClock } from "../game/FixedStepClock";
@@ -27,6 +33,8 @@ import {
   type Vector3State,
 } from "../game/state/types";
 import { MAX_GLIDE_SPEED, MovementSystem, PARACHUTE_DESCENT_SPEED } from "../game/systems/MovementSystem";
+import { SimulationCombatWorld } from "../game/systems/SimulationCombatWorld";
+import { sampleGrenadeTrajectory } from "../game/systems/ThrowableSystem";
 import { MultiplayerConnection } from "../network/MultiplayerClient";
 import { resolveHumanConnectionNotice } from "../network/MultiplayerPresence";
 import {
@@ -77,8 +85,10 @@ export class MultiplayerSession implements GameSession {
   private readonly syncSafeZoneRing;
   private readonly humanController: HumanController;
   private readonly effects: CombatEffects;
+  private readonly grenadePresentation: GrenadePresentation;
   private readonly clock = new FixedStepClock();
   private readonly movement: MovementSystem;
+  private grenadePreviewWorld: SimulationCombatWorld;
   private readonly queuedMessages: ServerMessage[] = [];
   private readonly pendingInputs: PendingInput[] = [];
   private readonly localRecoil = new LocalRecoilPresentation();
@@ -132,11 +142,17 @@ export class MultiplayerSession implements GameSession {
     this.syncAircraftVisual = bundle.syncAircraftVisual;
     this.syncSafeZoneRing = bundle.syncSafeZoneRing;
     this.movement = new MovementSystem(createMapLayout(initial.state.mapId, initial.state.mapSeed));
+    this.grenadePreviewWorld = new SimulationCombatWorld(
+      this.state,
+      true,
+      createMapLayout(initial.state.mapId, initial.state.mapSeed),
+    );
     this.humanController = new HumanController(canvas, settings.sensitivity, {
       touchRoot: uiRoot,
       onLeaderboardScroll: (deltaY, deltaMode) => this.hud?.scrollLeaderboard(deltaY, deltaMode),
     });
     this.effects = new CombatEffects(this.scene);
+    this.grenadePresentation = new GrenadePresentation(this.scene);
     this.lastSnapshotSequence = initial.snapshotSequence;
     this.lastSnapshotTick = initial.tick;
     this.renderedServerTick = initial.tick;
@@ -259,6 +275,9 @@ export class MultiplayerSession implements GameSession {
       this.humanController.isLeaderboardVisible(),
       orientationBlocked,
       this.mobileFullscreen.needsAction(orientationBlocked),
+      this.humanController.isGrenadeSelected(),
+      this.humanController.isGrenadePreparing(),
+      this.humanController.getGrenadeThrowMode(),
     );
   }
 
@@ -273,6 +292,7 @@ export class MultiplayerSession implements GameSession {
     this.hud?.dispose();
     this.hud = null;
     this.effects.dispose();
+    this.grenadePresentation.dispose();
     this.scene.dispose();
     this.queuedMessages.length = 0;
     this.pendingInputs.length = 0;
@@ -303,6 +323,11 @@ export class MultiplayerSession implements GameSession {
   private applyFull(message: FullMessage): void {
     if (message.localActorId !== this.localActorId) return;
     this.state = message.state;
+    this.grenadePreviewWorld = new SimulationCombatWorld(
+      this.state,
+      true,
+      createMapLayout(this.state.mapId, this.state.mapSeed),
+    );
     this.displayNames = message.displayNames;
     const restoredPlayer = this.state.actors[this.localActorId];
     if (restoredPlayer?.alive && this.state.phase !== "finished") {
@@ -345,7 +370,7 @@ export class MultiplayerSession implements GameSession {
     for (const [actorId, actor] of Object.entries(this.state.actors)) {
       renderedPositions.set(actorId, this.visualPosition(actorId, actor.position));
     }
-    this.state = {
+    Object.assign(this.state, {
       ...this.state,
       phase: frame.phase,
       elapsedSeconds: frame.elapsedSeconds,
@@ -353,8 +378,9 @@ export class MultiplayerSession implements GameSession {
       safeZone: frame.safeZone,
       result: frame.result,
       actors: frame.actors,
+      activeGrenades: frame.activeGrenades,
       groundLoot: { ...this.state.groundLoot },
-    };
+    });
     for (const loot of frame.lootChanges) this.state.groundLoot[loot.id] = loot;
     this.visibleActorIds = new Set(frame.visibleActorIds);
     const player = this.state.actors[this.localActorId];
@@ -534,7 +560,9 @@ export class MultiplayerSession implements GameSession {
           const sourceLabel = event.sourceId
             ? this.displayNames[event.sourceId] ?? event.sourceId
             : "安全区";
-          const weaponLabel = event.weaponId ? WEAPONS[event.weaponId]?.label ?? event.weaponId : "武器";
+          const weaponLabel = event.weaponId
+            ? WEAPONS[event.weaponId]?.label ?? ITEMS[event.weaponId]?.label ?? event.weaponId
+            : "武器";
           this.hud?.showEliminated(
             placement,
             player.kills,
@@ -555,12 +583,15 @@ export class MultiplayerSession implements GameSession {
     const spectator = this.spectatorActorId ? this.state.actors[this.spectatorActorId] : undefined;
     const cameraActor = spectator ?? player;
     const activeViewWeapon = getActiveWeapon(cameraActor);
+    const grenadeSelected = cameraActor.id === this.localActorId && this.humanController.isGrenadeSelected();
     const scoped = cameraActor.id === this.localActorId && this.humanController.isScoped(player);
     const targetFov = scoped ? WEAPONS[activeViewWeapon?.weaponId ?? ""]?.scopeFov ?? 1.18 : 1.18;
     if (this.camera.fov !== targetFov) this.camera.fov = targetFov;
-    const viewWeaponEnabled = Boolean(activeViewWeapon) && !scoped && cameraActor.deployment === "grounded";
+    const viewWeaponEnabled = Boolean(activeViewWeapon || grenadeSelected) &&
+      !scoped &&
+      cameraActor.deployment === "grounded";
     if (this.viewWeaponRoot.isEnabled() !== viewWeaponEnabled) this.viewWeaponRoot.setEnabled(viewWeaponEnabled);
-    const viewWeaponId = activeViewWeapon?.weaponId ?? null;
+    const viewWeaponId = grenadeSelected ? FRAG_GRENADE_ITEM_ID : activeViewWeapon?.weaponId ?? null;
     if (this.lastViewWeaponId !== viewWeaponId) {
       setActorWeaponVisual(this.viewWeaponRoot, viewWeaponId);
       this.lastViewWeaponId = viewWeaponId;
@@ -590,7 +621,12 @@ export class MultiplayerSession implements GameSession {
     if (!this.camera.rotation.equalsToFloats(cameraPitch, cameraActor.yaw, 0)) {
       this.camera.rotation.set(cameraPitch, cameraActor.yaw, 0);
     }
-    this.syncViewWeaponVisual(activeViewWeapon, cameraPose.weaponY, cameraPose.weaponRotationX);
+    this.syncViewWeaponVisual(
+      activeViewWeapon,
+      cameraPose.weaponY,
+      cameraPose.weaponRotationX,
+      grenadeSelected,
+    );
     for (const [actorId, root] of this.actorRoots) {
       const actor = this.getActor(actorId);
       const position = this.visualPosition(actorId, actor.position);
@@ -626,6 +662,18 @@ export class MultiplayerSession implements GameSession {
       }
     }
     this.syncSafeZoneRing(this.state.safeZone.center.x, this.state.safeZone.center.z, this.state.safeZone.radius);
+    this.grenadePresentation.sync(this.state.activeGrenades, frameSeconds);
+    this.grenadePresentation.showTrajectory(this.localGrenadeTrajectory(player));
+  }
+
+  private localGrenadeTrajectory(player: ActorState): ReturnType<typeof sampleGrenadeTrajectory> | null {
+    if (!this.humanController.isGrenadePreparing() || player.deployment !== "grounded") return null;
+    const origin = { x: player.position.x, y: player.position.y - 0.3, z: player.position.z };
+    const velocity = createGrenadeThrowVelocity(
+      this.humanController.getAimDirection(),
+      this.humanController.getGrenadeThrowMode(),
+    );
+    return sampleGrenadeTrajectory(origin, velocity, this.grenadePreviewWorld);
   }
 
   private visualPosition(actorId: EntityId, fallback: Vector3State): Vector3State {
@@ -714,10 +762,11 @@ export class MultiplayerSession implements GameSession {
     weapon: ReturnType<typeof getActiveWeapon>,
     jumpY: number,
     jumpRotationX: number,
+    grenadeSelected = false,
   ): void {
     const reload = getReloadVisualTransform(weapon);
-    const y = (reload?.y ?? 0) + jumpY;
-    const rotationX = (reload?.rotationX ?? 0) + jumpRotationX;
+    const y = (reload?.y ?? 0) + jumpY + (grenadeSelected ? 0.03 : 0);
+    const rotationX = (reload?.rotationX ?? 0) + jumpRotationX + (grenadeSelected ? -0.08 : 0);
     const rotationZ = reload?.rotationZ ?? 0;
     if (!this.viewWeaponRoot.position.equalsToFloats(0, y, 0)) this.viewWeaponRoot.position.set(0, y, 0);
     if (!this.viewWeaponRoot.rotation.equalsToFloats(rotationX, 0, rotationZ)) {

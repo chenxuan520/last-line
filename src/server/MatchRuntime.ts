@@ -7,9 +7,22 @@ import { createIdleCommand, type ActorCommand } from "../game/commands/ActorComm
 import { GameSimulation } from "../game/GameSimulation";
 import { BattleRoyaleMode, createBattleRoyaleStateForHumans } from "../game/modes/BattleRoyaleMode";
 import { SIMULATION_STEP_SECONDS, SIMULATION_TICK_RATE } from "../game/simulationTiming";
-import type { ActorState, EntityId, GameEvent, GroundLootState, MatchState } from "../game/state/types";
+import type {
+  ActiveGrenadeState,
+  ActorState,
+  EntityId,
+  GameEvent,
+  GroundLootState,
+  MatchState,
+} from "../game/state/types";
 import { SimulationCombatWorld } from "../game/systems/SimulationCombatWorld";
-import type { MatchFrame, MultiplayerEvent, SequencedGameEvent } from "../network/protocol";
+import {
+  MAX_HUMAN_PLAYERS,
+  MIN_HUMAN_PLAYERS,
+  type MatchFrame,
+  type MultiplayerEvent,
+  type SequencedGameEvent,
+} from "../network/protocol";
 import { CommandInbox } from "./CommandInbox";
 import { LagCompensatedCombatWorld } from "./LagCompensatedCombatWorld";
 
@@ -18,7 +31,7 @@ const TAKEOVER_TICKS = SIMULATION_TICK_RATE * 5;
 const ACTOR_REPLICATION_RANGE = 400;
 const LOOT_REPLICATION_RANGE = 60;
 const AIRBORNE_LOOT_REPLICATION_RANGE = ACTOR_REPLICATION_RANGE;
-export const MATCH_CHECKPOINT_VERSION = 5;
+export const MATCH_CHECKPOINT_VERSION = 6;
 
 export interface MatchRuntimeOptions {
   humanActorIds: readonly EntityId[];
@@ -146,6 +159,7 @@ export class MatchRuntime {
   public step(): void {
     if (this.state.phase === "finished") return;
     const commands = new Map<EntityId, ActorCommand>();
+    const aiActorIds = new Set<EntityId>();
     const rewindTicks = new Map<EntityId, number>();
     let livingActorCount: number | undefined;
     const getLivingActorCount = (): number => {
@@ -167,6 +181,7 @@ export class MatchRuntime {
           );
           this.takeoverBots.set(actorId, controller);
         }
+        aiActorIds.add(actorId);
         commands.set(actorId, controller.update(
           actor,
           this.state,
@@ -185,6 +200,7 @@ export class MatchRuntime {
     for (const [actorId, controller] of this.bots) {
       const actor = this.state.actors[actorId];
       if (actor?.alive) {
+        aiActorIds.add(actorId);
         if (botIndex % BOT_COHORTS === this.tickValue % BOT_COHORTS) {
           const command = controller.update(
             actor,
@@ -204,7 +220,7 @@ export class MatchRuntime {
     }
     this.world.beginStep(this.tickValue, rewindTicks);
     try {
-      this.simulation.step(SIMULATION_STEP_SECONDS, commands, this.world);
+      this.simulation.step(SIMULATION_STEP_SECONDS, commands, this.world, aiActorIds);
     } finally {
       this.world.endStep();
     }
@@ -233,6 +249,7 @@ export class MatchRuntime {
       result: this.state.result,
       actors: this.state.actors,
       visibleActorIds: Object.keys(this.state.actors),
+      activeGrenades: this.state.activeGrenades,
       lootChanges: [...this.dirtyLootIds].flatMap((id) => {
         const loot = this.state.groundLoot[id];
         return loot ? [loot] : [];
@@ -265,6 +282,9 @@ export class MatchRuntime {
         visibleActorIds.has(actor.id) ? actor : redactActor(actor),
       ])),
       groundLoot: Object.fromEntries(this.visibleLoot(viewer).map((loot) => [loot.id, loot])),
+      activeGrenades: Object.fromEntries(
+        this.visibleGrenades(viewer).map((grenade) => [grenade.id, grenade]),
+      ),
     };
   }
 
@@ -294,6 +314,9 @@ export class MatchRuntime {
           visibleActorIds.has(actor.id) ? actor : redactActor(actor),
         ])),
         visibleActorIds: [...visibleActorIds],
+        activeGrenades: Object.fromEntries(
+          this.visibleGrenades(viewer).map((grenade) => [grenade.id, grenade]),
+        ),
         lootChanges: [...new Map(
           [...newlyVisibleLoot, ...dirtyVisibleLoot, ...hiddenLoot].map((loot) => [loot.id, loot]),
         ).values()],
@@ -345,15 +368,248 @@ export class MatchRuntime {
       ) <= replicationRange
     );
   }
+
+  private visibleGrenades(viewer: ActorState): ActiveGrenadeState[] {
+    return Object.values(this.state.activeGrenades).filter((grenade) =>
+      Math.hypot(
+        grenade.position.x - viewer.position.x,
+        grenade.position.z - viewer.position.z,
+      ) <= ACTOR_REPLICATION_RANGE
+    );
+  }
 }
 
-export function isMatchCheckpointCompatible(checkpoint: MatchCheckpoint | null | undefined): checkpoint is MatchCheckpoint {
-  return checkpoint?.version === MATCH_CHECKPOINT_VERSION;
+export function isMatchCheckpointCompatible(
+  checkpoint: unknown,
+  humanActorIds?: readonly EntityId[],
+): checkpoint is MatchCheckpoint {
+  if (
+    !isRecord(checkpoint) ||
+    checkpoint.version !== MATCH_CHECKPOINT_VERSION ||
+    !isNonNegativeSafeInteger(checkpoint.tick) ||
+    !isNonNegativeSafeInteger(checkpoint.snapshotSequence) ||
+    !isNonNegativeSafeInteger(checkpoint.eventSequence) ||
+    !isRecord(checkpoint.state) ||
+    !isCompleteMatchState(checkpoint.state, humanActorIds)
+  ) return false;
+  return true;
+}
+
+function isCompleteMatchState(
+  state: Record<string, unknown>,
+  humanActorIds?: readonly EntityId[],
+): boolean {
+  if (
+    !["flight", "combat", "finished"].includes(String(state.phase)) ||
+    !isNonNegativeFiniteNumber(state.elapsedSeconds) ||
+    (state.mapId !== "island" && state.mapId !== "town") ||
+    !isUint32(state.mapSeed) ||
+    !isRecord(state.actors) ||
+    Object.keys(state.actors).length !== BATTLE_ROYALE_CONFIG.participantCount ||
+    !isRecord(state.groundLoot) ||
+    !isRecord(state.activeGrenades) ||
+    !isPositiveSafeInteger(state.nextGrenadeSequence) ||
+    !isSafeZoneState(state.safeZone) ||
+    !isFlightState(state.flight) ||
+    !isMatchResult(state.result) ||
+    (state.phase === "finished") !== (state.result !== null)
+  ) return false;
+
+  const playerActorIds: EntityId[] = [];
+  for (const [actorId, actor] of Object.entries(state.actors)) {
+    if (!isActorState(actor, actorId)) return false;
+    if (actor.kind === "player") playerActorIds.push(actorId);
+  }
+  if (humanActorIds !== undefined) {
+    const uniqueHumanActorIds = new Set(humanActorIds);
+    if (
+      humanActorIds.length < MIN_HUMAN_PLAYERS ||
+      humanActorIds.length > MAX_HUMAN_PLAYERS ||
+      uniqueHumanActorIds.size !== humanActorIds.length ||
+      playerActorIds.length !== humanActorIds.length ||
+      playerActorIds.some((actorId) => !uniqueHumanActorIds.has(actorId))
+    ) return false;
+  }
+
+  for (const [lootId, loot] of Object.entries(state.groundLoot)) {
+    if (!isGroundLootState(loot, lootId)) return false;
+  }
+
+  let maximumGrenadeSequence = 0;
+  for (const [grenadeId, value] of Object.entries(state.activeGrenades)) {
+    const sequenceMatch = /^grenade-(\d+)$/.exec(grenadeId);
+    const sequence = Number(sequenceMatch?.[1]);
+    if (
+      !isRecord(value) ||
+      value.id !== grenadeId ||
+      typeof value.ownerId !== "string" ||
+      value.ownerId.length === 0 ||
+      !(value.ownerId in state.actors) ||
+      typeof value.aiControlled !== "boolean" ||
+      !Number.isSafeInteger(sequence) ||
+      sequence < 1 ||
+      !isFiniteVector(value.position) ||
+      !isFiniteVector(value.velocity) ||
+      typeof value.fuseSeconds !== "number" ||
+      !Number.isFinite(value.fuseSeconds) ||
+      value.fuseSeconds <= 0
+    ) return false;
+    maximumGrenadeSequence = Math.max(maximumGrenadeSequence, sequence);
+  }
+  return (state.nextGrenadeSequence as number) > maximumGrenadeSequence;
 }
 
 function normalizeMatchState(state: MatchState): MatchState {
   state.mapId = normalizeMapId(state.mapId);
   return state;
+}
+
+function isFiniteVector(value: unknown): boolean {
+  return isRecord(value) &&
+    typeof value.x === "number" && Number.isFinite(value.x) &&
+    typeof value.y === "number" && Number.isFinite(value.y) &&
+    typeof value.z === "number" && Number.isFinite(value.z);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isActorState(value: unknown, actorId: EntityId): value is ActorState {
+  if (
+    !isRecord(value) ||
+    value.id !== actorId ||
+    (value.kind !== "player" && value.kind !== "bot") ||
+    !isFiniteVector(value.position) ||
+    !isFiniteVector(value.velocity) ||
+    !isFiniteNumber(value.yaw) ||
+    !isFiniteNumber(value.pitch) ||
+    !isNonNegativeFiniteNumber(value.health) ||
+    !isPositiveFiniteNumber(value.maxHealth) ||
+    value.health > value.maxHealth ||
+    !isNonNegativeFiniteNumber(value.armor) ||
+    !isNonNegativeFiniteNumber(value.maxArmor) ||
+    value.armor > value.maxArmor ||
+    typeof value.alive !== "boolean" ||
+    !["aircraft", "parachuting", "grounded"].includes(String(value.deployment)) ||
+    !isInventoryState(value.inventory) ||
+    !isNonNegativeSafeInteger(value.kills) ||
+    !(value.lastDamageDirection === null || isFiniteVector(value.lastDamageDirection)) ||
+    !isFiniteNumber(value.lastDamageElapsedSeconds)
+  ) return false;
+  return true;
+}
+
+function isInventoryState(value: unknown): boolean {
+  if (
+    !isRecord(value) ||
+    !Array.isArray(value.weaponSlots) ||
+    value.weaponSlots.length !== 2 ||
+    (value.activeWeaponSlot !== 0 && value.activeWeaponSlot !== 1) ||
+    !Array.isArray(value.backpack) ||
+    !isNonNegativeSafeInteger(value.maxBackpackStacks) ||
+    value.backpack.length > value.maxBackpackStacks ||
+    ![0, 1, 2].includes(Number(value.armorLevel)) ||
+    ![0, 1, 2].includes(Number(value.helmetLevel)) ||
+    !(value.usingItem === null || isItemUseState(value.usingItem))
+  ) return false;
+  return value.weaponSlots.every((weapon) => weapon === null || isWeaponState(weapon)) &&
+    value.backpack.every(isItemStackState);
+}
+
+function isWeaponState(value: unknown): boolean {
+  return isRecord(value) &&
+    typeof value.weaponId === "string" &&
+    WEAPONS[value.weaponId] !== undefined &&
+    isNonNegativeSafeInteger(value.ammoInMagazine) &&
+    isFiniteNumber(value.cooldownSeconds) &&
+    isNonNegativeFiniteNumber(value.reloadSeconds);
+}
+
+function isItemStackState(value: unknown): boolean {
+  return isRecord(value) &&
+    typeof value.itemId === "string" &&
+    value.itemId.length > 0 &&
+    isPositiveSafeInteger(value.quantity);
+}
+
+function isItemUseState(value: unknown): boolean {
+  return isRecord(value) &&
+    typeof value.itemId === "string" &&
+    value.itemId.length > 0 &&
+    isNonNegativeFiniteNumber(value.remainingSeconds);
+}
+
+function isGroundLootState(value: unknown, lootId: EntityId): boolean {
+  return isRecord(value) &&
+    value.id === lootId &&
+    (value.generation === undefined || isNonNegativeSafeInteger(value.generation)) &&
+    typeof value.itemId === "string" &&
+    value.itemId.length > 0 &&
+    isNonNegativeSafeInteger(value.quantity) &&
+    (value.weapon === undefined || isWeaponState(value.weapon)) &&
+    isFiniteVector(value.position) &&
+    typeof value.available === "boolean" &&
+    (value.source === undefined || ["spawn", "drop", "death"].includes(String(value.source)));
+}
+
+function isSafeZoneState(value: unknown): boolean {
+  return isRecord(value) &&
+    isFiniteVector(value.center) &&
+    isNonNegativeFiniteNumber(value.radius) &&
+    isFiniteVector(value.startCenter) &&
+    isNonNegativeFiniteNumber(value.startRadius) &&
+    isFiniteVector(value.targetCenter) &&
+    isNonNegativeFiniteNumber(value.targetRadius) &&
+    isNonNegativeSafeInteger(value.stageIndex) &&
+    value.stageIndex < BATTLE_ROYALE_CONFIG.safeZoneStages.length &&
+    ["waiting", "shrinking", "closed"].includes(String(value.status)) &&
+    isNonNegativeFiniteNumber(value.secondsRemaining) &&
+    isNonNegativeFiniteNumber(value.damagePerSecond);
+}
+
+function isFlightState(value: unknown): boolean {
+  return isRecord(value) &&
+    isFiniteVector(value.start) &&
+    isFiniteVector(value.end) &&
+    isNonNegativeFiniteNumber(value.durationSeconds) &&
+    isNonNegativeFiniteNumber(value.progress) &&
+    value.progress <= 1;
+}
+
+function isMatchResult(value: unknown): boolean {
+  return value === null || (
+    isRecord(value) &&
+    (value.winnerId === null || typeof value.winnerId === "string") &&
+    (value.reason === "last-alive" || value.reason === "player-eliminated")
+  );
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isNonNegativeFiniteNumber(value: unknown): value is number {
+  return isFiniteNumber(value) && value >= 0;
+}
+
+function isPositiveFiniteNumber(value: unknown): value is number {
+  return isFiniteNumber(value) && value > 0;
+}
+
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isPositiveSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function isUint32(value: unknown): value is number {
+  return typeof value === "number" &&
+    Number.isSafeInteger(value) &&
+    value >= 0 &&
+    value <= 0xffff_ffff;
 }
 
 function redactActor(actor: ActorState): ActorState {
@@ -404,6 +660,13 @@ function eventVisibleTo(
       event.end.z - viewer.position.z,
     ) <= ACTOR_REPLICATION_RANGE;
   }
+  if (event.type === "grenade-thrown" || event.type === "grenade-exploded") {
+    return Math.hypot(
+      event.position.x - viewer.position.x,
+      event.position.y - viewer.position.y,
+      event.position.z - viewer.position.z,
+    ) <= ACTOR_REPLICATION_RANGE;
+  }
   if ("actorId" in event) {
     const actor = actors[event.actorId];
     return Boolean(actor && Math.hypot(actor.position.x - viewer.position.x, actor.position.z - viewer.position.z) <= 60);
@@ -423,6 +686,7 @@ function continuousCommand(command: ActorCommand): ActorCommand {
     switchWeapon: null,
     useItem: null,
     dropItem: null,
+    throwGrenade: null,
   };
 }
 
