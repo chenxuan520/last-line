@@ -106,6 +106,47 @@ describe("asset manifest", () => {
     }
   });
 
+  it("declares the grenade equipment icon", () => {
+    expect(productionManifest.assets).toContainEqual({
+      id: "ui.item.grenade",
+      type: "image",
+      url: "./assets/ui/item-grenade.webp",
+      fallback: "fallback.ui",
+    });
+  });
+
+  it("declares the smoke grenade equipment icon", () => {
+    expect(productionManifest.assets).toContainEqual({
+      id: "ui.item.smoke-grenade",
+      type: "image",
+      url: "./assets/ui/item-smoke-grenade.webp",
+      fallback: "fallback.ui",
+    });
+  });
+
+  it("declares the urban material textures", () => {
+    expect(productionManifest.assets).toEqual(expect.arrayContaining([
+      {
+        id: "texture.road.asphalt",
+        type: "image",
+        url: "./assets/textures/asphalt.webp",
+        fallback: "fallback.ui",
+      },
+      {
+        id: "texture.building.concrete",
+        type: "image",
+        url: "./assets/textures/concrete.webp",
+        fallback: "fallback.ui",
+      },
+      {
+        id: "texture.industrial.metal",
+        type: "image",
+        url: "./assets/textures/metal.webp",
+        fallback: "fallback.ui",
+      },
+    ]));
+  });
+
   it("preloads payloads and falls back after a network failure", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const fetchMock = vi.fn(async (input: string | URL | Request) => {

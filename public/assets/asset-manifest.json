@@ -114,6 +114,18 @@
       "fallback": "fallback.ui"
     },
     {
+      "id": "ui.item.grenade",
+      "type": "image",
+      "url": "./assets/ui/item-grenade.webp",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "ui.item.smoke-grenade",
+      "type": "image",
+      "url": "./assets/ui/item-smoke-grenade.webp",
+      "fallback": "fallback.ui"
+    },
+    {
       "id": "texture.terrain.grass",
       "type": "image",
       "url": "./assets/textures/grass.webp",
@@ -132,6 +144,12 @@
       "fallback": "fallback.ui"
     },
     {
+      "id": "texture.road.asphalt",
+      "type": "image",
+      "url": "./assets/textures/asphalt.webp",
+      "fallback": "fallback.ui"
+    },
+    {
       "id": "texture.building.roof",
       "type": "image",
       "url": "./assets/textures/roof.webp",
@@ -141,6 +159,18 @@
       "id": "texture.building.wall",
       "type": "image",
       "url": "./assets/textures/wall.webp",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "texture.building.concrete",
+      "type": "image",
+      "url": "./assets/textures/concrete.webp",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "texture.industrial.metal",
+      "type": "image",
+      "url": "./assets/textures/metal.webp",
       "fallback": "fallback.ui"
     },
     {
