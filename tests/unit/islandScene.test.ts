@@ -25,7 +25,7 @@ import {
 } from "../../src/client/render/scenes/IslandScene";
 import { createMapLayout, getTerrainHeight, HOSPITAL_WALL_COLOR, MAP_SIZE } from "../../src/config/map";
 import { mixedFootprintClearsRoads } from "../../src/config/mixedMap";
-import { createMixedMapBlueprint } from "../../src/config/mixedMap";
+import { createMixedMapBlueprint, MIXED_REGION_COUNT } from "../../src/config/mixedMap";
 import { QUALITY_PROFILES } from "../../src/config/settings";
 import {
   TOWN_POINT_HALF_DEPTH,
@@ -1195,7 +1195,7 @@ describe("IslandScene lifecycle", () => {
       const blueprint = createMixedMapBlueprint(seed);
       expect(selectTownPresentationRoads(layout)).toEqual(blueprint.urbanRoadSegments);
       expect(selectTownPresentationRoads(layout)).toEqual(layout.urbanRoadSegments);
-      expect(blueprint.roadSegments.slice(0, 7).every((road) =>
+      expect(blueprint.roadSegments.slice(0, MIXED_REGION_COUNT - 1).every((road) =>
         !blueprint.urbanRoadSegments.includes(road)
       )).toBe(true);
     }

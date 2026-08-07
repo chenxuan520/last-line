@@ -5,6 +5,7 @@ import {
   createMapLayout,
   getTerrainHeight,
   HOSPITAL_WALL_COLOR,
+  MAP_HALF_SIZE,
   MIXED_NATURAL_OBSTACLE_MAX_TERRAIN_DELTA,
   TOTAL_LOOT_POINTS,
 } from "../../src/config/map";
@@ -13,7 +14,10 @@ import {
   createMixedRegionSpecs,
   FIXED_MIXED_REGION_NAMES,
   MIXED_REGION_COUNT,
+  MIXED_TOWN_MINIMUM_OWNED_COVERAGE,
+  mixedRegionBuildingCoverage,
   mixedFootprintClearsRoads,
+  pointOwnedByMixedRegion,
   pointInMixedRegion,
 } from "../../src/config/mixedMap";
 import { createActorState, type MatchState } from "../../src/game/state/types";
@@ -34,6 +38,90 @@ describe("mixed map layout", () => {
       expect.objectContaining({ name: FIXED_MIXED_REGION_NAMES.rural, kind: "rural" }),
       expect.objectContaining({ name: FIXED_MIXED_REGION_NAMES.forest, kind: "forest" }),
     ]));
+  });
+
+  it("places enlarged regions in a compact seeded irregular cluster", () => {
+    const seedZero = createMixedRegionSpecs(0);
+    const seedOne = createMixedRegionSpecs(1);
+
+    expect(createMixedRegionSpecs(0)).toEqual(seedZero);
+    expect(seedOne.map(({ centerX, centerZ }) => [centerX, centerZ]))
+      .not.toEqual(seedZero.map(({ centerX, centerZ }) => [centerX, centerZ]));
+
+    for (const seed of [0, 1, 11, 16, 38, 42, 2026, 4820, 0xffff_ffff]) {
+      const regions = createMixedRegionSpecs(seed);
+      const uniqueX = new Set(regions.map((region) => region.centerX));
+      const uniqueZ = new Set(regions.map((region) => region.centerZ));
+      const xCoordinates = regions.map((region) => region.centerX);
+      const zCoordinates = regions.map((region) => region.centerZ);
+
+      expect(uniqueX.size, `${seed}:unique-x`).toBeGreaterThanOrEqual(5);
+      expect(uniqueZ.size, `${seed}:unique-z`).toBeGreaterThanOrEqual(5);
+      const xSpan = Math.max(...xCoordinates) - Math.min(...xCoordinates);
+      const zSpan = Math.max(...zCoordinates) - Math.min(...zCoordinates);
+      expect(xSpan, `${seed}:x-span`).toBeLessThanOrEqual(1_400);
+      expect(zSpan, `${seed}:z-span`).toBeLessThanOrEqual(1_400);
+      expect(xSpan * zSpan, `${seed}:bounding-area`).toBeLessThanOrEqual(1_450_000);
+
+      for (const region of regions) {
+        expect(region.width * region.depth, `${seed}:${region.id}:area`)
+          .toBeGreaterThan(640 * 880);
+        expect(Math.max(region.width, region.depth) / Math.min(region.width, region.depth), `${seed}:${region.id}:aspect`)
+          .toBeLessThanOrEqual(1.1);
+        expect(Math.abs(region.centerX) + region.width / 2, `${seed}:${region.id}:map-x`)
+          .toBeLessThanOrEqual(MAP_HALF_SIZE - 20);
+        expect(Math.abs(region.centerZ) + region.depth / 2, `${seed}:${region.id}:map-z`)
+          .toBeLessThanOrEqual(MAP_HALF_SIZE - 20);
+        const otherRegions = regions.filter((candidate) => candidate.id !== region.id);
+        const nearestCenter = Math.min(...otherRegions.map((candidate) =>
+          Math.hypot(candidate.centerX - region.centerX, candidate.centerZ - region.centerZ)
+        ));
+        const nearestEdge = Math.min(...otherRegions.map((candidate) =>
+          regionFootprintGap(region, candidate)
+        ));
+        expect(nearestCenter, `${seed}:${region.id}:center-spacing`).toBeGreaterThanOrEqual(620);
+        expect(nearestCenter, `${seed}:${region.id}:nearest-center`).toBeLessThanOrEqual(820);
+        expect(nearestEdge, `${seed}:${region.id}:nearest-edge`).toBeLessThanOrEqual(70);
+      }
+    }
+  });
+
+  it("connects random region edges with a short non-grid backbone", () => {
+    for (const seed of [0, 1, 11, 16, 38, 42, 2026, 12894, 0xffff_ffff]) {
+      const blueprint = createMixedMapBlueprint(seed);
+      const localRoadCount = blueprint.regions.reduce(
+        (total, region) => total + (region.kind === "town" ? 4 : region.kind === "rural" ? 1 : 0),
+        0,
+      );
+      expect(blueprint.roadSegments).toHaveLength(MIXED_REGION_COUNT - 1 + localRoadCount);
+
+      const connectors = blueprint.roadSegments.slice(0, MIXED_REGION_COUNT - 1);
+      const lengths = connectors.map(([startX, startZ, endX, endZ]) => {
+        expect(blueprint.regions.some((region) =>
+          pointInMixedRegion(region, startX, startZ)
+        ), `${seed}:start:${startX}:${startZ}`).toBe(true);
+        expect(blueprint.regions.some((region) =>
+          pointInMixedRegion(region, endX, endZ)
+        ), `${seed}:end:${endX}:${endZ}`).toBe(true);
+        return Math.hypot(endX - startX, endZ - startZ);
+      });
+
+      expect(connectors.some(([startX, startZ, endX, endZ]) =>
+        Math.abs(endX - startX) > 20 && Math.abs(endZ - startZ) > 20
+      ), `${seed}:diagonal`).toBe(true);
+      for (let leftIndex = 0; leftIndex < connectors.length; leftIndex += 1) {
+        for (let rightIndex = leftIndex + 1; rightIndex < connectors.length; rightIndex += 1) {
+          expect(
+            segmentsCross(connectors[leftIndex] as readonly [number, number, number, number],
+              connectors[rightIndex] as readonly [number, number, number, number]),
+            `${seed}:connector-cross:${leftIndex}:${rightIndex}`,
+          ).toBe(false);
+        }
+      }
+      expect(Math.max(...lengths), `${seed}:longest`).toBeLessThanOrEqual(820);
+      expect(lengths.reduce((total, length) => total + length, 0), `${seed}:total`)
+        .toBeLessThanOrEqual(3_900);
+    }
   });
 
   it("varies the three random region kinds and names across seeds", () => {
@@ -93,37 +181,43 @@ describe("mixed map layout", () => {
   });
 
   it("keeps each region structurally distinct and all authoritative footprints clear", () => {
-    for (const seed of [0, 1, 2, 3, 11, 16, 38, 42, 2026]) {
+    for (const seed of [0, 1, 2, 3, 11, 16, 38, 42, 256, 423, 2026]) {
       const blueprint = createMixedMapBlueprint(seed);
       const layout = createMapLayout("mixed", seed);
 
       expect(layout.lootSpawnPoints).toHaveLength(TOTAL_LOOT_POINTS);
       expect(layout.lootZoneCounts).toHaveLength(16);
       expect(layout.lootZoneCounts.reduce((total, count) => total + count, 0)).toBe(240);
+      expect(blueprint.landingZones).toHaveLength(16);
+      for (const point of blueprint.landingZones) {
+        const region = blueprint.regions.find((candidate) => candidate.id === point.regionId);
+        if (!region) throw new Error(`landing region missing: ${seed}:${point.name}`);
+        expect(pointOwnedByMixedRegion(
+          blueprint.regions,
+          region,
+          point.x,
+          point.z,
+        ), `${seed}:${point.name}:ownership`).toBe(true);
+      }
       for (const region of blueprint.regions) {
-        const buildings = layout.obstacles.filter((obstacle) =>
-          pointInMixedRegion(region, obstacle.center.x, obstacle.center.z)
-        );
-        const trees = layout.treeTrunks.filter((tree) =>
-          pointInMixedRegion(region, tree.center.x, tree.center.z)
-        );
-        const rocks = layout.rockObstacles.filter((rock) =>
-          pointInMixedRegion(region, rock.center.x, rock.center.z)
-        );
+        const buildings = layout.obstacles.filter((obstacle) => obstacle.regionId === region.id);
+        const trees = layout.treeTrunks.filter((tree) => tree.regionId === region.id);
+        const rocks = layout.rockObstacles.filter((rock) => rock.regionId === region.id);
         const hay = layout.coverObstacles.filter((cover) =>
-          cover.kind === "hay" && pointInMixedRegion(region, cover.center.x, cover.center.z)
+          cover.kind === "hay" && cover.regionId === region.id
         );
 
         expect(buildings).toHaveLength(region.kind === "town" ? 36 : region.kind === "rural" ? 9 : 2);
         if (region.kind === "town") {
-          const coverage = buildings.reduce(
-            (total, building) => total + building.width * building.depth,
-            0,
-          ) / (region.width * region.depth);
-          expect(coverage).toBeGreaterThanOrEqual(0.38);
-          expect(coverage).toBeLessThanOrEqual(0.41);
+          const coverage = mixedRegionBuildingCoverage(
+            blueprint.regions,
+            region,
+            blueprint.buildings.filter((building) => building.regionId === region.id),
+          );
+          expect(coverage).toBeGreaterThanOrEqual(MIXED_TOWN_MINIMUM_OWNED_COVERAGE);
+          expect(coverage).toBeLessThanOrEqual(0.55);
         }
-        expect(trees).toHaveLength(region.kind === "forest" ? 150 : region.kind === "rural" ? 36 : 12);
+        expect(trees).toHaveLength(region.kind === "forest" ? 180 : region.kind === "rural" ? 36 : 12);
         expect(rocks).toHaveLength(region.kind === "forest" ? 24 : region.kind === "rural" ? 10 : 4);
         if (region.kind === "rural") expect(hay).toHaveLength(30);
         if (region.kind === "forest") {
@@ -132,6 +226,20 @@ describe("mixed map layout", () => {
           expect(Math.max(...regionHills.map((hill) => hill.height))).toBeGreaterThanOrEqual(34);
           expect(trees.every((tree) => getTerrainHeight(tree.center.x, tree.center.z, layout) >= 3)).toBe(true);
           expect(rocks.every((rock) => getTerrainHeight(rock.center.x, rock.center.z, layout) >= 3)).toBe(true);
+        }
+        for (const hill of blueprint.terrainHills.filter((candidate) => candidate.regionId === region.id)) {
+          expect(Math.abs(hill.x) + hill.radius, `${seed}:${region.id}:hill-x`)
+            .toBeLessThanOrEqual(MAP_HALF_SIZE);
+          expect(Math.abs(hill.z) + hill.radius, `${seed}:${region.id}:hill-z`)
+            .toBeLessThanOrEqual(MAP_HALF_SIZE);
+        }
+        for (const obstacle of [...buildings, ...trees, ...rocks, ...hay]) {
+          expect(pointOwnedByMixedRegion(
+            blueprint.regions,
+            region,
+            obstacle.center.x,
+            obstacle.center.z,
+          ), `${seed}:${obstacle.id}:ownership`).toBe(true);
         }
         for (const obstacle of [...trees, ...rocks]) {
           const terrainRange = footprintTerrainRange(obstacle, layout);
@@ -272,7 +380,61 @@ describe("mixed map layout", () => {
       expect(new GridNavigator(layout).findPath(start, end).length, obstacle.id).toBeGreaterThan(2);
     }
   });
+
+  it("keeps compact positions deterministic across ten thousand seeds", () => {
+    const violations: string[] = [];
+    for (let seed = 0; seed < 10_000; seed += 1) {
+      const regions = createMixedRegionSpecs(seed);
+      const xCoordinates = regions.map((region) => region.centerX);
+      const zCoordinates = regions.map((region) => region.centerZ);
+      const xSpan = Math.max(...xCoordinates) - Math.min(...xCoordinates);
+      const zSpan = Math.max(...zCoordinates) - Math.min(...zCoordinates);
+      if (xSpan > 1_400 || zSpan > 1_400 || xSpan * zSpan > 1_450_000) {
+        violations.push(`${seed}:${xSpan.toFixed(3)}:${zSpan.toFixed(3)}`);
+      }
+    }
+    expect(violations).toEqual([]);
+  }, 900_000);
 });
+
+function regionFootprintGap(
+  left: ReturnType<typeof createMixedRegionSpecs>[number],
+  right: ReturnType<typeof createMixedRegionSpecs>[number],
+): number {
+  const gapX = Math.max(
+    0,
+    Math.abs(left.centerX - right.centerX) - (left.width + right.width) / 2,
+  );
+  const gapZ = Math.max(
+    0,
+    Math.abs(left.centerZ - right.centerZ) - (left.depth + right.depth) / 2,
+  );
+  return Math.hypot(gapX, gapZ);
+}
+
+function segmentsCross(
+  left: readonly [number, number, number, number],
+  right: readonly [number, number, number, number],
+): boolean {
+  const [leftStartX, leftStartZ, leftEndX, leftEndZ] = left;
+  const [rightStartX, rightStartZ, rightEndX, rightEndZ] = right;
+  const leftDeltaX = leftEndX - leftStartX;
+  const leftDeltaZ = leftEndZ - leftStartZ;
+  const rightDeltaX = rightEndX - rightStartX;
+  const rightDeltaZ = rightEndZ - rightStartZ;
+  const denominator = leftDeltaX * rightDeltaZ - leftDeltaZ * rightDeltaX;
+  if (Math.abs(denominator) < 1e-9) return false;
+  const offsetX = rightStartX - leftStartX;
+  const offsetZ = rightStartZ - leftStartZ;
+  const leftProgress = (offsetX * rightDeltaZ - offsetZ * rightDeltaX) / denominator;
+  const rightProgress = (offsetX * leftDeltaZ - offsetZ * leftDeltaX) / denominator;
+  return (
+    leftProgress > 1e-6 &&
+    leftProgress < 1 - 1e-6 &&
+    rightProgress > 1e-6 &&
+    rightProgress < 1 - 1e-6
+  );
+}
 
 function createMixedCombatState(
   mapSeed: number,

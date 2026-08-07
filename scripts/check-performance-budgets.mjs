@@ -5,14 +5,14 @@ const projectRoot = path.resolve(import.meta.dirname, "..");
 const distDirectory = path.join(projectRoot, "dist");
 
 const budgets = {
-  browserEntry: 1_090_000,
+  browserEntry: 1_100_000,
   browserLargestNonEntry: 650_000,
   browserJavaScript: 3_900_000,
   browserJavaScriptChunks: 260,
   browserCss: 45_000,
   browserDist: 4_450_000,
-  worker: 490_000,
-  standaloneServer: 510_000,
+  worker: 510_000,
+  standaloneServer: 530_000,
 };
 
 async function requireFile(filePath) {

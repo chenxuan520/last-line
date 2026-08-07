@@ -14,7 +14,13 @@ import {
   type QualityLevel,
 } from "../config/settings";
 import { supportsTouchInput } from "../controllers/HumanController";
-import { requestPointerLockSafely } from "../controllers/pointerLock";
+import {
+  type MultiplayerAdmissionAction,
+  multiplayerAdmissionRequestsPointerLock,
+  privateLobbyReleasesPointerLock,
+  releasePointerLockSafely,
+  requestDesktopPointerLockSafely,
+} from "../controllers/pointerLock";
 import {
   getDefaultMultiplayerApiUrl,
   MultiplayerAuthClient,
@@ -109,12 +115,18 @@ export class GameApp {
 
   private readonly startSinglePlayerFromUserGesture = (): void => {
     if (!this.assets || this.starting) return;
-    if (!supportsTouchInput() && document.pointerLockElement !== this.canvas) {
-      requestPointerLockSafely(this.canvas);
-    }
+    this.requestDesktopGameplayInputFromUserGesture();
     this.mobileFullscreen.activateFromUserGesture();
     void this.startMatch();
   };
+
+  private requestDesktopGameplayInputFromUserGesture(): void {
+    requestDesktopPointerLockSafely(
+      this.canvas,
+      supportsTouchInput(),
+      document.pointerLockElement,
+    );
+  }
 
   private renderLoading(progress: number, message = "正在加载资源"): void {
     this.uiRoot.className = "";
@@ -122,6 +134,7 @@ export class GameApp {
   }
 
   private renderMenu(): void {
+    releasePointerLockSafely(document, this.canvas);
     if (!this.assets) return;
     this.mobileFullscreen.deactivate();
     const multiplayerEnabled = getDefaultMultiplayerApiUrl() !== null;
@@ -299,6 +312,7 @@ export class GameApp {
   }
 
   private renderMultiplayerMenu(): void {
+    releasePointerLockSafely(document, this.canvas);
     this.mobileFullscreen.deactivate();
     const apiUrl = getDefaultMultiplayerApiUrl();
     const savedName = localStorage.getItem(MULTIPLAYER_NAME_KEY) ?? `幸存者-${Math.floor(Math.random() * 9_000 + 1_000)}`;
@@ -361,11 +375,16 @@ export class GameApp {
         accountDisplayName ? () => auth.ensureAccessToken() : null,
       );
     };
-    const run = async (action: (client: MultiplayerClient) => Promise<RoomAdmission>): Promise<void> => {
+    const run = async (
+      action: (client: MultiplayerClient) => Promise<RoomAdmission>,
+      admissionAction: MultiplayerAdmissionAction,
+    ): Promise<void> => {
       if (!ready) {
         if (status) status.textContent = "请先完成账号验证";
         return;
       }
+      const requestGameplayInput = multiplayerAdmissionRequestsPointerLock(admissionAction);
+      if (requestGameplayInput) this.requestDesktopGameplayInputFromUserGesture();
       this.mobileFullscreen.activateFromUserGesture();
       try {
         if (status) status.textContent = "正在建立联机身份…";
@@ -373,22 +392,23 @@ export class GameApp {
         const admission = await action(client);
         await this.enterLobby(client, admission);
       } catch (error) {
+        if (requestGameplayInput) releasePointerLockSafely(document, this.canvas);
         this.mobileFullscreen.deactivate();
         if (status) status.textContent = error instanceof Error ? error.message : "联机请求失败";
       }
     };
     this.uiRoot.querySelector<HTMLButtonElement>("[data-action='quick']")?.addEventListener("click", () => {
-      void run((client) => client.quickMatch());
+      void run((client) => client.quickMatch(), "quick");
     });
     this.uiRoot.querySelector<HTMLButtonElement>("[data-action='create-public']")?.addEventListener("click", () => {
-      void run((client) => client.createRoom("public"));
+      void run((client) => client.createRoom("public"), "create-public");
     });
     this.uiRoot.querySelector<HTMLButtonElement>("[data-action='create-private']")?.addEventListener("click", () => {
-      void run((client) => client.createRoom("private"));
+      void run((client) => client.createRoom("private"), "create-private");
     });
     this.uiRoot.querySelector<HTMLButtonElement>("[data-action='join']")?.addEventListener("click", () => {
       const code = this.uiRoot.querySelector<HTMLInputElement>("[data-multiplayer='code']")?.value ?? "";
-      void run((client) => client.joinRoom(code));
+      void run((client) => client.joinRoom(code), "join");
     });
     const completeAccount = async (account: { username: string; displayName: string }): Promise<void> => {
       if (!panel?.isConnected) return;
@@ -496,12 +516,14 @@ export class GameApp {
         count.textContent = `${room.playerCount}/${room.capacity}`;
         button.append(label, count);
         button.addEventListener("click", async () => {
+          this.requestDesktopGameplayInputFromUserGesture();
           this.mobileFullscreen.activateFromUserGesture();
           try {
             if (status) status.textContent = "正在加入房间…";
             const admission = await client.joinRoom(room.code);
             await this.enterLobby(client, admission);
           } catch (error) {
+            releasePointerLockSafely(document, this.canvas);
             this.mobileFullscreen.deactivate();
             if (status) status.textContent = error instanceof Error ? error.message : "加入失败";
           }
@@ -519,7 +541,10 @@ export class GameApp {
     this.multiplayerConnection = connection;
     this.renderLobbyShell(admission.code);
     connection.setStatusHandler((connectionStatus) => {
-      if (connectionStatus === "closed") this.mobileFullscreen.deactivate();
+      if (connectionStatus === "closed") {
+        releasePointerLockSafely(document, this.canvas);
+        this.mobileFullscreen.deactivate();
+      }
       const status = this.uiRoot.querySelector<HTMLElement>("[data-lobby='status']");
       if (status) status.textContent = connectionStatus === "connected"
         ? "已连接"
@@ -537,13 +562,17 @@ export class GameApp {
           || message.code === "account-disabled"
           || message.code === "room-closed";
         if (terminal) {
+          releasePointerLockSafely(document, this.canvas);
           this.mobileFullscreen.deactivate();
           connection.close();
           if (this.multiplayerConnection === connection) this.multiplayerConnection = null;
         }
         const status = this.uiRoot.querySelector<HTMLElement>("[data-lobby='status']");
         if (status) status.textContent = message.message;
-        if (message.code === "cannot-start") this.mobileFullscreen.deactivate();
+        if (message.code === "cannot-start") {
+          releasePointerLockSafely(document, this.canvas);
+          this.mobileFullscreen.deactivate();
+        }
         if (terminal) {
           const actions = this.uiRoot.querySelector<HTMLElement>("[data-lobby='actions']");
           actions?.replaceChildren(this.actionButton("返回联机大厅", "BACK", () => {
@@ -574,6 +603,9 @@ export class GameApp {
     const summary = this.uiRoot.querySelector<HTMLElement>("[data-lobby='summary']");
     if (!summary) return;
     const local = lobby.members.find((member) => member.playerId === client.playerId);
+    if (local && privateLobbyReleasesPointerLock(lobby.visibility, local.host, local.ready)) {
+      releasePointerLockSafely(document, this.canvas);
+    }
     summary.textContent = lobby.status === "countdown"
       ? `${MAP_DISPLAY_NAMES[lobby.mapId]} · 部署倒计时已启动`
       : `${MAP_DISPLAY_NAMES[lobby.mapId]} · ${lobby.visibility === "private" ? "私人" : "公开"}房间 · ${lobby.members.length}/${lobby.maximumPlayers} 真人 · AI 将补满 50 人`;
@@ -593,16 +625,19 @@ export class GameApp {
     actions.replaceChildren();
     if (lobby.visibility === "private" && local && !local.host) {
       actions.append(this.actionButton(local.ready ? "取消准备" : "准备", "READY", () => {
+        if (!local.ready) this.requestDesktopGameplayInputFromUserGesture();
         connection.send({ type: "lobby.ready", ready: !local.ready });
       }));
     }
     if (lobby.visibility === "private" && local?.host) {
       actions.append(this.actionButton("开始对局", "DEPLOY", () => {
+        this.requestDesktopGameplayInputFromUserGesture();
         this.mobileFullscreen.activateFromUserGesture();
         connection.send({ type: "lobby.start" });
       }));
     }
     actions.append(this.actionButton("退出房间", "LEAVE", () => {
+      releasePointerLockSafely(document, this.canvas);
       this.mobileFullscreen.deactivate();
       connection.send({ type: "lobby.leave" });
       connection.close();
@@ -654,6 +689,7 @@ export class GameApp {
       this.multiplayerConnection = null;
       session.start();
     } catch (error) {
+      releasePointerLockSafely(document, this.canvas);
       connection.close();
       this.mobileFullscreen.deactivate();
       this.renderError(error);
@@ -663,6 +699,7 @@ export class GameApp {
   }
 
   private returnToMenu(terminalMessage?: string, multiplayerMenu = false): void {
+    releasePointerLockSafely(document, this.canvas);
     this.mobileFullscreen.deactivate();
     this.session?.dispose();
     this.session = null;

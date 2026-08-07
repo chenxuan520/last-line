@@ -5,7 +5,7 @@ import { DEFAULT_MAP_ID, mapDisplayName, type MapId } from "./maps";
 import {
   createMixedMapBlueprint,
   mixedFootprintClearsRoads,
-  pointInMixedRegion,
+  pointOwnedByMixedRegion,
   type MixedMapBlueprint,
   type MixedRegionSpec,
 } from "./mixedMap";
@@ -20,6 +20,7 @@ import {
 
 export interface MapObstacle {
   id: string;
+  regionId?: string;
   center: Vector3State;
   width: number;
   height: number;
@@ -202,6 +203,8 @@ const MINIMUM_BUILDING_DISTANCE_FROM_POI = 58;
 const MAJOR_POINT_MINIMUM_DISTANCE = 420;
 const LANDING_ZONE_MINIMUM_DISTANCE = 300;
 const POINT_MAP_MARGIN = 210;
+const MIXED_OUTDOOR_LOOT_BUILDING_CLEARANCE = 8;
+const MIXED_OUTDOOR_LOOT_OBSTACLE_CLEARANCE = 14;
 const MOUNTAIN_COUNT = 16;
 const COVERAGE_COMPOUND_COUNT = 20;
 const COVER_ROCK_COUNT = 64;
@@ -546,6 +549,7 @@ function createMixedMapLayout(seed: number): MapLayout {
     const height = round(building.storyHeight * storyCount);
     const base: MapBuilding = {
       id: building.id,
+      regionId: building.regionId,
       center: { x: building.x, y: round(baseY + height / 2), z: building.z },
       width: building.width,
       height,
@@ -691,12 +695,14 @@ function createMixedRockObstacles(
       const baseY = (terrainRange.minimum + terrainRange.maximum) / 2;
       const candidate: MapRockObstacle = {
         id: `mixed-rock-${rocks.length}`,
+        regionId: region.id,
         center: { x, y: round(baseY + height / 2), z },
         width,
         height,
         depth,
         color: "#676a62",
       };
+      if (!pointOwnedByMixedRegion(blueprint.regions, region, x, z)) continue;
       if (terrainRange.maximum - terrainRange.minimum > MIXED_NATURAL_OBSTACLE_MAX_TERRAIN_DELTA) continue;
       if (region.kind === "forest" && terrainRange.minimum < 3) continue;
       if (!mixedPlacementIsClear(candidate, blueprint, buildings, roofRamps, rocks, [], 3)) continue;
@@ -731,6 +737,7 @@ function createMixedCoverObstacles(
       const height = kind === "hay" ? round(randomBetween(random, 2.2, 3.6)) : 2.1;
       const candidate: MapCoverObstacle = {
         id: `mixed-cover-${covers.length}`,
+        regionId: region.id,
         kind,
         center: { x, y: round(terrainHeightFromHills(x, z, terrainHills) + height / 2), z },
         width,
@@ -738,6 +745,7 @@ function createMixedCoverObstacles(
         depth,
         color: kind === "hay" ? "#a58b4f" : "#5a5348",
       };
+      if (!pointOwnedByMixedRegion(blueprint.regions, region, x, z)) continue;
       if (!mixedPlacementIsClear(candidate, blueprint, buildings, roofRamps, rocks, covers, 2.5)) continue;
       covers.push(candidate);
     }
@@ -760,7 +768,7 @@ function createMixedTreeTrunks(
 ): MapTreeTrunk[] {
   const trees: MapTreeTrunk[] = [];
   for (const [regionIndex, region] of blueprint.regions.entries()) {
-    const targetCount = region.kind === "forest" ? 150 : region.kind === "rural" ? 36 : 12;
+    const targetCount = region.kind === "forest" ? 180 : region.kind === "rural" ? 36 : 12;
     const minimumSpacing = region.kind === "forest" ? 10 : 17;
     const random = createSeededRandom(seed ^ Math.imul(regionIndex + 1, 0x68bc21eb));
     for (let attempt = 0; attempt < 80_000 && countRegionObstacles(trees, region) < targetCount; attempt += 1) {
@@ -772,6 +780,7 @@ function createMixedTreeTrunks(
       const baseY = (terrainRange.minimum + terrainRange.maximum) / 2;
       const candidate: MapTreeTrunk = {
         id: `mixed-tree-${trees.length}`,
+        regionId: region.id,
         kind: "tree-trunk",
         center: { x, y: round(baseY + height / 2), z },
         width,
@@ -779,6 +788,7 @@ function createMixedTreeTrunks(
         depth: width,
         color: "#594b38",
       };
+      if (!pointOwnedByMixedRegion(blueprint.regions, region, x, z)) continue;
       if (terrainRange.maximum - terrainRange.minimum > MIXED_NATURAL_OBSTACLE_MAX_TERRAIN_DELTA) continue;
       if (region.kind === "forest" && terrainRange.minimum < 3) continue;
       if (!mixedPlacementIsClear(candidate, blueprint, buildings, roofRamps, rocks, [...covers, ...trees], minimumSpacing)) {
@@ -820,7 +830,7 @@ function createMixedLootSpawnPoints(
     if (!region) throw new Error(`Mixed map loot region missing for zone ${zoneIndex}`);
     const targetCount = counts[zoneIndex] ?? 0;
     const regionBuildings = buildings
-      .filter((building) => pointInMixedRegion(region, building.center.x, building.center.z))
+      .filter((building) => building.regionId === region.id)
       .sort((left, right) =>
         distanceSquared2d(left.center.x, left.center.z, zone.position.x, zone.position.z) -
           distanceSquared2d(right.center.x, right.center.z, zone.position.x, zone.position.z) ||
@@ -833,18 +843,37 @@ function createMixedLootSpawnPoints(
       buildingUseCounts,
       zoneIndex,
     );
-    if (!indoorSelection) throw new Error(`Mixed map indoor loot spacing failed: ${region.name}`);
+    if (!indoorSelection) {
+      throw new Error(
+        `Mixed map indoor loot spacing failed: ${region.name} zone=${zoneIndex} buildings=${regionBuildings.length} selected=${selected.length}`,
+      );
+    }
     const { building: indoorBuilding, point: indoorPoint, useCount: buildingUseCount } = indoorSelection;
     selected.push(indoorPoint);
     buildingUseCounts.set(indoorBuilding.id, buildingUseCount + 1);
     for (let slot = 1, attempt = 0; slot < targetCount && attempt < 80_000; attempt += 1) {
-      const x = round(randomBetween(random, region.centerX - region.width / 2 + 20, region.centerX + region.width / 2 - 20));
-      const z = round(randomBetween(random, region.centerZ - region.depth / 2 + 20, region.centerZ + region.depth / 2 - 20));
+      const angle = random() * Math.PI * 2;
+      const radius = Math.sqrt(randomBetween(random, 30 ** 2, 175 ** 2));
+      const x = round(zone.position.x + Math.cos(angle) * radius);
+      const z = round(zone.position.z + Math.sin(angle) * radius);
       const point = {
         x,
         y: round(terrainHeightFromHills(x, z, terrainHills) + GROUND_LOOT_POSITION_HEIGHT),
         z,
       };
+      if (!pointOwnedByMixedRegion(blueprint.regions, region, x, z)) continue;
+      if (buildings.some((building) =>
+        pointInsideObstacle(point, building, MIXED_OUTDOOR_LOOT_BUILDING_CLEARANCE)
+      )) continue;
+      if ([...rocks, ...covers, ...trees].some((obstacle) =>
+        pointInsideObstacle(point, obstacle, MIXED_OUTDOOR_LOOT_OBSTACLE_CLEARANCE)
+      )) continue;
+      if (!mixedLootCorridorIsClear(
+        zone.position,
+        point,
+        [...buildings, ...rocks, ...covers, ...trees],
+        roofRamps,
+      )) continue;
       if (!isClearLootPoint(
         point,
         wallSegments,
@@ -862,6 +891,84 @@ function createMixedLootSpawnPoints(
     }
   }
   return selected;
+}
+
+function mixedLootCorridorIsClear(
+  start: Vector3State,
+  end: Vector3State,
+  obstacles: readonly MapObstacle[],
+  roofRamps: readonly RoofRamp[],
+): boolean {
+  return (
+    obstacles.every((obstacle) =>
+      !segmentIntersectsObstacleFootprint(start, end, obstacle, 1.5)
+    ) &&
+    roofRamps.every((ramp) =>
+      !segmentIntersectsRectangleFootprint(
+        start.x,
+        start.z,
+        end.x,
+        end.z,
+        ramp.centerX,
+        (ramp.startZ + ramp.endZ) / 2,
+        ramp.width + 3,
+        Math.abs(ramp.endZ - ramp.startZ) + 3,
+      )
+    )
+  );
+}
+
+function segmentIntersectsObstacleFootprint(
+  start: Vector3State,
+  end: Vector3State,
+  obstacle: MapObstacle,
+  clearance: number,
+): boolean {
+  return segmentIntersectsRectangleFootprint(
+    start.x,
+    start.z,
+    end.x,
+    end.z,
+    obstacle.center.x,
+    obstacle.center.z,
+    obstacle.width + clearance * 2,
+    obstacle.depth + clearance * 2,
+  );
+}
+
+function segmentIntersectsRectangleFootprint(
+  startX: number,
+  startZ: number,
+  endX: number,
+  endZ: number,
+  centerX: number,
+  centerZ: number,
+  width: number,
+  depth: number,
+): boolean {
+  const minimumX = centerX - width / 2;
+  const maximumX = centerX + width / 2;
+  const minimumZ = centerZ - depth / 2;
+  const maximumZ = centerZ + depth / 2;
+  const deltaX = endX - startX;
+  const deltaZ = endZ - startZ;
+  let minimumProgress = 0;
+  let maximumProgress = 1;
+  for (const [start, delta, minimum, maximum] of [
+    [startX, deltaX, minimumX, maximumX],
+    [startZ, deltaZ, minimumZ, maximumZ],
+  ] as const) {
+    if (Math.abs(delta) < 1e-9) {
+      if (start < minimum || start > maximum) return false;
+      continue;
+    }
+    const first = (minimum - start) / delta;
+    const second = (maximum - start) / delta;
+    minimumProgress = Math.max(minimumProgress, Math.min(first, second));
+    maximumProgress = Math.min(maximumProgress, Math.max(first, second));
+    if (minimumProgress > maximumProgress) return false;
+  }
+  return true;
 }
 
 function selectMixedIndoorLootPoint(
@@ -981,9 +1088,7 @@ function countRegionObstacles(
   obstacles: readonly MapObstacle[],
   region: MixedRegionSpec,
 ): number {
-  return obstacles.filter((obstacle) =>
-    pointInMixedRegion(region, obstacle.center.x, obstacle.center.z)
-  ).length;
+  return obstacles.filter((obstacle) => obstacle.regionId === region.id).length;
 }
 
 function terrainFootprintRange(
