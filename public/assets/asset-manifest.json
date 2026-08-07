@@ -78,6 +78,12 @@
       "fallback": "fallback.ui"
     },
     {
+      "id": "ui.item.ammo-depot",
+      "type": "image",
+      "url": "./assets/ui/item-ammo-depot.webp",
+      "fallback": "fallback.ui"
+    },
+    {
       "id": "ui.item.armor.1",
       "type": "image",
       "url": "./assets/ui/item-armor-1.webp",
@@ -177,6 +183,12 @@
       "id": "decal.poi.harbor",
       "type": "image",
       "url": "./assets/decals/poi-harbor.webp",
+      "fallback": "fallback.ui"
+    },
+    {
+      "id": "decal.poi.ammo-depot",
+      "type": "image",
+      "url": "./assets/decals/poi-ammo-depot.webp",
       "fallback": "fallback.ui"
     },
     {
