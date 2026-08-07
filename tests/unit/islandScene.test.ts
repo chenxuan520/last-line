@@ -438,6 +438,12 @@ describe("IslandScene lifecycle", () => {
       candidate !== marker && candidate.metadata?.itemId === "weapon.rifle"
     );
     expect(secondRifle?.geometry).toBe(rifleGeometry);
+    const ammoModelVertexCounts = ["ammo.sniper", "ammo.shell", "ammo.rifle", "ammo.light"].map((itemId) => {
+      const ammoMarker = [...bundle.lootMeshes.values()].find((candidate) => candidate.metadata?.itemId === itemId);
+      if (!ammoMarker) throw new Error(`${itemId} marker missing`);
+      return ammoMarker.getTotalVertices();
+    });
+    expect(ammoModelVertexCounts).toEqual([116, 150, 184, 218]);
     expect([...bundle.lootMeshes.values()].every((modelMarker) => {
       const expectedScale = String(modelMarker.metadata?.itemId).startsWith("weapon.") ? 2 : 1.45;
       return modelMarker.scaling.equals(new Vector3(expectedScale, expectedScale, expectedScale));

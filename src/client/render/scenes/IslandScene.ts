@@ -2744,10 +2744,11 @@ function createLootModelTemplate(scene: Scene, itemId: string, modelMaterial: St
   } else if (item?.kind === "ammo") {
     const isShell = itemId === "ammo.shell";
     const isSniper = itemId === "ammo.sniper";
+    const isLight = itemId === "ammo.light";
     const crateWidth = isShell ? 0.72 : isSniper ? 0.92 : 0.82;
     addBox("crate", crateWidth, 0.36, 0.58, 0, -0.08, 0);
     addBox("lid", crateWidth + 0.06, 0.09, 0.62, 0, 0.14, 0);
-    const cartridgeCount = isShell ? 3 : isSniper ? 2 : 4;
+    const cartridgeCount = isShell ? 3 : isSniper ? 2 : isLight ? 5 : 4;
     for (let index = 0; index < cartridgeCount; index += 1) {
       const spacing = cartridgeCount === 2 ? 0.28 : 0.18;
       const x = (index - (cartridgeCount - 1) / 2) * spacing;
