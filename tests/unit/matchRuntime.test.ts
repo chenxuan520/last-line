@@ -249,6 +249,52 @@ describe("MatchRuntime", () => {
     expect(runtime.projectState(viewer.id).groundLoot[loot.id]).toBeUndefined();
   });
 
+  it("replicates all active grenades and grenade events to dead spectators", () => {
+    const runtime = new MatchRuntime({
+      humanActorIds: ["human-1", "human-2"],
+      seed: 23,
+      startWithBandage: false,
+      disableAiSnipers: true,
+    });
+    const viewer = runtime.state.actors["human-1"];
+    const owner = runtime.state.actors["human-2"];
+    if (!viewer || !owner) throw new Error("spectator state missing");
+    viewer.alive = false;
+    viewer.health = 0;
+    viewer.position = { x: -1_000, y: 1.76, z: -1_000 };
+    owner.position = { x: 1_000, y: 1.76, z: 1_000 };
+    runtime.state.activeGrenades["grenade-1"] = {
+      id: "grenade-1",
+      ownerId: owner.id,
+      aiControlled: false,
+      position: { ...owner.position },
+      velocity: { x: 0, y: 0, z: 0 },
+      fuseSeconds: 2,
+    };
+    runtime.state.nextGrenadeSequence = 2;
+    const frame = runtime.takeFrame(0);
+    frame.events.push({
+      sequence: 1,
+      event: {
+        type: "grenade-exploded",
+        grenadeId: "grenade-1",
+        actorId: owner.id,
+        position: { ...owner.position },
+      },
+    });
+
+    expect(runtime.projectState(viewer.id).activeGrenades).toEqual(runtime.state.activeGrenades);
+    const deadFrame = runtime.projectFrame(frame, viewer.id, new Set()).frame;
+    expect(deadFrame.activeGrenades).toEqual(runtime.state.activeGrenades);
+    expect(deadFrame.events.some((entry) => entry.event.type === "grenade-exploded")).toBe(true);
+
+    viewer.alive = true;
+    viewer.health = 100;
+    expect(runtime.projectState(viewer.id).activeGrenades).toEqual({});
+    expect(runtime.projectFrame(frame, viewer.id, new Set()).frame.events
+      .some((entry) => entry.event.type === "grenade-exploded")).toBe(false);
+  });
+
   it("sends loot only on visibility, dirtiness, and range-exit transitions", () => {
     const runtime = new MatchRuntime({
       humanActorIds: ["human-1", "human-2"],

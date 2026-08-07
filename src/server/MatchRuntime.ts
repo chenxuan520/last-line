@@ -370,6 +370,7 @@ export class MatchRuntime {
   }
 
   private visibleGrenades(viewer: ActorState): ActiveGrenadeState[] {
+    if (!viewer.alive) return Object.values(this.state.activeGrenades);
     return Object.values(this.state.activeGrenades).filter((grenade) =>
       Math.hypot(
         grenade.position.x - viewer.position.x,
@@ -661,6 +662,7 @@ function eventVisibleTo(
     ) <= ACTOR_REPLICATION_RANGE;
   }
   if (event.type === "grenade-thrown" || event.type === "grenade-exploded") {
+    if (!viewer.alive) return true;
     return Math.hypot(
       event.position.x - viewer.position.x,
       event.position.y - viewer.position.y,

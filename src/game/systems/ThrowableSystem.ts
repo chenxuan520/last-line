@@ -15,6 +15,7 @@ import type {
   MatchState,
   Vector3State,
 } from "../state/types";
+import { ACTOR_EYE_HEIGHT, ACTOR_HEIGHT, ACTOR_RADIUS } from "../rules/actorGeometry";
 import type { CombatWorld } from "./CombatSystem";
 import { DamageSystem } from "./DamageSystem";
 
@@ -132,9 +133,10 @@ export class ThrowableSystem {
       });
       for (const actor of Object.values(state.actors)) {
         if (!actor.alive || actor.deployment === "aircraft") continue;
-        const distance = vectorDistance(grenade.position, actor.position);
+        const targetPoint = closestActorCapsulePoint(grenade.position, actor);
+        const distance = vectorDistance(grenade.position, targetPoint);
         if (distance > this.config.radius) continue;
-        if (world.hasExplosionLineOfSight?.(grenade.position, actor.position) === false) continue;
+        if (world.hasExplosionLineOfSight?.(grenade.position, targetPoint) === false) continue;
         const amount = grenadeDamage(distance, this.config);
         if (amount <= 0) continue;
         const pending = pendingByTarget.get(actor.id) ?? [];
@@ -282,4 +284,25 @@ function dot(left: Vector3State, right: Vector3State): number {
 
 function vectorDistance(left: Vector3State, right: Vector3State): number {
   return Math.hypot(left.x - right.x, left.y - right.y, left.z - right.z);
+}
+
+export function closestActorCapsulePoint(
+  origin: Vector3State,
+  actor: Pick<ActorState, "position">,
+): Vector3State {
+  const feetY = actor.position.y - ACTOR_EYE_HEIGHT;
+  const segmentMinimumY = feetY + ACTOR_RADIUS;
+  const segmentMaximumY = feetY + ACTOR_HEIGHT - ACTOR_RADIUS;
+  const segmentY = Math.max(segmentMinimumY, Math.min(segmentMaximumY, origin.y));
+  const offsetX = origin.x - actor.position.x;
+  const offsetY = origin.y - segmentY;
+  const offsetZ = origin.z - actor.position.z;
+  const distance = Math.hypot(offsetX, offsetY, offsetZ);
+  if (distance <= ACTOR_RADIUS || distance <= 1e-9) return { ...origin };
+  const scale = ACTOR_RADIUS / distance;
+  return {
+    x: actor.position.x + offsetX * scale,
+    y: segmentY + offsetY * scale,
+    z: actor.position.z + offsetZ * scale,
+  };
 }

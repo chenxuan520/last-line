@@ -1,6 +1,11 @@
 import { SIMULATION_TICK_RATE } from "../game/simulationTiming";
-import type { EntityId, MatchState } from "../game/state/types";
-import type { CombatWorld, ShotResult, ShotTrace } from "../game/systems/CombatSystem";
+import type { EntityId, MatchState, Vector3State } from "../game/state/types";
+import type {
+  CombatWorld,
+  ShotResult,
+  ShotTrace,
+  ThrowableCollision,
+} from "../game/systems/CombatSystem";
 import {
   SimulationCombatWorld,
   type ActorHitboxState,
@@ -82,6 +87,18 @@ export class LagCompensatedCombatWorld implements CombatWorld {
 
   public hasLineOfSight(observerId: EntityId, targetId: EntityId): boolean {
     return this.currentWorld.hasLineOfSight(observerId, targetId);
+  }
+
+  public traceThrowable(
+    origin: Vector3State,
+    displacement: Vector3State,
+    radius: number,
+  ): ThrowableCollision | null {
+    return this.currentWorld.traceThrowable(origin, displacement, radius);
+  }
+
+  public hasExplosionLineOfSight(origin: Vector3State, target: Vector3State): boolean {
+    return this.currentWorld.hasExplosionLineOfSight(origin, target);
   }
 }
 

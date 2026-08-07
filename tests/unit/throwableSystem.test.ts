@@ -7,9 +7,11 @@ import {
   type ActorState,
   type GameEvent,
   type MatchState,
+  type Vector3State,
 } from "../../src/game/state/types";
 import type { CombatWorld } from "../../src/game/systems/CombatSystem";
 import {
+  closestActorCapsulePoint,
   grenadeDamage,
   sampleGrenadeTrajectory,
   ThrowableSystem,
@@ -163,9 +165,12 @@ describe("ThrowableSystem", () => {
     positionActor(state.actors.blocked, 2);
     state.activeGrenades.grenade = grenade("grenade", "owner", 0);
     const events: GameEvent[] = [];
+    const blockedActor = state.actors.blocked;
+    if (!blockedActor) throw new Error("blocked actor missing");
     const world = createWorld({
-      hasExplosionLineOfSight(_origin, target) {
-        return target.x !== 2;
+      hasExplosionLineOfSight(origin, target) {
+        const blockedTargetPoint = closestActorCapsulePoint(origin, blockedActor);
+        return vectorDistanceForTest(target, blockedTargetPoint) > 1e-6;
       },
     });
 
@@ -212,6 +217,45 @@ describe("ThrowableSystem", () => {
     );
     expect(grenadeDamage(6)).toBeGreaterThan(0);
     expect(grenadeDamage(FRAG_GRENADE_CONFIG.radius)).toBe(0);
+  });
+
+  it("measures ground blasts against the authoritative actor capsule", () => {
+    const actor = createActorState("actor", "player", { x: 0, y: 1.76, z: 0 });
+    actor.armor = 0;
+    actor.maxArmor = 0;
+    actor.inventory.armorLevel = 0;
+    const grenadePosition = { x: 0, y: 0.18, z: 0 };
+    const targetPoint = closestActorCapsulePoint(grenadePosition, actor);
+
+    expect(vectorDistanceForTest(grenadePosition, targetPoint)).toBeLessThanOrEqual(
+      FRAG_GRENADE_CONFIG.fullDamageRadius,
+    );
+
+    const state = createState(["actor", "survivor"]);
+    const target = state.actors.actor;
+    const survivor = state.actors.survivor;
+    if (!target || !survivor) throw new Error("target state missing");
+    target.position = { ...actor.position };
+    survivor.position = { x: 100, y: 1.76, z: 0 };
+    state.activeGrenades.grenade = {
+      ...grenade("grenade", "actor", 0),
+      position: grenadePosition,
+    };
+    let obstructionQuery: { origin: Vector3State; target: Vector3State } | null = null;
+    new ThrowableSystem().update(state, 0.1, createWorld({
+      hasExplosionLineOfSight(origin, targetPosition) {
+        obstructionQuery = {
+          origin: { ...origin },
+          target: { ...targetPosition },
+        };
+        return true;
+      },
+    }), []);
+
+    expect(target.health).toBe(0);
+    expect(obstructionQuery).not.toBeNull();
+    if (!obstructionQuery) throw new Error("obstruction query missing");
+    expect(obstructionQuery.target).toEqual(closestActorCapsulePoint(obstructionQuery.origin, target));
   });
 });
 
@@ -301,4 +345,8 @@ function actorOutcome(state: MatchState): Record<string, { alive: boolean; healt
     actor.id,
     { alive: actor.alive, health: actor.health, kills: actor.kills },
   ]));
+}
+
+function vectorDistanceForTest(left: Vector3State, right: Vector3State): number {
+  return Math.hypot(left.x - right.x, left.y - right.y, left.z - right.z);
 }
