@@ -137,6 +137,71 @@ describe("MatchRuntime", () => {
     }, humanActorIds)).toBe(false);
     expect(isMatchCheckpointCompatible({
       ...checkpoint,
+      state: {
+        ...checkpoint.state,
+        safeZone: {
+          ...checkpoint.state.safeZone,
+          stageIndex: 0,
+          status: "closed",
+          secondsRemaining: 0,
+        },
+      },
+    }, humanActorIds)).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: {
+        ...checkpoint.state,
+        phase: "combat",
+        actors: Object.fromEntries(Object.entries(checkpoint.state.actors).map(([actorId, actor]) => [
+          actorId,
+          { ...actor, deployment: "grounded" as const },
+        ])),
+        safeZone: {
+          ...checkpoint.state.safeZone,
+          stageIndex: BATTLE_ROYALE_CONFIG.safeZoneStages.length - 1,
+          status: "closed",
+          secondsRemaining: 0,
+        },
+      },
+    }, humanActorIds)).toBe(false);
+    const finalStage = BATTLE_ROYALE_CONFIG.safeZoneStages.at(-1);
+    if (!finalStage) throw new Error("final safe-zone stage missing");
+    const closedCenter = { x: 12, y: 0, z: -8 };
+    const groundedActors = Object.fromEntries(Object.entries(checkpoint.state.actors).map(([actorId, actor]) => [
+      actorId,
+      { ...actor, deployment: "grounded" as const, position: { x: 12, y: 1.76, z: -8 } },
+    ]));
+    const closedSafeZone = {
+      ...checkpoint.state.safeZone,
+      center: closedCenter,
+      radius: finalStage.radius,
+      targetCenter: { ...closedCenter },
+      targetRadius: finalStage.radius,
+      stageIndex: BATTLE_ROYALE_CONFIG.safeZoneStages.length - 1,
+      status: "closed" as const,
+      secondsRemaining: 0,
+      damagePerSecond: finalStage.damagePerSecond,
+    };
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: {
+        ...checkpoint.state,
+        phase: "flight",
+        actors: groundedActors,
+        safeZone: closedSafeZone,
+      },
+    }, humanActorIds)).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: {
+        ...checkpoint.state,
+        phase: "combat",
+        actors: groundedActors,
+        safeZone: closedSafeZone,
+      },
+    }, humanActorIds)).toBe(true);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
       state: { ...checkpoint.state, phase: "finished", result: null },
     }, humanActorIds)).toBe(false);
     expect(isMatchCheckpointCompatible({

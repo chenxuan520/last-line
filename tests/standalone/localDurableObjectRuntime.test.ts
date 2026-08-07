@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { BATTLE_ROYALE_CONFIG } from "../../src/config/battleRoyale";
 import {
   DurableService,
   type PlatformDurableObjectState,
@@ -301,6 +302,37 @@ describe("LocalDurableObjectRuntime", () => {
             ...checkpoint.state.safeZone,
             stageIndex: 999,
             status: "waiting" as const,
+            secondsRemaining: 0,
+          },
+        },
+      }),
+    },
+    {
+      name: "same-version prematurely closed safe zone",
+      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => ({
+        ...checkpoint,
+        state: {
+          ...checkpoint.state,
+          safeZone: {
+            ...checkpoint.state.safeZone,
+            stageIndex: 0,
+            status: "closed" as const,
+            secondsRemaining: 0,
+          },
+        },
+      }),
+    },
+    {
+      name: "same-version final-stage closed large safe zone",
+      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => ({
+        ...checkpoint,
+        state: {
+          ...checkpoint.state,
+          phase: "combat" as const,
+          safeZone: {
+            ...checkpoint.state.safeZone,
+            stageIndex: BATTLE_ROYALE_CONFIG.safeZoneStages.length - 1,
+            status: "closed" as const,
             secondsRemaining: 0,
           },
         },

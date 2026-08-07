@@ -410,7 +410,7 @@ function isCompleteMatchState(
     !isRecord(state.groundLoot) ||
     !isRecord(state.activeGrenades) ||
     !isPositiveSafeInteger(state.nextGrenadeSequence) ||
-    !isSafeZoneState(state.safeZone) ||
+    !isSafeZoneState(state.safeZone, state.phase) ||
     !isFlightState(state.flight) ||
     !isMatchResult(state.result) ||
     (state.phase === "finished") !== (state.result !== null)
@@ -554,19 +554,42 @@ function isGroundLootState(value: unknown, lootId: EntityId): boolean {
     (value.source === undefined || ["spawn", "drop", "death"].includes(String(value.source)));
 }
 
-function isSafeZoneState(value: unknown): boolean {
-  return isRecord(value) &&
-    isFiniteVector(value.center) &&
-    isNonNegativeFiniteNumber(value.radius) &&
-    isFiniteVector(value.startCenter) &&
-    isNonNegativeFiniteNumber(value.startRadius) &&
-    isFiniteVector(value.targetCenter) &&
-    isNonNegativeFiniteNumber(value.targetRadius) &&
-    isNonNegativeSafeInteger(value.stageIndex) &&
-    value.stageIndex < BATTLE_ROYALE_CONFIG.safeZoneStages.length &&
-    ["waiting", "shrinking", "closed"].includes(String(value.status)) &&
-    isNonNegativeFiniteNumber(value.secondsRemaining) &&
-    isNonNegativeFiniteNumber(value.damagePerSecond);
+function isSafeZoneState(value: unknown, phase: unknown): boolean {
+  if (
+    !isRecord(value) ||
+    !isFiniteVector(value.center) ||
+    !isNonNegativeFiniteNumber(value.radius) ||
+    !isFiniteVector(value.startCenter) ||
+    !isNonNegativeFiniteNumber(value.startRadius) ||
+    !isFiniteVector(value.targetCenter) ||
+    !isNonNegativeFiniteNumber(value.targetRadius) ||
+    !isNonNegativeSafeInteger(value.stageIndex) ||
+    value.stageIndex >= BATTLE_ROYALE_CONFIG.safeZoneStages.length ||
+    !["waiting", "shrinking", "closed"].includes(String(value.status)) ||
+    !isNonNegativeFiniteNumber(value.secondsRemaining) ||
+    !isNonNegativeFiniteNumber(value.damagePerSecond)
+  ) return false;
+  if (value.status !== "closed") return true;
+  const finalStageIndex = BATTLE_ROYALE_CONFIG.safeZoneStages.length - 1;
+  const finalStage = BATTLE_ROYALE_CONFIG.safeZoneStages[finalStageIndex];
+  return Boolean(
+    finalStage &&
+    (phase === "combat" || phase === "finished") &&
+    value.stageIndex === finalStageIndex &&
+    value.secondsRemaining === 0 &&
+    value.radius === finalStage.radius &&
+    value.targetRadius === finalStage.radius &&
+    value.damagePerSecond === finalStage.damagePerSecond &&
+    equalFiniteVectors(value.center, value.targetCenter)
+  );
+}
+
+function equalFiniteVectors(left: unknown, right: unknown): boolean {
+  return isRecord(left) &&
+    isRecord(right) &&
+    left.x === right.x &&
+    left.y === right.y &&
+    left.z === right.z;
 }
 
 function isFlightState(value: unknown): boolean {

@@ -1,5 +1,6 @@
 import { env, evictDurableObject, reset, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
+import { BATTLE_ROYALE_CONFIG } from "../../src/config/battleRoyale";
 import { MATCH_CHECKPOINT_VERSION, MatchRuntime } from "../../src/server/MatchRuntime";
 import worker from "../../worker/index";
 
@@ -448,6 +449,43 @@ describe("admin control plane", () => {
           actors: {},
         },
       }),
+    },
+    {
+      name: "same-version prematurely closed safe zone",
+      corrupt: (checkpoint: Record<string, unknown>) => {
+        const state = checkpoint.state as Record<string, unknown>;
+        return {
+          ...checkpoint,
+          state: {
+            ...state,
+            safeZone: {
+              ...(state.safeZone as Record<string, unknown>),
+              stageIndex: 0,
+              status: "closed",
+              secondsRemaining: 0,
+            },
+          },
+        };
+      },
+    },
+    {
+      name: "same-version final-stage closed large safe zone",
+      corrupt: (checkpoint: Record<string, unknown>) => {
+        const state = checkpoint.state as Record<string, unknown>;
+        return {
+          ...checkpoint,
+          state: {
+            ...state,
+            phase: "combat",
+            safeZone: {
+              ...(state.safeZone as Record<string, unknown>),
+              stageIndex: BATTLE_ROYALE_CONFIG.safeZoneStages.length - 1,
+              status: "closed",
+              secondsRemaining: 0,
+            },
+          },
+        };
+      },
     },
     {
       name: "same-version missing member assignment",
