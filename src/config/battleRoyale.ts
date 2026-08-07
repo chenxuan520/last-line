@@ -15,12 +15,12 @@ export const BATTLE_ROYALE_CONFIG: BattleRoyaleConfig = {
   participantCount: 50,
   flightSeconds: 60,
   safeZoneStages: [
-    { waitSeconds: 120, shrinkSeconds: 60, radius: 860, damagePerSecond: 1 },
-    { waitSeconds: 90, shrinkSeconds: 55, radius: 590, damagePerSecond: 2 },
-    { waitSeconds: 70, shrinkSeconds: 45, radius: 350, damagePerSecond: 4 },
-    { waitSeconds: 35, shrinkSeconds: 28, radius: 164, damagePerSecond: 7 },
-    { waitSeconds: 15, shrinkSeconds: 16, radius: 48, damagePerSecond: 12 },
-    { waitSeconds: 5, shrinkSeconds: 8, radius: 0, damagePerSecond: 30 },
+    { waitSeconds: 120, shrinkSeconds: 60, radius: 860, damagePerSecond: 5 },
+    { waitSeconds: 90, shrinkSeconds: 55, radius: 590, damagePerSecond: 8 },
+    { waitSeconds: 70, shrinkSeconds: 45, radius: 350, damagePerSecond: 11 },
+    { waitSeconds: 35, shrinkSeconds: 28, radius: 164, damagePerSecond: 14 },
+    { waitSeconds: 35, shrinkSeconds: 16, radius: 48, damagePerSecond: 17 },
+    { waitSeconds: 35, shrinkSeconds: 8, radius: 0, damagePerSecond: 20 },
   ],
 };
 

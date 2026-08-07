@@ -19,7 +19,7 @@ const damageConfig: BattleRoyaleConfig = {
 };
 
 describe("BattleRoyaleMode", () => {
-  it("budgets about 10 minutes with shorter opening circles", () => {
+  it("budgets under 11 minutes with 35-second minimum waits", () => {
     const budgetSeconds =
       BATTLE_ROYALE_CONFIG.flightSeconds +
       BATTLE_ROYALE_CONFIG.safeZoneStages.reduce(
@@ -27,7 +27,7 @@ describe("BattleRoyaleMode", () => {
         0,
       );
 
-    expect(budgetSeconds).toBe(607);
+    expect(budgetSeconds).toBe(657);
     expect(budgetSeconds).toBeGreaterThanOrEqual(10 * 60);
     expect(budgetSeconds).toBeLessThanOrEqual(11 * 60);
     const stages = BATTLE_ROYALE_CONFIG.safeZoneStages;
@@ -35,8 +35,10 @@ describe("BattleRoyaleMode", () => {
       [120, 60],
       [90, 55],
     ]);
-    expect(stages.slice(2).map((stage) => stage.waitSeconds)).toEqual([70, 35, 15, 5]);
+    expect(stages.slice(2).map((stage) => stage.waitSeconds)).toEqual([70, 35, 35, 35]);
+    expect(stages.every((stage) => stage.waitSeconds >= 35)).toBe(true);
     expect(stages.slice(2).map((stage) => stage.shrinkSeconds)).toEqual([45, 28, 16, 8]);
+    expect(stages.map((stage) => stage.damagePerSecond)).toEqual([5, 8, 11, 14, 17, 20]);
   });
 
   it("creates a serializable 50-person match with complete ground loot", () => {
