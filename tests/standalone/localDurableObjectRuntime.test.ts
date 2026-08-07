@@ -371,6 +371,54 @@ describe("LocalDurableObjectRuntime", () => {
     }
   });
 
+  it("deletes a running room restored without the complete canonical loot roster", async () => {
+    const directory = await mkdtemp(resolve(tmpdir(), "last-line-checkpoint-truncated-loot-"));
+    const databasePath = resolve(directory, "rooms.sqlite");
+    const roomId = "room-00000000-0000-4000-8000-000000000007";
+    let environment = await createStandaloneEnvironment({ databasePath });
+    try {
+      const state = await environment.rooms.getState(roomId);
+      const runtime = new MatchRuntime({
+        humanActorIds: ["human-1", "human-2"],
+        seed: 47,
+        mapId: "mixed",
+        startWithBandage: true,
+        disableAiSnipers: true,
+      });
+      const checkpoint = runtime.checkpoint();
+      const groundLoot = structuredClone(checkpoint.state.groundLoot);
+      delete groundLoot["loot-250"];
+      const corruptedCheckpoint = {
+        ...checkpoint,
+        state: { ...checkpoint.state, groundLoot },
+      };
+      await state.storage.put("room-v1", {
+        roomId,
+        code: "OLD238",
+        visibility: "private",
+        status: "running",
+        revision: 1,
+        countdownEndsAt: null,
+        options: { mapId: "mixed", startWithBandage: true, disableAiSnipers: true },
+        seed: 47,
+        expiresAt: Date.now() + 60_000,
+        members: persistedMatchMembers(),
+        checkpoint: corruptedCheckpoint,
+      });
+      await state.storage.put("checkpoint-v1", corruptedCheckpoint);
+      await state.storage.setAlarm(Date.now() + 60_000);
+      await environment.close();
+
+      environment = await createStandaloneEnvironment({ databasePath });
+      const restoredState = await environment.rooms.getState(roomId);
+      expect(await restoredState.storage.get("room-v1")).toBeUndefined();
+      expect(await restoredState.storage.get("checkpoint-v1")).toBeUndefined();
+    } finally {
+      await environment.close();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
   it("deletes running rooms restored from malformed members containers", async () => {
     const directory = await mkdtemp(resolve(tmpdir(), "last-line-checkpoint-members-shape-"));
     const databasePath = resolve(directory, "rooms.sqlite");

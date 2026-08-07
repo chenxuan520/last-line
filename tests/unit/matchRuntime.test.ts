@@ -171,6 +171,43 @@ describe("MatchRuntime", () => {
     } as never)).toBe(false);
     expect(isMatchCheckpointCompatible({
       ...checkpoint,
+      state: { ...checkpoint.state, groundLoot: {} },
+    })).toBe(false);
+    const missingCanonicalLoot = structuredClone(checkpoint.state.groundLoot);
+    delete missingCanonicalLoot["loot-250"];
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: { ...checkpoint.state, groundLoot: missingCanonicalLoot },
+    })).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: {
+        ...checkpoint.state,
+        groundLoot: {
+          ...checkpoint.state.groundLoot,
+          "loot-250": { ...checkpoint.state.groundLoot["loot-250"], id: "loot-other" },
+        },
+      },
+    })).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: {
+        ...checkpoint.state,
+        groundLoot: {
+          ...checkpoint.state.groundLoot,
+          "dynamic-extra": {
+            id: "dynamic-extra",
+            itemId: "ammo.rifle",
+            quantity: 1,
+            position: { x: 0, y: 0.45, z: 0 },
+            available: true,
+            source: "drop",
+          },
+        },
+      },
+    })).toBe(true);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
       tick: undefined,
     } as never)).toBe(false);
     const actorId = Object.keys(checkpoint.state.actors)[0];

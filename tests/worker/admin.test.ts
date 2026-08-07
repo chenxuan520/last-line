@@ -527,6 +527,54 @@ describe("admin control plane", () => {
     expect(checkpoint).toBeUndefined();
   }, 60_000);
 
+  it("expires a running room restored without the complete canonical loot roster", async () => {
+    const guest = await publicPost("/v1/guests", { displayName: "Corrupt Loot" });
+    const admission = await publicPost("/v1/matchmaking/quick", guest);
+    const secondGuest = await publicPost("/v1/guests", { displayName: "Corrupt Loot Two" });
+    const secondAdmission = await publicPost("/v1/matchmaking/quick", secondGuest);
+    const roomId = String(admission.roomId);
+    expect(secondAdmission.roomId).toBe(roomId);
+    const stub = env.GAME_ROOMS.getByName(roomId);
+    await runInDurableObject(stub, async (_instance, state) => {
+      const room = await state.storage.get<{
+        status: string;
+        members: Record<string, { actorId: string | null }>;
+        checkpoint?: unknown;
+      }>("room-v1");
+      if (!room) throw new Error("corrupt loot room state missing");
+      const runtime = new MatchRuntime({
+        humanActorIds: ["human-1", "human-2"],
+        seed: 47,
+        mapId: "mixed",
+        startWithBandage: true,
+        disableAiSnipers: true,
+      });
+      const checkpoint = runtime.checkpoint();
+      const groundLoot = structuredClone(checkpoint.state.groundLoot);
+      delete groundLoot["loot-250"];
+      const corruptedCheckpoint = {
+        ...checkpoint,
+        state: { ...checkpoint.state, groundLoot },
+      };
+      assignMemberActorIds(room.members);
+      room.status = "running";
+      room.checkpoint = corruptedCheckpoint;
+      await state.storage.put("room-v1", room);
+      await state.storage.put("checkpoint-v1", corruptedCheckpoint);
+    });
+
+    await evictDurableObject(stub);
+    const remaining = await runInDurableObject(stub, async (_instance, state) =>
+      state.storage.get("room-v1")
+    );
+    const checkpoint = await runInDurableObject(stub, async (_instance, state) =>
+      state.storage.get("checkpoint-v1")
+    );
+
+    expect(remaining).toBeUndefined();
+    expect(checkpoint).toBeUndefined();
+  }, 60_000);
+
   it("expires a full actor roster that omits a persisted room member", async () => {
     const guest = await publicPost("/v1/guests", { displayName: "Missing Human" });
     const admission = await publicPost("/v1/matchmaking/quick", guest);

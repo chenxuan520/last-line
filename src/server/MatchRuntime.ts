@@ -1,4 +1,5 @@
 import { BATTLE_ROYALE_CONFIG } from "../config/battleRoyale";
+import { TOTAL_LOOT_POINTS } from "../config/map";
 import { WEAPONS } from "../config/weapons";
 import { createMapLayout, type MapLayout } from "../config/map";
 import { DEFAULT_MAP_ID, normalizeMapId, type MapId } from "../config/maps";
@@ -386,7 +387,7 @@ function isRecoverableMatchState(
       )
     ) return false;
   }
-  if (!isRecord(value.groundLoot) || !Object.values(value.groundLoot).every(isRecoverableLoot)) return false;
+  if (!isRecoverableGroundLoot(value.groundLoot)) return false;
   if (!isRecoverableSafeZone(value.safeZone) || !isRecoverableFlight(value.flight)) return false;
   return value.result === null || (
     isRecord(value.result) &&
@@ -431,7 +432,7 @@ function isRecoverableWeapon(value: unknown): boolean {
     [value.ammoInMagazine, value.cooldownSeconds, value.reloadSeconds].every(isFiniteNumber);
 }
 
-function isRecoverableLoot(value: unknown): boolean {
+function isRecoverableLoot(value: unknown): value is GroundLootState {
   return isRecord(value) &&
     typeof value.id === "string" &&
     typeof value.itemId === "string" &&
@@ -439,6 +440,16 @@ function isRecoverableLoot(value: unknown): boolean {
     isVector(value.position) &&
     typeof value.available === "boolean" &&
     (value.weapon === undefined || isRecoverableWeapon(value.weapon));
+}
+
+function isRecoverableGroundLoot(value: unknown): value is Record<EntityId, GroundLootState> {
+  if (!isRecord(value)) return false;
+  const entries = Object.entries(value);
+  if (!entries.every(([lootId, loot]) => isRecoverableLoot(loot) && loot.id === lootId)) return false;
+  for (let index = 0; index < TOTAL_LOOT_POINTS; index += 1) {
+    if (!Object.hasOwn(value, `loot-${index}`)) return false;
+  }
+  return true;
 }
 
 function isRecoverableSafeZone(value: unknown): boolean {
