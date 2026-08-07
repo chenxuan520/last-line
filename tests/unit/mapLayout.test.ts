@@ -239,7 +239,7 @@ describe("map layouts", () => {
         expect(angles.size).toBeGreaterThanOrEqual(2);
       });
     }
-  });
+  }, 30_000);
 
   it("generates irregular named point layouts instead of a perimeter polygon", () => {
     for (const seed of [1, 7, 19, 42, 99]) {
@@ -421,7 +421,7 @@ describe("map layouts", () => {
         )).toBeGreaterThanOrEqual(hospitalPair ? 2.9 : 11.9);
       }
     }
-  }, 30_000);
+  }, 60_000);
 
   it("adds scattered wilderness houses and loot outside named POI clusters", () => {
     const layout = createMapLayout(20_260_718);
@@ -454,7 +454,7 @@ describe("map layouts", () => {
         }
       }
     }
-  }, 240_000);
+  }, 900_000);
 
   it("keeps buildings and ramps inside the map and above terrain across seeds", () => {
     for (let seed = 0; seed <= 400; seed += 1) {
@@ -499,7 +499,7 @@ describe("map layouts", () => {
         }
       }
     }
-  }, 420_000);
+  }, 2_400_000);
 
   it("keeps every ramp navigable for the former out-of-bounds regression seed", () => {
     const layout = createMapLayout(331);

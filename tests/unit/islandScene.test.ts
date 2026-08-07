@@ -15,14 +15,19 @@ import { AssetCatalog } from "../../src/assets/AssetCatalog";
 import type { AssetEntry } from "../../src/assets/types";
 import {
   applyActorVisualPose,
+  bindTextureWhenReady,
   createLoadingBayLayout,
   createNaturalDetailPlacements,
   createIslandScene,
   getSkyAssetId,
+  selectTownPresentationRoads,
   setActorEquipmentVisual,
   setActorWeaponVisual,
 } from "../../src/client/render/scenes/IslandScene";
+import { Observable } from "@babylonjs/core/Misc/observable";
 import { createMapLayout, getTerrainHeight, HOSPITAL_WALL_COLOR, MAP_SIZE } from "../../src/config/map";
+import { mixedFootprintClearsRoads } from "../../src/config/mixedMap";
+import { createMixedMapBlueprint, MIXED_REGION_COUNT } from "../../src/config/mixedMap";
 import { QUALITY_PROFILES } from "../../src/config/settings";
 import {
   TOWN_POINT_HALF_DEPTH,
@@ -37,6 +42,14 @@ import { createWeaponState } from "../../src/game/state/types";
 import { InventorySystem } from "../../src/game/systems/InventorySystem";
 import { getSupportHeight } from "../../src/game/systems/MovementSystem";
 import productionManifest from "../../public/assets/asset-manifest.json";
+
+const BRAND_SIGN_ASSET_IDS = new Set([
+  "decal.brand.drop-zone",
+  "decal.brand.island-operations",
+  "decal.brand.property-ll01",
+  "decal.brand.restricted-area",
+  "decal.brand.supply",
+]);
 
 describe("IslandScene lifecycle", () => {
   afterEach(() => {
@@ -930,6 +943,128 @@ describe("IslandScene lifecycle", () => {
     engine.dispose();
   }, 30_000);
 
+  it("uses preloaded terrain payloads without blocking or refetching the ground", async () => {
+    const payload = new Uint8Array([0x52, 0x49, 0x46, 0x46]).buffer;
+    const assets = createAssets();
+    const payloads = new Map([
+      ["texture.terrain.grass", payload],
+      ["texture.terrain.mud", payload],
+      ["texture.road", payload],
+    ]);
+    vi.spyOn(assets, "getPayload").mockImplementation((id) => payloads.get(id));
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const engine = new NullEngine();
+    const state = createBattleRoyaleState("player", {
+      participantCount: 2,
+      flightSeconds: 1,
+      safeZoneStages: [{ waitSeconds: 1, shrinkSeconds: 1, radius: 100, damagePerSecond: 1 }],
+    }, () => 0.5);
+
+    const bundle = await createIslandScene(
+      engine,
+      assets,
+      state.actors,
+      state.groundLoot,
+      state.mapSeed,
+      false,
+      undefined,
+      "low",
+      state.mapId,
+    );
+    const ground = bundle.scene.getMeshByName("island-ground");
+    const materials = (ground?.material as MultiMaterial).subMaterials as StandardMaterial[];
+    const textures = materials.map((entry) => entry.diffuseTexture as Texture);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(textures.map((texture) => texture.name)).toEqual([
+      "texture.terrain.grass",
+      "texture.terrain.mud",
+      "texture.road",
+    ]);
+    expect(textures.every((texture) => texture.isBlocking === false)).toBe(true);
+    expect(textures.every((texture) =>
+      (texture as unknown as { _buffer?: ArrayBuffer })._buffer === payload
+    )).toBe(true);
+    expect(ground?.isEnabled()).toBe(true);
+
+    bundle.scene.dispose();
+    engine.dispose();
+  }, 30_000);
+
+  it("binds a pending texture only after successful readiness", () => {
+    const onLoadObservable = new Observable<Texture>();
+    let ready = false;
+    let loadingError = false;
+    const texture = {
+      isReady: () => ready,
+      get loadingError() { return loadingError; },
+      onLoadObservable,
+    };
+    const bind = vi.fn();
+
+    bindTextureWhenReady({ isDisposed: false }, texture, bind);
+    expect(bind).not.toHaveBeenCalled();
+    ready = true;
+    onLoadObservable.notifyObservers(texture as Texture);
+    expect(bind).toHaveBeenCalledOnce();
+
+    ready = false;
+    loadingError = true;
+    const failedBind = vi.fn();
+    bindTextureWhenReady({ isDisposed: false }, texture, failedBind);
+    ready = true;
+    onLoadObservable.notifyObservers(texture as Texture);
+    expect(failedBind).not.toHaveBeenCalled();
+
+    loadingError = false;
+    ready = false;
+    const disposedBind = vi.fn();
+    bindTextureWhenReady({ isDisposed: true }, texture, disposedBind);
+    ready = true;
+    onLoadObservable.notifyObservers(texture as Texture);
+    expect(disposedBind).not.toHaveBeenCalled();
+  });
+
+  it("keeps the ground renderable when terrain payloads are unavailable", async () => {
+    const assets = createAssets();
+    vi.spyOn(assets, "resolve").mockImplementation((id, expectedType) => {
+      if (id.startsWith("texture.terrain.") || id === "texture.road") {
+        return { id: "fallback.ui", type: "svg", url: "/fallback.svg" };
+      }
+      return AssetCatalog.prototype.resolve.call(assets, id, expectedType);
+    });
+    const engine = new NullEngine();
+    const state = createBattleRoyaleState("player", {
+      participantCount: 2,
+      flightSeconds: 1,
+      safeZoneStages: [{ waitSeconds: 1, shrinkSeconds: 1, radius: 100, damagePerSecond: 1 }],
+    }, () => 0.5);
+
+    const bundle = await createIslandScene(
+      engine,
+      assets,
+      state.actors,
+      state.groundLoot,
+      state.mapSeed,
+      false,
+      undefined,
+      "low",
+      state.mapId,
+    );
+    const ground = bundle.scene.getMeshByName("island-ground");
+    const materials = (ground?.material as MultiMaterial).subMaterials as StandardMaterial[];
+
+    expect(materials.every((entry) => entry.diffuseTexture === null)).toBe(true);
+    expect(ground).toMatchObject({ isVisible: true });
+    expect(ground?.isEnabled()).toBe(true);
+    expect(ground?.getTotalVertices()).toBeGreaterThan(0);
+    expect(ground?.subMeshes.length).toBe(3);
+
+    bundle.scene.dispose();
+    engine.dispose();
+  }, 30_000);
+
   it("keeps procedural actors and does not download GLBs on low quality", async () => {
     const assets = await createGlbAssets();
     const fetchMock = vi.mocked(fetch);
@@ -1042,6 +1177,9 @@ describe("IslandScene lifecycle", () => {
     expect(bundle.scene.meshes.some((mesh) => mesh.name === "building-floor-slabs-batch")).toBe(true);
     expect(bundle.scene.meshes.some((mesh) => mesh.name.startsWith("town-building-silhouettes-"))).toBe(false);
     expect(bundle.scene.meshes.some((mesh) => mesh.metadata?.decoration === "town-visual-detail")).toBe(false);
+    const brandSigns = bundle.scene.meshes.filter((mesh) => mesh.metadata?.decoration === "brand-sign");
+    expect(new Set(brandSigns.map((mesh) => mesh.name))).toEqual(BRAND_SIGN_ASSET_IDS);
+    expect(brandSigns.every((mesh) => !mesh.isPickable && !mesh.checkCollisions)).toBe(true);
     expect(new Set(bundle.scene.meshes
       .filter((mesh) => mesh.metadata?.decoration === "poi")
       .map((mesh) => mesh.metadata?.poiName)
@@ -1106,6 +1244,108 @@ describe("IslandScene lifecycle", () => {
     bundle.scene.dispose();
     engine.dispose();
   }, 60_000);
+
+  it("renders mixed regions while isolating high-quality town details", async () => {
+    const engine = new NullEngine();
+    const assets = createAssets();
+    const state = createBattleRoyaleState("player", {
+      participantCount: 2,
+      flightSeconds: 1,
+      safeZoneStages: [{ waitSeconds: 1, shrinkSeconds: 1, radius: 100, damagePerSecond: 1 }],
+    }, () => 0.5, { mapId: "mixed" });
+    const layout = createMapLayout("mixed", state.mapSeed);
+    const low = await createIslandScene(
+      engine,
+      assets,
+      state.actors,
+      state.groundLoot,
+      state.mapSeed,
+      false,
+      undefined,
+      "low",
+      state.mapId,
+    );
+
+    expect(low.scene.meshes.some((mesh) => mesh.name === "island-beach")).toBe(false);
+    expect(low.scene.meshes.some((mesh) => mesh.metadata?.decoration === "town-poi-paving")).toBe(false);
+    expect(low.scene.meshes.some((mesh) => mesh.metadata?.decoration === "town-visual-detail")).toBe(false);
+    const brandSigns = low.scene.meshes.filter((mesh) => mesh.metadata?.decoration === "brand-sign");
+    expect(new Set(brandSigns.map((mesh) => mesh.name))).toEqual(BRAND_SIGN_ASSET_IDS);
+    expect(brandSigns.every((mesh) => !mesh.isPickable && !mesh.checkCollisions)).toBe(true);
+    expect(new Set(low.scene.meshes
+      .filter((mesh) => mesh.metadata?.decoration === "poi")
+      .map((mesh) => mesh.metadata?.poiName)
+      .filter((name): name is string => typeof name === "string")))
+      .toEqual(new Set(layout.mapPoints.map((point) => point.name)));
+    expect(low.scene.meshes.filter((mesh) => mesh instanceof InstancedMesh && mesh.name.startsWith("mixed-tree-")))
+      .toHaveLength(layout.treeTrunks.length);
+    expect(low.scene.getMeshByName("hay-cover-batch")?.metadata?.sourceCount)
+      .toBe(layout.coverObstacles.filter((cover) => cover.kind === "hay").length * 3);
+    expect(low.scene.getMeshByName("hospital-medical-cross")?.metadata).toMatchObject({
+      poiName: "医院",
+      poiType: "hospital",
+      obstacleId: layout.hospital.buildingId,
+    });
+
+    low.scene.dispose();
+
+    const high = await createIslandScene(
+      engine,
+      assets,
+      state.actors,
+      state.groundLoot,
+      state.mapSeed,
+      false,
+      undefined,
+      "high",
+      state.mapId,
+    );
+    const townVisualBatches = high.scene.meshes.filter((mesh) =>
+      mesh.metadata?.decoration === "town-visual-detail"
+    );
+    expect(townVisualBatches.length).toBeGreaterThan(8);
+    const townBuildingIds = new Set(layout.obstacles
+      .filter((building) => Boolean(building.townKind))
+      .map((building) => building.id));
+    expect(townVisualBatches.find((mesh) => mesh.metadata?.detailType === "window-glass")?.metadata?.sourceCount)
+      .toBe(layout.wallOpenings.filter((opening) =>
+        opening.kind === "window" && townBuildingIds.has(opening.obstacleId)
+      ).length);
+    const placements = createNaturalDetailPlacements(layout, QUALITY_PROFILES.high);
+    expect(placements).toHaveLength(
+      QUALITY_PROFILES.high.decorativeRockCount + QUALITY_PROFILES.high.shrubCount,
+    );
+    for (const placement of placements) {
+      expect(layout.landingZones.every((point) =>
+        Math.hypot(placement.x - point.position.x, placement.z - point.position.z) > 20
+      ), placement.name).toBe(true);
+      expect(mixedFootprintClearsRoads(
+        layout.roadSegments,
+        placement.x,
+        placement.z,
+        placement.detailType === "rock" ? 6 : 4,
+        placement.detailType === "rock" ? 6 : 4,
+        0.5,
+      ), placement.name).toBe(true);
+    }
+
+    high.scene.dispose();
+    engine.dispose();
+  }, 60_000);
+
+  it("keeps mixed town presentation off rural and forest connector roads", () => {
+    for (const seed of [16, 38]) {
+      const layout = createMapLayout("mixed", seed);
+      const blueprint = createMixedMapBlueprint(seed);
+      expect(selectTownPresentationRoads(layout)).toEqual(blueprint.urbanRoadSegments);
+      expect(selectTownPresentationRoads(layout)).toEqual(layout.urbanRoadSegments);
+      expect(blueprint.roadSegments.slice(0, MIXED_REGION_COUNT - 1).every((road) =>
+        !blueprint.urbanRoadSegments.includes(road)
+      )).toBe(true);
+    }
+    expect(selectTownPresentationRoads(createMapLayout("mixed", 38))).toHaveLength(4);
+    expect(selectTownPresentationRoads(createMapLayout("mixed", 16))).toHaveLength(16);
+  });
 
   it("enables dense realistic town presentation only on high quality", async () => {
     const engine = new NullEngine();
@@ -1397,7 +1637,7 @@ function createAssets(): AssetCatalog {
     "decal.brand.restricted-area",
     "decal.brand.supply",
   ];
-  return new AssetCatalog({
+  const catalog = new AssetCatalog({
     version: 1,
     assets: [
       { id: "fallback.ui", type: "svg", url: "/fallback.svg" },
@@ -1413,6 +1653,11 @@ function createAssets(): AssetCatalog {
       { id: "model.weapon.sniper", type: "procedural-model", fallback: "fallback.model", metadata: { color: "#354238" } },
     ],
   });
+  const imagePayload = new Uint8Array([0x52, 0x49, 0x46, 0x46]).buffer;
+  vi.spyOn(catalog, "getPayload").mockImplementation((id) =>
+    textureAssetIds.includes(id) ? imagePayload : undefined
+  );
+  return catalog;
 }
 
 async function createGlbAssets(failedModelUrls: ReadonlySet<string> = new Set()): Promise<AssetCatalog> {

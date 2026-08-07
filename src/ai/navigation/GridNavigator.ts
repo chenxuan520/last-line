@@ -95,7 +95,7 @@ export class GridNavigator {
     );
     if (skybridgePath.length > 0) return skybridgePath;
 
-    if (this.layout?.mapId === "town") {
+    if (this.layout && usesBuildingEnvelopeNavigation(this.layout)) {
       const groundPath = this.findPathViaExteriorGround(
         normalizedStart,
         startLocation,
@@ -517,7 +517,7 @@ export class GridNavigator {
   private blockersForLocation(location: SurfaceLocation): SurfaceBlockers {
     const supportY = location.supportY;
     const ground = location.level === 0;
-    const townInterior = this.layout?.mapId === "town" && location.building
+    const townInterior = this.layout && usesBuildingEnvelopeNavigation(this.layout) && location.building
       ? this.layout.wallSegments.filter((obstacle) =>
         obstacle.obstacleId === location.building?.id &&
         this.obstacleOverlapsLocation(obstacle, { supportY, ground })
@@ -817,12 +817,16 @@ function obstacleOverlapsSurface(obstacle: MapObstacle, supportY: number): boole
 function getLayoutBlockingObstacles(layout: MapLayout): readonly MapObstacle[] {
   let obstacles = layoutBlockingObstacles.get(layout);
   if (!obstacles) {
-    obstacles = layout.mapId === "town"
+    obstacles = usesBuildingEnvelopeNavigation(layout)
       ? [...layout.obstacles, ...layout.rockObstacles, ...layout.coverObstacles, ...layout.treeTrunks]
       : [...layout.wallSegments, ...layout.rockObstacles, ...layout.coverObstacles, ...layout.treeTrunks];
     layoutBlockingObstacles.set(layout, obstacles);
   }
   return obstacles;
+}
+
+function usesBuildingEnvelopeNavigation(layout: MapLayout): boolean {
+  return layout.mapId === "town" || layout.mapId === "mixed";
 }
 
 function createBlockerIndex(

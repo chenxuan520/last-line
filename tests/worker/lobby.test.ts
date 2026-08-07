@@ -48,20 +48,28 @@ describe("multiplayer worker", () => {
     });
   });
 
-  it("defaults legacy room requests to island and separates quick match by map", async () => {
+  it("defaults legacy room requests to island and separates quick match by all maps", async () => {
     const legacyGuest = await createGuest("Legacy Island");
     const townGuest = await createGuest("Town Alpha");
     const townPeer = await createGuest("Town Bravo");
+    const mixedGuest = await createGuest("Mixed Alpha");
+    const mixedPeer = await createGuest("Mixed Bravo");
     const legacyAdmission = await post("/v1/matchmaking/quick", legacyGuest);
     const townAdmission = await post("/v1/matchmaking/quick", { ...townGuest, mapId: "town" });
     const townPeerAdmission = await post("/v1/matchmaking/quick", { ...townPeer, mapId: "town" });
+    const mixedAdmission = await post("/v1/matchmaking/quick", { ...mixedGuest, mapId: "mixed" });
+    const mixedPeerAdmission = await post("/v1/matchmaking/quick", { ...mixedPeer, mapId: "mixed" });
     const rooms = await getRooms();
 
     expect(townAdmission.roomId).not.toBe(legacyAdmission.roomId);
     expect(townPeerAdmission.roomId).toBe(townAdmission.roomId);
+    expect(mixedAdmission.roomId).not.toBe(legacyAdmission.roomId);
+    expect(mixedAdmission.roomId).not.toBe(townAdmission.roomId);
+    expect(mixedPeerAdmission.roomId).toBe(mixedAdmission.roomId);
     expect(rooms).toEqual(expect.arrayContaining([
       expect.objectContaining({ roomId: legacyAdmission.roomId, mapId: "island", playerCount: 1 }),
       expect.objectContaining({ roomId: townAdmission.roomId, mapId: "town", playerCount: 2 }),
+      expect.objectContaining({ roomId: mixedAdmission.roomId, mapId: "mixed", playerCount: 2 }),
     ]));
   });
 

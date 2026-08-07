@@ -17,7 +17,7 @@ import { createMapLayout } from "../config/map";
 import { WEAPONS } from "../config/weapons";
 import { BotController } from "../controllers/BotController";
 import { HumanController } from "../controllers/HumanController";
-import { requestPointerLockSafely } from "../controllers/pointerLock";
+import { requestDesktopPointerLockSafely } from "../controllers/pointerLock";
 import type { ActorCommand } from "../game/commands/ActorCommand";
 import { FixedStepClock } from "../game/FixedStepClock";
 import { GameSimulation } from "../game/GameSimulation";
@@ -415,7 +415,11 @@ export class BattleRoyaleSession {
       this.humanController.resumeInput();
       return;
     }
-    if (document.pointerLockElement !== this.canvas) requestPointerLockSafely(this.canvas);
+    requestDesktopPointerLockSafely(
+      this.canvas,
+      false,
+      document.pointerLockElement,
+    );
   }
 }
 

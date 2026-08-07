@@ -133,10 +133,13 @@ export class GameRoom extends DurableService<WorkerEnv> {
         && (!this.data.checkpoint || checkpoint.tick > this.data.checkpoint.tick)
       ) this.data.checkpoint = checkpoint;
       if (this.data) {
+        const restoringMatch = this.data.status === "running" || this.data.status === "finished";
+        const requiredActorIds = persistedMemberActorIds(this.data.members, restoringMatch);
         if (
-          (this.data.status === "running" || this.data.status === "finished") &&
-          !isMatchCheckpointCompatible(this.data.checkpoint)
+          requiredActorIds === null ||
+          restoringMatch && !isMatchCheckpointCompatible(this.data.checkpoint, requiredActorIds)
         ) {
+          this.data.members = {};
           this.data.status = "finished";
           for (const socket of this.ctx.getWebSockets()) {
             this.send(socket, { type: "error", code: "room-closed", message: "房间版本已过期，请创建新对局" });
@@ -688,8 +691,9 @@ export class GameRoom extends DurableService<WorkerEnv> {
   private ensureRuntime(): MatchRuntime | null {
     const data = this.data;
     if (this.runtime || !data?.checkpoint) return this.runtime;
-    if (!isMatchCheckpointCompatible(data.checkpoint)) return null;
-    const humanActorIds = Object.values(data.members).flatMap((member) => member.actorId ? [member.actorId] : []);
+    const humanActorIds = persistedMemberActorIds(data.members, true);
+    if (humanActorIds === null) return null;
+    if (!isMatchCheckpointCompatible(data.checkpoint, humanActorIds)) return null;
     this.runtime = new MatchRuntime({
       humanActorIds,
       seed: data.seed,
@@ -1020,6 +1024,69 @@ function createMember(guest: GuestRecord, host: boolean, ready: boolean): RoomMe
     connectionEpoch: 0,
     actorId: null,
   };
+}
+
+function persistedMemberActorIds(members: unknown, requireActorIds: boolean): EntityId[] | null {
+  if (!isRecord(members)) return null;
+  const actorIds: EntityId[] = [];
+  for (const [key, member] of Object.entries(members)) {
+    if (!isRoomMemberRecord(key, member)) return null;
+    if (member.actorId === null) {
+      if (requireActorIds) return null;
+    } else {
+      actorIds.push(member.actorId);
+    }
+  }
+  if (
+    requireActorIds && (
+      actorIds.length < MIN_HUMAN_PLAYERS ||
+      actorIds.length > MAX_HUMAN_PLAYERS
+    ) ||
+    new Set(actorIds).size !== actorIds.length
+  ) return null;
+  return actorIds;
+}
+
+function isRoomMemberRecord(key: string, value: unknown): value is RoomMemberRecord {
+  if (!isRecord(value) ||
+    value.playerId !== key ||
+    !isNonEmptyString(value.playerId) ||
+    !isNonEmptyString(value.displayName) ||
+    !isNonEmptyString(value.admissionToken) ||
+    !isNonEmptyString(value.reconnectToken) ||
+    !isNonNegativeNumber(value.admissionExpiresAt) ||
+    !isNonNegativeNumber(value.joinedAt) ||
+    !isNonNegativeInteger(value.connectionEpoch) ||
+    typeof value.admissionConsumed !== "boolean" ||
+    typeof value.ready !== "boolean" ||
+    typeof value.connected !== "boolean" ||
+    typeof value.host !== "boolean" ||
+    !isOptionalString(value.pendingReconnectToken) ||
+    !(value.actorId === null || isNonEmptyString(value.actorId))
+  ) return false;
+  return value.accountId === null
+    ? value.accountSessionRevision === null
+    : isNonEmptyString(value.accountId) && isNonNegativeInteger(value.accountSessionRevision);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+function isOptionalString(value: unknown): value is string | null | undefined {
+  return value === undefined || value === null || isNonEmptyString(value);
+}
+
+function isNonNegativeNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) >= 0;
 }
 
 function randomUint32(): number {

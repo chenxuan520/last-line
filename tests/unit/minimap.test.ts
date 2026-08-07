@@ -67,6 +67,36 @@ describe("minimap projection", () => {
     ]);
   });
 
+  it("maps every mixed-map region name to a stable existing decal", () => {
+    expect([
+      "赤钟城区",
+      "白塔旧城",
+      "铜灯街区",
+      "断桥坊",
+      "风穗乡",
+      "雁栖庄",
+      "麦风坳",
+      "石篱村",
+      "沉杉岭",
+      "乌松岭",
+      "雾鹿峰",
+      "暮鸦山",
+    ].map((name) => getPoiDecalAssetId(name))).toEqual([
+      "decal.poi.town",
+      "decal.poi.town",
+      "decal.poi.town",
+      "decal.poi.town",
+      "decal.poi.warehouse",
+      "decal.poi.warehouse",
+      "decal.poi.warehouse",
+      "decal.poi.warehouse",
+      "decal.poi.station",
+      "decal.poi.station",
+      "decal.poi.station",
+      "decal.poi.station",
+    ]);
+  });
+
   it("builds player, route, and safe-zone markers without exposing enemies", () => {
     const state = createBattleRoyaleState("player", undefined, () => 0.5);
     const player = state.actors.player;
