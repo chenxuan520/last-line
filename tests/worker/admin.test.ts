@@ -717,8 +717,25 @@ describe("admin control plane", () => {
   it.each([
     ["missing", (room: Record<string, unknown>) => { delete room.members; }],
     ["null", (room: Record<string, unknown>) => { room.members = null; }],
+    ["array", (room: Record<string, unknown>) => { room.members = []; }],
     ["null entry", (room: Record<string, unknown>) => {
       room.members = { ...(room.members as Record<string, unknown>), corrupt: null };
+    }],
+    ["partial entry", (room: Record<string, unknown>) => {
+      room.members = Object.fromEntries(
+        Object.entries(room.members as Record<string, { actorId: string | null }>).map(([key, member]) =>
+          [key, { actorId: member.actorId }]
+        ),
+      );
+    }],
+    ["key mismatch", (room: Record<string, unknown>) => {
+      const entries = Object.entries(room.members as Record<string, unknown>);
+      const [firstKey, firstMember] = entries[0] ?? [];
+      if (!firstKey || !firstMember) throw new Error("member key mismatch fixture missing");
+      room.members = Object.fromEntries([
+        ["mismatched-key", firstMember],
+        ...entries.slice(1),
+      ]);
     }],
   ])("expires a running room restored from a %s members container", async (_label, corruptMembers) => {
     const firstGuest = await publicPost("/v1/guests", { displayName: "Malformed One" });
@@ -741,6 +758,7 @@ describe("admin control plane", () => {
       const checkpoint = runtime.checkpoint();
       room.status = "running";
       room.checkpoint = checkpoint;
+      assignMemberActorIds(room.members as Record<string, { actorId: string | null }>);
       corruptMembers(room);
       await state.storage.put("room-v1", room);
       await state.storage.put("checkpoint-v1", checkpoint);

@@ -894,3 +894,52 @@ Phase 6 Round 2（最终 re-review）— 2026-08-07：
 
 - 后续变化只涉及 brand-sign 道路净空、对应 unit 和 browser 产物；`worker/GameRoom.ts`、Worker/standalone persistence tests 仍保持 Phase 6 Round 1 已通过的 malformed members guard 与真实删除/合法 v5 恢复合同。外层最终 Worker 4 / 41、standalone 3 / 25 继续通过。
 - Phase 6 最终结论：**通过。** Findings：blocker 0、high 0、medium 0、low 0。Phase 5 + Phase 6 合并增量最终通过独立审查。
+
+### Phase 7：Codex complete persisted member shape P2
+
+#### Plan
+
+Codex 对已推送提交 `fa4c857dc17e7517dc20c88f7009fc6b51a1329c` 指出：Phase 6 只证明 members 容器/entry 是 object 并提取 `actorId`，但 running/finished room 中 `{ actorId: "human-1" }` 之类 partial member 仍会通过；record key 与 `member.playerId` 不一致也会通过。恢复后 lobby、admission/reconnect、账号状态和 socket attachment 会读取缺失字段，留下不可访问或语义错乱的房间。
+
+最终合同：
+
+- 持久化 `members` 必须是非数组 record；每个 `[recordKey, member]` 必须是完整 `RoomMemberRecord`，且 `recordKey === member.playerId`。
+- `playerId`、`displayName`、`admissionToken`、`reconnectToken` 必须为非空字符串；`pendingReconnectToken` 仅允许 `undefined | null | 非空字符串`。
+- `accountId/accountSessionRevision` 必须成对：游客为 `null/null`；账号成员为非空字符串 + 非负安全整数 revision。
+- `admissionExpiresAt`、`joinedAt` 必须为有限非负数；`connectionEpoch` 必须为非负安全整数。
+- `admissionConsumed`、`ready`、`connected`、`host` 必须为 boolean；`actorId` 对 waiting/countdown 可为 null，对 running/finished 仍由 `memberActorIds()` 要求为非空字符串、2–10 个且唯一。
+- malformed member record 或 key identity mismatch 对任意持久化 room status 都不能进入后续读取；constructor 必须安全通知目录并删除 room/checkpoint，不能抛错或反复恢复。
+- shared checkpoint player-set、合法 v5 town 两成员恢复、正常 waiting/countdown 创建与加入语义不变。
+
+文件与任务：
+
+1. `tests/worker/admin.test.ts`：在现有 malformed members 参数化真实 DO 测试中增加 array container、partial member 和 key/playerId mismatch，均必须删除 room/checkpoint。
+2. `tests/standalone/localDurableObjectRuntime.test.ts`：SQLite 重启覆盖同样输入；合法 v5 town 完整两成员继续保留。
+3. `worker/GameRoom.ts`：新增清晰的完整 member shape parser/guard；constructor 对所有 persisted status 先验证完整 members，running/finished 再提取 actor IDs 和校验 checkpoint。
+4. `AGENTS.md`、`docs/architecture.md`：把“object member”收紧为完整 `RoomMemberRecord` 与 key identity。
+5. 运行 typecheck、完整 Worker/standalone、build/budget 和 `git diff --check`；按用户要求不运行 coverage。无 presentation 变化，不重复 Chrome，MCP保持已清理。
+6. 独立 reviewer/re-review通过后创建包含非 plan 实现的单一 commit、push、回复 Codex discussion并再次 `@codex review`。
+
+#### Build
+
+- 2026-08-07 13:48：`fa4c857` 两条 CI build 和 Pages preview 均成功；Codex 对精确 SHA 新增 complete member shape P2。确认当前 guard 只读 `actorId`，partial object 和 record key/`playerId` mismatch 会通过，问题成立。
+- 2026-08-07 13:52：失败回归准确复现。Worker admin 在 partial entry 与 key mismatch 两项保留 room/checkpoint，删除断言失败；standalone SQLite malformed fixture index 4/5 同样保留，证明 Phase 6 仅验证 actorId 不足。missing/null/array/null-entry 已保持删除。
+- 2026-08-07 13:54：新增完整 `isRoomMemberRecord(key, value)` guard。持久化成员必须满足 key=`playerId`、非空 identity/display/admission/reconnect strings、可选 pending token、游客或账号/session成对、有限非负 deadlines、非负安全整数 epoch、四个 boolean状态和合法 nullable actorId。`persistedMemberActorIds()` 对任意 status 先验证完整 members；running/finished 再要求 2–10 个非空唯一 actor IDs并校验完整 player set。constructor 对 invalid members 或 match checkpoint 统一清理；`ensureRuntime()` 复用同一 parser。
+- 2026-08-07 13:56：最终三端 typecheck和完整 Worker 4 files / 44 tests通过；standalone `localDurableObjectRuntime` 11/11通过，覆盖 missing/null/array/null-entry/partial/key mismatch SQLite重启删除及合法v5 town恢复。完整 standalone 轮次仅既有“独立子进程 kill后重获数据锁”用例因子进程3秒内未输出就绪标记失败；机器 load约69且有56个 self-play+14个match进程。该用例与member guard无调用关系；绑定唯一无占用 CPU 56 后原测试1/1通过，未改timeout或断言。
+- 2026-08-07 13:56：最终 build/budget继续通过：browser `1,097,524 / 1,200,000`、Worker `516,341 / 615,000`、server `531,722 / 630,000`，其余阈值和实际值沿用Phase 6/牌子最终记录；`git diff --check`通过。Phase 7无presentation变化，未打开Chrome，MCP仍只剩`about:blank`。按用户要求未运行coverage。
+
+#### Review
+
+待失败回归、实现、自动验证和独立 reviewer完成后追加。
+
+Round 1（独立终审）— 2026-08-07：
+
+- 审查范围：完整读取 `/home/lingchen.judy/ai-workspace/subagents/code-reviewer.md`、根 `AGENTS.md`、`README.md` 和 canonical plan Phase 7 Plan/Build；以 `fa4c857dc17e7517dc20c88f7009fc6b51a1329c` 为直接基线、`main@7a453f5` 为背景，静态审查当前 6 个未提交文件的完整 diff。未修改业务代码、测试、文档或其他 plan。
+- 完整 member shape：`isRoomMemberRecord()` 覆盖 `RoomMemberRecord` 的全部持久化字段，并在任何后续 lobby/admission/reconnect/account/socket 读取前要求 record key 等于非空 `playerId`；`displayName`、admission/reconnect token 为非空字符串，pending token 仅允许 undefined/null/非空字符串；游客严格为 `accountId/accountSessionRevision = null/null`，账号成员为非空 account ID + 非负安全整数 revision；deadlines/joinedAt 为有限非负数，connection epoch 为非负安全整数，四个状态字段为 boolean，actorId 仅允许 null 或非空字符串。
+- 状态语义：constructor 对任意 status 都先调用完整 parser，因此 missing/null/array/partial/key mismatch 不会进入后续成员读取；waiting/countdown 的完整成员允许 `actorId: null`，且不要求 2–10 个 actor IDs。running/finished 通过 `requireActorIds=true` 继续要求 2–10 个非空唯一 actor IDs，并由 `isMatchCheckpointCompatible()` 验证与 checkpoint 全部 player actor set 完全一致，Phase 4/6 roster 合同未回归。
+- 恢复链路：条件等价于“member shape 无效，或 running/finished checkpoint 不兼容”；短路和 `&&` 优先级不会误删合法 waiting/countdown，也不会放过损坏 match。清理先将 members 置空并标记 finished，使 `summary()` 安全生成目录删除通知；Lobby 对 finished summary 删除条目，随后 room/checkpoint `deleteAll()`。`ensureRuntime()` 复用同一完整 parser、强制 actor IDs 并再次执行 checkpoint guard。
+- 持久化回归：Worker 真实 Durable Object 参数化覆盖 missing/null/array/null-entry/partial/key mismatch，且在破坏前为 running fixture 分配合法 actor IDs，目标条件不会被旧 null-actor guard 掩盖；standalone SQLite 同库重启覆盖相同六类损坏并断言 room/checkpoint 均删除。合法完整两成员 v5 town fixture继续保留恢复；既有 member→bot、duplicate/null actor、缺 player 与 truncated roster 回归仍由完整 Worker 4 / 44 和定向 standalone 11/11 覆盖。
+- 既有阶段与预算：Phase 7 diff 不改 brand-sign 或地图代码，Phase 5 的 6m/8m shoulder + footprint 道路净空和 Phase 6 malformed container 合同保持通过。预算阈值仍为用户批准的 browser `1,200,000`、Worker `615,000`、server `630,000`，最终实际值 `1,097,524 / 516,341 / 531,722` 均在范围内。
+- 已参考外层证据：三端 typecheck；Worker 4 files / 44 tests；standalone local runtime 11/11；所有 build/budget 和 `git diff --check`；MCP 仅 `about:blank`。未重复完整 tests/build/browser，按用户要求未运行 coverage。
+- 审查结论：**通过。** 本次 Phase 7 独立终审未发现明确问题。Findings：blocker 0、high 0、medium 0、low 0；没有阻止提交的 unresolved finding。
+- 残余风险：完整 standalone 套件在机器 load 约 69 时，既有独立子进程 3 秒就绪门限发生一次环境性失败；该测试不经过 member restore guard，绑定空闲 CPU 56 后原用例 1/1 通过，且未改 timeout/断言，因此不构成本阶段 finding。

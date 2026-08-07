@@ -384,10 +384,19 @@ describe("LocalDurableObjectRuntime", () => {
         disableAiSnipers: true,
       });
       const checkpoint = runtime.checkpoint();
+      const validMembers = persistedMatchMembers();
       const corruptMembers = [
         undefined,
         null,
-        { ...persistedMatchMembers(), corrupt: null },
+        [],
+        { ...validMembers, corrupt: null },
+        Object.fromEntries(Object.entries(validMembers).map(([key, member]) =>
+          [key, { actorId: member.actorId }]
+        )),
+        Object.fromEntries([
+          ["mismatched-key", Object.values(validMembers)[0]],
+          ...Object.entries(validMembers).slice(1),
+        ]),
       ];
       for (const [index, members] of corruptMembers.entries()) {
         const roomId = `room-00000000-0000-4000-8000-00000000010${index}`;
