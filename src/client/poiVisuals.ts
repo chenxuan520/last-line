@@ -1,4 +1,4 @@
-export type PoiVisualType = "harbor" | "town" | "warehouse" | "station" | "hospital";
+export type PoiVisualType = "harbor" | "town" | "warehouse" | "station" | "hospital" | "ammo-depot";
 
 const POI_VISUAL_TYPES: Readonly<Record<string, PoiVisualType>> = {
   北港: "harbor",
@@ -30,6 +30,7 @@ const POI_VISUAL_TYPES: Readonly<Record<string, PoiVisualType>> = {
   雾鹿峰: "station",
   暮鸦山: "station",
   医院: "hospital",
+  弹药库: "ammo-depot",
 };
 
 export function getPoiVisualType(name: string): PoiVisualType | null {

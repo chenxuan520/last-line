@@ -58,6 +58,7 @@ export class GameHud {
     const mapLayout = createMapLayout(options.mapId ?? "island", mapSeed);
     const mapPoints = mapLayout.mapPoints;
     const hospitalPoint = projectToMinimap(mapLayout.hospital.position);
+    const ammunitionDepotPoint = projectToMinimap(mapLayout.ammunitionDepot.position);
     const mapRoadPath = mapLayout.roadSegments.map(([startX, startZ, endX, endZ]) => {
       const start = projectToMinimap({ x: startX, y: 0, z: startZ });
       const end = projectToMinimap({ x: endX, y: 0, z: endZ });
@@ -91,6 +92,12 @@ export class GameHud {
               return minimapPoiMarker(assets, point.name, projected.x, projected.y);
             }).join("")}</g>
             <g class="minimap-hospital">${minimapPoiMarker(assets, "医院", hospitalPoint.x, hospitalPoint.y)}</g>
+            <g class="minimap-ammunition-depot">${minimapPoiMarker(
+              assets,
+              "弹药库",
+              ammunitionDepotPoint.x,
+              ammunitionDepotPoint.y,
+            )}</g>
             <line class="minimap-flight" data-hud="map-flight" />
             <circle class="minimap-target-zone" data-hud="map-target-zone" />
             <circle class="minimap-current-zone" data-hud="map-current-zone" />

@@ -4,7 +4,12 @@ import {
   type SafeZoneStageConfig,
 } from "../../config/battleRoyale";
 import { ITEMS } from "../../config/items";
-import { createMapLayout, MAP_HALF_SIZE } from "../../config/map";
+import {
+  AMMUNITION_DEPOT_AMMO,
+  createMapLayout,
+  GLOBAL_LOOT_POINTS,
+  MAP_HALF_SIZE,
+} from "../../config/map";
 import { DEFAULT_MAP_ID, type MapId } from "../../config/maps";
 import type { GameMode } from "./GameMode";
 import { ACTOR_RADIUS } from "../rules/actorGeometry";
@@ -342,7 +347,13 @@ export function createBattleRoyaleStateForHumans(
     mapId,
     mapSeed,
     actors,
-    groundLoot: createGroundLoot(layout.lootSpawnPoints, layout.lootZoneCounts, layout.hospital, createLootRandom(mapSeed)),
+    groundLoot: createGroundLoot(
+      layout.lootSpawnPoints,
+      layout.lootZoneCounts,
+      layout.hospital,
+      layout.ammunitionDepot,
+      createLootRandom(mapSeed),
+    ),
     safeZone: createInitialSafeZone(config, random),
     flight,
     result: null,
@@ -369,6 +380,7 @@ function createGroundLoot(
   lootSpawnPoints: readonly Vector3State[],
   lootZoneCounts: readonly number[],
   hospital: ReturnType<typeof createMapLayout>["hospital"],
+  ammunitionDepot: ReturnType<typeof createMapLayout>["ammunitionDepot"],
   random: () => number,
 ): Record<EntityId, GroundLootState> {
   const groundLoot: Record<EntityId, GroundLootState> = {};
@@ -415,7 +427,7 @@ function createGroundLoot(
     }
     zoneStart += zoneCount;
   }
-  for (let index = zoneStart; index < lootSpawnPoints.length; index += 1) {
+  for (let index = zoneStart; index < GLOBAL_LOOT_POINTS; index += 1) {
     const position = lootSpawnPoints[index];
     if (!position) continue;
     const itemId = index === hospital.bandageLootIndex
@@ -429,6 +441,23 @@ function createGroundLoot(
       generation: 0,
       itemId,
       quantity: itemId === "bandage" ? 2 : 1,
+      position: { ...position },
+      available: true,
+      source: "spawn",
+    };
+  }
+  for (const [offset, ammo] of AMMUNITION_DEPOT_AMMO.entries()) {
+    const index = ammunitionDepot.lootIndices[offset];
+    const position = index === undefined ? undefined : lootSpawnPoints[index];
+    if (index === undefined || !position) {
+      throw new Error(`弹药库物资点缺失: ${offset}`);
+    }
+    const id = `loot-${index}`;
+    groundLoot[id] = {
+      id,
+      generation: 0,
+      itemId: ammo.itemId,
+      quantity: ammo.quantity,
       position: { ...position },
       available: true,
       source: "spawn",

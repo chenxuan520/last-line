@@ -28,6 +28,7 @@ import type { AssetCatalog } from "../../../assets/AssetCatalog";
 import type { AssetEntry } from "../../../assets/types";
 import { ITEMS } from "../../../config/items";
 import {
+  AMMUNITION_DEPOT_WALL_COLOR,
   BUILDING_ROOF_CAP_HEIGHT,
   createMapLayout,
   getTerrainHeight,
@@ -119,6 +120,7 @@ interface IslandMaterials {
   floor: StandardMaterial;
   roof: StandardMaterial;
   hospitalSurface: StandardMaterial;
+  ammunitionDepotSurface: StandardMaterial;
   wallTrim: StandardMaterial;
   hospitalCross: StandardMaterial;
   window: StandardMaterial;
@@ -192,7 +194,7 @@ export async function createIslandScene(
   const materials = createMaterials(scene, assets, highPresentation);
   createSkyDome(scene, assets, mapSeed);
   const qualityProfile = QUALITY_PROFILES[quality];
-  createIslandEnvironment(scene, materials, layout, qualityProfile, quality);
+  createIslandEnvironment(scene, assets, materials, layout, qualityProfile, quality);
   createPois(scene, materials, layout);
   createBrandSigns(scene, assets, layout);
 
@@ -624,6 +626,14 @@ function createMaterials(scene: Scene, assets: AssetCatalog, highPresentation: b
     industrialLight.emissiveColor = Color3.FromHexString("#f0c76e").scale(0.75);
     industrialLight.specularColor = Color3.FromHexString("#ffe4a6").scale(0.28);
   }
+  const ammunitionDepotSurface = texturedMaterial(
+    scene,
+    assets,
+    "ammunition-depot-surface-material",
+    AMMUNITION_DEPOT_WALL_COLOR,
+    "texture.industrial.metal",
+    1.8,
+  );
 
   return {
     ground,
@@ -645,6 +655,7 @@ function createMaterials(scene: Scene, assets: AssetCatalog, highPresentation: b
     floor: material(scene, "building-floor-material", "#343b3b"),
     roof: texturedMaterial(scene, assets, "building-roof-material", "#69706d", "texture.building.roof", 2),
     hospitalSurface: material(scene, "hospital-surface-material", HOSPITAL_SURFACE_COLOR),
+    ammunitionDepotSurface,
     wallTrim,
     hospitalCross: material(scene, "hospital-cross-material", "#d8473f"),
     window: windowMaterial,
@@ -668,6 +679,7 @@ function createMaterials(scene: Scene, assets: AssetCatalog, highPresentation: b
 
 function createIslandEnvironment(
   scene: Scene,
+  assets: AssetCatalog,
   materials: IslandMaterials,
   layout: MapLayout,
   quality: QualityProfile,
@@ -696,12 +708,18 @@ function createIslandEnvironment(
     if (doorSillIds.has(wall.id)) continue;
     let buildingMaterial = buildingMaterials.get(wall.color);
     if (!buildingMaterial) {
-      buildingMaterial = material(
-        scene,
-        `building-material-${buildingMaterials.size}`,
-        wall.color === HOSPITAL_WALL_COLOR ? HOSPITAL_SURFACE_COLOR : wall.color,
-      );
-      if (wall.color !== HOSPITAL_WALL_COLOR && materials.wallTexture) {
+      buildingMaterial = wall.color === AMMUNITION_DEPOT_WALL_COLOR
+        ? materials.ammunitionDepotSurface
+        : material(
+            scene,
+            `building-material-${buildingMaterials.size}`,
+            wall.color === HOSPITAL_WALL_COLOR ? HOSPITAL_SURFACE_COLOR : wall.color,
+          );
+      if (
+        wall.color !== HOSPITAL_WALL_COLOR &&
+        wall.color !== AMMUNITION_DEPOT_WALL_COLOR &&
+        materials.wallTexture
+      ) {
         const targetMaterial = buildingMaterial;
         bindTextureWhenReady(scene, materials.wallTexture, () => {
           targetMaterial.diffuseTexture = materials.wallTexture;
@@ -731,6 +749,7 @@ function createIslandEnvironment(
   }
 
   createHospitalCross(scene, materials.hospitalCross, layout);
+  createAmmunitionDepotSign(scene, assets, materials.ammunitionDepotSurface, layout);
 
   createBuildingDetails(scene, materials, layout);
   if (qualityLevel === "high") {
@@ -751,7 +770,8 @@ function createIslandEnvironment(
     "building-floor-slabs-batch",
     (mesh) => mesh.metadata?.decoration === "building-detail" &&
       mesh.metadata?.detailType === "floor" &&
-      mesh.metadata?.obstacleId !== layout.hospital.buildingId,
+      mesh.metadata?.obstacleId !== layout.hospital.buildingId &&
+      mesh.metadata?.obstacleId !== layout.ammunitionDepot.buildingId,
     { decoration: "building-detail", detailType: "floor-slabs" },
   );
   mergeStaticBatch(
@@ -759,8 +779,26 @@ function createIslandEnvironment(
     "building-roof-slabs-batch",
     (mesh) => mesh.metadata?.decoration === "building-detail" &&
       mesh.metadata?.detailType === "roof" &&
-      mesh.metadata?.obstacleId !== layout.hospital.buildingId,
+      mesh.metadata?.obstacleId !== layout.hospital.buildingId &&
+      mesh.metadata?.obstacleId !== layout.ammunitionDepot.buildingId,
     { decoration: "building-detail", detailType: "roof-slabs" },
+  );
+  mergeStaticBatch(
+    scene,
+    "ammunition-depot-surfaces-batch",
+    (mesh) => mesh.metadata?.obstacleId === layout.ammunitionDepot.buildingId &&
+      (
+        mesh.metadata?.decoration === "town-building-silhouette" ||
+        (
+          mesh.metadata?.decoration === "building-detail" &&
+          (mesh.metadata?.detailType === "floor" || mesh.metadata?.detailType === "roof")
+        )
+      ),
+    {
+      decoration: "building-detail",
+      detailType: "ammunition-depot-surfaces",
+      obstacleId: layout.ammunitionDepot.buildingId,
+    },
   );
   mergeStaticBatch(
     scene,
@@ -875,6 +913,48 @@ function createHospitalCross(scene: Scene, crossMaterial: StandardMaterial, layo
     obstacleId: hospital.id,
   };
   cross.freezeWorldMatrix();
+}
+
+function createAmmunitionDepotSign(
+  scene: Scene,
+  assets: AssetCatalog,
+  fallbackMaterial: StandardMaterial,
+  layout: MapLayout,
+): void {
+  const building = layout.obstacles.find((candidate) => candidate.id === layout.ammunitionDepot.buildingId);
+  if (!building) throw new Error("Ammunition depot building missing from scene layout");
+  const texture = catalogTexture(scene, assets, "ui.item.ammo-depot", 1, Texture.CLAMP_ADDRESSMODE);
+  const signMaterial = new StandardMaterial("ammunition-depot-sign-material", scene);
+  signMaterial.diffuseColor = fallbackMaterial.diffuseColor.scale(1.35);
+  signMaterial.emissiveColor = Color3.FromHexString("#9aa88d").scale(0.12);
+  signMaterial.specularColor = Color3.Black();
+  signMaterial.backFaceCulling = false;
+  if (texture) {
+    bindTextureWhenReady(scene, texture, () => {
+      signMaterial.diffuseTexture = texture;
+      signMaterial.useAlphaFromDiffuseTexture = true;
+    });
+  }
+  const sign = CreatePlane(
+    "ammunition-depot-sign",
+    { width: Math.min(5.2, building.width * 0.28), height: 2.4, sideOrientation: Mesh.DOUBLESIDE },
+    scene,
+  );
+  sign.position.set(
+    building.center.x,
+    building.baseY + Math.min(building.storyHeight - 0.8, 3.5),
+    building.center.z - building.depth / 2 - 0.04,
+  );
+  sign.material = signMaterial;
+  sign.checkCollisions = false;
+  sign.isPickable = false;
+  sign.metadata = {
+    decoration: "ammunition-depot-sign",
+    poiName: layout.ammunitionDepot.name,
+    poiType: "ammo-depot",
+    obstacleId: building.id,
+  };
+  sign.freezeWorldMatrix();
 }
 
 function mergeStaticBatch(
@@ -1194,6 +1274,8 @@ function createBuildingDetails(scene: Scene, materials: IslandMaterials, layout:
     mesh.scaling.set(slab.width, slab.height, slab.depth);
     mesh.material = slab.obstacleId === layout.hospital.buildingId
       ? materials.hospitalSurface
+      : slab.obstacleId === layout.ammunitionDepot.buildingId
+        ? materials.ammunitionDepotSurface
       : slab.kind === "roof"
         ? materials.roof
         : materials.floor;
@@ -1227,7 +1309,9 @@ function createTownBuildingSilhouettes(scene: Scene, materials: IslandMaterials,
       mesh.position.set(building.center.x + offsetX, roofY + height / 2, building.center.z + offsetZ);
       mesh.material = building.id === layout.hospital.buildingId
         ? materials.hospitalSurface
-        : rooftopMaterial;
+        : building.id === layout.ammunitionDepot.buildingId
+          ? materials.ammunitionDepotSurface
+          : rooftopMaterial;
       markTownBuildingSilhouette(mesh, building, kind);
     };
 
@@ -1268,7 +1352,8 @@ function createTownBuildingSilhouettes(scene: Scene, materials: IslandMaterials,
       `town-building-silhouettes-${kind}`,
       (mesh) => mesh.metadata?.decoration === "town-building-silhouette" &&
         mesh.metadata?.townKind === kind &&
-        mesh.metadata?.obstacleId !== layout.hospital.buildingId,
+        mesh.metadata?.obstacleId !== layout.hospital.buildingId &&
+        mesh.metadata?.obstacleId !== layout.ammunitionDepot.buildingId,
       { decoration: "town-building-silhouette", townKind: kind },
     );
   }

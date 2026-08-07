@@ -5,7 +5,14 @@ import {
   type BattleRoyaleConfig,
 } from "../../src/config/battleRoyale";
 import { ITEMS } from "../../src/config/items";
-import { BASE_LOOT_POINTS, createMapLayout, MAP_HALF_SIZE } from "../../src/config/map";
+import {
+  AMMUNITION_DEPOT_AMMO,
+  BASE_LOOT_POINTS,
+  createMapLayout,
+  GLOBAL_LOOT_POINTS,
+  MAP_HALF_SIZE,
+  TOTAL_LOOT_POINTS,
+} from "../../src/config/map";
 import { WEAPONS } from "../../src/config/weapons";
 import { BattleRoyaleMode, createBattleRoyaleState } from "../../src/game/modes/BattleRoyaleMode";
 import { createIdleCommand } from "../../src/game/commands/ActorCommand";
@@ -82,7 +89,17 @@ describe("BattleRoyaleMode", () => {
       quantity: 1,
       position: layout.lootSpawnPoints[layout.hospital.medkitLootIndex],
     });
-    const supplemental = Object.values(state.groundLoot).slice(BASE_LOOT_POINTS);
+    for (const [offset, ammo] of AMMUNITION_DEPOT_AMMO.entries()) {
+      const lootIndex = layout.ammunitionDepot.lootIndices[offset];
+      if (lootIndex === undefined) throw new Error(`ammunition depot loot index missing: ${offset}`);
+      expect(state.groundLoot[`loot-${lootIndex}`]).toMatchObject({
+        itemId: ammo.itemId,
+        quantity: ammo.quantity,
+        position: layout.lootSpawnPoints[lootIndex],
+      });
+    }
+    expect(Object.values(state.groundLoot)).toHaveLength(TOTAL_LOOT_POINTS);
+    const supplemental = Object.values(state.groundLoot).slice(BASE_LOOT_POINTS, GLOBAL_LOOT_POINTS);
     expect(supplemental.filter((loot) => loot.itemId === "bandage")).toHaveLength(5);
     expect(supplemental.filter((loot) => loot.itemId === "medkit")).toHaveLength(5);
     expect(itemIds).toEqual(
@@ -117,7 +134,7 @@ describe("BattleRoyaleMode", () => {
     const loot = Object.values(state.groundLoot);
     const layout = createMapLayout(state.mapSeed);
 
-    expect(loot).toHaveLength(250);
+    expect(loot).toHaveLength(TOTAL_LOOT_POINTS);
     let start = 0;
     for (const zoneCount of layout.lootZoneCounts) {
       const poiLoot = loot.slice(start, start + zoneCount);
@@ -156,11 +173,14 @@ describe("BattleRoyaleMode", () => {
       }
       start += zoneCount;
     }
-    const additionalMedical = loot.slice(start);
+    const additionalMedical = loot.slice(start, GLOBAL_LOOT_POINTS);
     expect(additionalMedical).toHaveLength(10);
     expect(additionalMedical.every((entry) => lootCategory(entry.itemId) === "medical")).toBe(true);
     expect(additionalMedical.filter((entry) => entry.itemId === "bandage")).toHaveLength(5);
     expect(additionalMedical.filter((entry) => entry.itemId === "medkit")).toHaveLength(5);
+    expect(loot.slice(GLOBAL_LOOT_POINTS).map((entry) => [entry.itemId, entry.quantity])).toEqual(
+      AMMUNITION_DEPOT_AMMO.map((entry) => [entry.itemId, entry.quantity]),
+    );
   });
 
   it("reproduces loot for the same seed and varies it for a different seed", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getTerrainHeight } from "../../src/config/map";
+import { getTerrainHeight, TOTAL_LOOT_POINTS } from "../../src/config/map";
 import { createIdleCommand } from "../../src/game/commands/ActorCommand";
 import { createWeaponState } from "../../src/game/state/types";
 import type { SequencedGameEvent, ServerMessage } from "../../src/network/protocol";
@@ -92,7 +92,7 @@ describe("MatchRuntime", () => {
     expect(restored.state).toEqual(checkpoint.state);
   });
 
-  it("accepts version 5 island and town checkpoints while rejecting mixed and older maps", () => {
+  it("accepts only current version 7 checkpoints with explicit known map identities", () => {
     const runtime = new MatchRuntime({
       humanActorIds: ["human-1", "human-2"],
       seed: 42,
@@ -102,7 +102,7 @@ describe("MatchRuntime", () => {
     });
     const checkpoint = runtime.checkpoint();
 
-    expect(MATCH_CHECKPOINT_VERSION).toBe(6);
+    expect(MATCH_CHECKPOINT_VERSION).toBe(7);
     expect(isMatchCheckpointCompatible(checkpoint)).toBe(true);
     expect(isMatchCheckpointCompatible({
       ...checkpoint,
@@ -111,20 +111,19 @@ describe("MatchRuntime", () => {
     expect(isMatchCheckpointCompatible({
       ...checkpoint,
       version: MATCH_CHECKPOINT_VERSION - 1,
-    })).toBe(true);
+    })).toBe(false);
     const missingMapIdState = structuredClone(checkpoint.state) as unknown as Record<string, unknown>;
     delete missingMapIdState.mapId;
     expect(isMatchCheckpointCompatible({
       ...checkpoint,
-      version: MATCH_CHECKPOINT_VERSION - 1,
       state: missingMapIdState,
-    })).toBe(true);
+    })).toBe(false);
     const islandCheckpoint = {
       ...checkpoint,
       version: MATCH_CHECKPOINT_VERSION - 1,
       state: { ...checkpoint.state, mapId: "island" as const },
     };
-    expect(isMatchCheckpointCompatible(islandCheckpoint)).toBe(true);
+    expect(isMatchCheckpointCompatible(islandCheckpoint)).toBe(false);
     const mixedCheckpoint = {
       ...checkpoint,
       version: MATCH_CHECKPOINT_VERSION - 1,
@@ -483,7 +482,7 @@ describe("MatchRuntime", () => {
 
     expect(humanActorIds).toHaveLength(10);
     expect(Object.keys(runtime.state.actors)).toHaveLength(50);
-    expect(Object.keys(runtime.state.groundLoot)).toHaveLength(250);
+    expect(Object.keys(runtime.state.groundLoot)).toHaveLength(TOTAL_LOOT_POINTS);
 
     const localActorId = humanActorIds[0] ?? "human-1";
     const fullMessage = {

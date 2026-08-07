@@ -30,6 +30,7 @@ describe("minimap projection", () => {
       "西风农场",
       "东岭营地",
       "医院",
+      "弹药库",
     ].map((name) => getPoiDecalAssetId(name))).toEqual([
       "decal.poi.harbor",
       "decal.poi.town",
@@ -40,6 +41,7 @@ describe("minimap projection", () => {
       "decal.poi.warehouse",
       "decal.poi.town",
       "decal.poi.hospital",
+      "decal.poi.ammo-depot",
     ]);
     expect(getPoiVisualType("未知区域")).toBeNull();
     expect(getPoiDecalAssetId("未知区域")).toBeNull();

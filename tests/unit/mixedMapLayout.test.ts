@@ -298,8 +298,10 @@ describe("mixed map layout", () => {
           if (!point || !other) throw new Error(`loot point missing: ${seed}:${index}:${otherIndex}`);
           const hospitalPair = index === layout.hospital.bandageLootIndex &&
             otherIndex === layout.hospital.medkitLootIndex;
+          const depotPair = layout.ammunitionDepot.lootIndices.includes(index) &&
+            layout.ammunitionDepot.lootIndices.includes(otherIndex);
           expect(Math.hypot(point.x - other.x, point.z - other.z))
-            .toBeGreaterThanOrEqual(hospitalPair ? 7.9 : 11.9);
+            .toBeGreaterThanOrEqual(depotPair ? 3.9 : hospitalPair ? 7.9 : 11.9);
         }
       }
     }

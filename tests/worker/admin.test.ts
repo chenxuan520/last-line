@@ -377,7 +377,6 @@ describe("admin control plane", () => {
       }>("room-v1");
       if (!room?.checkpoint) throw new Error("running checkpoint missing");
       const latest = structuredClone(room.checkpoint);
-      latest.version = MATCH_CHECKPOINT_VERSION - 1;
       latest.tick += 30;
       latest.state.elapsedSeconds += 1;
       await state.storage.put("checkpoint-v1", latest);
@@ -419,13 +418,14 @@ describe("admin control plane", () => {
       }>("room-v1");
       if (!room) throw new Error("legacy room state missing");
       assignMemberActorIds(room.members);
-      const legacy = {
-        version: MATCH_CHECKPOINT_VERSION - 2,
-        state: {},
-        tick: 0,
-        snapshotSequence: 0,
-        eventSequence: 0,
-      };
+      const runtime = new MatchRuntime({
+        humanActorIds: ["human-1", "human-2"],
+        seed: 42,
+        mapId: "mixed",
+        startWithBandage: true,
+        disableAiSnipers: true,
+      });
+      const legacy = { ...runtime.checkpoint(), version: MATCH_CHECKPOINT_VERSION - 1 };
       room.status = "running";
       room.checkpoint = legacy;
       await state.storage.put("room-v1", room);
@@ -440,7 +440,7 @@ describe("admin control plane", () => {
     expect(remaining).toBeUndefined();
   }, 60_000);
 
-  it("expires a running room restored from a version 5 checkpoint without state", async () => {
+  it("expires a running room restored from a version 6 checkpoint without state", async () => {
     const guest = await publicPost("/v1/guests", { displayName: "Corrupt Legacy" });
     const admission = await publicPost("/v1/matchmaking/quick", guest);
     const secondGuest = await publicPost("/v1/guests", { displayName: "Corrupt Legacy Two" });

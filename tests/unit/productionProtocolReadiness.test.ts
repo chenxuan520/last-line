@@ -61,7 +61,7 @@ describe("production protocol readiness", () => {
     const clock = fakeClock();
 
     await expect(waitForProductionProtocol(options(fetchImpl, clock, { timeoutMs: 20_000 })))
-      .rejects.toThrow("expected 7 after 20000ms");
+      .rejects.toThrow(`expected ${MULTIPLAYER_PROTOCOL_VERSION} after 20000ms`);
 
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect(clock.sleep).toHaveBeenCalledTimes(2);

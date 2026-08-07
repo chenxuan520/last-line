@@ -41,7 +41,7 @@ describe("MultiplayerConnection lifecycle", () => {
   });
 
   it("accepts only the mixed-map protocol version", async () => {
-    expect(MULTIPLAYER_PROTOCOL_VERSION).toBe(7);
+    expect(MULTIPLAYER_PROTOCOL_VERSION).toBe(8);
     const sockets: FakeWebSocket[] = [];
     const connection = new MultiplayerConnection(
       "https://example.test",

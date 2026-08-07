@@ -181,7 +181,7 @@ describe("SimulationCombatWorld", () => {
   });
 
   it("blocks shots with roof ramps", () => {
-    const ramp = createMapLayout(0).roofRamps.find((entry) => entry.kind === "exterior");
+    const ramp = createMapLayout(0).roofRamps[0];
     if (!ramp) throw new Error("test ramp missing");
     const z = (ramp.startZ + ramp.endZ) / 2;
     const surfaceY = getRampHeight(ramp, ramp.centerX, z);

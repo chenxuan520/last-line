@@ -18,7 +18,7 @@ const TAKEOVER_TICKS = SIMULATION_TICK_RATE * 5;
 const ACTOR_REPLICATION_RANGE = 400;
 const LOOT_REPLICATION_RANGE = 60;
 const AIRBORNE_LOOT_REPLICATION_RANGE = ACTOR_REPLICATION_RANGE;
-export const MATCH_CHECKPOINT_VERSION = 6;
+export const MATCH_CHECKPOINT_VERSION = 7;
 
 export interface MatchRuntimeOptions {
   humanActorIds: readonly EntityId[];
@@ -357,12 +357,9 @@ export function isMatchCheckpointCompatible(
     !isNonNegativeInteger(checkpoint.snapshotSequence) ||
     !isNonNegativeInteger(checkpoint.eventSequence)
   ) return false;
+  if (checkpoint.version !== MATCH_CHECKPOINT_VERSION) return false;
   const mapId: unknown = checkpoint.state.mapId;
-  if (checkpoint.version === MATCH_CHECKPOINT_VERSION) {
-    return mapId === "island" || mapId === "town" || mapId === "mixed";
-  }
-  if (checkpoint.version !== MATCH_CHECKPOINT_VERSION - 1) return false;
-  return mapId === undefined || mapId === "island" || mapId === "town";
+  return mapId === "island" || mapId === "town" || mapId === "mixed";
 }
 
 function isRecoverableMatchState(

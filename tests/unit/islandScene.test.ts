@@ -25,7 +25,13 @@ import {
   setActorWeaponVisual,
 } from "../../src/client/render/scenes/IslandScene";
 import { Observable } from "@babylonjs/core/Misc/observable";
-import { createMapLayout, getTerrainHeight, HOSPITAL_WALL_COLOR, MAP_SIZE } from "../../src/config/map";
+import {
+  AMMUNITION_DEPOT_WALL_COLOR,
+  createMapLayout,
+  getTerrainHeight,
+  HOSPITAL_WALL_COLOR,
+  MAP_SIZE,
+} from "../../src/config/map";
 import { mixedFootprintClearsRoads } from "../../src/config/mixedMap";
 import { createMixedMapBlueprint, MIXED_REGION_COUNT } from "../../src/config/mixedMap";
 import { QUALITY_PROFILES } from "../../src/config/settings";
@@ -205,6 +211,25 @@ describe("IslandScene lifecycle", () => {
       ]));
       expect(hospitalCrosses[0]).toMatchObject({ isPickable: false, checkCollisions: false });
       expect(hospitalCrosses[0]?.metadata).toMatchObject({ poiName: "医院", poiType: "hospital" });
+      const ammunitionDepotSign = bundle.scene.getMeshByName("ammunition-depot-sign");
+      expect(ammunitionDepotSign).toMatchObject({ isPickable: false, checkCollisions: false });
+      expect(ammunitionDepotSign?.metadata).toMatchObject({
+        decoration: "ammunition-depot-sign",
+        poiName: "弹药库",
+        poiType: "ammo-depot",
+        obstacleId: layout.ammunitionDepot.buildingId,
+      });
+      const ammunitionDepotWallBatch = bundle.scene.getMeshByName(
+        `building-walls-${AMMUNITION_DEPOT_WALL_COLOR.replace("#", "")}`,
+      );
+      expect((ammunitionDepotWallBatch?.material as StandardMaterial).name)
+        .toBe("ammunition-depot-surface-material");
+      expect((ammunitionDepotWallBatch?.material as StandardMaterial).diffuseColor.toHexString().toLowerCase())
+        .toBe(AMMUNITION_DEPOT_WALL_COLOR);
+      expect(bundle.scene.getMeshByName("ammunition-depot-surfaces-batch")?.metadata).toMatchObject({
+        detailType: "ammunition-depot-surfaces",
+        obstacleId: layout.ammunitionDepot.buildingId,
+      });
       const hospitalWalls = layout.wallSegments.filter((wall) => wall.obstacleId === layout.hospital.buildingId);
       const hospitalDoorSills = new Set(
         layout.wallOpenings
@@ -307,10 +332,14 @@ describe("IslandScene lifecycle", () => {
         slab.obstacleId === layout.hospital.buildingId
       );
       const regularFloors = layout.floorSlabs.filter((slab) =>
-        slab.obstacleId !== layout.hospital.buildingId && slab.kind === "floor"
+        slab.obstacleId !== layout.hospital.buildingId &&
+        slab.obstacleId !== layout.ammunitionDepot.buildingId &&
+        slab.kind === "floor"
       );
       const regularRoofs = layout.floorSlabs.filter((slab) =>
-        slab.obstacleId !== layout.hospital.buildingId && slab.kind === "roof"
+        slab.obstacleId !== layout.hospital.buildingId &&
+        slab.obstacleId !== layout.ammunitionDepot.buildingId &&
+        slab.kind === "roof"
       );
       const floorBatch = bundle.scene.getMeshByName("building-floor-slabs-batch");
       const roofBatch = bundle.scene.getMeshByName("building-roof-slabs-batch");
@@ -828,10 +857,10 @@ describe("IslandScene lifecycle", () => {
         expect(bundle.scene.transformNodes.length).toBeLessThanOrEqual(520);
         expect(bundle.scene.materials.length).toBeLessThanOrEqual(75);
         expect(bundle.scene.geometries.length).toBeLessThanOrEqual(2_500);
-        expect(aggregateMeshVertices).toBeLessThanOrEqual(580_000);
+        expect(aggregateMeshVertices).toBeLessThanOrEqual(590_000);
         expect(aggregateMeshIndices).toBeLessThanOrEqual(1_550_000);
-        expect(uniqueGeometryVertices).toBeLessThanOrEqual(400_000);
-        expect(uniqueGeometryIndices).toBeLessThanOrEqual(950_000);
+        expect(uniqueGeometryVertices).toBeLessThanOrEqual(420_000);
+        expect(uniqueGeometryIndices).toBeLessThanOrEqual(960_000);
       } finally {
         bundle.scene.dispose();
       }
@@ -1623,11 +1652,13 @@ function createAssets(): AssetCatalog {
     "ui.item.medkit",
   ];
   const textureAssetIds = [
+    "ui.item.ammo-depot",
     "texture.terrain.grass",
     "texture.terrain.mud",
     "texture.road",
     "texture.building.roof",
     "texture.building.wall",
+    "texture.industrial.metal",
     "texture.sky.clearing",
     "texture.sky.overcast",
     "texture.sky.storm",
@@ -1763,6 +1794,13 @@ function createProductionGlbAssets(): AssetCatalog {
       { id: "fallback.model", type: "procedural-model", metadata: { color: "#cf4b3f" } },
       { id: "ui.crosshair", type: "svg", url: "/crosshair.svg", fallback: "fallback.ui" },
       { id: "ui.weapon.rifle", type: "svg", url: "/rifle.svg", fallback: "fallback.ui" },
+      { id: "ui.item.ammo-depot", type: "image", url: "/ammo-depot.webp", fallback: "fallback.ui" },
+      {
+        id: "texture.industrial.metal",
+        type: "image",
+        url: "/industrial-metal.webp",
+        fallback: "fallback.ui",
+      },
       ...[
         "texture.terrain.grass",
         "texture.terrain.mud",

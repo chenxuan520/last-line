@@ -207,17 +207,29 @@ describe("MovementSystem", () => {
 
   it("walks up a roof ramp, jumps on the roof, and falls back to terrain", () => {
     const layout = createMapLayout(0);
-    const ramp = layout.roofRamps.find((entry) => entry.kind === "exterior");
-    const obstacle = layout.obstacles.find((entry) => entry.id === ramp?.obstacleId);
-    if (!ramp || !obstacle) throw new Error("test ramp missing");
-    const state = createState(ramp.centerX, ramp.startZ, ramp.bottomY + GROUND_HEIGHT);
+    const obstacle = layout.obstacles.find((entry) => entry.storyCount === 1);
+    const ramp = layout.roofRamps.find((entry) => entry.obstacleId === obstacle?.id && entry.fromLevel === 0);
+    const door = layout.wallOpenings.find((entry) =>
+      entry.obstacleId === obstacle?.id && entry.storyIndex === 0 && entry.kind === "door"
+    );
+    if (!ramp || !obstacle || !door) throw new Error("test ramp missing");
+    const outside = {
+      x: door.center.x,
+      y: getTerrainHeight(door.center.x, door.center.z - 1.5, layout) + GROUND_HEIGHT,
+      z: door.center.z - 1.5,
+    };
+    const roofY = obstacle.center.y + obstacle.height / 2 + BUILDING_ROOF_CAP_HEIGHT;
+    const roof = {
+      x: obstacle.center.x,
+      y: roofY + GROUND_HEIGHT,
+      z: obstacle.center.z,
+    };
+    const state = createState(outside.x, outside.z, outside.y);
     const actor = state.actors.actor;
     if (!actor) throw new Error("test actor missing");
-
-    const rampDirection = Math.sign(ramp.endZ - ramp.startZ) || 1;
-    advance(state, movingCommand(0, rampDirection), 240, 1 / 60);
-
-    const roofY = obstacle.center.y + obstacle.height / 2 + BUILDING_ROOF_CAP_HEIGHT;
+    const path = new GridNavigator(layout).findPath(outside, roof);
+    expect(path).not.toHaveLength(0);
+    followPath(state, path, layout, 2_400);
     expect(actor.position.y).toBeCloseTo(roofY + GROUND_HEIGHT, 1);
 
     new MovementSystem().processCommand(state, actor.id, { ...createIdleCommand(), jump: true }, 1 / 60);
@@ -435,7 +447,7 @@ describe("GridNavigator", () => {
 
   it("routes rooftop actors down the matching ramp", () => {
     const layout = createMapLayout(0);
-    const ramp = layout.roofRamps.find((entry) => entry.kind === "exterior");
+    const ramp = layout.roofRamps[0];
     const obstacle = layout.obstacles.find((entry) => entry.id === ramp?.obstacleId);
     if (!obstacle || !ramp) throw new Error("test rooftop missing");
     const start = {
