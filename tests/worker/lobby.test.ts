@@ -6,7 +6,11 @@ import {
   runInDurableObject,
 } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
-import { MULTIPLAYER_PROTOCOL_VERSION, type ServerMessage } from "../../src/network/protocol";
+import {
+  MULTIPLAYER_PROTOCOL_HEADER,
+  MULTIPLAYER_PROTOCOL_VERSION,
+  type ServerMessage,
+} from "../../src/network/protocol";
 import worker from "../../worker/index";
 
 describe("multiplayer worker", () => {
@@ -17,6 +21,8 @@ describe("multiplayer worker", () => {
   it("reports a healthy realtime service", async () => {
     const response = await worker.fetch(new Request("https://test/health"), env);
     expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(response.headers.get(MULTIPLAYER_PROTOCOL_HEADER)).toBe(String(MULTIPLAYER_PROTOCOL_VERSION));
     await expect(response.json()).resolves.toEqual({ ok: true, service: "lastlinep2p" });
     expect((await worker.fetch(new Request("https://test/metrics"), env)).status).toBe(404);
   });

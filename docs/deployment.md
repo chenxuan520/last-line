@@ -112,7 +112,7 @@ npm run build:worker
 npm run test:multiplayer:production
 ```
 
-`test:multiplayer:production` uses the public Pages origin to create one private production room, opens the returned WebSocket, requires a `welcome` with the source `MULTIPLAYER_PROTOCOL_VERSION` followed by the matching waiting-room member state, and then acknowledges and leaves the room. `MULTIPLAYER_SMOKE_URL` and `MULTIPLAYER_SMOKE_ORIGIN` may override the production defaults. A bounded scheduled GitHub Actions workflow detects persistent production drift; it is an alert, not a deployment-order gate.
+`test:multiplayer:production` first polls the public Worker's side-effect-free `/health` protocol header for at most 120 seconds so a just-deployed version can propagate to the custom domain. Transport errors and Cloudflare 502/503/504 responses may retry only inside that same bound; invalid responses and persistent failures still fail the deployment. Once the marker matches the source `MULTIPLAYER_PROTOCOL_VERSION`, the smoke creates exactly one private production room, opens the returned WebSocket, requires the matching `welcome` and waiting-room member state, then acknowledges and leaves. It never retries guest creation, room creation, WebSocket, lobby, or leave failures. Run it after every production Worker or Pages deployment. `MULTIPLAYER_SMOKE_URL` and `MULTIPLAYER_SMOKE_ORIGIN` may override the production defaults. A bounded scheduled GitHub Actions workflow detects persistent production drift; it is an alert, not a deployment-order gate.
 
 Worker and Pages deployments are independent, and strict protocol versions do not support a mixed rolling release. For a protocol-version change, use a maintenance rollout instead of choosing either component first:
 

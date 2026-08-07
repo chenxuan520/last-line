@@ -1,5 +1,9 @@
 import type { WorkerEnv } from "./env";
 import { adminPage } from "./adminPage";
+import {
+  MULTIPLAYER_PROTOCOL_HEADER,
+  MULTIPLAYER_PROTOCOL_VERSION,
+} from "../src/network/protocol";
 export { AccountDirectory } from "./AccountDirectory";
 export { AdminDirectory } from "./AdminDirectory";
 export { GameRoom } from "./GameRoom";
@@ -36,7 +40,15 @@ export default {
       return cors(await handlePlayerAuth(request, env), request, env);
     }
     if (request.method === "GET" && url.pathname === "/health") {
-      return cors(Response.json({ ok: true, service: "lastlinep2p" }), request, env);
+      return cors(Response.json(
+        { ok: true, service: "lastlinep2p" },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+            [MULTIPLAYER_PROTOCOL_HEADER]: String(MULTIPLAYER_PROTOCOL_VERSION),
+          },
+        },
+      ), request, env);
     }
     const roomSocket = /^\/v1\/rooms\/(room-[a-f0-9-]+)\/socket$/.exec(url.pathname);
     if (roomSocket?.[1]) {

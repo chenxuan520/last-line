@@ -1026,3 +1026,53 @@ Round 2（最终 re-review）— 2026-08-07：
 - 文档与验证：`AGENTS.md`、`docs/architecture.md` 的“预载payload、不二次请求、ready前procedural/vertex fallback、失败保持可见”合同与实现一致。已参考外层 core 3/3、AssetCatalog + IslandScene 2 files / 34、完整unit 45 / 444、三端typecheck、全部build/budget、精确Chrome Network/console和MCP清理；未重复tests/build/browser，按用户要求未运行coverage。
 - 审查结论：**通过。** 本次 Phase 8 Round 2 未发现明确问题。Findings：blocker 0、high 0、medium 0、low 0；Round 1 medium 已解决，没有阻止提交的 unresolved finding。
 - 非阻塞残余风险：helper 在失败或scene dispose后保留一个不会再触发业务回调的 one-shot observer，最终由 texture/scene dispose 清理；数量固定为有限 world textures，不构成功能或无界资源风险。
+
+### Phase 9：Worker 协议发布传播竞态
+
+#### Plan
+
+PR #2 合并到 `main` 的提交 `2a08beb7ec46421adf9ddac3a0f6deccda336f1f` 将联机协议从 6 升到 7。Cloudflare Workers Builds 在 2026-08-07 17:17:37 创建并部署新 Worker 版本 `326652c8-27d3-4e51-959c-d8de39baea55`，但部署命令返回约 6 秒后立即运行的 production smoke 仍从自定义域名收到旧协议 6 welcome，因此 deploy command 失败。随后同一生产地址已稳定返回协议 7，手工运行完整 HTTP/WebSocket smoke 通过，证明 Worker 代码与持久化迁移已成功，失败来自部署完成与边缘入口切换之间的短暂传播窗口。
+
+最终合同：
+
+- Worker `/health` 保持既有精确 JSON body 与 liveness 语义，同时用稳定响应 Header 暴露当前 `MULTIPLAYER_PROTOCOL_VERSION`，供部署验证辨认实际服务版本。
+- production smoke 在创建 guest/room 前先轮询无副作用 `/health`，最多等待 120 秒，直到自定义域名明确报告当前协议；旧 artifact 缺少 Header 或报告更旧协议时可继续等待。
+- 健康检查 transport error 与 Cloudflare 502/503/504 可在同一120秒总窗口内重试；其他非2xx、非法 health body/Header、比客户端更新的协议立即失败，持续旧协议或持续网关故障最终失败，不能用泛化重试掩盖真实故障。
+- 协议 ready 后只运行一次原有 guest、private room、WebSocket welcome/lobby/leave 全流程；不得重试有副作用的房间业务失败。
+- Cloudflare Worker、standalone、客户端协议仍共享同一版本常量；不改变游戏消息、房间规则、checkpoint 或地图逻辑。
+
+文件与任务：
+
+1. `src/network/protocol.ts`：定义稳定 protocol health Header 名称。
+2. `worker/index.ts`、`tests/worker/lobby.test.ts`：Worker health 返回并验证当前协议 Header，body 保持不变。
+3. `scripts/productionProtocolReadiness.ts`、`scripts/smoke-production-multiplayer.ts`：实现可测试的有界 readiness 轮询，并在创建生产资源前调用。
+4. `tests/unit/productionProtocolReadiness.test.ts`：覆盖旧 artifact 缺 Header、旧协议到当前协议、持续旧协议超时、短暂 transport/网关故障、非法/未来协议和非健康响应；使用注入时钟，不依赖真实等待。
+5. `AGENTS.md`、`docs/deployment.md`：记录部署传播等待只能围绕无副作用协议 marker，不能重试房间业务。
+6. 运行定向 unit/Worker、三端 typecheck、完整 test、Worker/browser/server build与预算；不运行 coverage。本阶段无 presentation 改动，不打开 Chrome。
+7. 独立 reviewer 静态审查 retry 边界、超时、失败分类、无副作用和共享协议合同；解决全部 blocker/high/medium 后，在 `main` 创建包含实现与 plan 的单一提交并直接 push。
+8. 监控 GitHub CI、Cloudflare Pages、Workers Builds；确认新 Worker version、自动 production smoke 和一次独立 production smoke 均通过。提交后不再修改仓库。
+
+#### Build
+
+- 2026-08-07 17:21：失败根因确认。Workers Builds 日志为 `Production protocol 6 does not match client protocol 7`；新版本 `326652c8-27d3-4e51-959c-d8de39baea55` 已于 17:17:37 创建，失败 welcome 出现在 17:17:43。随后对同一 `https://lastlinep2p.011203.xyz` 运行现有完整 production smoke 返回 `Production multiplayer smoke passed (protocol 7)`。Pages 已成功，GitHub main build仍在运行；问题是部署后边缘传播竞态，不是 Worker build、协议实现或地图权威逻辑失败。
+- 2026-08-07 17:25：新增 readiness 回归先因模块不存在准确红灯。最终1 file / 9 tests通过：旧 artifact缺marker、旧协议后切到当前协议会等待；短暂transport error与502/503/504会在同一总窗口等待；持续旧协议或网关错误到期失败；4xx、非法health JSON/body/Header和未来协议均只请求一次并立即失败。测试注入时钟，不使用真实sleep。
+- 2026-08-07 17:27：Worker `/health` JSON body保持 `{ ok: true, service: "lastlinep2p" }`，新增 `Cache-Control: no-store` 与共享 `X-Last-Line-Protocol: 7` Header。production smoke 在任何 guest/room副作用前最多120秒轮询 marker；单次请求也受剩余总预算约束，marker匹配后原有 guest/private-room/WebSocket welcome/lobby/leave只执行一次。
+- 2026-08-07 17:28：三端 typecheck通过；Worker dry-run bundle通过，产物 `516,593 / 615,000B`。本机定向 Worker Vitest未启动任何测试，因为当前 workerd要求 glibc 2.29–2.35而主机Debian 10不满足；未降级依赖或绕过测试。该 runtime合同由 push后的Node 24 GitHub CI强制验证。
+- 2026-08-07 17:37：完整 unit在最多7 workers下46 files / 453 tests通过，未修改测试、seed、断言、worker数或timeout；高外部load下耗时554秒。完整 standalone 3 files / 25 tests通过。按用户既有要求未运行coverage。
+- 2026-08-07 17:38：browser、Worker dry-run和standalone server build全部通过；预算最终browser entry `1,098,042 / 1,200,000`、all JS `3,794,697 / 4,000,000`、252 / 270 chunks、CSS `44,643 / 50,000`、dist `4,369,105 / 4,550,000`、Worker `516,593 / 615,000`、server `531,974 / 630,000`，全部PASS；`git diff --check`通过。本阶段无presentation变化，不需要Chrome，MCP保持仅`about:blank`。
+- 2026-08-07 17:38：合并提交 `2a08beb` 的GitHub main CI最终完整成功，证明原PR的typecheck/test/build/Docker smoke无持续代码失败；外部Workers Builds红灯仍准确对应其部署后过早smoke。本修复尚未提交，当前生产Worker没有新protocol Header，因此不提前运行修改后的production smoke；必须与本修复Worker部署一起验证。
+- 2026-08-07 17:42：使用仓库要求的本机Node `v24.18.1` 复跑readiness 9/9、三端typecheck和Worker dry-run bundle均通过；默认Node 22结果不作为最终语言/runtime证据。主机glibc仍为2.28，无法启动当前workerd；push后GitHub Node 24 runner必须执行真实Worker suite并成为提交门禁。
+- 2026-08-07 17:48：提交前远端`main`新增`1f99374 feat: add ammunition depot assets`，仅修改asset manifest、两张图片和`assetCatalog.test.ts`，与Phase 9十个改动路径零重叠。本地安全fast-forward后，Node 24定向readiness + AssetCatalog 2 files / 21 tests及三端typecheck通过；独立reviewer的Phase 9结论不受该正交基线更新影响。
+
+#### Review
+
+Round 1（独立终审）— 2026-08-07 17:45 UTC：
+
+- 审查范围：完整读取 `/home/lingchen.judy/ai-workspace/subagents/code-reviewer.md`、根 `AGENTS.md`、`README.md` 和 canonical plan Phase 9 Plan/Build；以用户指定的生产基线 `origin/main@2a08beb7ec46421adf9ddac3a0f6deccda336f1f` 对照当前 `main` 未提交完整 diff。只读审查 Worker health、共享协议常量、production readiness、原 smoke 调用链、Worker/unit 回归、架构/部署文档和本阶段 plan；未修改业务代码、测试、文档或其他 plan。
+- 根因与发布边界：`wrangler deploy` 返回后自定义域名仍短暂命中旧协议 6 的现象与 Phase 9 传播竞态判断一致。新轮询只对 `GET /health` 执行，且在 `smoke-production-multiplayer.ts` 顶层的第一项 guest POST 之前完成；marker 匹配后 guest、private room、WebSocket、welcome/lobby、ack/leave 仍沿原单次控制流执行，任何业务错误都不会回到 readiness 或重试资源创建。
+- `/health` 合同：Worker继续返回精确 `{ ok: true, service: "lastlinep2p" }` JSON和200 liveness语义，仅增加 `Cache-Control: no-store` 与共享 `X-Last-Line-Protocol`。`cors()` 复制原 response headers和body后再追加既有CORS headers，不会丢失 marker、no-store或content type；无 Origin请求仍可供部署脚本读取，现有跨域合同不变。standalone复用同一gateway，因此也暴露相同无副作用marker而不改变其health body。
+- readiness边界：默认120秒总窗口由单一 `startedAt` 和注入 `now()` 计算；每个 fetch 的 `AbortSignal.timeout` 被剩余总预算和15秒单次上限共同约束，每次 sleep也裁剪到剩余预算。缺marker、旧协议、transport error和502/503/504只在该窗口重试；其他非2xx、非法JSON/body/Header、非正安全整数及未来协议立即失败。读取JSON发生在已成功响应之后，生产health body固定且极小；不存在可控大body路径。测试时钟、fetch和sleep均可注入，覆盖9条分类且不依赖真实等待。
+- 共享常量、文档与范围：health header名称和welcome协议版本共处 `src/network/protocol.ts`，Worker和smoke直接导入同一常量，没有复制版本数字。`AGENTS.md`、`docs/architecture.md`、`docs/deployment.md`准确记录只重试无副作用marker、严格有界等待和marker后单次业务smoke。完整diff仅包含本根因修复、对应测试/文档及canonical plan，无地图、房间、checkpoint、消息协议或其他无关语义改动。
+- 已参考外层证据：readiness Node 24 1 file / 9；完整unit 46 / 453；standalone 3 / 25；三端typecheck；browser/Worker/server build与全部预算；`git diff --check`。按约束未重复完整tests/build/browser/coverage。额外仅用Node `Response`/`Headers` 做无副作用最小静态合同核对，确认 `cors()` 重建响应后仍保留200、JSON body/content-type、no-store和protocol header。
+- 审查结论：**通过。** 本次 Phase 9 未发现明确问题。Findings：blocker 0、high 0、medium 0、low 0；没有阻止提交的 unresolved finding。
+- 残余验证风险：当前主机glibc 2.28无法启动仓库锁定版本的workerd，因此本地未执行真实Worker suite；这不是代码finding，push后的GitHub Node 24 CI必须实际通过Worker tests，并由新Worker部署后的public readiness +完整HTTP/WebSocket smoke作为最终发布证据。
