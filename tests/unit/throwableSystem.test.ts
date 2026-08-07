@@ -241,19 +241,19 @@ describe("ThrowableSystem", () => {
       ...grenade("grenade", "actor", 0),
       position: grenadePosition,
     };
-    let obstructionQuery: { origin: Vector3State; target: Vector3State } | null = null;
+    const obstructionQueries: Array<{ origin: Vector3State; target: Vector3State }> = [];
     new ThrowableSystem().update(state, 0.1, createWorld({
       hasExplosionLineOfSight(origin, targetPosition) {
-        obstructionQuery = {
+        obstructionQueries.push({
           origin: { ...origin },
           target: { ...targetPosition },
-        };
+        });
         return true;
       },
     }), []);
 
     expect(target.health).toBe(0);
-    expect(obstructionQuery).not.toBeNull();
+    const obstructionQuery = obstructionQueries[0];
     if (!obstructionQuery) throw new Error("obstruction query missing");
     expect(obstructionQuery.target).toEqual(closestActorCapsulePoint(obstructionQuery.origin, target));
   });
