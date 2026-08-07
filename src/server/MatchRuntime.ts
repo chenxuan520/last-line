@@ -1,4 +1,5 @@
 import { BATTLE_ROYALE_CONFIG } from "../config/battleRoyale";
+import { ITEMS } from "../config/items";
 import { WEAPONS } from "../config/weapons";
 import { createMapLayout, type MapLayout } from "../config/map";
 import { DEFAULT_MAP_ID, normalizeMapId, type MapId } from "../config/maps";
@@ -463,9 +464,7 @@ function isRecoverableInventory(value: unknown): boolean {
   if (!isRecord(value) || !Array.isArray(value.weaponSlots) || value.weaponSlots.length !== 2) return false;
   if (!value.weaponSlots.every((weapon) => weapon === null || isRecoverableWeapon(weapon))) return false;
   if (value.activeWeaponSlot !== 0 && value.activeWeaponSlot !== 1) return false;
-  if (!Array.isArray(value.backpack) || !value.backpack.every((stack) =>
-    isRecord(stack) && isNonEmptyString(stack.itemId) && isPositiveInteger(stack.quantity)
-  )) return false;
+  if (!Array.isArray(value.backpack) || !value.backpack.every(isRecoverableBackpackStack)) return false;
   if (!isNonNegativeInteger(value.maxBackpackStacks) ||
     value.backpack.length > value.maxBackpackStacks
   ) return false;
@@ -477,6 +476,14 @@ function isRecoverableInventory(value: unknown): boolean {
     isNonEmptyString(value.usingItem.itemId) &&
     isNonNegativeNumber(value.usingItem.remainingSeconds)
   );
+}
+
+function isRecoverableBackpackStack(value: unknown): boolean {
+  if (!isRecord(value) || !isNonEmptyString(value.itemId) || !isPositiveInteger(value.quantity)) {
+    return false;
+  }
+  const item = ITEMS[value.itemId];
+  return Boolean(item) && value.quantity <= (item?.maxStack ?? 0);
 }
 
 function isRecoverableWeapon(value: unknown): boolean {

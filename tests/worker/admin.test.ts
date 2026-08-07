@@ -778,6 +778,19 @@ describe("admin control plane", () => {
 
   it.each([
     {
+      name: "grenade backpack stack above the configured limit",
+      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => {
+        const actors = structuredClone(checkpoint.state.actors);
+        const actor = actors["human-1"];
+        if (!actor) throw new Error("actor fixture missing");
+        actor.inventory.backpack = [{ itemId: "grenade.frag", quantity: 4 }];
+        return {
+          ...checkpoint,
+          state: { ...checkpoint.state, actors },
+        };
+      },
+    },
+    {
       name: "grenade fuse above the configured duration",
       corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => ({
         ...checkpoint,

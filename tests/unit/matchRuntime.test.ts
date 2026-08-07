@@ -513,6 +513,16 @@ describe("MatchRuntime", () => {
       if (!stack) throw new Error("backpack fixture missing");
       stack.quantity = 0;
     }],
+    ["unknown backpack item", (state: MatchRuntime["state"]) => {
+      const stack = state.actors["human-1"]?.inventory.backpack[0];
+      if (!stack) throw new Error("backpack fixture missing");
+      stack.itemId = "missing";
+    }],
+    ["backpack stack above item limit", (state: MatchRuntime["state"]) => {
+      const inventory = state.actors["human-1"]?.inventory;
+      if (!inventory) throw new Error("inventory fixture missing");
+      inventory.backpack = [{ itemId: "grenade.frag", quantity: 4 }];
+    }],
     ["backpack over capacity", (state: MatchRuntime["state"]) => {
       const inventory = state.actors["human-1"]?.inventory;
       if (!inventory) throw new Error("inventory fixture missing");
