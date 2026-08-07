@@ -943,3 +943,86 @@ Round 1（独立终审）— 2026-08-07：
 - 已参考外层证据：三端 typecheck；Worker 4 files / 44 tests；standalone local runtime 11/11；所有 build/budget 和 `git diff --check`；MCP 仅 `about:blank`。未重复完整 tests/build/browser，按用户要求未运行 coverage。
 - 审查结论：**通过。** 本次 Phase 7 独立终审未发现明确问题。Findings：blocker 0、high 0、medium 0、low 0；没有阻止提交的 unresolved finding。
 - 残余风险：完整 standalone 套件在机器 load 约 69 时，既有独立子进程 3 秒就绪门限发生一次环境性失败；该测试不经过 member restore guard，绑定空闲 CPU 56 后原用例 1/1 通过，且未改 timeout/断言，因此不构成本阶段 finding。
+
+### Phase 8：地形纹理非阻塞加载
+
+#### Plan
+
+用户反馈三张地图都可能偶发“地板没加载出来”。进一步澄清后确认不是相机视角裁剪，而是进入对局时 ground 暂未渲染。Git 历史表明该问题来自 `bd9559b`（2026-07-22）引入的旧 textured-environment 路径，当前 `main` 已存在；本混合地图分支没有创建这段机制，但三张地图共用它，因此新图也会暴露。
+
+根因与最终合同：
+
+- `AssetCatalog.initialize()` 已经 fetch、解码验证并保存全部非模型 asset payload；当前 `catalogTexture()` 却忽略该 payload，再以 URL 创建 Babylon `Texture`，形成第二次异步网络请求。
+- Babylon texture 默认参与 material readiness。草地、泥地或道路任一纹理第二次请求/解码未完成时，ground `MultiMaterial` 可暂时 not-ready，整块 `island-ground` 不绘制；请求异常时窗口更明显。
+- 地形和其他已预载 image texture 应直接消费 `AssetCatalog.getPayload()` 的同一已验证 bytes，不再发第二次 URL 请求。
+- payload-backed image texture 即使 GPU upload/浏览器解码仍在进行，也不得阻塞依附 mesh；材质先以稳定纯色/vertex color 绘制，纹理 ready 后自然接管。
+- 若 asset 在 catalog preload 阶段失败并被标记 unavailable，scene 必须返回 `null` texture，保留材质固有颜色和地形 vertex colors；不能尝试把 `fallback.ui` SVG 当地形贴图，也不能因纹理错误隐藏 ground。
+- sky/brand/building textures同样通过统一 `catalogTexture()` 获得 payload 和 non-blocking 语义；品牌牌缺纹理时保持既有 skip/fallback边界，不能引入 gameplay authority变化。
+- `island-ground` geometry、submeshes、bounding info、terrain heights 和权威碰撞不变；修复仅限客户端 presentation加载。
+- 不新增资源、依赖或协议变化。
+
+文件与任务：
+
+1. `tests/unit/islandScene.test.ts`：添加 payload-backed texture合同，证明 scene创建后不再次 fetch texture URL、ground texture使用catalog payload、texture blocking关闭；添加terrain texture unavailable时 ground仍存在、enabled、ready且材质以纯色/vertex color绘制的回归。
+2. `tests/unit/assetCatalog.test.ts`：仅在需要公开稳定payload/descriptor状态时补最小测试；不把Babylon行为塞入catalog。
+3. `src/client/render/scenes/IslandScene.ts`：`catalogTexture()` 使用预载 bytes +正确扩展名/MIME创建 texture，设置 non-blocking；没有原始asset payload时返回null，不用跨类型UI SVG fallback作为世界贴图。
+4. 必要时 `src/assets/AssetCatalog.ts` 增加只读方法，以“请求asset自身且payload存在”原子返回 descriptor/payload，避免 resolve fallback和payload ID错配。
+5. `AGENTS.md`、`docs/architecture.md`：记录已预载 image不二次请求、world texture failure不得阻塞geometry的长期资源合同。
+6. 自动验证：受影响AssetCatalog/NullEngine/scene lifecycle、三端typecheck、必要完整unit、browser/Worker/server builds与预算；按用户既有明确要求不运行coverage。
+7. Chrome DevTools MCP production验收：volume=0；使用Slow 3G或请求拦截/延迟证明进入三图时ground立即存在和enabled；强制terrain URL二次请求失败时不得发生第二次请求或ground消失。检查console/network。每轮立即导航`about:blank`、关闭isolated context、停止preview并确认端口/进程清理。
+8. 独立 reviewer/re-review：静态审查payload生命周期、Blob/ArrayBuffer ownership、Babylon texture readiness、fallback类型与内存释放；解决全部blocker/high/medium。
+9. 创建包含非plan代码/测试/文档的单一commit，普通push到现有PR #2，等待CI/Pages，重新`@codex review`并持续处理最新SHA finding直到Codex明确无问题。
+
+#### Build
+
+- 2026-08-07 14:15：根因定位完成。`AssetCatalog.preload()` 自首个提交 `99f3dfb` 起保存验证后的payload；`catalogTexture()` 和terrain textured material由旧提交 `bd9559b` 引入并始终按URL新建blocking Texture。当前`main`也包含完全相同逻辑；混合地图提交未引入该机制。确认是历史共享presentation bug，不是本次地图生成代码造成。
+- 2026-08-07 14:15：当前调用链证据：ground由`CreateGround()`同步创建并立即写入terrain vertices/submeshes；grass/mud/road三个submaterial随后通过`new Texture(descriptor.url)`异步二次加载。`AssetCatalog.getPayload()`当前仅被GLB加载消费，scene image path完全忽略已预载bytes。
+- 2026-08-07 14:47：测试先行红灯准确命中：新增 payload-backed terrain 用例中旧 texture 的 `isBlocking` 仍为 `true`，且未消费测试提供的 catalog payload；unavailable terrain 用例证明纯色/vertex-color ground fallback已有基础能力。失败不是地图生成、bounding或碰撞问题。
+- 2026-08-07 14:48：统一 `catalogTexture()` 现在要求原始 image descriptor 与其已验证 payload同时存在，以 descriptor URL仅提供扩展名/loader提示，并把 payload直接传给 Babylon `Texture`；`isBlocking=false`。没有payload或asset已fallback时返回null，保留material纯色和terrain vertex colors，不把`fallback.ui` SVG当world texture。sky同样复用该helper并使用clamp address mode；grass/mud/road/building/brand均不再二次fetch。
+- 2026-08-07 14:54：新定向回归2/2通过：场景创建后terrain纹理使用同一预载ArrayBuffer、名称正确、全部non-blocking，fetch零调用；terrain payload unavailable时三个ground submaterial均无texture，ground保持visible/enabled、顶点和三个submesh完整。三端typecheck通过。
+- 2026-08-07 14:56：完整`assetCatalog.test.ts + islandScene.test.ts` 2 files / 33 tests通过，覆盖scene lifecycle、town/mixed、sky、brand signs、GLB fallback与terrain payload/fallback；未发现统一image helper回归。
+- 2026-08-07 15:08：完整unit使用最多7 workers与120s通用有限timeout，45 files / 443 tests全部通过；未修改seed、断言或timeout。same-origin standalone/browser、Worker dry-run、server builds及预算通过，最终browser entry `1,097,577 / 1,200,000`、all JS `3,794,232 / 4,000,000`、252 / 270 chunks、CSS `44,643 / 50,000`、dist `4,316,171 / 4,550,000`、Worker `516,341 / 615,000`、server `531,722 / 630,000`；`git diff --check`通过。按用户要求未运行coverage。
+- 2026-08-07 15:09：首次production Chrome Slow 3G验收发现“URL+buffer”构造虽已`isBlocking=false`并保证ground立即visible/ready，但Babylon仍对terrain/road/wall/roof/sky/brand原URL发304二次请求；因此没有把该轮误记为完全通过。根据Babylon官方`Texture.LoadFromDataString()`语义，改为`data:<assetId><extension>` +预载buffer，彻底移除HTTP二次请求，同时保留non-blocking。
+- 2026-08-07 15:10：最终production Chrome Slow 3G验收通过，全程`volume=0`。初始化阶段每个world image原URL仅一次200 preload；进入烬岚郡后Network无第二次terrain/road/wall/roof/sky/brand HTTP请求，仅出现内存payload解码的`blob:`请求。当前ground存在、enabled/visible/ready，40401顶点、3 submesh；grass/mud/road texture URL为`data:<asset>.webp`、`isBlocking=false`、`isReadyOrNotBlocking=true`且持有buffer。console仅SwiftShader warning。
+- 2026-08-07 15:11：独立fallback Chrome轮通过initScript强制grass/mud/road preload返回503。菜单仍正常，灰炉城进入航线后ground存在、enabled/visible/ready，40401顶点、3 submesh，三个ground submaterial texture均为null，证明纯色+vertex color兜底不会隐藏地面。console仅本机SwiftShader与本轮预期注入的3个503/对应fallback日志。
+- 2026-08-07 15:11：两轮Chrome后均立即导航任务页`about:blank`、关闭`last-line-ground-load`/`last-line-ground-fallback` isolated context、停止preview、清除network emulation并确认8798关闭、无本任务Vitest/tsx/preview进程；MCP最终仅剩page1 `about:blank`。
+- 2026-08-07 15:40：处理独立 reviewer Round 1 medium。新增 `bindTextureWhenReady()`，payload texture 创建后保持 non-blocking，但在 `isReady()` 成立且无 `loadingError`、scene 未 dispose 前不写入材质的 `diffuseTexture`；load error 或 scene disposal 后永不绑定。terrain material 通过 metadata 保存“存在待加载纹理”的 tint 选择，不再靠提前挂载 sampler 触发黑色 empty texture。ground、building wall/roof、brand sign 和 sky 均复用同一 ready-only 绑定边界。
+- 2026-08-07 15:42：新增 lifecycle 回归准确覆盖 pending→ready、error 和 disposed 三条路径；pending/error/disposed 时 bind callback 均不执行，ready/onLoad 后仅绑定一次。核心定向 3/3、`assetCatalog.test.ts + islandScene.test.ts` 2 files / 34、完整 unit 45 files / 444 tests、三端 typecheck 全部通过；未修改 seed、断言、worker 数或 timeout，按用户要求未运行 coverage。
+- 2026-08-07 15:43：修复后 browser、Worker、server build 与 budget 全部通过；最终 browser entry `1,097,997 / 1,200,000`、Worker `516,341 / 615,000`、server `531,722 / 630,000`，其余阈值保持用户批准值。
+- 2026-08-07 15:45：production Chrome pending-window 精确验收通过，全程 mixed/low、`volume=0`。在菜单 AssetCatalog preload 完成后拦截 Babylon 实际使用的 `HTMLImageElement.src` Blob 解码路径，共冻结 11 个 scene payload image assignment；冻结期间 `island-ground` 仍 exists/enabled/visible/ready，40401 顶点、3 submesh，grass/mud/road 三个 `StandardMaterial.diffuseTexture` 均为 null，证明 shader 不会采样黑色 empty texture。释放门闩后三个材质才绑定各自 `data:texture.*.webp` texture，全部 ready、`isBlocking=false`、无 loading error，ground 全程保持 visible/ready。
+- 2026-08-07 15:45：pending-window Network 显示 world image 原 HTTP URL 仍仅为菜单 preload 请求，释放后仅新增 11 个内存 `blob:` 200 解码请求；console 仅 Babylon 启动日志和本机 SwiftShader warning，无应用 error。验收后立即恢复原生 image setter、导航 isolated page 到 `about:blank` 并关闭 context，清除 network emulation、停止 preview，确认 MCP 仅 page 1 `about:blank`、8798 无监听且无本任务 preview 进程。
+
+#### Review
+
+待失败回归、实现、完整验证、Chrome MCP和独立reviewer完成后追加。
+
+Round 1（独立终审）— 2026-08-07：
+
+- 审查范围：完整读取 `/home/lingchen.judy/ai-workspace/subagents/code-reviewer.md`、根 `AGENTS.md`、`README.md` 和 canonical plan Phase 8 Plan/Build；以 `cc0a3798e1c4d880d9e2f69803d702746fea2e71` 为直接基线、`main@7a453f5` 为背景，静态审查 canonical plan、AGENTS、architecture、`IslandScene` 和对应 unit 的当前完整 diff。未修改业务代码、测试、文档或其他 plan。
+- 已确认：根因判断成立，旧 URL `Texture` 会绕过已经 preload/decode 验证的 `AssetCatalog` payload 并发起第二次 blocking 请求。当前 `Texture.LoadFromDataString(name, payload, scene, false, false, true, TRILINEAR, null, null, undefined, undefined, extension)` 参数位置正确：`deleteBuffer=false` 保留 catalog 所有权，forced extension 来自原 descriptor URL；`data:<assetId><extension>` 避免原 URL HTTP/cache 再请求。Babylon 对 ArrayBuffer 解码创建的临时 object URL 在 load/error/CSP 路径均 revoke，scene/material/texture dispose 会释放 texture/internal GPU 资源和 texture 自身 `_buffer` 引用，而 catalog 继续持有唯一 payload。
+- 已确认：统一 helper 对 terrain/road/building/brand 使用 wrap、sky 使用 clamp，scale 与 sky anisotropy 覆盖保持原语义；descriptor fallback ID/type或原 payload 缺失时返回 null，不会把 `fallback.ui` SVG作为 world texture。强制 preload 503 的 null-texture路径保留 ground material 固有颜色、vertex colors、geometry和submeshes。
+- 已参考外层证据：三端 typecheck；新增 2/2；AssetCatalog + IslandScene 2 files / 33；完整 unit 45 / 443；全部 build/budget，最终 browser `1,097,577 / 1,200,000`、Worker `516,341 / 615,000`、server `531,722 / 630,000`；`git diff --check`；Slow 3G 单次原 URL preload + 内存 blob 解码；强制 terrain preload 503 时 ground ready且 texture null；MCP仅 `about:blank`、8798关闭。未重复完整 tests/build/browser，按用户要求未运行 coverage。
+- 为核对一个现有证据未覆盖的具体风险，本轮只读检查当前仓库安装的 Babylon `StandardMaterial`、engine texture binding和default shader实现；未运行测试或浏览器。
+- 审查结论：**不通过，阻止提交。** Findings：blocker 0、high 0、medium 1、low 0。
+
+Medium：
+
+1. `src/client/render/scenes/IslandScene.ts:913`、`src/client/render/scenes/IslandScene.ts:3102`、`src/client/render/scenes/IslandScene.ts:3132`、`tests/unit/islandScene.test.ts:938`：`isBlocking=false` 确实使 `StandardMaterial` 在 payload texture 尚未 ready 时通过 readiness，但不会自动回退到材质纯色。Babylon 此时仍启用 `DIFFUSE` define并绑定由四个零字节创建的 1×1 `emptyTexture`；default shader先采样该全零纹理，再乘 ground vertex color，因此 upload/decode 窗口中的地面是全黑而不是 plan/AGENTS/architecture承诺的“procedural color/vertex color先绘制，texture ready后接管”。若 payload 已通过 preload 验证但后续浏览器解码/GPU upload失败，`loadingError` 也继续令材质ready并永久绑定空纹理。当前生产还仅凭 `diffuseTexture` 对象存在就把顶点色切到 `textureTint`，放大了该偏差。现有 unit只断言同payload、零fetch、`isBlocking=false`和ground enabled；Slow 3G在观察时纹理已经ready；强制503只覆盖 helper返回null，三者都没有把一个已附加的 payload-backed texture 保持在 pending/error 状态。Builder应在纹理真正ready前不把它作为 diffuse sampler启用（或提供等价的可见纯色/vertex fallback），load后再接管，error时恢复null，并增加独立的 pending→ready及payload-backed decode/error回归后请求复审。
+
+- 非阻塞残余风险：`data:<assetId><extension>` 以稳定asset ID作为engine cache key，依赖“同一engine生命周期内同ID payload不可变”的现有manifest合同；生产资源满足该条件。本轮未发现 forced extension、ArrayBuffer所有权、Blob回收、scene dispose、wrap/clamp、cross-type fallback、HTTP去重或预算方面的其他明确问题。
+
+Round 1 finding disposition：
+
+- **已解决。** payload texture 现在只在实际 ready 且无 error、scene 未 dispose 时绑定给材质；pending/error 窗口的 `diffuseTexture` 保持 null，程序化材质色和 terrain vertex colors 可直接绘制，不再启用 Babylon `DIFFUSE` define 或采样黑色 `emptyTexture`。
+- 独立 lifecycle unit 覆盖 pending→ready、error、disposed；production Chrome 通过冻结真实 Blob image assignment 精确观察到 pending 时三个 ground sampler 均为 null、释放后才绑定 ready/non-blocking data texture。修复后的完整 unit、typecheck、build/budget、Network/console 和 MCP 清理证据见 Phase 8 Build。
+
+Round 2（最终 re-review）— 2026-08-07：
+
+- 审查范围：重新完整读取 reviewer 提示、根 `AGENTS.md`、`README.md` 和 canonical plan Phase 8 最新 Plan/Build/Review及 Round 1 disposition；继续以 `cc0a3798e1c4d880d9e2f69803d702746fea2e71` 为直接基线、`main@7a453f5` 为背景，静态审查当前 5 个未提交文件的完整 diff。未修改业务代码、测试、文档或其他 plan。
+- Round 1 medium 复核：`bindTextureWhenReady()` 在调用时已 ready 的同步路径只绑定一次；pending 路径先注册 `addOnce`，再复查 ready 并在竞态成立时移除 observer后绑定，避免错过同步完成。回调统一拒绝已绑定、scene disposed、`loadingError` 或仍未 ready 的 texture，因此 pending/error/disposed 均不会把 sampler挂到材质，成功 onLoad只绑定一次。
+- 调用点复核：ground grass/mud/road 与 building roof 经 `texturedMaterial()` 先保留 procedural `diffuseColor`，仅 ready 后赋 `diffuseTexture`；building wall共享同一个 catalog texture，并为每个颜色材质注册独立 ready-only闭包；brand sign pending时使用显式灰色牌面，ready后同时绑定 texture并启用alpha；sky保留 clamp、scale 1与anisotropy 1，仅ready后写入 `BackgroundMaterial.diffuseTexture`。所有闭包都捕获正确的材质/texture，没有循环变量串绑。
+- Terrain tint复核：`pendingDiffuseTexture` metadata仅表示该surface有可用的待加载payload，使顶点色预先使用与最终纹理相乘的白色shade tint；pending时没有 sampler，因此该 tint本身直接可见，ready后同一vertex tint继续调制纹理，不发生颜色语义跳变。preload unavailable时无texture也无metadata，仍使用原 `surface.color`；payload decode error时保持无sampler，metadata留下的白色shade fallback仍可见而非黑地面。
+- 生命周期测试与证据：独立 unit明确覆盖 pending不绑定、ready/onLoad绑定一次、已有error即使后续通知也不绑定、已disposed即使后续通知也不绑定；既有scene用例继续证明最终ground/building/brand/sky texture绑定语义。外层精确 Chrome通过冻结真实 Blob `HTMLImageElement.src` 观察到 pending窗口三个ground sampler均为null，释放后才绑定ready texture，补足纯helper测试与真实Babylon之间的证据。
+- 文档与验证：`AGENTS.md`、`docs/architecture.md` 的“预载payload、不二次请求、ready前procedural/vertex fallback、失败保持可见”合同与实现一致。已参考外层 core 3/3、AssetCatalog + IslandScene 2 files / 34、完整unit 45 / 444、三端typecheck、全部build/budget、精确Chrome Network/console和MCP清理；未重复tests/build/browser，按用户要求未运行coverage。
+- 审查结论：**通过。** 本次 Phase 8 Round 2 未发现明确问题。Findings：blocker 0、high 0、medium 0、low 0；Round 1 medium 已解决，没有阻止提交的 unresolved finding。
+- 非阻塞残余风险：helper 在失败或scene dispose后保留一个不会再触发业务回调的 one-shot observer，最终由 texture/scene dispose 清理；数量固定为有限 world textures，不构成功能或无界资源风险。

@@ -15,6 +15,7 @@ import { AssetCatalog } from "../../src/assets/AssetCatalog";
 import type { AssetEntry } from "../../src/assets/types";
 import {
   applyActorVisualPose,
+  bindTextureWhenReady,
   createLoadingBayLayout,
   createNaturalDetailPlacements,
   createIslandScene,
@@ -23,6 +24,7 @@ import {
   setActorEquipmentVisual,
   setActorWeaponVisual,
 } from "../../src/client/render/scenes/IslandScene";
+import { Observable } from "@babylonjs/core/Misc/observable";
 import { createMapLayout, getTerrainHeight, HOSPITAL_WALL_COLOR, MAP_SIZE } from "../../src/config/map";
 import { mixedFootprintClearsRoads } from "../../src/config/mixedMap";
 import { createMixedMapBlueprint, MIXED_REGION_COUNT } from "../../src/config/mixedMap";
@@ -935,6 +937,128 @@ describe("IslandScene lifecycle", () => {
     engine.dispose();
   }, 30_000);
 
+  it("uses preloaded terrain payloads without blocking or refetching the ground", async () => {
+    const payload = new Uint8Array([0x52, 0x49, 0x46, 0x46]).buffer;
+    const assets = createAssets();
+    const payloads = new Map([
+      ["texture.terrain.grass", payload],
+      ["texture.terrain.mud", payload],
+      ["texture.road", payload],
+    ]);
+    vi.spyOn(assets, "getPayload").mockImplementation((id) => payloads.get(id));
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const engine = new NullEngine();
+    const state = createBattleRoyaleState("player", {
+      participantCount: 2,
+      flightSeconds: 1,
+      safeZoneStages: [{ waitSeconds: 1, shrinkSeconds: 1, radius: 100, damagePerSecond: 1 }],
+    }, () => 0.5);
+
+    const bundle = await createIslandScene(
+      engine,
+      assets,
+      state.actors,
+      state.groundLoot,
+      state.mapSeed,
+      false,
+      undefined,
+      "low",
+      state.mapId,
+    );
+    const ground = bundle.scene.getMeshByName("island-ground");
+    const materials = (ground?.material as MultiMaterial).subMaterials as StandardMaterial[];
+    const textures = materials.map((entry) => entry.diffuseTexture as Texture);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(textures.map((texture) => texture.name)).toEqual([
+      "texture.terrain.grass",
+      "texture.terrain.mud",
+      "texture.road",
+    ]);
+    expect(textures.every((texture) => texture.isBlocking === false)).toBe(true);
+    expect(textures.every((texture) =>
+      (texture as unknown as { _buffer?: ArrayBuffer })._buffer === payload
+    )).toBe(true);
+    expect(ground?.isEnabled()).toBe(true);
+
+    bundle.scene.dispose();
+    engine.dispose();
+  }, 30_000);
+
+  it("binds a pending texture only after successful readiness", () => {
+    const onLoadObservable = new Observable<Texture>();
+    let ready = false;
+    let loadingError = false;
+    const texture = {
+      isReady: () => ready,
+      get loadingError() { return loadingError; },
+      onLoadObservable,
+    };
+    const bind = vi.fn();
+
+    bindTextureWhenReady({ isDisposed: false }, texture, bind);
+    expect(bind).not.toHaveBeenCalled();
+    ready = true;
+    onLoadObservable.notifyObservers(texture as Texture);
+    expect(bind).toHaveBeenCalledOnce();
+
+    ready = false;
+    loadingError = true;
+    const failedBind = vi.fn();
+    bindTextureWhenReady({ isDisposed: false }, texture, failedBind);
+    ready = true;
+    onLoadObservable.notifyObservers(texture as Texture);
+    expect(failedBind).not.toHaveBeenCalled();
+
+    loadingError = false;
+    ready = false;
+    const disposedBind = vi.fn();
+    bindTextureWhenReady({ isDisposed: true }, texture, disposedBind);
+    ready = true;
+    onLoadObservable.notifyObservers(texture as Texture);
+    expect(disposedBind).not.toHaveBeenCalled();
+  });
+
+  it("keeps the ground renderable when terrain payloads are unavailable", async () => {
+    const assets = createAssets();
+    vi.spyOn(assets, "resolve").mockImplementation((id, expectedType) => {
+      if (id.startsWith("texture.terrain.") || id === "texture.road") {
+        return { id: "fallback.ui", type: "svg", url: "/fallback.svg" };
+      }
+      return AssetCatalog.prototype.resolve.call(assets, id, expectedType);
+    });
+    const engine = new NullEngine();
+    const state = createBattleRoyaleState("player", {
+      participantCount: 2,
+      flightSeconds: 1,
+      safeZoneStages: [{ waitSeconds: 1, shrinkSeconds: 1, radius: 100, damagePerSecond: 1 }],
+    }, () => 0.5);
+
+    const bundle = await createIslandScene(
+      engine,
+      assets,
+      state.actors,
+      state.groundLoot,
+      state.mapSeed,
+      false,
+      undefined,
+      "low",
+      state.mapId,
+    );
+    const ground = bundle.scene.getMeshByName("island-ground");
+    const materials = (ground?.material as MultiMaterial).subMaterials as StandardMaterial[];
+
+    expect(materials.every((entry) => entry.diffuseTexture === null)).toBe(true);
+    expect(ground).toMatchObject({ isVisible: true });
+    expect(ground?.isEnabled()).toBe(true);
+    expect(ground?.getTotalVertices()).toBeGreaterThan(0);
+    expect(ground?.subMeshes.length).toBe(3);
+
+    bundle.scene.dispose();
+    engine.dispose();
+  }, 30_000);
+
   it("keeps procedural actors and does not download GLBs on low quality", async () => {
     const assets = await createGlbAssets();
     const fetchMock = vi.mocked(fetch);
@@ -1507,7 +1631,7 @@ function createAssets(): AssetCatalog {
     "decal.brand.restricted-area",
     "decal.brand.supply",
   ];
-  return new AssetCatalog({
+  const catalog = new AssetCatalog({
     version: 1,
     assets: [
       { id: "fallback.ui", type: "svg", url: "/fallback.svg" },
@@ -1523,6 +1647,11 @@ function createAssets(): AssetCatalog {
       { id: "model.weapon.sniper", type: "procedural-model", fallback: "fallback.model", metadata: { color: "#354238" } },
     ],
   });
+  const imagePayload = new Uint8Array([0x52, 0x49, 0x46, 0x46]).buffer;
+  vi.spyOn(catalog, "getPayload").mockImplementation((id) =>
+    textureAssetIds.includes(id) ? imagePayload : undefined
+  );
+  return catalog;
 }
 
 async function createGlbAssets(failedModelUrls: ReadonlySet<string> = new Set()): Promise<AssetCatalog> {

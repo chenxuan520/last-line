@@ -57,6 +57,7 @@ npm run preview
 ## Asset Rules
 
 - Gameplay and rendering code reference stable asset IDs, never concrete asset paths.
+- Preloaded image assets must be consumed from the validated `AssetCatalog` payload rather than fetched again during scene creation. World textures may enhance a material only as non-blocking resources; missing or failed textures must leave authoritative geometry immediately renderable with its procedural color/vertex fallback instead of hiding the mesh.
 - Gameplay values remain in `src/config/`; model metadata must not change damage, fire rate, inventory, or hit volumes.
 - GLB models are visual-only and non-pickable. Keep procedural fallbacks enabled unless loading, mesh validation, and required-node validation all succeed.
 - Preserve typed fallback checks and actual SVG/image decode validation.

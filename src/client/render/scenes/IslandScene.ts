@@ -255,6 +255,28 @@ export async function createIslandScene(
   };
 }
 
+export function bindTextureWhenReady(
+  scene: Pick<Scene, "isDisposed">,
+  texture: Pick<Texture, "isReady" | "loadingError" | "onLoadObservable">,
+  bind: () => void,
+): void {
+  let bound = false;
+  const bindIfAvailable = (): void => {
+    if (bound || scene.isDisposed || texture.loadingError || !texture.isReady()) return;
+    bound = true;
+    bind();
+  };
+  if (texture.isReady()) {
+    bindIfAvailable();
+    return;
+  }
+  const observer = texture.onLoadObservable.addOnce(bindIfAvailable);
+  if (texture.isReady()) {
+    texture.onLoadObservable.remove(observer);
+    bindIfAvailable();
+  }
+}
+
 export function getSkyAssetId(mapSeed: number): (typeof SKY_ASSET_IDS)[number] {
   return SKY_ASSET_IDS[(mapSeed >>> 0) % SKY_ASSET_IDS.length] ?? SKY_ASSET_IDS[0];
 }
@@ -679,7 +701,12 @@ function createIslandEnvironment(
         `building-material-${buildingMaterials.size}`,
         wall.color === HOSPITAL_WALL_COLOR ? HOSPITAL_SURFACE_COLOR : wall.color,
       );
-      if (wall.color !== HOSPITAL_WALL_COLOR) buildingMaterial.diffuseTexture = materials.wallTexture;
+      if (wall.color !== HOSPITAL_WALL_COLOR && materials.wallTexture) {
+        const targetMaterial = buildingMaterial;
+        bindTextureWhenReady(scene, materials.wallTexture, () => {
+          targetMaterial.diffuseTexture = materials.wallTexture;
+        });
+      }
       buildingMaterials.set(wall.color, buildingMaterial);
     }
 
@@ -781,19 +808,16 @@ function createIslandEnvironment(
 
 function createSkyDome(scene: Scene, assets: AssetCatalog, mapSeed: number): void {
   const assetId = getSkyAssetId(mapSeed);
-  const descriptor = assets.resolve(assetId, "image");
-  if (descriptor.id !== assetId || !descriptor.url) return;
-
-  const texture = new Texture(descriptor.url, scene, false, true, Texture.TRILINEAR_SAMPLINGMODE);
-  texture.name = assetId;
-  texture.wrapU = Texture.CLAMP_ADDRESSMODE;
-  texture.wrapV = Texture.CLAMP_ADDRESSMODE;
+  const texture = catalogTexture(scene, assets, assetId, 1, Texture.CLAMP_ADDRESSMODE);
+  if (!texture) return;
   texture.anisotropicFilteringLevel = 1;
 
   const skyMaterial = new BackgroundMaterial("island-sky-material", scene);
   skyMaterial.disableDepthWrite = true;
   skyMaterial.primaryColor = Color3.White();
-  skyMaterial.diffuseTexture = texture;
+  bindTextureWhenReady(scene, texture, () => {
+    skyMaterial.diffuseTexture = texture;
+  });
   skyMaterial.useEquirectangularFOV = true;
   skyMaterial.fovMultiplier = 1;
   skyMaterial.opacityFresnel = false;
@@ -915,7 +939,8 @@ function applyTerrainSurface(ground: Mesh, layout: MapLayout, groundMaterial: Mu
     positions[index + 1] = height;
     const materialIndex = terrainMaterialIndex(surface.kind);
     const surfaceMaterial = groundMaterial.subMaterials[materialIndex];
-    const color = surfaceMaterial instanceof StandardMaterial && surfaceMaterial.diffuseTexture
+    const color = surfaceMaterial instanceof StandardMaterial &&
+      (surfaceMaterial.diffuseTexture || surfaceMaterial.metadata?.pendingDiffuseTexture)
       ? surface.textureTint
       : surface.color;
     colors.push(color.r, color.g, color.b, 1);
@@ -2178,8 +2203,11 @@ function createBrandSigns(scene: Scene, assets: AssetCatalog, layout: MapLayout)
     if (!texture) continue;
     texture.hasAlpha = true;
     const signMaterial = new StandardMaterial(`${placement.assetId}-material`, scene);
-    signMaterial.diffuseTexture = texture;
-    signMaterial.useAlphaFromDiffuseTexture = true;
+    signMaterial.diffuseColor = Color3.FromHexString("#68736c");
+    bindTextureWhenReady(scene, texture, () => {
+      signMaterial.diffuseTexture = texture;
+      signMaterial.useAlphaFromDiffuseTexture = true;
+    });
     signMaterial.emissiveColor = Color3.White().scale(0.16);
     signMaterial.specularColor = Color3.Black();
     signMaterial.backFaceCulling = false;
@@ -3104,7 +3132,13 @@ function texturedMaterial(
   scale: number,
 ): StandardMaterial {
   const result = material(scene, name, hex);
-  result.diffuseTexture = catalogTexture(scene, assets, assetId, scale);
+  const texture = catalogTexture(scene, assets, assetId, scale);
+  if (texture) {
+    result.metadata = { ...result.metadata, pendingDiffuseTexture: true };
+    bindTextureWhenReady(scene, texture, () => {
+      result.diffuseTexture = texture;
+    });
+  }
   return result;
 }
 
@@ -3113,13 +3147,30 @@ function catalogTexture(
   assets: AssetCatalog,
   assetId: string,
   scale: number,
+  addressMode = Texture.WRAP_ADDRESSMODE,
 ): Texture | null {
   const descriptor = assets.resolve(assetId, "image");
-  if (descriptor.id !== assetId || !descriptor.url) return null;
-  const texture = new Texture(descriptor.url, scene, false, true, Texture.TRILINEAR_SAMPLINGMODE);
+  const payload = assets.getPayload(assetId);
+  if (descriptor.id !== assetId || descriptor.type !== "image" || !descriptor.url || !payload) return null;
+  const extension = new URL(descriptor.url, "https://asset.invalid").pathname.match(/\.[^.\/]+$/)?.[0] ?? ".png";
+  const texture = Texture.LoadFromDataString(
+    `${assetId}${extension}`,
+    payload,
+    scene,
+    false,
+    false,
+    true,
+    Texture.TRILINEAR_SAMPLINGMODE,
+    null,
+    null,
+    undefined,
+    undefined,
+    extension,
+  );
   texture.name = assetId;
-  texture.wrapU = Texture.WRAP_ADDRESSMODE;
-  texture.wrapV = Texture.WRAP_ADDRESSMODE;
+  texture.isBlocking = false;
+  texture.wrapU = addressMode;
+  texture.wrapV = addressMode;
   texture.uScale = scale;
   texture.vScale = scale;
   texture.anisotropicFilteringLevel = 4;

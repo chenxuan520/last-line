@@ -52,6 +52,8 @@ Static visual details are merged by decoration type to bound scene resources. Si
 
 Optional GLB models are loaded asynchronously and instantiated as non-pickable visual children. Procedural models remain the fallback. Repeated loot drops reuse inactive state IDs and marker meshes, and scene disposal clears marker references and imported containers.
 
+`AssetCatalog` preloads and decode-validates non-model assets once. Scene image textures are created directly from those cached payloads, never by issuing a second URL request, and are marked non-blocking so terrain/building/brand geometry renders immediately from procedural colors and vertex colors while GPU texture upload completes. Missing or failed world-image payloads produce no Babylon texture and retain the same visible geometry fallback; cross-type UI SVG fallbacks are not applied as terrain textures.
+
 The enemy character palette uses a dark blue-gray uniform while preserving authored skin colors; remote human characters retain their green palette. Procedural third-person weapons are created under each imported character LOD's `weapon_socket`, so reverting the weapon style does not reintroduce the old character coordinate system. Dynamic GLTF loader chunks receive two bounded reload retries across deployment cache mismatches before character fallback is accepted.
 
 `IslandScene` receives an explicit local actor ID for multiplayer. Only that actor uses the first-person hitbox representation; remote human actors use the same third-person presentation contract as AI while retaining `kind: "player"` in authoritative state.
