@@ -778,6 +778,26 @@ describe("admin control plane", () => {
 
   it.each([
     {
+      name: "grenade fuse above the configured duration",
+      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => ({
+        ...checkpoint,
+        state: {
+          ...checkpoint.state,
+          activeGrenades: {
+            "grenade-1": {
+              id: "grenade-1",
+              ownerId: "human-1",
+              aiControlled: false,
+              position: { x: 0, y: 1, z: 0 },
+              velocity: { x: 0, y: 0, z: 0 },
+              fuseSeconds: 1e9,
+            },
+          },
+          nextGrenadeSequence: 2,
+        },
+      }),
+    },
+    {
       name: "negative actor health",
       corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => {
         const actors = structuredClone(checkpoint.state.actors);

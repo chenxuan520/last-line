@@ -13,7 +13,6 @@ import {
 import { getItemIconAssetId } from "../itemIcon";
 import {
   getActiveWeapon,
-  getItemQuantity,
   getItemLabel,
   getReserveAmmo,
   type ActorState,
@@ -244,7 +243,7 @@ export class GameHud {
     const fullscreenAction = this.elements.get("fullscreen-action") as HTMLButtonElement | undefined;
     if (fullscreenAction) fullscreenAction.hidden = !showFullscreenAction || orientationBlocked;
     this.root.querySelector<HTMLElement>("[data-touch-action='scope']")?.classList.toggle("is-active", scoped);
-    const grenadeCount = getItemQuantity(viewedActor, FRAG_GRENADE_ITEM_ID);
+    const grenadeCount = getBackpackItemQuantity(viewedActor, FRAG_GRENADE_ITEM_ID);
     const grenadeStatusSignature = [
       viewedActor.id,
       grenadeCount,
@@ -662,6 +661,16 @@ export function hudRootClassName(touchInput: boolean, quality?: QualityLevel): s
     touchInput ? "is-touch-input" : "",
     quality === "high" ? "is-high-quality-hud" : "",
   ].filter(Boolean).join(" ");
+}
+
+export function getBackpackItemQuantity(
+  actor: Pick<ActorState, "inventory">,
+  itemId: string,
+): number {
+  return actor.inventory.backpack.reduce(
+    (quantity, stack) => quantity + (stack.itemId === itemId ? stack.quantity : 0),
+    0,
+  );
 }
 
 export function leaderboardScrollPixels(deltaY: number, deltaMode: number, pageHeight: number): number {

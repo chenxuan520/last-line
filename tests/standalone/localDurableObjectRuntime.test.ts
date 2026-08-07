@@ -481,6 +481,30 @@ describe("LocalDurableObjectRuntime", () => {
 
   it.each([
     {
+      suffix: "000000000199",
+      name: "grenade fuse above the configured duration",
+      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => {
+        const ownerId = "human-1";
+        return {
+          ...checkpoint,
+          state: {
+            ...checkpoint.state,
+            activeGrenades: {
+              "grenade-1": {
+                id: "grenade-1",
+                ownerId,
+                aiControlled: false,
+                position: { x: 0, y: 1, z: 0 },
+                velocity: { x: 0, y: 0, z: 0 },
+                fuseSeconds: 1e9,
+              },
+            },
+            nextGrenadeSequence: 2,
+          },
+        };
+      },
+    },
+    {
       suffix: "000000000200",
       name: "negative actor health",
       corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => {

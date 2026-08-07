@@ -2,6 +2,7 @@ import { BATTLE_ROYALE_CONFIG } from "../config/battleRoyale";
 import { WEAPONS } from "../config/weapons";
 import { createMapLayout, type MapLayout } from "../config/map";
 import { DEFAULT_MAP_ID, normalizeMapId, type MapId } from "../config/maps";
+import { FRAG_GRENADE_CONFIG } from "../config/throwables";
 import { BotController } from "../controllers/BotController";
 import { createIdleCommand, type ActorCommand } from "../game/commands/ActorCommand";
 import { GameSimulation } from "../game/GameSimulation";
@@ -523,7 +524,8 @@ function isRecoverableGrenades(
       sequence < 1 ||
       !isVector(value.position) ||
       !isVector(value.velocity) ||
-      !isPositiveNumber(value.fuseSeconds)
+      !isPositiveNumber(value.fuseSeconds) ||
+      value.fuseSeconds > FRAG_GRENADE_CONFIG.fuseSeconds
     ) return false;
     maximumGrenadeSequence = Math.max(maximumGrenadeSequence, sequence);
   }

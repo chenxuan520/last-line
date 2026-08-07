@@ -458,6 +458,18 @@ describe("MatchRuntime", () => {
         },
       },
     } as typeof checkpoint)).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: {
+        ...checkpoint.state,
+        activeGrenades: {
+          "grenade-1": {
+            ...checkpoint.state.activeGrenades["grenade-1"],
+            fuseSeconds: 3.500_001,
+          },
+        },
+      },
+    } as typeof checkpoint)).toBe(false);
 
     const restored = new MatchRuntime({
       humanActorIds: ["human-1", "human-2"],
