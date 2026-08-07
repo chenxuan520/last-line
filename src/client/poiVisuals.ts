@@ -17,6 +17,18 @@ const POI_VISUAL_TYPES: Readonly<Record<string, PoiVisualType>> = {
   老城区: "town",
   商业街: "town",
   城市公园: "station",
+  赤钟城区: "town",
+  白塔旧城: "town",
+  铜灯街区: "town",
+  断桥坊: "town",
+  风穗乡: "warehouse",
+  雁栖庄: "warehouse",
+  麦风坳: "warehouse",
+  石篱村: "warehouse",
+  沉杉岭: "station",
+  乌松岭: "station",
+  雾鹿峰: "station",
+  暮鸦山: "station",
   医院: "hospital",
 };
 

@@ -147,6 +147,23 @@ describe("asset manifest", () => {
     ]));
   });
 
+  it("declares the ammunition depot assets", () => {
+    expect(productionManifest.assets).toEqual(expect.arrayContaining([
+      {
+        id: "ui.item.ammo-depot",
+        type: "image",
+        url: "./assets/ui/item-ammo-depot.webp",
+        fallback: "fallback.ui",
+      },
+      {
+        id: "decal.poi.ammo-depot",
+        type: "image",
+        url: "./assets/decals/poi-ammo-depot.webp",
+        fallback: "fallback.ui",
+      },
+    ]));
+  });
+
   it("preloads payloads and falls back after a network failure", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const fetchMock = vi.fn(async (input: string | URL | Request) => {

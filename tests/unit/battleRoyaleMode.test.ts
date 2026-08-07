@@ -119,6 +119,34 @@ describe("BattleRoyaleMode", () => {
     expect(() => JSON.parse(JSON.stringify(state)) as unknown).not.toThrow();
   });
 
+  it.each(["island", "town", "mixed"] as const)(
+    "keeps %s loot partitioned as 240 base, 10 medical, and 10 grenade records",
+    (mapId) => {
+      const state = createBattleRoyaleState(
+        "player",
+        FAST_BATTLE_ROYALE_CONFIG,
+        () => 0.5,
+        { mapId },
+      );
+      const layout = createMapLayout(mapId, state.mapSeed);
+      const loot = Object.values(state.groundLoot);
+
+      expect(layout.lootZoneCounts.reduce((total, count) => total + count, 0)).toBe(BASE_LOOT_POINTS);
+      expect(layout.grenadeLootStartIndex).toBe(PRE_GRENADE_LOOT_POINTS);
+      expect(loot).toHaveLength(TOTAL_LOOT_POINTS);
+      const medical = loot.slice(BASE_LOOT_POINTS, PRE_GRENADE_LOOT_POINTS);
+      expect(medical).toHaveLength(10);
+      expect(medical.filter((entry) => entry.itemId === "bandage")).toHaveLength(5);
+      expect(medical.filter((entry) => entry.itemId === "medkit")).toHaveLength(5);
+      const grenades = loot.slice(PRE_GRENADE_LOOT_POINTS);
+      expect(grenades).toHaveLength(10);
+      expect(grenades.every((entry) =>
+        entry.itemId === FRAG_GRENADE_ITEM_ID && entry.quantity === 2
+      )).toBe(true);
+    },
+    30_000,
+  );
+
   it("can disable the shared starter bandage for both player and AI", () => {
     const state = createBattleRoyaleState("player", damageConfig, () => 0.5, { startWithBandage: false });
 

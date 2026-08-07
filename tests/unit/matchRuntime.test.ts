@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { BATTLE_ROYALE_CONFIG } from "../../src/config/battleRoyale";
 import { getTerrainHeight } from "../../src/config/map";
 import { createIdleCommand } from "../../src/game/commands/ActorCommand";
+import { SIMULATION_TICK_RATE } from "../../src/game/simulationTiming";
 import { createWeaponState } from "../../src/game/state/types";
 import type { SequencedGameEvent, ServerMessage } from "../../src/network/protocol";
 import {
@@ -11,7 +12,7 @@ import {
 } from "../../src/server/MatchRuntime";
 
 describe("MatchRuntime", () => {
-  it("creates town matches explicitly and restores legacy states as island", () => {
+  it("creates non-default maps explicitly and restores legacy states as island", () => {
     const town = new MatchRuntime({
       humanActorIds: ["human-1", "human-2"],
       seed: 2026,
@@ -21,6 +22,24 @@ describe("MatchRuntime", () => {
     });
     expect(town.state.mapId).toBe("town");
     expect(town.state.mapSeed).toBeGreaterThanOrEqual(0);
+
+    const mixed = new MatchRuntime({
+      humanActorIds: ["human-1", "human-2"],
+      seed: 2026,
+      mapId: "mixed",
+      startWithBandage: true,
+      disableAiSnipers: true,
+    });
+    expect(mixed.state.mapId).toBe("mixed");
+    const mixedCheckpoint = mixed.checkpoint();
+    expect(mixedCheckpoint.version).toBe(MATCH_CHECKPOINT_VERSION);
+    expect(new MatchRuntime({
+      humanActorIds: ["human-1", "human-2"],
+      seed: 2026,
+      startWithBandage: true,
+      disableAiSnipers: true,
+      ...mixedCheckpoint,
+    }).state).toEqual(mixedCheckpoint.state);
 
     const legacyState = JSON.parse(JSON.stringify(town.state)) as Record<string, unknown>;
     delete legacyState.mapId;
@@ -32,7 +51,7 @@ describe("MatchRuntime", () => {
       state: legacyState as unknown as MatchRuntime["state"],
     });
     expect(restored.state.mapId).toBe("island");
-  });
+  }, 30_000);
 
   it("runs a 10-human authoritative room with 40 bots", () => {
     const humanActorIds = Array.from({ length: 10 }, (_, index) => `human-${index + 1}`);
@@ -75,7 +94,7 @@ describe("MatchRuntime", () => {
     expect(restored.state).toEqual(checkpoint.state);
   });
 
-  it("rejects checkpoints from the pre-random-town map contract", () => {
+  it("accepts only complete version 7 checkpoints for explicit map identities", () => {
     const runtime = new MatchRuntime({
       humanActorIds: ["human-1", "human-2"],
       seed: 42,
@@ -85,15 +104,166 @@ describe("MatchRuntime", () => {
     });
     const checkpoint = runtime.checkpoint();
 
-    expect(MATCH_CHECKPOINT_VERSION).toBe(6);
+    expect(MATCH_CHECKPOINT_VERSION).toBe(7);
     expect(isMatchCheckpointCompatible(checkpoint)).toBe(true);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: { ...checkpoint.state, mapId: "invalid" as never },
+    })).toBe(false);
     expect(isMatchCheckpointCompatible({
       ...checkpoint,
       version: MATCH_CHECKPOINT_VERSION - 1,
     })).toBe(false);
+    const missingMapIdState = structuredClone(checkpoint.state) as unknown as Record<string, unknown>;
+    delete missingMapIdState.mapId;
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      version: MATCH_CHECKPOINT_VERSION - 1,
+      state: missingMapIdState,
+    })).toBe(false);
+    const islandCheckpoint = {
+      ...checkpoint,
+      version: MATCH_CHECKPOINT_VERSION - 1,
+      state: { ...checkpoint.state, mapId: "island" as const },
+    };
+    expect(isMatchCheckpointCompatible(islandCheckpoint)).toBe(false);
+    const mixedCheckpoint = {
+      ...checkpoint,
+      version: MATCH_CHECKPOINT_VERSION - 1,
+      state: { ...checkpoint.state, mapId: "mixed" as const },
+    };
+    expect(isMatchCheckpointCompatible(mixedCheckpoint)).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      version: MATCH_CHECKPOINT_VERSION - 1,
+      state: { ...checkpoint.state, mapId: "invalid" as never },
+    })).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      version: MATCH_CHECKPOINT_VERSION - 2,
+    })).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      version: MATCH_CHECKPOINT_VERSION - 1,
+      state: undefined,
+    } as never)).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      version: MATCH_CHECKPOINT_VERSION - 1,
+      state: null,
+    } as never)).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      version: MATCH_CHECKPOINT_VERSION - 1,
+      state: { mapId: undefined },
+    } as never)).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: { ...checkpoint.state, actors: undefined },
+    } as never)).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: {
+        ...checkpoint.state,
+        actors: { "human-1": { id: "human-1", kind: "player" } },
+      },
+    } as never)).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: { ...checkpoint.state, safeZone: { radius: 100 } },
+    } as never)).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      tick: undefined,
+    } as never)).toBe(false);
+    const actorId = Object.keys(checkpoint.state.actors)[0];
+    if (!actorId) throw new Error("checkpoint actor fixture missing");
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: {
+        ...checkpoint.state,
+        actors: {
+          ...checkpoint.state.actors,
+          [actorId]: {
+            ...checkpoint.state.actors[actorId],
+            inventory: {
+              ...checkpoint.state.actors[actorId]?.inventory,
+              armorLevel: "1",
+            },
+          },
+        },
+      },
+    } as never)).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: {
+        ...checkpoint.state,
+        safeZone: {
+          ...checkpoint.state.safeZone,
+          stageIndex: 999,
+        },
+      },
+    } as never)).toBe(false);
+    const actorEntries = Object.entries(checkpoint.state.actors);
+    const oneActor = Object.fromEntries(actorEntries.slice(0, 1));
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: { ...checkpoint.state, actors: oneActor },
+    })).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: { ...checkpoint.state, actors: Object.fromEntries(actorEntries.slice(0, -1)) },
+    })).toBe(false);
+    const extraActorSource = actorEntries.find(([, actor]) => actor.kind === "bot")?.[1];
+    if (!extraActorSource) throw new Error("extra actor fixture missing");
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: {
+        ...checkpoint.state,
+        actors: {
+          ...checkpoint.state.actors,
+          "extra-bot": { ...extraActorSource, id: "extra-bot" },
+        },
+      },
+    })).toBe(false);
+    const [firstActorKey, firstActor] = actorEntries[0] ?? [];
+    if (!firstActorKey || !firstActor) throw new Error("checkpoint actor fixture missing");
+    const mismatchedActors = { ...checkpoint.state.actors };
+    delete mismatchedActors[firstActorKey];
+    mismatchedActors["mismatched-key"] = firstActor;
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: { ...checkpoint.state, actors: mismatchedActors },
+    })).toBe(false);
+    const replacementActors = structuredClone(checkpoint.state.actors);
+    delete replacementActors["human-1"];
+    const replacementSource = Object.values(replacementActors).find((actor) => actor.kind === "bot");
+    if (!replacementSource) throw new Error("replacement bot fixture missing");
+    replacementActors["replacement-bot"] = {
+      ...replacementSource,
+      id: "replacement-bot",
+    };
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: { ...checkpoint.state, actors: replacementActors },
+    }, ["human-1", "human-2"])).toBe(false);
+    expect(isMatchCheckpointCompatible(checkpoint, ["human-1", "human-2"])).toBe(true);
+    expect(isMatchCheckpointCompatible(checkpoint, ["human-1"])).toBe(false);
+    const botMemberActors = structuredClone(checkpoint.state.actors);
+    const humanActor = botMemberActors["human-1"];
+    if (!humanActor) throw new Error("human actor fixture missing");
+    botMemberActors["human-1"] = { ...humanActor, kind: "bot" };
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: { ...checkpoint.state, actors: botMemberActors },
+    }, ["human-1", "human-2"])).toBe(false);
+    expect(isMatchCheckpointCompatible(
+      checkpoint,
+      ["human-1", "human-1"],
+    )).toBe(false);
   });
 
-  it("requires complete serializable grenade state in v6 checkpoints", () => {
+  it("requires complete serializable grenade and closed-zone state in v7 checkpoints", () => {
     const runtime = new MatchRuntime({
       humanActorIds: ["human-1", "human-2"],
       seed: 43,
@@ -182,6 +352,11 @@ describe("MatchRuntime", () => {
       secondsRemaining: 0,
       damagePerSecond: finalStage.damagePerSecond,
     };
+    const minimumClosedSeconds = BATTLE_ROYALE_CONFIG.safeZoneStages.reduce(
+      (total, stage) => total + stage.waitSeconds + stage.shrinkSeconds / 2,
+      0,
+    );
+    const minimumClosedTicks = Math.ceil(minimumClosedSeconds * SIMULATION_TICK_RATE);
     expect(isMatchCheckpointCompatible({
       ...checkpoint,
       state: {
@@ -193,8 +368,32 @@ describe("MatchRuntime", () => {
     }, humanActorIds)).toBe(false);
     expect(isMatchCheckpointCompatible({
       ...checkpoint,
+      tick: minimumClosedTicks - 1,
       state: {
         ...checkpoint.state,
+        elapsedSeconds: minimumClosedSeconds,
+        phase: "combat",
+        actors: groundedActors,
+        safeZone: closedSafeZone,
+      },
+    }, humanActorIds)).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      tick: minimumClosedTicks,
+      state: {
+        ...checkpoint.state,
+        elapsedSeconds: minimumClosedSeconds - 1 / SIMULATION_TICK_RATE,
+        phase: "combat",
+        actors: groundedActors,
+        safeZone: closedSafeZone,
+      },
+    }, humanActorIds)).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      tick: minimumClosedTicks,
+      state: {
+        ...checkpoint.state,
+        elapsedSeconds: minimumClosedSeconds,
         phase: "combat",
         actors: groundedActors,
         safeZone: closedSafeZone,
@@ -269,6 +468,98 @@ describe("MatchRuntime", () => {
     });
     expect(restored.state.activeGrenades).toEqual(checkpoint.state.activeGrenades);
     expect(restored.state.nextGrenadeSequence).toBe(2);
+  });
+
+  it.each([
+    ["negative health", (state: MatchRuntime["state"]) => {
+      const actor = state.actors["human-1"];
+      if (!actor) throw new Error("actor fixture missing");
+      actor.health = -1;
+    }],
+    ["health above maximum", (state: MatchRuntime["state"]) => {
+      const actor = state.actors["human-1"];
+      if (!actor) throw new Error("actor fixture missing");
+      actor.health = actor.maxHealth + 1;
+    }],
+    ["negative armor", (state: MatchRuntime["state"]) => {
+      const actor = state.actors["human-1"];
+      if (!actor) throw new Error("actor fixture missing");
+      actor.armor = -1;
+    }],
+    ["fractional kills", (state: MatchRuntime["state"]) => {
+      const actor = state.actors["human-1"];
+      if (!actor) throw new Error("actor fixture missing");
+      actor.kills = 0.5;
+    }],
+    ["empty backpack item id", (state: MatchRuntime["state"]) => {
+      const stack = state.actors["human-1"]?.inventory.backpack[0];
+      if (!stack) throw new Error("backpack fixture missing");
+      stack.itemId = "";
+    }],
+    ["zero backpack quantity", (state: MatchRuntime["state"]) => {
+      const stack = state.actors["human-1"]?.inventory.backpack[0];
+      if (!stack) throw new Error("backpack fixture missing");
+      stack.quantity = 0;
+    }],
+    ["backpack over capacity", (state: MatchRuntime["state"]) => {
+      const inventory = state.actors["human-1"]?.inventory;
+      if (!inventory) throw new Error("inventory fixture missing");
+      inventory.maxBackpackStacks = 0;
+    }],
+    ["negative item timer", (state: MatchRuntime["state"]) => {
+      const inventory = state.actors["human-1"]?.inventory;
+      if (!inventory) throw new Error("inventory fixture missing");
+      inventory.usingItem = { itemId: "bandage", remainingSeconds: -1 };
+    }],
+    ["unknown weapon", (state: MatchRuntime["state"]) => {
+      const inventory = state.actors["human-1"]?.inventory;
+      if (!inventory) throw new Error("inventory fixture missing");
+      inventory.weaponSlots[0] = { ...createWeaponState("rifle"), weaponId: "missing" };
+    }],
+    ["negative ammunition", (state: MatchRuntime["state"]) => {
+      const inventory = state.actors["human-1"]?.inventory;
+      if (!inventory) throw new Error("inventory fixture missing");
+      inventory.weaponSlots[0] = { ...createWeaponState("rifle"), ammoInMagazine: -1 };
+    }],
+    ["negative reload", (state: MatchRuntime["state"]) => {
+      const inventory = state.actors["human-1"]?.inventory;
+      if (!inventory) throw new Error("inventory fixture missing");
+      inventory.weaponSlots[0] = { ...createWeaponState("rifle"), reloadSeconds: -1 };
+    }],
+    ["negative loot generation", (state: MatchRuntime["state"]) => {
+      const loot = Object.values(state.groundLoot)[0];
+      if (!loot) throw new Error("loot fixture missing");
+      loot.generation = -1;
+    }],
+    ["invalid loot source", (state: MatchRuntime["state"]) => {
+      const loot = Object.values(state.groundLoot)[0];
+      if (!loot) throw new Error("loot fixture missing");
+      (loot as unknown as { source: string }).source = "invalid";
+    }],
+    ["negative safe-zone radius", (state: MatchRuntime["state"]) => {
+      state.safeZone.radius = -1;
+    }],
+    ["negative flight duration", (state: MatchRuntime["state"]) => {
+      state.flight.durationSeconds = -1;
+    }],
+    ["flight progress above one", (state: MatchRuntime["state"]) => {
+      state.flight.progress = 2;
+    }],
+  ] as const)("rejects checkpoint state with %s", (_label, corrupt) => {
+    const runtime = new MatchRuntime({
+      humanActorIds: ["human-1", "human-2"],
+      seed: 54,
+      startWithBandage: true,
+      disableAiSnipers: true,
+    });
+    const checkpoint = runtime.checkpoint();
+    const state = structuredClone(checkpoint.state);
+    corrupt(state);
+
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state,
+    }, ["human-1", "human-2"])).toBe(false);
   });
 
   it("redacts distant actors and expands only airborne loot replication", () => {

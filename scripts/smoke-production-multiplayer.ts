@@ -4,6 +4,7 @@ import {
   MULTIPLAYER_PROTOCOL_VERSION,
   type RoomAdmission,
 } from "../src/network/protocol";
+import { waitForProductionProtocol } from "./productionProtocolReadiness";
 
 const apiUrl = normalizeHttpUrl(
   process.env.MULTIPLAYER_SMOKE_URL ?? "https://lastlinep2p.011203.xyz",
@@ -11,6 +12,11 @@ const apiUrl = normalizeHttpUrl(
 const pageOrigin = normalizeOrigin(
   process.env.MULTIPLAYER_SMOKE_ORIGIN ?? "https://lastline.011203.xyz",
 );
+
+await waitForProductionProtocol({
+  apiUrl,
+  expectedProtocolVersion: MULTIPLAYER_PROTOCOL_VERSION,
+});
 
 interface GuestCredentials {
   readonly playerId: string;

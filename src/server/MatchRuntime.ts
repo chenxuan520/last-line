@@ -16,13 +16,7 @@ import type {
   MatchState,
 } from "../game/state/types";
 import { SimulationCombatWorld } from "../game/systems/SimulationCombatWorld";
-import {
-  MAX_HUMAN_PLAYERS,
-  MIN_HUMAN_PLAYERS,
-  type MatchFrame,
-  type MultiplayerEvent,
-  type SequencedGameEvent,
-} from "../network/protocol";
+import type { MatchFrame, MultiplayerEvent, SequencedGameEvent } from "../network/protocol";
 import { CommandInbox } from "./CommandInbox";
 import { LagCompensatedCombatWorld } from "./LagCompensatedCombatWorld";
 
@@ -31,7 +25,14 @@ const TAKEOVER_TICKS = SIMULATION_TICK_RATE * 5;
 const ACTOR_REPLICATION_RANGE = 400;
 const LOOT_REPLICATION_RANGE = 60;
 const AIRBORNE_LOOT_REPLICATION_RANGE = ACTOR_REPLICATION_RANGE;
-export const MATCH_CHECKPOINT_VERSION = 6;
+export const MATCH_CHECKPOINT_VERSION = 7;
+const MINIMUM_CLOSED_SAFE_ZONE_SECONDS = BATTLE_ROYALE_CONFIG.safeZoneStages.reduce(
+  (total, stage) => total + stage.waitSeconds + stage.shrinkSeconds / 2,
+  0,
+);
+const MINIMUM_CLOSED_SAFE_ZONE_TICKS = Math.ceil(
+  MINIMUM_CLOSED_SAFE_ZONE_SECONDS * SIMULATION_TICK_RATE,
+);
 
 export interface MatchRuntimeOptions {
   humanActorIds: readonly EntityId[];
@@ -382,192 +383,168 @@ export class MatchRuntime {
 
 export function isMatchCheckpointCompatible(
   checkpoint: unknown,
-  humanActorIds?: readonly EntityId[],
+  requiredActorIds?: readonly EntityId[],
 ): checkpoint is MatchCheckpoint {
+  if (!isRecord(checkpoint)) return false;
   if (
-    !isRecord(checkpoint) ||
-    checkpoint.version !== MATCH_CHECKPOINT_VERSION ||
-    !isNonNegativeSafeInteger(checkpoint.tick) ||
-    !isNonNegativeSafeInteger(checkpoint.snapshotSequence) ||
-    !isNonNegativeSafeInteger(checkpoint.eventSequence) ||
-    !isRecord(checkpoint.state) ||
-    !isCompleteMatchState(checkpoint.state, humanActorIds)
+    !isNonNegativeInteger(checkpoint.tick) ||
+    !isNonNegativeInteger(checkpoint.snapshotSequence) ||
+    !isNonNegativeInteger(checkpoint.eventSequence)
   ) return false;
-  return true;
+  if (!isRecoverableMatchState(checkpoint.state, checkpoint.tick, requiredActorIds)) return false;
+  const mapId: unknown = checkpoint.state.mapId;
+  if (checkpoint.version === MATCH_CHECKPOINT_VERSION) {
+    return mapId === "island" || mapId === "town" || mapId === "mixed";
+  }
+  return false;
 }
 
-function isCompleteMatchState(
-  state: Record<string, unknown>,
-  humanActorIds?: readonly EntityId[],
-): boolean {
-  if (
-    !["flight", "combat", "finished"].includes(String(state.phase)) ||
-    !isNonNegativeFiniteNumber(state.elapsedSeconds) ||
-    (state.mapId !== "island" && state.mapId !== "town") ||
-    !isUint32(state.mapSeed) ||
-    !isRecord(state.actors) ||
-    Object.keys(state.actors).length !== BATTLE_ROYALE_CONFIG.participantCount ||
-    !isRecord(state.groundLoot) ||
-    !isRecord(state.activeGrenades) ||
-    !isPositiveSafeInteger(state.nextGrenadeSequence) ||
-    !isSafeZoneState(state.safeZone, state.phase) ||
-    !isFlightState(state.flight) ||
-    !isMatchResult(state.result) ||
-    (state.phase === "finished") !== (state.result !== null)
-  ) return false;
-
-  const playerActorIds: EntityId[] = [];
-  for (const [actorId, actor] of Object.entries(state.actors)) {
-    if (!isActorState(actor, actorId)) return false;
-    if (actor.kind === "player") playerActorIds.push(actorId);
-  }
-  if (humanActorIds !== undefined) {
-    const uniqueHumanActorIds = new Set(humanActorIds);
+function isRecoverableMatchState(
+  value: unknown,
+  tick: number,
+  requiredActorIds?: readonly EntityId[],
+): value is MatchState {
+  if (!isRecord(value)) return false;
+  if (!["flight", "combat", "finished"].includes(String(value.phase))) return false;
+  if (!isNonNegativeNumber(value.elapsedSeconds) || !isUint32(value.mapSeed)) return false;
+  const actors = value.actors;
+  if (!isRecord(actors)) return false;
+  const actorEntries = Object.entries(actors);
+  if (actorEntries.length !== BATTLE_ROYALE_CONFIG.participantCount) return false;
+  if (!actorEntries.every(([actorId, actor]) =>
+    isRecoverableActor(actor) && actorId === actor.id
+  )) return false;
+  if (requiredActorIds !== undefined) {
+    const requiredActors = new Set(requiredActorIds);
     if (
-      humanActorIds.length < MIN_HUMAN_PLAYERS ||
-      humanActorIds.length > MAX_HUMAN_PLAYERS ||
-      uniqueHumanActorIds.size !== humanActorIds.length ||
-      playerActorIds.length !== humanActorIds.length ||
-      playerActorIds.some((actorId) => !uniqueHumanActorIds.has(actorId))
+      requiredActors.size !== requiredActorIds.length ||
+      requiredActorIds.some((actorId) => (actors[actorId] as ActorState | undefined)?.kind !== "player") ||
+      actorEntries.some(([actorId, actor]) =>
+        requiredActors.has(actorId) !== ((actor as ActorState).kind === "player")
+      )
     ) return false;
   }
+  if (!isRecord(value.groundLoot) || !Object.entries(value.groundLoot).every(
+    ([lootId, loot]) => isRecoverableLoot(lootId, loot),
+  )) return false;
+  if (!isRecoverableGrenades(value.activeGrenades, value.nextGrenadeSequence, actors)) return false;
+  if (!isRecoverableSafeZone(value.safeZone, value.phase, value.elapsedSeconds, tick) ||
+    !isRecoverableFlight(value.flight)) return false;
+  const resultIsValid = value.result === null || (
+    isRecord(value.result) &&
+    (value.result.winnerId === null || typeof value.result.winnerId === "string") &&
+    (value.result.reason === "last-alive" || value.result.reason === "player-eliminated")
+  );
+  return resultIsValid && (value.phase === "finished") === (value.result !== null);
+}
 
-  for (const [lootId, loot] of Object.entries(state.groundLoot)) {
-    if (!isGroundLootState(loot, lootId)) return false;
+function isRecoverableActor(value: unknown): value is ActorState {
+  if (!isRecord(value) || !isNonEmptyString(value.id)) return false;
+  if (value.kind !== "player" && value.kind !== "bot") return false;
+  if (!isVector(value.position) || !isVector(value.velocity)) return false;
+  if (!isFiniteNumber(value.yaw) || !isFiniteNumber(value.pitch)) return false;
+  if (!isPositiveNumber(value.maxHealth) ||
+    !isNonNegativeNumber(value.health) ||
+    value.health > value.maxHealth ||
+    !isNonNegativeNumber(value.maxArmor) ||
+    !isNonNegativeNumber(value.armor) ||
+    value.armor > value.maxArmor ||
+    !isNonNegativeInteger(value.kills) ||
+    !isFiniteNumber(value.lastDamageElapsedSeconds)
+  ) return false;
+  if (typeof value.alive !== "boolean") return false;
+  if (!["aircraft", "parachuting", "grounded"].includes(String(value.deployment))) return false;
+  if (value.lastDamageDirection !== null && !isVector(value.lastDamageDirection)) return false;
+  return isRecoverableInventory(value.inventory);
+}
+
+function isRecoverableInventory(value: unknown): boolean {
+  if (!isRecord(value) || !Array.isArray(value.weaponSlots) || value.weaponSlots.length !== 2) return false;
+  if (!value.weaponSlots.every((weapon) => weapon === null || isRecoverableWeapon(weapon))) return false;
+  if (value.activeWeaponSlot !== 0 && value.activeWeaponSlot !== 1) return false;
+  if (!Array.isArray(value.backpack) || !value.backpack.every((stack) =>
+    isRecord(stack) && isNonEmptyString(stack.itemId) && isPositiveInteger(stack.quantity)
+  )) return false;
+  if (!isNonNegativeInteger(value.maxBackpackStacks) ||
+    value.backpack.length > value.maxBackpackStacks
+  ) return false;
+  if (!isEquipmentLevel(value.armorLevel) || !isEquipmentLevel(value.helmetLevel)) {
+    return false;
   }
+  return value.usingItem === null || (
+    isRecord(value.usingItem) &&
+    isNonEmptyString(value.usingItem.itemId) &&
+    isNonNegativeNumber(value.usingItem.remainingSeconds)
+  );
+}
 
+function isRecoverableWeapon(value: unknown): boolean {
+  if (!isRecord(value) || !isNonEmptyString(value.weaponId)) return false;
+  const config = WEAPONS[value.weaponId];
+  return Boolean(config) &&
+    isNonNegativeInteger(value.ammoInMagazine) &&
+    Number(value.ammoInMagazine) <= (config?.magazineSize ?? -1) &&
+    isFiniteNumber(value.cooldownSeconds) &&
+    isNonNegativeNumber(value.reloadSeconds);
+}
+
+function isRecoverableLoot(lootId: string, value: unknown): boolean {
+  return isRecord(value) &&
+    value.id === lootId &&
+    isNonEmptyString(value.id) &&
+    isNonEmptyString(value.itemId) &&
+    (value.generation === undefined || isNonNegativeInteger(value.generation)) &&
+    isNonNegativeInteger(value.quantity) &&
+    isVector(value.position) &&
+    typeof value.available === "boolean" &&
+    (value.source === undefined || ["spawn", "drop", "death"].includes(String(value.source))) &&
+    (value.weapon === undefined || isRecoverableWeapon(value.weapon));
+}
+
+function isRecoverableGrenades(
+  activeGrenades: unknown,
+  nextGrenadeSequence: unknown,
+  actors: Record<string, unknown>,
+): boolean {
+  if (!isRecord(activeGrenades) ||
+    !Number.isSafeInteger(nextGrenadeSequence) ||
+    Number(nextGrenadeSequence) < 1
+  ) return false;
   let maximumGrenadeSequence = 0;
-  for (const [grenadeId, value] of Object.entries(state.activeGrenades)) {
-    const sequenceMatch = /^grenade-(\d+)$/.exec(grenadeId);
-    const sequence = Number(sequenceMatch?.[1]);
+  for (const [grenadeId, value] of Object.entries(activeGrenades)) {
+    const sequence = Number(/^grenade-(\d+)$/.exec(grenadeId)?.[1]);
     if (
       !isRecord(value) ||
       value.id !== grenadeId ||
       typeof value.ownerId !== "string" ||
-      value.ownerId.length === 0 ||
-      !(value.ownerId in state.actors) ||
+      !(value.ownerId in actors) ||
       typeof value.aiControlled !== "boolean" ||
       !Number.isSafeInteger(sequence) ||
       sequence < 1 ||
-      !isFiniteVector(value.position) ||
-      !isFiniteVector(value.velocity) ||
-      typeof value.fuseSeconds !== "number" ||
-      !Number.isFinite(value.fuseSeconds) ||
-      value.fuseSeconds <= 0
+      !isVector(value.position) ||
+      !isVector(value.velocity) ||
+      !isPositiveNumber(value.fuseSeconds)
     ) return false;
     maximumGrenadeSequence = Math.max(maximumGrenadeSequence, sequence);
   }
-  return (state.nextGrenadeSequence as number) > maximumGrenadeSequence;
+  return Number(nextGrenadeSequence) > maximumGrenadeSequence;
 }
 
-function normalizeMatchState(state: MatchState): MatchState {
-  state.mapId = normalizeMapId(state.mapId);
-  return state;
-}
-
-function isFiniteVector(value: unknown): boolean {
-  return isRecord(value) &&
-    typeof value.x === "number" && Number.isFinite(value.x) &&
-    typeof value.y === "number" && Number.isFinite(value.y) &&
-    typeof value.z === "number" && Number.isFinite(value.z);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isActorState(value: unknown, actorId: EntityId): value is ActorState {
-  if (
-    !isRecord(value) ||
-    value.id !== actorId ||
-    (value.kind !== "player" && value.kind !== "bot") ||
-    !isFiniteVector(value.position) ||
-    !isFiniteVector(value.velocity) ||
-    !isFiniteNumber(value.yaw) ||
-    !isFiniteNumber(value.pitch) ||
-    !isNonNegativeFiniteNumber(value.health) ||
-    !isPositiveFiniteNumber(value.maxHealth) ||
-    value.health > value.maxHealth ||
-    !isNonNegativeFiniteNumber(value.armor) ||
-    !isNonNegativeFiniteNumber(value.maxArmor) ||
-    value.armor > value.maxArmor ||
-    typeof value.alive !== "boolean" ||
-    !["aircraft", "parachuting", "grounded"].includes(String(value.deployment)) ||
-    !isInventoryState(value.inventory) ||
-    !isNonNegativeSafeInteger(value.kills) ||
-    !(value.lastDamageDirection === null || isFiniteVector(value.lastDamageDirection)) ||
-    !isFiniteNumber(value.lastDamageElapsedSeconds)
-  ) return false;
-  return true;
-}
-
-function isInventoryState(value: unknown): boolean {
-  if (
-    !isRecord(value) ||
-    !Array.isArray(value.weaponSlots) ||
-    value.weaponSlots.length !== 2 ||
-    (value.activeWeaponSlot !== 0 && value.activeWeaponSlot !== 1) ||
-    !Array.isArray(value.backpack) ||
-    !isNonNegativeSafeInteger(value.maxBackpackStacks) ||
-    value.backpack.length > value.maxBackpackStacks ||
-    ![0, 1, 2].includes(Number(value.armorLevel)) ||
-    ![0, 1, 2].includes(Number(value.helmetLevel)) ||
-    !(value.usingItem === null || isItemUseState(value.usingItem))
-  ) return false;
-  return value.weaponSlots.every((weapon) => weapon === null || isWeaponState(weapon)) &&
-    value.backpack.every(isItemStackState);
-}
-
-function isWeaponState(value: unknown): boolean {
-  return isRecord(value) &&
-    typeof value.weaponId === "string" &&
-    WEAPONS[value.weaponId] !== undefined &&
-    isNonNegativeSafeInteger(value.ammoInMagazine) &&
-    isFiniteNumber(value.cooldownSeconds) &&
-    isNonNegativeFiniteNumber(value.reloadSeconds);
-}
-
-function isItemStackState(value: unknown): boolean {
-  return isRecord(value) &&
-    typeof value.itemId === "string" &&
-    value.itemId.length > 0 &&
-    isPositiveSafeInteger(value.quantity);
-}
-
-function isItemUseState(value: unknown): boolean {
-  return isRecord(value) &&
-    typeof value.itemId === "string" &&
-    value.itemId.length > 0 &&
-    isNonNegativeFiniteNumber(value.remainingSeconds);
-}
-
-function isGroundLootState(value: unknown, lootId: EntityId): boolean {
-  return isRecord(value) &&
-    value.id === lootId &&
-    (value.generation === undefined || isNonNegativeSafeInteger(value.generation)) &&
-    typeof value.itemId === "string" &&
-    value.itemId.length > 0 &&
-    isNonNegativeSafeInteger(value.quantity) &&
-    (value.weapon === undefined || isWeaponState(value.weapon)) &&
-    isFiniteVector(value.position) &&
-    typeof value.available === "boolean" &&
-    (value.source === undefined || ["spawn", "drop", "death"].includes(String(value.source)));
-}
-
-function isSafeZoneState(value: unknown, phase: unknown): boolean {
-  if (
-    !isRecord(value) ||
-    !isFiniteVector(value.center) ||
-    !isNonNegativeFiniteNumber(value.radius) ||
-    !isFiniteVector(value.startCenter) ||
-    !isNonNegativeFiniteNumber(value.startRadius) ||
-    !isFiniteVector(value.targetCenter) ||
-    !isNonNegativeFiniteNumber(value.targetRadius) ||
-    !isNonNegativeSafeInteger(value.stageIndex) ||
+function isRecoverableSafeZone(
+  value: unknown,
+  phase: unknown,
+  elapsedSeconds: number,
+  tick: number,
+): boolean {
+  if (!isRecord(value) ||
+    !isVector(value.center) ||
+    !isVector(value.startCenter) ||
+    !isVector(value.targetCenter) ||
+    ![value.radius, value.startRadius, value.targetRadius, value.secondsRemaining,
+      value.damagePerSecond].every(isNonNegativeNumber) ||
+    !isNonNegativeInteger(value.stageIndex) ||
     value.stageIndex >= BATTLE_ROYALE_CONFIG.safeZoneStages.length ||
-    !["waiting", "shrinking", "closed"].includes(String(value.status)) ||
-    !isNonNegativeFiniteNumber(value.secondsRemaining) ||
-    !isNonNegativeFiniteNumber(value.damagePerSecond)
+    !["waiting", "shrinking", "closed"].includes(String(value.status))
   ) return false;
   if (value.status !== "closed") return true;
   const finalStageIndex = BATTLE_ROYALE_CONFIG.safeZoneStages.length - 1;
@@ -575,16 +552,34 @@ function isSafeZoneState(value: unknown, phase: unknown): boolean {
   return Boolean(
     finalStage &&
     (phase === "combat" || phase === "finished") &&
+    elapsedSeconds >= MINIMUM_CLOSED_SAFE_ZONE_SECONDS &&
+    tick >= MINIMUM_CLOSED_SAFE_ZONE_TICKS &&
     value.stageIndex === finalStageIndex &&
     value.secondsRemaining === 0 &&
     value.radius === finalStage.radius &&
     value.targetRadius === finalStage.radius &&
     value.damagePerSecond === finalStage.damagePerSecond &&
-    equalFiniteVectors(value.center, value.targetCenter)
+    equalVectors(value.center, value.targetCenter)
   );
 }
 
-function equalFiniteVectors(left: unknown, right: unknown): boolean {
+function isRecoverableFlight(value: unknown): boolean {
+  return isRecord(value) &&
+    isVector(value.start) &&
+    isVector(value.end) &&
+    isNonNegativeNumber(value.durationSeconds) &&
+    isNonNegativeNumber(value.progress) &&
+    value.progress <= 1;
+}
+
+function isVector(value: unknown): boolean {
+  return isRecord(value) &&
+    isFiniteNumber(value.x) &&
+    isFiniteNumber(value.y) &&
+    isFiniteNumber(value.z);
+}
+
+function equalVectors(left: unknown, right: unknown): boolean {
   return isRecord(left) &&
     isRecord(right) &&
     left.x === right.x &&
@@ -592,48 +587,45 @@ function equalFiniteVectors(left: unknown, right: unknown): boolean {
     left.z === right.z;
 }
 
-function isFlightState(value: unknown): boolean {
-  return isRecord(value) &&
-    isFiniteVector(value.start) &&
-    isFiniteVector(value.end) &&
-    isNonNegativeFiniteNumber(value.durationSeconds) &&
-    isNonNegativeFiniteNumber(value.progress) &&
-    value.progress <= 1;
-}
-
-function isMatchResult(value: unknown): boolean {
-  return value === null || (
-    isRecord(value) &&
-    (value.winnerId === null || typeof value.winnerId === "string") &&
-    (value.reason === "last-alive" || value.reason === "player-eliminated")
-  );
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
-function isNonNegativeFiniteNumber(value: unknown): value is number {
+function isNonNegativeNumber(value: unknown): value is number {
   return isFiniteNumber(value) && value >= 0;
 }
 
-function isPositiveFiniteNumber(value: unknown): value is number {
+function isPositiveNumber(value: unknown): value is number {
   return isFiniteNumber(value) && value > 0;
 }
 
-function isNonNegativeSafeInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-}
-
-function isPositiveSafeInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
 }
 
 function isUint32(value: unknown): value is number {
-  return typeof value === "number" &&
-    Number.isSafeInteger(value) &&
-    value >= 0 &&
-    value <= 0xffff_ffff;
+  return Number.isInteger(value) && Number(value) >= 0 && Number(value) <= 0xffff_ffff;
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) >= 0;
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) > 0;
+}
+
+function isEquipmentLevel(value: unknown): value is 0 | 1 | 2 {
+  return value === 0 || value === 1 || value === 2;
+}
+
+function normalizeMatchState(state: MatchState): MatchState {
+  state.mapId = normalizeMapId(state.mapId);
+  return state;
 }
 
 function redactActor(actor: ActorState): ActorState {

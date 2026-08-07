@@ -15,8 +15,10 @@ describe("map selection", () => {
     expect(normalizeMapId(undefined)).toBe("island");
     expect(normalizeMapId("invalid")).toBe("island");
     expect(normalizeMapId("town")).toBe("town");
+    expect(normalizeMapId("mixed")).toBe("mixed");
     expect(mapDisplayName("island")).toBe("苍岬岛");
     expect(mapDisplayName("town")).toBe("灰炉城");
+    expect(mapDisplayName("mixed")).toBe("烬岚郡");
   });
 
   it("keeps the legacy seed-only factory equivalent to explicit island", () => {
@@ -29,6 +31,19 @@ describe("map selection", () => {
     expect(explicit.skybridges).toEqual([]);
   });
 
+  it("keeps all map families isolated for the same seed", () => {
+    const island = createMapLayout("island", 42);
+    const town = createMapLayout("town", 42);
+    const mixed = createMapLayout("mixed", 42);
+
+    expect(new Set([island, town, mixed]).size).toBe(3);
+    expect(mixed.mapId).toBe("mixed");
+    expect(mixed.displayName).toBe("烬岚郡");
+    expect(createMapLayout("mixed", 42)).toBe(mixed);
+    expect(mixed).not.toEqual(island);
+    expect(mixed).not.toEqual(town);
+  });
+
   it.each([
     [0, "82798bfb431d6ff854764c8056a1ca814e18b9a0c28f67f94a85874680e0ab1e"],
     [42, "ecaddfb71b4a189a9ef8e04f0e7c3de25f1556b719be9e8baef535b6e5f699a1"],
@@ -39,6 +54,7 @@ describe("map selection", () => {
       mapId: _mapId,
       displayName: _displayName,
       roadSegments: _roadSegments,
+      urbanRoadSegments: _urbanRoadSegments,
       skybridges: _skybridges,
       grenadeLootStartIndex: _grenadeLootStartIndex,
       ...currentPayload

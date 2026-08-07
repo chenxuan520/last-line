@@ -22,6 +22,7 @@ import {
 } from "../config/throwables";
 import { WEAPONS } from "../config/weapons";
 import { HumanController } from "../controllers/HumanController";
+import { requestDesktopPointerLockSafely } from "../controllers/pointerLock";
 import { FixedStepClock } from "../game/FixedStepClock";
 import { SIMULATION_STEP_SECONDS } from "../game/simulationTiming";
 import {
@@ -795,6 +796,10 @@ export class MultiplayerSession implements GameSession {
       this.humanController.resumeInput();
       return;
     }
-    void this.canvas.requestPointerLock().catch(() => {});
+    requestDesktopPointerLockSafely(
+      this.canvas,
+      false,
+      document.pointerLockElement,
+    );
   }
 }

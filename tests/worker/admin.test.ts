@@ -374,7 +374,7 @@ describe("admin control plane", () => {
 
     const latestCheckpointTick = await runInDurableObject(stub, async (instance, state) => {
       const room = await state.storage.get<{
-        checkpoint?: { tick: number; state: { elapsedSeconds: number } };
+        checkpoint?: { version: number; tick: number; state: { elapsedSeconds: number; mapId: string } };
       }>("room-v1");
       if (!room?.checkpoint) throw new Error("running checkpoint missing");
       const latest = structuredClone(room.checkpoint);
@@ -406,13 +406,21 @@ describe("admin control plane", () => {
   it("expires a running room restored from the previous authoritative-map checkpoint", async () => {
     const guest = await publicPost("/v1/guests", { displayName: "Legacy One" });
     const admission = await publicPost("/v1/matchmaking/quick", guest);
+    const secondGuest = await publicPost("/v1/guests", { displayName: "Legacy Two" });
+    const secondAdmission = await publicPost("/v1/matchmaking/quick", secondGuest);
     const roomId = String(admission.roomId);
+    expect(secondAdmission.roomId).toBe(roomId);
     const stub = env.GAME_ROOMS.getByName(roomId);
     await runInDurableObject(stub, async (_instance, state) => {
-      const room = await state.storage.get<Record<string, unknown>>("room-v1");
+      const room = await state.storage.get<{
+        status: string;
+        members: Record<string, { actorId: string | null }>;
+        checkpoint?: unknown;
+      }>("room-v1");
       if (!room) throw new Error("legacy room state missing");
+      assignMemberActorIds(room.members);
       const legacy = {
-        version: MATCH_CHECKPOINT_VERSION - 1,
+        version: MATCH_CHECKPOINT_VERSION - 2,
         state: {},
         tick: 0,
         snapshotSequence: 0,
@@ -432,131 +440,466 @@ describe("admin control plane", () => {
     expect(remaining).toBeUndefined();
   }, 60_000);
 
-  it.each([
-    {
-      name: "same-version truncated state",
-      corrupt: (checkpoint: Record<string, unknown>) => ({
-        ...checkpoint,
-        state: {},
-      }),
-    },
-    {
-      name: "same-version incomplete actor roster",
-      corrupt: (checkpoint: Record<string, unknown>) => ({
-        ...checkpoint,
-        state: {
-          ...(checkpoint.state as Record<string, unknown>),
-          actors: {},
-        },
-      }),
-    },
-    {
-      name: "same-version prematurely closed safe zone",
-      corrupt: (checkpoint: Record<string, unknown>) => {
-        const state = checkpoint.state as Record<string, unknown>;
-        return {
-          ...checkpoint,
-          state: {
-            ...state,
-            safeZone: {
-              ...(state.safeZone as Record<string, unknown>),
-              stageIndex: 0,
-              status: "closed",
-              secondsRemaining: 0,
-            },
-          },
-        };
-      },
-    },
-    {
-      name: "same-version final-stage closed large safe zone",
-      corrupt: (checkpoint: Record<string, unknown>) => {
-        const state = checkpoint.state as Record<string, unknown>;
-        return {
-          ...checkpoint,
-          state: {
-            ...state,
-            phase: "combat",
-            safeZone: {
-              ...(state.safeZone as Record<string, unknown>),
-              stageIndex: BATTLE_ROYALE_CONFIG.safeZoneStages.length - 1,
-              status: "closed",
-              secondsRemaining: 0,
-            },
-          },
-        };
-      },
-    },
-    {
-      name: "same-version missing member assignment",
-      corrupt: (checkpoint: Record<string, unknown>) => checkpoint,
-      corruptMembers: true,
-    },
-  ])("expires a running room restored from $name", async ({ corrupt, corruptMembers }) => {
-    const roomId = `corrupt-room-${corruptMembers ? "members" : String(corrupt).length}`;
+  it("expires a running room restored from a version 6 checkpoint without state", async () => {
+    const guest = await publicPost("/v1/guests", { displayName: "Corrupt Legacy" });
+    const admission = await publicPost("/v1/matchmaking/quick", guest);
+    const secondGuest = await publicPost("/v1/guests", { displayName: "Corrupt Legacy Two" });
+    const secondAdmission = await publicPost("/v1/matchmaking/quick", secondGuest);
+    const roomId = String(admission.roomId);
+    expect(secondAdmission.roomId).toBe(roomId);
     const stub = env.GAME_ROOMS.getByName(roomId);
     await runInDurableObject(stub, async (_instance, state) => {
-      const runtime = new MatchRuntime({
-        humanActorIds: ["human-1", "human-2"],
-        seed: 42,
-        startWithBandage: true,
-        disableAiSnipers: true,
-      });
-      const checkpoint = corrupt(runtime.checkpoint() as unknown as Record<string, unknown>);
-      const members = {
-        "player-1": persistedMember("player-1", corruptMembers ? null : "human-1", true),
-        "player-2": persistedMember("player-2", "human-2", false),
+      const room = await state.storage.get<{
+        status: string;
+        members: Record<string, { actorId: string | null }>;
+        checkpoint?: unknown;
+      }>("room-v1");
+      if (!room) throw new Error("corrupt room state missing");
+      assignMemberActorIds(room.members);
+      const checkpoint = {
+        version: MATCH_CHECKPOINT_VERSION - 1,
+        tick: 0,
+        snapshotSequence: 0,
+        eventSequence: 0,
       };
-      const room = {
-        roomId,
-        code: "BAD234",
-        visibility: "private",
-        status: "running",
-        revision: 1,
-        countdownEndsAt: null,
-        options: { mapId: "island", startWithBandage: true, disableAiSnipers: true },
-        seed: 42,
-        expiresAt: Date.now() + 60_000,
-        members,
-        checkpoint,
-      };
+      room.status = "running";
+      room.checkpoint = checkpoint;
       await state.storage.put("room-v1", room);
       await state.storage.put("checkpoint-v1", checkpoint);
-      await state.storage.setAlarm(Date.now() + 60_000);
     });
 
     await evictDurableObject(stub);
     const remaining = await runInDurableObject(stub, async (_instance, state) =>
       state.storage.get("room-v1")
     );
+    const checkpoint = await runInDurableObject(stub, async (_instance, state) =>
+      state.storage.get("checkpoint-v1")
+    );
 
     expect(remaining).toBeUndefined();
+    expect(checkpoint).toBeUndefined();
+  }, 60_000);
+
+  it("expires running rooms restored from incomplete actor rosters", async () => {
+    const guest = await publicPost("/v1/guests", { displayName: "Corrupt Roster" });
+    const admission = await publicPost("/v1/matchmaking/quick", guest);
+    const secondGuest = await publicPost("/v1/guests", { displayName: "Corrupt Roster Two" });
+    const secondAdmission = await publicPost("/v1/matchmaking/quick", secondGuest);
+    const roomId = String(admission.roomId);
+    expect(secondAdmission.roomId).toBe(roomId);
+    const stub = env.GAME_ROOMS.getByName(roomId);
+    await runInDurableObject(stub, async (_instance, state) => {
+      const room = await state.storage.get<{
+        status: string;
+        members: Record<string, { actorId: string | null }>;
+        checkpoint?: unknown;
+      }>("room-v1");
+      if (!room) throw new Error("corrupt roster room state missing");
+      const runtime = new MatchRuntime({
+        humanActorIds: ["human-1", "human-2"],
+        seed: 45,
+        mapId: "town",
+        startWithBandage: true,
+        disableAiSnipers: true,
+      });
+      const checkpoint = runtime.checkpoint();
+      const actors = Object.fromEntries(Object.entries(checkpoint.state.actors).slice(0, -1));
+      assignMemberActorIds(room.members);
+      const corruptedCheckpoint = {
+        ...checkpoint,
+        state: { ...checkpoint.state, actors },
+      };
+      room.status = "running";
+      room.checkpoint = corruptedCheckpoint;
+      await state.storage.put("room-v1", room);
+      await state.storage.put("checkpoint-v1", corruptedCheckpoint);
+    });
+
+    await evictDurableObject(stub);
+    const remaining = await runInDurableObject(stub, async (_instance, state) =>
+      state.storage.get("room-v1")
+    );
+    const checkpoint = await runInDurableObject(stub, async (_instance, state) =>
+      state.storage.get("checkpoint-v1")
+    );
+
+    expect(remaining).toBeUndefined();
+    expect(checkpoint).toBeUndefined();
+  }, 60_000);
+
+  it("expires a full actor roster that omits a persisted room member", async () => {
+    const guest = await publicPost("/v1/guests", { displayName: "Missing Human" });
+    const admission = await publicPost("/v1/matchmaking/quick", guest);
+    const secondGuest = await publicPost("/v1/guests", { displayName: "Missing Human Two" });
+    const secondAdmission = await publicPost("/v1/matchmaking/quick", secondGuest);
+    const roomId = String(admission.roomId);
+    expect(secondAdmission.roomId).toBe(roomId);
+    const stub = env.GAME_ROOMS.getByName(roomId);
+    await runInDurableObject(stub, async (_instance, state) => {
+      const room = await state.storage.get<{
+        status: string;
+        members: Record<string, { actorId: string | null }>;
+        checkpoint?: unknown;
+      }>("room-v1");
+      if (!room) throw new Error("missing human room state missing");
+      const runtime = new MatchRuntime({
+        humanActorIds: ["human-1", "human-2"],
+        seed: 46,
+        mapId: "town",
+        startWithBandage: true,
+        disableAiSnipers: true,
+      });
+      const checkpoint = runtime.checkpoint();
+      const actors = structuredClone(checkpoint.state.actors);
+      delete actors["human-1"];
+      const replacementSource = Object.values(actors).find((actor) => actor.kind === "bot");
+      if (!replacementSource) throw new Error("replacement bot missing");
+      actors["replacement-bot"] = { ...replacementSource, id: "replacement-bot" };
+      assignMemberActorIds(room.members);
+      const corruptedCheckpoint = {
+        ...checkpoint,
+        state: { ...checkpoint.state, actors },
+      };
+      room.status = "running";
+      room.checkpoint = corruptedCheckpoint;
+      await state.storage.put("room-v1", room);
+      await state.storage.put("checkpoint-v1", corruptedCheckpoint);
+    });
+
+    await evictDurableObject(stub);
+    const remaining = await runInDurableObject(stub, async (_instance, state) =>
+      state.storage.get("room-v1")
+    );
+    const checkpoint = await runInDurableObject(stub, async (_instance, state) =>
+      state.storage.get("checkpoint-v1")
+    );
+
+    expect(remaining).toBeUndefined();
+    expect(checkpoint).toBeUndefined();
+  }, 60_000);
+
+  it("expires a full actor roster when a persisted member points to a bot", async () => {
+    const guest = await publicPost("/v1/guests", { displayName: "Bot Identity" });
+    const admission = await publicPost("/v1/matchmaking/quick", guest);
+    const secondGuest = await publicPost("/v1/guests", { displayName: "Bot Identity Two" });
+    const secondAdmission = await publicPost("/v1/matchmaking/quick", secondGuest);
+    const roomId = String(admission.roomId);
+    expect(secondAdmission.roomId).toBe(roomId);
+    const stub = env.GAME_ROOMS.getByName(roomId);
+    await runInDurableObject(stub, async (_instance, state) => {
+      const room = await state.storage.get<{
+        status: string;
+        members: Record<string, { actorId: string | null }>;
+        checkpoint?: unknown;
+      }>("room-v1");
+      if (!room) throw new Error("bot identity room state missing");
+      const runtime = new MatchRuntime({
+        humanActorIds: ["human-1", "human-2"],
+        seed: 47,
+        mapId: "town",
+        startWithBandage: true,
+        disableAiSnipers: true,
+      });
+      const checkpoint = runtime.checkpoint();
+      const botActor = Object.values(checkpoint.state.actors).find((actor) => actor.kind === "bot");
+      assignMemberActorIds(room.members);
+      const member = Object.values(room.members)[0];
+      if (!botActor || !member) throw new Error("bot identity fixture missing");
+      member.actorId = botActor.id;
+      room.status = "running";
+      room.checkpoint = checkpoint;
+      await state.storage.put("room-v1", room);
+      await state.storage.put("checkpoint-v1", checkpoint);
+    });
+
+    await evictDurableObject(stub);
+    const remaining = await runInDurableObject(stub, async (_instance, state) =>
+      state.storage.get("room-v1")
+    );
+    const checkpoint = await runInDurableObject(stub, async (_instance, state) =>
+      state.storage.get("checkpoint-v1")
+    );
+
+    expect(remaining).toBeUndefined();
+    expect(checkpoint).toBeUndefined();
+  }, 60_000);
+
+  it("expires a running room whose persisted members share one actor", async () => {
+    const guest = await publicPost("/v1/guests", { displayName: "Duplicate One" });
+    const admission = await publicPost("/v1/matchmaking/quick", guest);
+    const secondGuest = await publicPost("/v1/guests", { displayName: "Duplicate Two" });
+    const secondAdmission = await publicPost("/v1/matchmaking/quick", secondGuest);
+    const roomId = String(admission.roomId);
+    expect(secondAdmission.roomId).toBe(roomId);
+    const stub = env.GAME_ROOMS.getByName(roomId);
+    await runInDurableObject(stub, async (_instance, state) => {
+      const room = await state.storage.get<{
+        status: string;
+        members: Record<string, { actorId: string | null }>;
+        checkpoint?: unknown;
+      }>("room-v1");
+      if (!room) throw new Error("duplicate actor room state missing");
+      const runtime = new MatchRuntime({
+        humanActorIds: ["human-1", "human-2"],
+        seed: 48,
+        mapId: "town",
+        startWithBandage: true,
+        disableAiSnipers: true,
+      });
+      const checkpoint = runtime.checkpoint();
+      const members = Object.values(room.members);
+      if (members.length !== 2) throw new Error("duplicate actor members missing");
+      members[0].actorId = "human-1";
+      members[1].actorId = "human-1";
+      room.status = "running";
+      room.checkpoint = checkpoint;
+      await state.storage.put("room-v1", room);
+      await state.storage.put("checkpoint-v1", checkpoint);
+    });
+
+    await evictDurableObject(stub);
+    const remaining = await runInDurableObject(stub, async (_instance, state) =>
+      state.storage.get("room-v1")
+    );
+    const checkpoint = await runInDurableObject(stub, async (_instance, state) =>
+      state.storage.get("checkpoint-v1")
+    );
+
+    expect(remaining).toBeUndefined();
+    expect(checkpoint).toBeUndefined();
+  }, 60_000);
+
+  it("expires a running room whose persisted member has no actor", async () => {
+    const guest = await publicPost("/v1/guests", { displayName: "Null Actor One" });
+    const admission = await publicPost("/v1/matchmaking/quick", guest);
+    const secondGuest = await publicPost("/v1/guests", { displayName: "Null Actor Two" });
+    const secondAdmission = await publicPost("/v1/matchmaking/quick", secondGuest);
+    const roomId = String(admission.roomId);
+    expect(secondAdmission.roomId).toBe(roomId);
+    const stub = env.GAME_ROOMS.getByName(roomId);
+    await runInDurableObject(stub, async (_instance, state) => {
+      const room = await state.storage.get<{
+        status: string;
+        members: Record<string, { actorId: string | null }>;
+        checkpoint?: unknown;
+      }>("room-v1");
+      if (!room) throw new Error("null actor room state missing");
+      const runtime = new MatchRuntime({
+        humanActorIds: ["human-1", "human-2"],
+        seed: 49,
+        mapId: "town",
+        startWithBandage: true,
+        disableAiSnipers: true,
+      });
+      const checkpoint = runtime.checkpoint();
+      const members = Object.values(room.members);
+      if (members.length !== 2) throw new Error("null actor members missing");
+      members[0].actorId = "human-1";
+      members[1].actorId = null;
+      room.status = "running";
+      room.checkpoint = checkpoint;
+      await state.storage.put("room-v1", room);
+      await state.storage.put("checkpoint-v1", checkpoint);
+    });
+
+    await evictDurableObject(stub);
+    const remaining = await runInDurableObject(stub, async (_instance, state) =>
+      state.storage.get("room-v1")
+    );
+    const checkpoint = await runInDurableObject(stub, async (_instance, state) =>
+      state.storage.get("checkpoint-v1")
+    );
+
+    expect(remaining).toBeUndefined();
+    expect(checkpoint).toBeUndefined();
+  }, 60_000);
+
+  it.each([
+    ["missing", (room: Record<string, unknown>) => { delete room.members; }],
+    ["null", (room: Record<string, unknown>) => { room.members = null; }],
+    ["array", (room: Record<string, unknown>) => { room.members = []; }],
+    ["null entry", (room: Record<string, unknown>) => {
+      room.members = { ...(room.members as Record<string, unknown>), corrupt: null };
+    }],
+    ["partial entry", (room: Record<string, unknown>) => {
+      room.members = Object.fromEntries(
+        Object.entries(room.members as Record<string, { actorId: string | null }>).map(([key, member]) =>
+          [key, { actorId: member.actorId }]
+        ),
+      );
+    }],
+    ["key mismatch", (room: Record<string, unknown>) => {
+      const entries = Object.entries(room.members as Record<string, unknown>);
+      const [firstKey, firstMember] = entries[0] ?? [];
+      if (!firstKey || !firstMember) throw new Error("member key mismatch fixture missing");
+      room.members = Object.fromEntries([
+        ["mismatched-key", firstMember],
+        ...entries.slice(1),
+      ]);
+    }],
+  ])("expires a running room restored from a %s members container", async (_label, corruptMembers) => {
+    const firstGuest = await publicPost("/v1/guests", { displayName: "Malformed One" });
+    const firstAdmission = await publicPost("/v1/matchmaking/quick", firstGuest);
+    const secondGuest = await publicPost("/v1/guests", { displayName: "Malformed Two" });
+    const secondAdmission = await publicPost("/v1/matchmaking/quick", secondGuest);
+    const roomId = String(firstAdmission.roomId);
+    expect(secondAdmission.roomId).toBe(roomId);
+    const stub = env.GAME_ROOMS.getByName(roomId);
+    await runInDurableObject(stub, async (_instance, state) => {
+      const room = await state.storage.get<Record<string, unknown>>("room-v1");
+      if (!room) throw new Error("malformed members room state missing");
+      const runtime = new MatchRuntime({
+        humanActorIds: ["human-1", "human-2"],
+        seed: 50,
+        mapId: "town",
+        startWithBandage: true,
+        disableAiSnipers: true,
+      });
+      const checkpoint = runtime.checkpoint();
+      room.status = "running";
+      room.checkpoint = checkpoint;
+      assignMemberActorIds(room.members as Record<string, { actorId: string | null }>);
+      corruptMembers(room);
+      await state.storage.put("room-v1", room);
+      await state.storage.put("checkpoint-v1", checkpoint);
+    });
+
+    await evictDurableObject(stub);
+    const remaining = await runInDurableObject(stub, async (_instance, state) =>
+      state.storage.get("room-v1")
+    );
+    const checkpoint = await runInDurableObject(stub, async (_instance, state) =>
+      state.storage.get("checkpoint-v1")
+    );
+
+    expect(remaining).toBeUndefined();
+    expect(checkpoint).toBeUndefined();
+  }, 60_000);
+
+  it.each([
+    {
+      name: "negative actor health",
+      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => {
+        const actors = structuredClone(checkpoint.state.actors);
+        const actor = actors["human-1"];
+        if (!actor) throw new Error("actor fixture missing");
+        actor.health = -1;
+        return {
+          ...checkpoint,
+          state: { ...checkpoint.state, actors },
+        };
+      },
+    },
+    {
+      name: "missing grenade state",
+      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => ({
+        ...checkpoint,
+        state: { ...checkpoint.state, activeGrenades: undefined },
+      }),
+    },
+    {
+      name: "prematurely closed safe zone",
+      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => ({
+        ...checkpoint,
+        state: {
+          ...checkpoint.state,
+          phase: "combat" as const,
+          actors: groundedActors(checkpoint.state.actors),
+          safeZone: {
+            ...checkpoint.state.safeZone,
+            stageIndex: 0,
+            status: "closed" as const,
+            secondsRemaining: 0,
+          },
+        },
+      }),
+    },
+    {
+      name: "final-stage closed large safe zone",
+      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => ({
+        ...checkpoint,
+        state: {
+          ...checkpoint.state,
+          phase: "combat" as const,
+          actors: groundedActors(checkpoint.state.actors),
+          safeZone: {
+            ...checkpoint.state.safeZone,
+            stageIndex: BATTLE_ROYALE_CONFIG.safeZoneStages.length - 1,
+            status: "closed" as const,
+            secondsRemaining: 0,
+          },
+        },
+      }),
+    },
+    {
+      name: "final-stage closed before minimum timeline",
+      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => {
+        const finalStage = BATTLE_ROYALE_CONFIG.safeZoneStages.at(-1);
+        if (!finalStage) throw new Error("final safe-zone stage missing");
+        return {
+          ...checkpoint,
+          state: {
+            ...checkpoint.state,
+            phase: "combat" as const,
+            actors: groundedActors(checkpoint.state.actors),
+            safeZone: {
+              ...checkpoint.state.safeZone,
+              center: { ...checkpoint.state.safeZone.targetCenter },
+              radius: finalStage.radius,
+              targetRadius: finalStage.radius,
+              stageIndex: BATTLE_ROYALE_CONFIG.safeZoneStages.length - 1,
+              status: "closed" as const,
+              secondsRemaining: 0,
+              damagePerSecond: finalStage.damagePerSecond,
+            },
+          },
+        };
+      },
+    },
+  ])("expires a running room restored with $name", async ({ corrupt }) => {
+    const roomId = `grenade-corrupt-${String(corrupt).length}`;
+    const stub = env.GAME_ROOMS.getByName(roomId);
+    await runInDurableObject(stub, async (_instance, state) => {
+      const runtime = new MatchRuntime({
+        humanActorIds: ["human-1", "human-2"],
+        seed: 52,
+        mapId: "mixed",
+        startWithBandage: true,
+        disableAiSnipers: true,
+      });
+      const checkpoint = corrupt(runtime.checkpoint()) as ReturnType<MatchRuntime["checkpoint"]>;
+      const members = {
+        "player-1": persistedCheckpointMember("player-1", "human-1", true),
+        "player-2": persistedCheckpointMember("player-2", "human-2", false),
+      };
+      await state.storage.put("room-v1", {
+        roomId,
+        code: "BAD252",
+        visibility: "private",
+        status: "running",
+        revision: 1,
+        countdownEndsAt: null,
+        options: { mapId: "mixed", startWithBandage: true, disableAiSnipers: true },
+        seed: 52,
+        expiresAt: Date.now() + 60_000,
+        members,
+        checkpoint,
+      });
+      await state.storage.put("checkpoint-v1", checkpoint);
+      await state.storage.setAlarm(Date.now() + 60_000);
+    });
+
+    await evictDurableObject(stub);
+    const [room, checkpoint] = await runInDurableObject(stub, async (_instance, state) =>
+      Promise.all([
+        state.storage.get("room-v1"),
+        state.storage.get("checkpoint-v1"),
+      ])
+    );
+    expect(room).toBeUndefined();
+    expect(checkpoint).toBeUndefined();
   }, 60_000);
 });
-
-function persistedMember(
-  playerId: string,
-  actorId: string | null,
-  host: boolean,
-) {
-  return {
-    playerId,
-    displayName: playerId,
-    accountId: null,
-    accountSessionRevision: null,
-    admissionToken: `admission-${playerId}`,
-    admissionExpiresAt: Date.now() + 60_000,
-    admissionConsumed: true,
-    reconnectToken: `reconnect-${playerId}`,
-    pendingReconnectToken: null,
-    ready: true,
-    connected: false,
-    host,
-    joinedAt: Date.now(),
-    connectionEpoch: 1,
-    actorId,
-  };
-}
 
 async function bootstrapAdministrator(): Promise<string> {
   const response = await post("/v1/admin/bootstrap", {
@@ -627,4 +970,45 @@ async function connectAdmission(admission: Record<string, unknown>): Promise<Web
   if (!response.webSocket) throw new Error(`WebSocket upgrade failed: ${response.status}`);
   response.webSocket.accept();
   return response.webSocket;
+}
+
+function assignMemberActorIds(members: Record<string, { actorId: string | null }>): void {
+  const entries = Object.values(members);
+  if (entries.length !== 2) throw new Error("two room members required");
+  entries.forEach((member, index) => {
+    member.actorId = `human-${index + 1}`;
+  });
+}
+
+function persistedCheckpointMember(
+  playerId: string,
+  actorId: string,
+  host: boolean,
+): Record<string, unknown> {
+  return {
+    playerId,
+    displayName: playerId,
+    accountId: null,
+    accountSessionRevision: null,
+    admissionToken: `admission-${playerId}`,
+    admissionExpiresAt: Date.now() + 60_000,
+    admissionConsumed: true,
+    reconnectToken: `reconnect-${playerId}`,
+    pendingReconnectToken: null,
+    ready: true,
+    connected: false,
+    host,
+    joinedAt: Date.now(),
+    connectionEpoch: 1,
+    actorId,
+  };
+}
+
+function groundedActors(
+  actors: ReturnType<MatchRuntime["checkpoint"]>["state"]["actors"],
+): ReturnType<MatchRuntime["checkpoint"]>["state"]["actors"] {
+  return Object.fromEntries(Object.entries(actors).map(([actorId, actor]) => [
+    actorId,
+    { ...actor, deployment: "grounded" as const },
+  ]));
 }

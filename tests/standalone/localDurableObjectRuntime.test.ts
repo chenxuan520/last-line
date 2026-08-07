@@ -242,7 +242,7 @@ describe("LocalDurableObjectRuntime", () => {
       const runtime = new MatchRuntime({
         humanActorIds: ["human-1", "human-2"],
         seed: 42,
-        mapId: "town",
+        mapId: "mixed",
         startWithBandage: true,
         disableAiSnipers: true,
       });
@@ -257,10 +257,212 @@ describe("LocalDurableObjectRuntime", () => {
         status: "running",
         revision: 1,
         countdownEndsAt: null,
-        options: { mapId: "town", startWithBandage: true, disableAiSnipers: true },
+        options: { mapId: "mixed", startWithBandage: true, disableAiSnipers: true },
         seed: 42,
         expiresAt: Date.now() + 60_000,
-        members: {},
+        members: persistedMatchMembers(),
+        checkpoint: legacyCheckpoint,
+      });
+      await state.storage.put("checkpoint-v1", legacyCheckpoint);
+      await state.storage.setAlarm(Date.now() + 60_000);
+      await environment.close();
+
+      environment = await createStandaloneEnvironment({ databasePath });
+      const restoredState = await environment.rooms.getState(roomId);
+      expect(await restoredState.storage.get("room-v1")).toBeUndefined();
+      expect(await restoredState.storage.get("checkpoint-v1")).toBeUndefined();
+    } finally {
+      await environment.close();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("deletes a running room restored from a version 6 checkpoint without state", async () => {
+    const directory = await mkdtemp(resolve(tmpdir(), "last-line-checkpoint-missing-state-"));
+    const databasePath = resolve(directory, "rooms.sqlite");
+    const roomId = "room-00000000-0000-4000-8000-000000000004";
+    let environment = await createStandaloneEnvironment({ databasePath });
+    try {
+      const state = await environment.rooms.getState(roomId);
+      const runtime = new MatchRuntime({
+        humanActorIds: ["human-1", "human-2"],
+        seed: 44,
+        mapId: "town",
+        startWithBandage: true,
+        disableAiSnipers: true,
+      });
+      const corruptedCheckpoint = {
+        ...runtime.checkpoint(),
+        version: MATCH_CHECKPOINT_VERSION - 1,
+        state: undefined,
+      };
+      await state.storage.put("room-v1", {
+        roomId,
+        code: "OLD236",
+        visibility: "private",
+        status: "running",
+        revision: 1,
+        countdownEndsAt: null,
+        options: { mapId: "town", startWithBandage: true, disableAiSnipers: true },
+        seed: 44,
+        expiresAt: Date.now() + 60_000,
+        members: persistedMatchMembers(),
+        checkpoint: corruptedCheckpoint,
+      });
+      await state.storage.put("checkpoint-v1", corruptedCheckpoint);
+      await state.storage.setAlarm(Date.now() + 60_000);
+      await environment.close();
+
+      environment = await createStandaloneEnvironment({ databasePath });
+      const restoredState = await environment.rooms.getState(roomId);
+      expect(await restoredState.storage.get("room-v1")).toBeUndefined();
+      expect(await restoredState.storage.get("checkpoint-v1")).toBeUndefined();
+    } finally {
+      await environment.close();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("deletes a running room restored from a truncated actor roster", async () => {
+    const directory = await mkdtemp(resolve(tmpdir(), "last-line-checkpoint-truncated-roster-"));
+    const databasePath = resolve(directory, "rooms.sqlite");
+    const roomId = "room-00000000-0000-4000-8000-000000000005";
+    let environment = await createStandaloneEnvironment({ databasePath });
+    try {
+      const state = await environment.rooms.getState(roomId);
+      const runtime = new MatchRuntime({
+        humanActorIds: ["human-1", "human-2"],
+        seed: 45,
+        mapId: "town",
+        startWithBandage: true,
+        disableAiSnipers: true,
+      });
+      const checkpoint = runtime.checkpoint();
+      const corruptedCheckpoint = {
+        ...checkpoint,
+        state: {
+          ...checkpoint.state,
+          actors: Object.fromEntries(Object.entries(checkpoint.state.actors).slice(0, -1)),
+        },
+      };
+      await state.storage.put("room-v1", {
+        roomId,
+        code: "OLD237",
+        visibility: "private",
+        status: "running",
+        revision: 1,
+        countdownEndsAt: null,
+        options: { mapId: "town", startWithBandage: true, disableAiSnipers: true },
+        seed: 45,
+        expiresAt: Date.now() + 60_000,
+        members: persistedMatchMembers(),
+        checkpoint: corruptedCheckpoint,
+      });
+      await state.storage.put("checkpoint-v1", corruptedCheckpoint);
+      await state.storage.setAlarm(Date.now() + 60_000);
+      await environment.close();
+
+      environment = await createStandaloneEnvironment({ databasePath });
+      const restoredState = await environment.rooms.getState(roomId);
+      expect(await restoredState.storage.get("room-v1")).toBeUndefined();
+      expect(await restoredState.storage.get("checkpoint-v1")).toBeUndefined();
+    } finally {
+      await environment.close();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("deletes running rooms restored from malformed members containers", async () => {
+    const directory = await mkdtemp(resolve(tmpdir(), "last-line-checkpoint-members-shape-"));
+    const databasePath = resolve(directory, "rooms.sqlite");
+    let environment = await createStandaloneEnvironment({ databasePath });
+    try {
+      const runtime = new MatchRuntime({
+        humanActorIds: ["human-1", "human-2"],
+        seed: 46,
+        mapId: "town",
+        startWithBandage: true,
+        disableAiSnipers: true,
+      });
+      const checkpoint = runtime.checkpoint();
+      const validMembers = persistedMatchMembers();
+      const corruptMembers = [
+        undefined,
+        null,
+        [],
+        { ...validMembers, corrupt: null },
+        Object.fromEntries(Object.entries(validMembers).map(([key, member]) =>
+          [key, { actorId: member.actorId }]
+        )),
+        Object.fromEntries([
+          ["mismatched-key", Object.values(validMembers)[0]],
+          ...Object.entries(validMembers).slice(1),
+        ]),
+      ];
+      for (const [index, members] of corruptMembers.entries()) {
+        const roomId = `room-00000000-0000-4000-8000-00000000010${index}`;
+        const state = await environment.rooms.getState(roomId);
+        const room: Record<string, unknown> = {
+          roomId,
+          code: `BAD10${index}`,
+          visibility: "private",
+          status: "running",
+          revision: 1,
+          countdownEndsAt: null,
+          options: { mapId: "town", startWithBandage: true, disableAiSnipers: true },
+          seed: 46,
+          expiresAt: Date.now() + 60_000,
+          checkpoint,
+        };
+        if (members !== undefined) room.members = members;
+        await state.storage.put("room-v1", room);
+        await state.storage.put("checkpoint-v1", checkpoint);
+        await state.storage.setAlarm(Date.now() + 60_000);
+      }
+      await environment.close();
+
+      environment = await createStandaloneEnvironment({ databasePath });
+      for (let index = 0; index < corruptMembers.length; index += 1) {
+        const roomId = `room-00000000-0000-4000-8000-00000000010${index}`;
+        const restoredState = await environment.rooms.getState(roomId);
+        expect(await restoredState.storage.get("room-v1"), `${index}:room`).toBeUndefined();
+        expect(await restoredState.storage.get("checkpoint-v1"), `${index}:checkpoint`).toBeUndefined();
+      }
+    } finally {
+      await environment.close();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("deletes a version 6 town checkpoint across a SQLite restart", async () => {
+    const directory = await mkdtemp(resolve(tmpdir(), "last-line-checkpoint-town-v6-"));
+    const databasePath = resolve(directory, "rooms.sqlite");
+    const roomId = "room-00000000-0000-4000-8000-000000000003";
+    let environment = await createStandaloneEnvironment({ databasePath });
+    try {
+      const state = await environment.rooms.getState(roomId);
+      const runtime = new MatchRuntime({
+        humanActorIds: ["human-1", "human-2"],
+        seed: 43,
+        mapId: "town",
+        startWithBandage: true,
+        disableAiSnipers: true,
+      });
+      const legacyCheckpoint = {
+        ...runtime.checkpoint(),
+        version: MATCH_CHECKPOINT_VERSION - 1,
+      };
+      await state.storage.put("room-v1", {
+        roomId,
+        code: "OLD235",
+        visibility: "private",
+        status: "running",
+        revision: 1,
+        countdownEndsAt: null,
+        options: { mapId: "town", startWithBandage: true, disableAiSnipers: true },
+        seed: 43,
+        expiresAt: Date.now() + 60_000,
+        members: persistedMatchMembers(),
         checkpoint: legacyCheckpoint,
       });
       await state.storage.put("checkpoint-v1", legacyCheckpoint);
@@ -279,40 +481,36 @@ describe("LocalDurableObjectRuntime", () => {
 
   it.each([
     {
-      name: "same-version truncated state",
+      suffix: "000000000200",
+      name: "negative actor health",
+      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => {
+        const actors = structuredClone(checkpoint.state.actors);
+        const actor = actors["human-1"];
+        if (!actor) throw new Error("actor fixture missing");
+        actor.health = -1;
+        return {
+          ...checkpoint,
+          state: { ...checkpoint.state, actors },
+        };
+      },
+    },
+    {
+      suffix: "000000000201",
+      name: "missing grenade state",
       corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => ({
         ...checkpoint,
-        state: {},
+        state: { ...checkpoint.state, activeGrenades: undefined },
       }),
     },
     {
-      name: "same-version incomplete actor roster",
-      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => ({
-        ...checkpoint,
-        state: { ...checkpoint.state, actors: {} },
-      }),
-    },
-    {
-      name: "same-version impossible safe-zone stage",
+      suffix: "000000000202",
+      name: "prematurely closed safe zone",
       corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => ({
         ...checkpoint,
         state: {
           ...checkpoint.state,
-          safeZone: {
-            ...checkpoint.state.safeZone,
-            stageIndex: 999,
-            status: "waiting" as const,
-            secondsRemaining: 0,
-          },
-        },
-      }),
-    },
-    {
-      name: "same-version prematurely closed safe zone",
-      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => ({
-        ...checkpoint,
-        state: {
-          ...checkpoint.state,
+          phase: "combat" as const,
+          actors: groundedActors(checkpoint.state.actors),
           safeZone: {
             ...checkpoint.state.safeZone,
             stageIndex: 0,
@@ -323,12 +521,14 @@ describe("LocalDurableObjectRuntime", () => {
       }),
     },
     {
-      name: "same-version final-stage closed large safe zone",
+      suffix: "000000000203",
+      name: "final-stage closed large safe zone",
       corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => ({
         ...checkpoint,
         state: {
           ...checkpoint.state,
           phase: "combat" as const,
+          actors: groundedActors(checkpoint.state.actors),
           safeZone: {
             ...checkpoint.state.safeZone,
             stageIndex: BATTLE_ROYALE_CONFIG.safeZoneStages.length - 1,
@@ -339,41 +539,57 @@ describe("LocalDurableObjectRuntime", () => {
       }),
     },
     {
-      name: "missing persisted members",
-      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => checkpoint,
-      missingMembers: true,
+      suffix: "000000000204",
+      name: "final-stage closed before minimum timeline",
+      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => {
+        const finalStage = BATTLE_ROYALE_CONFIG.safeZoneStages.at(-1);
+        if (!finalStage) throw new Error("final safe-zone stage missing");
+        return {
+          ...checkpoint,
+          state: {
+            ...checkpoint.state,
+            phase: "combat" as const,
+            actors: groundedActors(checkpoint.state.actors),
+            safeZone: {
+              ...checkpoint.state.safeZone,
+              center: { ...checkpoint.state.safeZone.targetCenter },
+              radius: finalStage.radius,
+              targetRadius: finalStage.radius,
+              stageIndex: BATTLE_ROYALE_CONFIG.safeZoneStages.length - 1,
+              status: "closed" as const,
+              secondsRemaining: 0,
+              damagePerSecond: finalStage.damagePerSecond,
+            },
+          },
+        };
+      },
     },
-  ])("deletes a running room with $name", async ({ corrupt, missingMembers }) => {
-    const directory = await mkdtemp(resolve(tmpdir(), "last-line-corrupt-checkpoint-"));
+  ])("deletes a running room restored with $name", async ({ suffix, corrupt }) => {
+    const directory = await mkdtemp(resolve(tmpdir(), "last-line-checkpoint-grenade-"));
     const databasePath = resolve(directory, "rooms.sqlite");
-    const roomId = `room-00000000-0000-4000-8000-${missingMembers ? "000000000004" : "000000000003"}`;
+    const roomId = `room-00000000-0000-4000-8000-${suffix}`;
     let environment = await createStandaloneEnvironment({ databasePath });
     try {
       const state = await environment.rooms.getState(roomId);
       const runtime = new MatchRuntime({
         humanActorIds: ["human-1", "human-2"],
-        seed: 42,
+        seed: 52,
+        mapId: "mixed",
         startWithBandage: true,
         disableAiSnipers: true,
       });
       const checkpoint = corrupt(runtime.checkpoint()) as ReturnType<MatchRuntime["checkpoint"]>;
-      const members = missingMembers
-        ? {}
-        : {
-            "player-1": persistedMember("player-1", "human-1", true),
-            "player-2": persistedMember("player-2", "human-2", false),
-          };
       await state.storage.put("room-v1", {
         roomId,
-        code: "BAD234",
+        code: "BAD252",
         visibility: "private",
         status: "running",
         revision: 1,
         countdownEndsAt: null,
-        options: { mapId: "island", startWithBandage: true, disableAiSnipers: true },
-        seed: 42,
+        options: { mapId: "mixed", startWithBandage: true, disableAiSnipers: true },
+        seed: 52,
         expiresAt: Date.now() + 60_000,
-        members,
+        members: persistedMatchMembers(),
         checkpoint,
       });
       await state.storage.put("checkpoint-v1", checkpoint);
@@ -390,26 +606,6 @@ describe("LocalDurableObjectRuntime", () => {
     }
   });
 });
-
-function persistedMember(playerId: string, actorId: string, host: boolean) {
-  return {
-    playerId,
-    displayName: playerId,
-    accountId: null,
-    accountSessionRevision: null,
-    admissionToken: `admission-${playerId}`,
-    admissionExpiresAt: Date.now() + 60_000,
-    admissionConsumed: true,
-    reconnectToken: `reconnect-${playerId}`,
-    pendingReconnectToken: null,
-    ready: true,
-    connected: false,
-    host,
-    joinedAt: Date.now(),
-    connectionEpoch: 1,
-    actorId,
-  };
-}
 
 interface AlarmEnvironment {
   entered: Deferred<void>;
@@ -445,6 +641,38 @@ function deferred<Value>(): Deferred<Value> {
 }
 
 type TestEnvironment = Awaited<ReturnType<typeof createStandaloneEnvironment>>;
+
+function persistedMatchMembers(): Record<string, Record<string, unknown>> {
+  return Object.fromEntries(["human-1", "human-2"].map((actorId, index) => {
+    const playerId = `player-${index + 1}`;
+    return [playerId, {
+      playerId,
+      displayName: `Player ${index + 1}`,
+      accountId: null,
+      accountSessionRevision: null,
+      admissionToken: `admission-${index + 1}`,
+      admissionExpiresAt: Date.now() + 60_000,
+      admissionConsumed: true,
+      reconnectToken: `reconnect-${index + 1}`,
+      pendingReconnectToken: null,
+      ready: true,
+      connected: false,
+      host: index === 0,
+      joinedAt: Date.now() + index,
+      connectionEpoch: 1,
+      actorId,
+    }];
+  }));
+}
+
+function groundedActors(
+  actors: ReturnType<MatchRuntime["checkpoint"]>["state"]["actors"],
+): ReturnType<MatchRuntime["checkpoint"]>["state"]["actors"] {
+  return Object.fromEntries(Object.entries(actors).map(([actorId, actor]) => [
+    actorId,
+    { ...actor, deployment: "grounded" as const },
+  ]));
+}
 
 async function createGuest(
   environment: TestEnvironment,

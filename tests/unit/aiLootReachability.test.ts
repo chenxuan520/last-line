@@ -137,11 +137,14 @@ describe("AI loot reachability", () => {
     expect(bots.some((bot) => bot.inventory.backpack.some((stack) => stack.itemId === "ammo.sniper"))).toBe(false);
   }, 120_000);
 
-  it("arms at least 42 of 49 bots in Greyfurnace City", () => {
+  it.each([
+    ["Greyfurnace City", "town"],
+    ["mixed region map", "mixed"],
+  ] as const)("arms at least 42 of 49 bots in %s", (_label, mapId: MapId) => {
     const seed = 42;
     const random = seededRandom(seed);
-    const state = createBattleRoyaleState("player", TEST_CONFIG, random, { mapId: "town" });
-    const layout = createMapLayout("town", state.mapSeed);
+    const state = createBattleRoyaleState("player", TEST_CONFIG, random, { mapId });
+    const layout = createMapLayout(mapId, state.mapSeed);
     const simulation = new GameSimulation(state, new BattleRoyaleMode(TEST_CONFIG, random), WEAPONS, layout);
     const bots = Object.values(state.actors).filter((actor) => actor.kind === "bot");
     const controllers = new Map(
@@ -169,7 +172,7 @@ describe("AI loot reachability", () => {
 
     const armedBots = bots.filter((bot) => getActiveWeapon(bot) !== null);
     expect(bots.every((bot) => bot.deployment === "grounded")).toBe(true);
-    expect(armedBots.length, `${armedBots.length} town bots armed`).toBeGreaterThanOrEqual(42);
+    expect(armedBots.length, `${armedBots.length} ${mapId} bots armed`).toBeGreaterThanOrEqual(42);
   }, 120_000);
 
   it.each([1, 42, 99])("keeps Greyfurnace City loot navigable and interactable with seed %i", (seed) => {
@@ -222,9 +225,51 @@ describe("AI loot reachability", () => {
     }
   }, 120_000);
 
+  it.each([1, 42, 99])("keeps mixed-region loot navigable and interactable with seed %i", (seed) => {
+    const random = seededRandom(seed);
+    const state = createBattleRoyaleState("player", TEST_CONFIG, random, { mapId: "mixed" });
+    const layout = createMapLayout("mixed", state.mapSeed);
+    const navigator = new GridNavigator(layout);
+    const inventory = new InventorySystem(layout);
+    const player = state.actors.player;
+    if (!player) throw new Error("Mixed map loot test player missing");
+    player.deployment = "grounded";
+
+    for (const [index, point] of layout.lootSpawnPoints.entries()) {
+      const building = layout.obstacles.find((candidate) =>
+        Math.abs(point.x - candidate.center.x) <= candidate.width / 2 &&
+        Math.abs(point.z - candidate.center.z) <= candidate.depth / 2
+      );
+      const start = building
+        ? outsideBuildingDoor(layout, building.id)
+        : nearestLandingZone(layout, point.x, point.z);
+      const target = {
+        x: point.x,
+        y: getTerrainHeight(point.x, point.z, layout) + 1.76,
+        z: point.z,
+      };
+      expect(navigator.findPath(start, target), `${seed}:${index}:path`).not.toHaveLength(0);
+
+      player.position = target;
+      player.inventory.backpack = [];
+      state.groundLoot = {
+        loot: {
+          id: "loot",
+          itemId: "ammo.rifle",
+          quantity: 1,
+          position: { ...point },
+          available: true,
+        },
+      };
+      inventory.processCommand(state, player.id, { ...createIdleCommand(), interact: true }, []);
+      expect(state.groundLoot.loot?.available, `${seed}:${index}:pickup`).toBe(false);
+    }
+  }, 120_000);
+
   it.each([
     ["island", "island"],
     ["Greyfurnace City", "town"],
+    ["mixed region map", "mixed"],
   ] as const)("lets 49 real bot controllers loot, fight, and produce one winner on %s", (_label, mapId: MapId) => {
     const config: BattleRoyaleConfig = {
       participantCount: 50,
@@ -303,14 +348,58 @@ describe("AI loot reachability", () => {
     expect(allEvents.some((event) => event.type === "actor-died" && event.sourceId?.startsWith("bot-"))).toBe(true);
     expect(controllerUpdates).toBeLessThanOrEqual(47_000);
     expect(actorCommands).toBeLessThanOrEqual(48_000);
-    expect(findPath.mock.calls.length).toBeLessThanOrEqual(mapId === "town" ? 22_000 : 17_500);
-    expect(hasLineOfSight.mock.calls.length).toBeLessThanOrEqual(mapId === "town" ? 26_000 : 20_000);
-    expect(traceShotDetailed.mock.calls.length).toBeLessThanOrEqual(mapId === "town" ? 30_000 : 23_500);
+    const operationBudget: Record<MapId, {
+      findPath: number;
+      lineOfSight: number;
+      shotTrace: number;
+    }> = {
+      island: { findPath: 17_500, lineOfSight: 20_000, shotTrace: 23_500 },
+      town: { findPath: 22_000, lineOfSight: 26_000, shotTrace: 30_000 },
+      mixed: { findPath: 22_000, lineOfSight: 26_000, shotTrace: 30_000 },
+    };
+    expect(findPath.mock.calls.length).toBeLessThanOrEqual(operationBudget[mapId].findPath);
+    expect(hasLineOfSight.mock.calls.length).toBeLessThanOrEqual(operationBudget[mapId].lineOfSight);
+    expect(traceShotDetailed.mock.calls.length).toBeLessThanOrEqual(operationBudget[mapId].shotTrace);
     expect(allEvents.length).toBeLessThanOrEqual(7_000);
     expect(peakGroundLoot).toBeLessThanOrEqual(300);
     expect(steps).toBeLessThanOrEqual(1_200);
-  }, 180_000);
+  }, 600_000);
 });
+
+function outsideBuildingDoor(
+  layout: ReturnType<typeof createMapLayout>,
+  buildingId: string,
+): { x: number; y: number; z: number } {
+  const door = layout.wallOpenings.find((opening) =>
+    opening.obstacleId === buildingId &&
+    opening.storyIndex === 0 &&
+    opening.kind === "door"
+  );
+  if (!door) throw new Error(`Ground door missing for ${buildingId}`);
+  const z = door.center.z - 1.1;
+  return {
+    x: door.center.x,
+    y: getTerrainHeight(door.center.x, z, layout) + 1.76,
+    z,
+  };
+}
+
+function nearestLandingZone(
+  layout: ReturnType<typeof createMapLayout>,
+  x: number,
+  z: number,
+): { x: number; y: number; z: number } {
+  const point = [...layout.landingZones].sort((left, right) =>
+    Math.hypot(left.position.x - x, left.position.z - z) -
+      Math.hypot(right.position.x - x, right.position.z - z)
+  )[0];
+  if (!point) throw new Error("Mixed map landing zone missing");
+  return {
+    x: point.position.x,
+    y: getTerrainHeight(point.position.x, point.position.z, layout) + 1.76,
+    z: point.position.z,
+  };
+}
 
 function seededRandom(seed: number): () => number {
   let value = seed >>> 0;

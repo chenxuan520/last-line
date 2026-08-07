@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
+import type { MapId } from "../../src/config/maps";
 import {
   MULTIPLAYER_PROTOCOL_VERSION,
   type RoomAdmission,
@@ -154,7 +155,7 @@ describe("standalone multiplayer server", () => {
     let server = await start(fixture.config);
     const firstGuest = await createGuest(server.origin, "Alpha");
     const secondGuest = await createGuest(server.origin, "Bravo");
-    const firstAdmission = await createPrivateRoom(server.origin, firstGuest, "town");
+    const firstAdmission = await createPrivateRoom(server.origin, firstGuest, "mixed");
     const secondAdmission = await joinPrivateRoom(server.origin, firstAdmission.code, secondGuest);
     const first = connect(server.origin, firstAdmission);
     const second = connect(server.origin, secondAdmission);
@@ -183,8 +184,8 @@ describe("standalone multiplayer server", () => {
     const firstFull = await first.waitFor("match.full", 6_000);
     const secondFull = await second.waitFor("match.full", 6_000);
     expect(firstFull.type === "match.full" && firstFull.state.phase).toBe("flight");
-    expect(firstFull.type === "match.full" && firstFull.state.mapId).toBe("town");
-    expect(secondFull.type === "match.full" && secondFull.state.mapId).toBe("town");
+    expect(firstFull.type === "match.full" && firstFull.state.mapId).toBe("mixed");
+    expect(secondFull.type === "match.full" && secondFull.state.mapId).toBe("mixed");
     await delay(150);
 
     const secondReconnectToken = secondWelcome.type === "welcome" ? secondWelcome.reconnectToken : "";
@@ -235,7 +236,7 @@ describe("standalone multiplayer server", () => {
     const restored = await reconnected.waitFor("match.full");
     expect(restoredWelcome.type === "welcome" && restoredWelcome.roomId).toBe(roomId);
     expect(restored.type === "match.full" && restored.tick).toBeGreaterThanOrEqual(previousTick);
-    expect(restored.type === "match.full" && restored.state.mapId).toBe("town");
+    expect(restored.type === "match.full" && restored.state.mapId).toBe("mixed");
     reconnected.socket.close(1000, "done");
     await reconnected.waitForClose();
     expect(secondWelcome.type).toBe("welcome");
@@ -384,7 +385,7 @@ async function createGuest(origin: string, displayName: string): Promise<GuestCr
 async function createPrivateRoom(
   origin: string,
   guest: GuestCredentials,
-  mapId: "island" | "town" = "island",
+  mapId: MapId = "island",
 ): Promise<RoomAdmission> {
   const result = await post(origin, "/v1/rooms", { ...guest, visibility: "private", mapId });
   expect(result.response.status).toBe(201);

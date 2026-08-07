@@ -1,0 +1,7 @@
+#!/bin/sh
+
+printf '%s\n' \
+  'Reminder: confirm this commit received an independent code-reviewer review.' \
+  'If review was missed, start the reviewer before push, deployment, or completion report.' >&2
+
+exit 0
