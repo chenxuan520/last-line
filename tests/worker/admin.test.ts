@@ -713,6 +713,50 @@ describe("admin control plane", () => {
     expect(remaining).toBeUndefined();
     expect(checkpoint).toBeUndefined();
   }, 60_000);
+
+  it.each([
+    ["missing", (room: Record<string, unknown>) => { delete room.members; }],
+    ["null", (room: Record<string, unknown>) => { room.members = null; }],
+    ["null entry", (room: Record<string, unknown>) => {
+      room.members = { ...(room.members as Record<string, unknown>), corrupt: null };
+    }],
+  ])("expires a running room restored from a %s members container", async (_label, corruptMembers) => {
+    const firstGuest = await publicPost("/v1/guests", { displayName: "Malformed One" });
+    const firstAdmission = await publicPost("/v1/matchmaking/quick", firstGuest);
+    const secondGuest = await publicPost("/v1/guests", { displayName: "Malformed Two" });
+    const secondAdmission = await publicPost("/v1/matchmaking/quick", secondGuest);
+    const roomId = String(firstAdmission.roomId);
+    expect(secondAdmission.roomId).toBe(roomId);
+    const stub = env.GAME_ROOMS.getByName(roomId);
+    await runInDurableObject(stub, async (_instance, state) => {
+      const room = await state.storage.get<Record<string, unknown>>("room-v1");
+      if (!room) throw new Error("malformed members room state missing");
+      const runtime = new MatchRuntime({
+        humanActorIds: ["human-1", "human-2"],
+        seed: 50,
+        mapId: "town",
+        startWithBandage: true,
+        disableAiSnipers: true,
+      });
+      const checkpoint = runtime.checkpoint();
+      room.status = "running";
+      room.checkpoint = checkpoint;
+      corruptMembers(room);
+      await state.storage.put("room-v1", room);
+      await state.storage.put("checkpoint-v1", checkpoint);
+    });
+
+    await evictDurableObject(stub);
+    const remaining = await runInDurableObject(stub, async (_instance, state) =>
+      state.storage.get("room-v1")
+    );
+    const checkpoint = await runInDurableObject(stub, async (_instance, state) =>
+      state.storage.get("checkpoint-v1")
+    );
+
+    expect(remaining).toBeUndefined();
+    expect(checkpoint).toBeUndefined();
+  }, 60_000);
 });
 
 async function bootstrapAdministrator(): Promise<string> {

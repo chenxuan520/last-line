@@ -758,3 +758,139 @@ Round 2 — 2026-08-07：
 - Plan consolidation 与文档：canonical plan 继续保留 Phase 2/3 关键 Build/Review 和 Phase 4 Round 1 finding/disposition；两个重复 plan 保持删除。`AGENTS.md` 与 `docs/architecture.md` 准确记录 50 actor、2–10 member、非空唯一 member actor ID 和完整 player-set 等价合同。
 - 审查结论：**通过。** 本次审查未发现明确问题。Findings：blocker 0、high 0、medium 0、low 0；没有阻止提交的 unresolved finding。
 - 残余风险：standalone 本轮新增的是 truncated 49-actor SQLite 删除回归，member→bot/duplicate/null 的平台持久化回归集中在共享 Worker `GameRoom` 测试；standalone 复用同一个 `GameRoom` 和 `memberActorIds()`，且完整 standalone suite 已通过，因此这是非阻塞的平台测试分布差异，不是实现分叉。
+
+### Phase 5：三地图品牌牌一致性
+
+#### Plan
+
+用户在 `d78c616` 推送后新增 presentation 修正：苍岬岛已有的五块品牌牌在灰炉城和烬岚郡只出现两块，要求所有地图都显示完整同一组牌子，并分别放在语义合适、几何安全的位置。本阶段是新的用户变更，继续使用本 canonical plan，不新建 plan；它不改变权威地图、碰撞、协议、checkpoint 或游戏数值。
+
+根因与最终合同：
+
+- 稳定牌子资产共五个：`decal.brand.drop-zone`、`decal.brand.island-operations`、`decal.brand.property-ll01`、`decal.brand.restricted-area`、`decal.brand.supply`。
+- 当前 `property / restricted / supply` 分别硬编码到苍岬岛 `北港 / 雷达哨 / 旧仓区`；另外两张地图没有这些名称，所以 `resolvePoint()` 返回 `undefined` 并静默跳过，只剩 drop-zone 和 hospital 两块。
+- 每个 `MapId`、每个合法 seed 都必须生成五个互不重复的稳定 asset ID；不能用数组索引偶然碰到某个点，也不能在找不到锚点或净空位置时静默少牌。
+- 语义锚点：
+  - 苍岬岛保持 `北港 / 雷达哨 / 旧仓区`，避免已有外观漂移。
+  - 灰炉城：地产牌靠 `工人住宅区`，禁区牌靠 `铸造工业园`，补给牌靠 `仓储港区`。
+  - 烬岚郡：地产牌靠固定城区 `赤钟城区`，禁区牌靠固定山林 `沉杉岭`，补给牌靠固定农村 `风穗乡`；不依赖三个随机区域的类型或名字。
+- drop-zone 继续锚定 landing zone，operations 继续锚定唯一医院；医院牌和全部品牌牌保持 presentation-only、non-pickable、non-colliding。
+- 放置继续使用统一地形/障碍/坡道/牌间净空检查，并面向锚点；若标准搜索半径不足，应扩展确定性候选而不是穿进建筑、树石、道路权威几何或静默丢失。
+- 不新增图片、manifest ID 或第三方依赖；复用现有五个稳定资产。
+
+文件与任务：
+
+1. `tests/unit/brandSigns.test.ts`：先把现有“岛屿五牌”升级为三地图、代表 seed、五 asset ID、确定性、净空和语义锚点合同；旧实现应因 town/mixed 只有两牌而失败。
+2. `src/client/brandSigns.ts`：把硬编码单名称 resolver 改为显式 per-map 语义锚点，不改变苍岬岛已有锚点；确保任一牌无法放置时显式失败。
+3. `tests/unit/islandScene.test.ts`：灰炉城和烬岚郡 NullEngine 场景必须各渲染五个 `brand-sign` mesh，名称集合与资产集合一致，且全部 non-pickable/non-colliding。
+4. `AGENTS.md`、`docs/architecture.md`：记录三地图共享五牌、per-map 语义锚点和禁止静默遗漏的长期 presentation 合同。
+5. 验证：受影响 unit/NullEngine、typecheck、完整必要回归、browser build 和 budgets；不运行用户已明确停止的 coverage。
+6. Chrome DevTools MCP：production build、音量 `0`，分别进入灰炉城和烬岚郡，确认五牌实际 mesh/纹理均出现且 console 无任务引入错误；每轮立即关闭页面/context、停止服务并确认只剩 `about:blank`。
+7. 启动独立 reviewer，解决全部 blocker/high/medium 并复审通过；Build/Review 在新实现 commit 前写入本文件。
+8. 创建包含非 plan presentation 实现的单一 commit，普通 push 到现有 `feat/hybrid-regions` / PR #2，重新 `@codex review` 并监控最新 SHA 的 CI、Pages 与 Codex 到明确通过。
+
+#### Build
+
+- 2026-08-07 12:36：盘点现有资产与运行结果。五个 asset ID 均已在 manifest 且图片存在；代表 seeds `0/42/2026` 中苍岬岛均生成五牌，灰炉城与烬岚郡均只生成 `drop-zone / island-operations` 两牌。确认根因是三个 `namedPoint()` 只认识岛屿名称，不是纹理解码、场景创建或资产缺失。
+- 2026-08-07 12:36：语义锚点定稿为 island `北港 / 雷达哨 / 旧仓区`，town `工人住宅区 / 铸造工业园 / 仓储港区`，mixed `赤钟城区 / 沉杉岭 / 风穗乡`；后两图均使用固定主 POI，不依赖随机候选区域。
+- 2026-08-07 12:36：测试先行红灯准确复现：扩展后的三地图 brand-sign contract 在 `town:0` 断言期望 5、实际 2；不是测试环境或纹理加载错误。
+- 2026-08-07 12:37：`src/client/brandSigns.ts` 已使用显式 `MapId -> semantic POI` resolver。岛屿锚点保持不变；town/mixed 使用上述专属锚点。确定性净空候选半径扩展到第四档；任何锚点或安全位置缺失现在显式抛错，不再静默 `continue` 少牌。
+- 2026-08-07 12:40：三地图 placement 定向测试通过，覆盖 maps `island/town/mixed` × seeds `0/1/11/16/38/42/2026`，断言五个 asset ID 顺序/唯一性、重复调用确定性、权威障碍/坡面/牌间净空，以及地产/禁区/补给牌距其语义锚点 `<55m`。NullEngine 在既有 town/mixed 场景用例中真实创建五个 `brand-sign` mesh，全部 non-pickable/non-colliding；brandSigns + IslandScene 2 files / 24 tests 通过。
+- 2026-08-07 13:01：完整 unit 7-worker 轮次中，既有 `mixedMapLayout` 用例在持续外部满核环境下约 31s 发生 wall-clock timeout；该文件不调用 brand-sign 代码。为避免继续等待已经确定失败的无关 401-seed 长尾，停止该轮后按 1 worker 串行复跑 `mixedMapLayout / brandSigns / IslandScene`，3 files / 33 tests 全通过；未修改测试、seed、断言或 timeout。三端 typecheck 通过。
+- 2026-08-07 12:43：browser production build 与预算通过，无需调整阈值：browser entry `1,097,274 / 1,100,000`、all JS `3,793,929 / 3,900,000`、252 / 260 chunks、CSS `44,643 / 45,000`、dist `4,315,868 / 4,450,000`；server/Worker 源码未变并继续使用已通过产物 `514,291 / 515,000` 与 `529,970 / 530,000`。`git diff --check` 通过，按用户要求未运行 coverage。
+- 2026-08-07 13:06：production Chrome DevTools MCP 验收通过，全程 `volume=0`、low quality。灰炉城进入航线后，Babylon 当前 scene 恰有 5 个 enabled `brand-sign` mesh，名称/实际 texture 分别为完整五 asset ID，全部 `isPickable=false`、`checkCollisions=false`；烬岚郡独立 reload/开局后同样 5/5 全齐。console 仅本机 SwiftShader software WebGL deprecation warning，无任务引入 error/warn。
+- 2026-08-07 13:06：浏览器验收后立即导航任务页面到 `about:blank`、关闭 `last-line-brand-signs` isolated context、停止 preview、确认 8798 关闭且无 Vitest/tsx/preview 残留；Chrome MCP 最终只剩不可避免的 page 1 `about:blank`，未占用其他 agent 的浏览器资源。
+- 2026-08-07 13:26：采纳独立 reviewer Phase 5 medium。生产 `brandSignPositionClear()` 新增完整 road shoulder 净空：island/town 使用 `TOWN_ROAD_SHOULDER_HALF_WIDTH=6m`，mixed 使用 `MIXED_ROAD_SHOULDER_HALF_WIDTH=8m`，阈值再加牌面 `width/2 + 1m` footprint 半径；点到线段距离处理零长度 segment。牌子候选仍按同一确定性搜索选取，不能落入道路 surface/shoulder。
+- 2026-08-07 13:26：测试不再仅调用生产 helper 自证净空；`brandSigns.test.ts` 使用独立点到线段距离实现，逐牌逐 road 断言距离严格大于 map-specific shoulder + footprint，覆盖 reviewer 反例 town seeds `0/38` 及三图代表 seeds。三图 placement 1/1 通过，brandSigns + NullEngine 最终 2 files / 24 tests 通过；五 asset、semantic anchors、确定性、non-pickable/non-colliding 保持。
+- 2026-08-07 13:26：道路修复后最终 browser entry 为 `1,097,524 / 1,200,000`，all JS `3,794,179 / 4,000,000`，252 / 270 chunks，CSS `44,643 / 50,000`，dist `4,316,118 / 4,550,000`；Worker `514,694 / 615,000`、server `530,342 / 630,000`，全部 PASS。三端 typecheck 与 `git diff --check` 通过。牌子数量/纹理未变，只修正位置且自动几何/NullEngine已覆盖，因此未重新打开已清理的 Chrome MCP。
+
+#### Review
+
+待实现、自动验证、Chrome MCP 和独立 reviewer 完成后追加。不得在 reviewer 通过前创建本阶段 implementation commit。
+
+Round 1 — 2026-08-07：
+
+- 审查范围：完整读取 reviewer 提示、根 `AGENTS.md`、`README.md` 和 canonical plan Phase 5 Plan/Build；以 `d78c6167146f2998c82bc22ec880a7f576dd757c` 为直接基线、`main@7a453f5` 为背景，静态审查 Phase 5 指定文件的当前 diff 与 brand-sign placement/render 调用链。审查期间共享工作区出现并行 Phase 6 变更，未撤销、覆盖或纳入本轮 finding。
+- 已参考外层证据：三端 typecheck；三图 placement 代表 seeds；brandSigns/IslandScene 2 files / 24、串行受影响 3 files / 33；browser build/budget；town/mixed production Chrome 五 mesh/实际纹理、volume 0、console 和 MCP/8798/process 清理。未重复完整 tests/build/browser，按用户要求未运行 coverage。
+- 额外最小只读验证：现有测试的净空断言复用生产 `brandSignPositionClear()`，无法独立覆盖该 helper 遗漏的道路合同，因此计算牌面线段到 `layout.roadSegments` 的二维最短距离。代表 seeds 中灰炉城多处牌面实际进入道路路幅：seed `0` 的 `property-ll01` 与 seed `38` 的同牌和道路中心线相交（距离 `0`）；seed `0` 的 drop-zone / supply 距道路中心线约 `0.054m / 0.573m`，均远小于 town road half-width `3.75m`。另对 town seeds `0–99` 做有限只读生成扫描，五牌均可生成，未发现当前第四候选半径造成合法 seed fail-closed；命令未修改文件。
+- 审查结论：**不通过，阻止提交。** Findings：blocker 0、high 0、medium 1、low 0。
+
+Medium：
+
+1. `src/client/brandSigns.ts:64`、`tests/unit/brandSigns.test.ts:40`：Phase 5 Plan 与根 `AGENTS.md` 明确要求品牌牌避开道路权威几何，但 `brandSignPositionClear()` 只检查地图边界、建筑/树石/cover、坡道、其他牌和地形高差，从未消费 `layout.roadSegments`；测试又调用同一个 helper 自证净空，所以会共同漏报。最小只读几何扫描确认灰炉城代表 seed 的牌面线段实际穿过 road surface，包含 seed `0` / `38` 的 `property-ll01` 直接与道路中心线相交。这会把两根立柱和整块牌面插在车道中，视觉上明显穿模，也违背本阶段“扩展候选而不是进入道路权威几何”的验收合同。Builder 应按 map family 的实际 road/shoulder width 对完整牌面 footprint 做 segment clearance，并添加独立于生产 helper 的道路距离断言及上述反例后请求复审。
+
+- 非阻塞确认：五个稳定 asset ID 的 per-map resolver、固定 town/mixed semantic anchors 和 island 原名称锚点正确；代表 seeds 的顺序/唯一性/确定性与 100 个连续 town seed fail-closed 扫描通过。NullEngine 与 production Chrome 均证明 town/mixed 五个 sign mesh 和实际 texture 全齐，牌面/立柱通过 `markDecoration` 保持 non-pickable/non-colliding。当前 production catalog 会在启动 preload 阶段验证五张图片且实际文件存在；Chrome 已确认纹理解析。文档、browser budget 与 MCP/preview 清理记录一致。
+
+Round 2（Phase 5 + Phase 6 合并终审）— 2026-08-07：
+
+- 审查范围：重新完整读取 reviewer 提示、根 `AGENTS.md`、`README.md` 和 canonical plan Phase 5/6 最新 Plan/Build；以 `d78c6167146f2998c82bc22ec880a7f576dd757c` 为直接基线、`main@7a453f5` 为背景，静态审查当前 10 个未提交文件的完整 diff。未修改业务代码、测试、文档或预算。
+- 已参考外层冻结证据：三端 typecheck；Phase 5 placement/NullEngine 2 files / 24 与串行受影响 3 / 33；Phase 6 Worker admin 19/19、standalone runtime 11/11、最终 Worker 4 / 41 与 standalone 3 / 25；全部 build/budget；town/mixed production Chrome 五 mesh/实际纹理、volume 0、console 与 MCP/8798 清理；`git diff --check`。按要求未重复完整 test/build/browser，未运行 coverage。只读复核时 Chrome MCP 仍只有 `about:blank`；发现的 Vitest 进程属于另一 checkout `last-line-throwables`，未干预。
+- Phase 5 复核：三地图五 asset、显式 per-map semantic anchor、island 原锚点、fail-closed、NullEngine/Chrome mesh/texture 以及 non-pickable/non-colliding 合同均保持成立；预算阈值与 Phase 6 Build 记录完全一致，且属于用户明确批准的资源审阅。
+- 审查结论：**不通过，阻止提交。** Findings：blocker 0、high 0、medium 1、low 0。Round 1 medium 尚未处理：`src/client/brandSigns.ts:64` 仍未检查 `layout.roadSegments`，`tests/unit/brandSigns.test.ts:40` 仍复用同一 production helper，灰炉城 seed `0/38` 的已确认道路穿模反例仍可发生。必须让完整牌面 footprint 避开实际 road/shoulder width，并用独立道路距离断言覆盖反例后复审。
+- 其余 Phase 5 残余风险：当前 fail-closed 连续扫描证据为 town seeds `0–99`，不是全部合法 seed 的数学证明；但显式失败、确定性有限候选、代表 seed/NullEngine/Chrome 证据足以使其保持非阻塞风险。唯一提交阻塞项仍是上述道路净空 medium。
+
+### Phase 6：Codex malformed members container P2
+
+#### Plan
+
+Codex 对已推送提交 `d78c6167146f2998c82bc22ec880a7f576dd757c` 指出：`memberActorIds()` 直接执行 `Object.values(data.members)` 和 `member.actorId`。若 running/finished 持久化 room 的 `members` 整体缺失、为 `null`/array，或某个 member 项本身为 `null`/非对象，constructor 恢复会在兼容判断前抛错，Worker/standalone 无法到达既有 `deleteAll()` 不兼容清理路径。
+
+最终合同：
+
+- `PersistedRoom.members` 在 runtime restore 边界按 `unknown` 防御性解析，不能信任 TypeScript interface 或存储泛型。
+- 仅接受非数组 record；每个 member value 必须是非数组 record，且 `actorId` 为非空字符串。
+- 继续要求 2–10 个成员、actor ID 唯一，并由共享 checkpoint guard 验证与完整 player actor 集合一一对应。
+- malformed container/value 统一返回 `null`，由 running/finished constructor 关闭并删除 room/checkpoint；`ensureRuntime()` 也必须安全返回 null，不能抛错或创建恢复循环。
+- Worker Durable Object 和 standalone SQLite 重启至少覆盖 missing members、`members: null` 和 null member entry；合法两成员 v5 town 恢复继续通过。
+- 不改变 checkpoint version、协议、房间规则、正常 waiting-room member 创建或 presentation。
+
+文件与任务：
+
+1. `tests/worker/admin.test.ts`：真实 DO 存储 missing/null/null-entry members，evict 后实例化必须删除 room/checkpoint而非抛错。
+2. `tests/standalone/localDurableObjectRuntime.test.ts`：SQLite 重启覆盖 malformed members 删除。
+3. `worker/GameRoom.ts`：`PersistedRoom.members` 恢复边界及 helper 接受 unknown，先 record/member shape guard 再提取 IDs。
+4. `AGENTS.md`、`docs/architecture.md`：记录持久化成员容器也属于 checkpoint/room 恢复 shape，平台必须删除而不是重试。
+5. 运行三端 typecheck、Worker/standalone 完整合同、受影响 unit、build/budget；按用户要求不运行 coverage。
+6. 本阶段无 presentation 变更，不重复 Chrome；Phase 5 已完成并清理 MCP。
+7. 与 Phase 5 一起完成独立 reviewer/re-review，随后创建包含非 plan 实现文件的单一 commit、push、回复 Codex discussion 并重新 `@codex review`。
+
+#### Build
+
+- 2026-08-07 13:09：`d78c616` 两条 CI build 和 Cloudflare Pages preview 均成功；Codex 对精确 SHA 新增 malformed `members` P2。已确认问题成立：当前 `Object.values(data.members)` 和 `member.actorId` 对 missing/null container 或 null entry 会抛错，绕过 constructor 的 incompatible checkpoint `deleteAll()`。
+- 2026-08-07 13:11：失败回归准确复现三类输入。Worker admin 参数化用例的 missing/null members 均以 `Cannot convert undefined or null to object` 失败，null member entry 以 `Cannot read properties of null (reading 'actorId')` 失败；standalone SQLite alarm restore 同样在 `memberActorIds()` 抛错，均未到达 room/checkpoint 删除断言。
+- 2026-08-07 13:13：`memberActorIds(members: unknown)` 现在先用清晰 `isRecord()` 验证容器和每个 member entry，再验证非空字符串 actorId、2–10 数量和唯一性。constructor 仅对 running/finished restore 调用该 helper；helper 返回 null 或 checkpoint 不兼容时先清空只供 finished summary 使用的 members，安全通知 Lobby 删除目录项，再 `deleteAll()`。`ensureRuntime()` 复用同一 helper并安全返回 null。
+- 2026-08-07 13:14：Worker missing/null/null-entry members 三个真实 DO 用例 19/19 通过；standalone SQLite 同一数据库内三种 malformed room 重启后 room/checkpoint 均删除，runtime file 11/11 通过。最终完整 Worker 4 files / 41 tests、standalone 3 / 25、三端 typecheck 全部通过；合法两成员 v5 town 恢复继续通过。
+- 2026-08-07 13:18：shape guard 初版使 standalone server raw 产物为 `530,410B`，超过旧 `530,000B` 410B；等价精简后仍为 `530,327B`，继续压缩会牺牲恢复边界可读性。用户明确要求“代码可读性重要”并批准各资源预算相应加大，允许最多增加 100KB；因此恢复清晰 `isRecord()` helper，并完成显式资源预算审阅。
+- 2026-08-07 13:20：预算按用户批准统一增加一档：browser entry `1,100,000→1,200,000`、largest non-entry `650,000→700,000`、all JS `3,900,000→4,000,000`、chunks `260→270`、CSS `45,000→50,000`、dist `4,450,000→4,550,000`、Worker `515,000→615,000`、server `530,000→630,000`。最终实际值 browser `1,097,255`、largest `613,551`、all JS `3,793,910`、252 chunks、CSS `44,643`、dist `4,315,849`、Worker `514,694`、server `530,342`，全部 PASS；没有以压缩代码换取字节。
+- 2026-08-07 13:20：Phase 6 不改变 presentation，未重新打开 Chrome；Phase 5 MCP 清理状态保持为仅 `about:blank`、8798 关闭、无 preview/Vitest/tsx 残留。按用户要求未运行 coverage。
+
+#### Review
+
+待失败回归、实现、自动验证和独立 reviewer 完成后追加。
+
+Round 1（Phase 5 + Phase 6 合并终审）— 2026-08-07：
+
+- 审查范围与外层证据同 Phase 5 Round 2；静态复核 `worker/GameRoom.ts`、Worker/standalone 真实持久化回归、AGENTS/architecture 合同及预算脚本，没有重复完整验证或运行 coverage。
+- Shape guard：`memberActorIds(members: unknown)` 在枚举前拒绝 missing、null、array 和其他非 record container；逐项拒绝 null、array、其他非 object entry，以及非字符串/空字符串 actorId。随后继续执行 2–10 数量和 actorId 唯一性合同，并把 IDs 交给共享 `isMatchCheckpointCompatible()` 验证完整 player actor set，未回归 Phase 4 roster 约束。
+- 恢复链路：constructor 只对 `running/finished` 执行该恢复 guard，合法 `waiting/countdown` 不会因 actorId 尚为空而被误删；损坏恢复先清空 members，使 `summary()` 可安全生成 finished directory update，再 `deleteAll()` 删除 room/checkpoint。Lobby 收到 finished summary 后删除目录项。`ensureRuntime()` 复用同一 helper，损坏输入安全返回 null，不会构造 runtime。
+- 持久化证据：Worker 真实 Durable Object 与 standalone SQLite 重启均覆盖 missing/null/null-entry 的 room/checkpoint 删除；代码 guard 同时直接覆盖 outer array 和 non-object/array entry。既有 member→bot、duplicate actor、null actorId、缺失 player/截断 roster 回归继续经过同一链路，合法两成员 v5 town SQLite fixture仍保留并恢复。
+- 文档与预算：`AGENTS.md`、`docs/architecture.md` 准确记录 malformed members 删除合同；实际阈值为 browser entry `1,200,000`、largest non-entry `700,000`、all JS `4,000,000`、chunks `270`、CSS `50,000`、dist `4,550,000`、Worker `615,000`、server `630,000`，与 Build 记录一致且属于用户明确批准的调整。
+- Phase 6 审查结论：**通过。** 本阶段未发现明确问题。Findings：blocker 0、high 0、medium 0、low 0。Phase 6 无独立提交阻塞项；但当前合并提交仍被 Phase 5 未解决的 1 个 medium 道路净空 finding 阻塞。
+
+Phase 5 Round 2 finding disposition：
+
+- **已解决。** `brandSignPositionClear()` 现在消费 `layout.roadSegments` 与实际 map-family shoulder 常量，对完整牌面 footprint 做 point-to-segment clearance；reviewer 的 town seed `0/38` 道路中心线穿模不再可选。
+- 测试使用独立几何公式逐条验证 road clearance，不复用 production helper；最终 placement、NullEngine、typecheck 和 build/budget 证据见 Phase 5 Build。Phase 6 代码/测试未因该修复改变。
+
+Phase 5 Round 3（最终 re-review）— 2026-08-07：
+
+- 审查范围：按要求只重新读取 Phase 5/6 最新 Build/Review disposition、`git diff d78c616` 中 `src/client/brandSigns.ts`、`tests/unit/brandSigns.test.ts`、`tests/unit/islandScene.test.ts` 的相关变化，以及当前预算阈值和 Phase 6 文件 diff；未重复 tests、build、browser 或 coverage。
+- Round 2 medium 已关闭：生产 helper 对每个 `layout.roadSegments` 使用 point-to-segment 距离，island/town 采用 `TOWN_ROAD_SHOULDER_HALF_WIDTH=6m`、mixed 采用 `MIXED_ROAD_SHOULDER_HALF_WIDTH=8m`，并额外加上 `width / 2 + 1m` 完整牌面 footprint；距离等于阈值也会拒绝。零长 segment 以 progress `0` 回退到端点距离，不会除零或错误放行。
+- 独立测试核对：测试自己的 `independentPointToSegmentDistance()` 不调用 production distance/helper，逐牌逐 road 要求严格 `> shoulder + footprint`；代表 seeds 同时包含 town `0/38` 反例以及 island/town/mixed 的 `0/1/11/16/38/42/2026`。同一用例继续锁定五个稳定 asset ID、确定性、semantic anchors 和 `getBrandSignPlacements()` 不抛错，外层 brandSigns 1/1、brandSigns + IslandScene 2/24 证据证明道路修复未回归五牌/fail-closed 与 scene mesh 合同。
+- 预算与清理：最终 browser entry `1,097,524 / 1,200,000`、Worker `514,694 / 615,000`、server `530,342 / 630,000`，阈值与用户批准及脚本一致；外层记录 typecheck、build/budget、`git diff --check` 均通过，MCP 仍仅 `about:blank`。
+- Phase 5 最终结论：**通过。** 本次 re-review 未发现明确问题。Findings：blocker 0、high 0、medium 0、low 0；此前道路净空 medium 已解决，没有阻止提交的 unresolved finding。
+
+Phase 6 Round 2（最终 re-review）— 2026-08-07：
+
+- 后续变化只涉及 brand-sign 道路净空、对应 unit 和 browser 产物；`worker/GameRoom.ts`、Worker/standalone persistence tests 仍保持 Phase 6 Round 1 已通过的 malformed members guard 与真实删除/合法 v5 恢复合同。外层最终 Worker 4 / 41、standalone 3 / 25 继续通过。
+- Phase 6 最终结论：**通过。** Findings：blocker 0、high 0、medium 0、low 0。Phase 5 + Phase 6 合并增量最终通过独立审查。

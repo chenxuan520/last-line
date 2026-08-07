@@ -133,14 +133,16 @@ export class GameRoom extends DurableService<WorkerEnv> {
         && (!this.data.checkpoint || checkpoint.tick > this.data.checkpoint.tick)
       ) this.data.checkpoint = checkpoint;
       if (this.data) {
-        const requiredActorIds = memberActorIds(this.data);
+        const restoringMatch = this.data.status === "running" || this.data.status === "finished";
+        const requiredActorIds = restoringMatch ? memberActorIds(this.data.members) : null;
         if (
-          (this.data.status === "running" || this.data.status === "finished") &&
+          restoringMatch &&
           (
             requiredActorIds === null ||
             !isMatchCheckpointCompatible(this.data.checkpoint, requiredActorIds)
           )
         ) {
+          this.data.members = {};
           this.data.status = "finished";
           for (const socket of this.ctx.getWebSockets()) {
             this.send(socket, { type: "error", code: "room-closed", message: "房间版本已过期，请创建新对局" });
@@ -692,7 +694,7 @@ export class GameRoom extends DurableService<WorkerEnv> {
   private ensureRuntime(): MatchRuntime | null {
     const data = this.data;
     if (this.runtime || !data?.checkpoint) return this.runtime;
-    const humanActorIds = memberActorIds(data);
+    const humanActorIds = memberActorIds(data.members);
     if (humanActorIds === null) return null;
     if (!isMatchCheckpointCompatible(data.checkpoint, humanActorIds)) return null;
     this.runtime = new MatchRuntime({
@@ -1027,15 +1029,23 @@ function createMember(guest: GuestRecord, host: boolean, ready: boolean): RoomMe
   };
 }
 
-function memberActorIds(data: Pick<PersistedRoom, "members">): EntityId[] | null {
-  const actorIds = Object.values(data.members).map((member) => member.actorId);
+function memberActorIds(members: unknown): EntityId[] | null {
+  if (!isRecord(members)) return null;
+  const actorIds: EntityId[] = [];
+  for (const member of Object.values(members)) {
+    if (!isRecord(member) || typeof member.actorId !== "string" || member.actorId.length === 0) return null;
+    actorIds.push(member.actorId);
+  }
   if (
     actorIds.length < MIN_HUMAN_PLAYERS ||
     actorIds.length > MAX_HUMAN_PLAYERS ||
-    actorIds.some((actorId) => !actorId) ||
     new Set(actorIds).size !== actorIds.length
   ) return null;
-  return actorIds as EntityId[];
+  return actorIds;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function randomUint32(): number {

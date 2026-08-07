@@ -371,6 +371,59 @@ describe("LocalDurableObjectRuntime", () => {
     }
   });
 
+  it("deletes running rooms restored from malformed members containers", async () => {
+    const directory = await mkdtemp(resolve(tmpdir(), "last-line-checkpoint-members-shape-"));
+    const databasePath = resolve(directory, "rooms.sqlite");
+    let environment = await createStandaloneEnvironment({ databasePath });
+    try {
+      const runtime = new MatchRuntime({
+        humanActorIds: ["human-1", "human-2"],
+        seed: 46,
+        mapId: "town",
+        startWithBandage: true,
+        disableAiSnipers: true,
+      });
+      const checkpoint = runtime.checkpoint();
+      const corruptMembers = [
+        undefined,
+        null,
+        { ...persistedMatchMembers(), corrupt: null },
+      ];
+      for (const [index, members] of corruptMembers.entries()) {
+        const roomId = `room-00000000-0000-4000-8000-00000000010${index}`;
+        const state = await environment.rooms.getState(roomId);
+        const room: Record<string, unknown> = {
+          roomId,
+          code: `BAD10${index}`,
+          visibility: "private",
+          status: "running",
+          revision: 1,
+          countdownEndsAt: null,
+          options: { mapId: "town", startWithBandage: true, disableAiSnipers: true },
+          seed: 46,
+          expiresAt: Date.now() + 60_000,
+          checkpoint,
+        };
+        if (members !== undefined) room.members = members;
+        await state.storage.put("room-v1", room);
+        await state.storage.put("checkpoint-v1", checkpoint);
+        await state.storage.setAlarm(Date.now() + 60_000);
+      }
+      await environment.close();
+
+      environment = await createStandaloneEnvironment({ databasePath });
+      for (let index = 0; index < corruptMembers.length; index += 1) {
+        const roomId = `room-00000000-0000-4000-8000-00000000010${index}`;
+        const restoredState = await environment.rooms.getState(roomId);
+        expect(await restoredState.storage.get("room-v1"), `${index}:room`).toBeUndefined();
+        expect(await restoredState.storage.get("checkpoint-v1"), `${index}:checkpoint`).toBeUndefined();
+      }
+    } finally {
+      await environment.close();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
   it("keeps a version 5 town checkpoint recoverable across a SQLite restart", async () => {
     const directory = await mkdtemp(resolve(tmpdir(), "last-line-checkpoint-town-v5-"));
     const databasePath = resolve(directory, "rooms.sqlite");

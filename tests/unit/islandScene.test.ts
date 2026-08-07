@@ -41,6 +41,14 @@ import { InventorySystem } from "../../src/game/systems/InventorySystem";
 import { getSupportHeight } from "../../src/game/systems/MovementSystem";
 import productionManifest from "../../public/assets/asset-manifest.json";
 
+const BRAND_SIGN_ASSET_IDS = new Set([
+  "decal.brand.drop-zone",
+  "decal.brand.island-operations",
+  "decal.brand.property-ll01",
+  "decal.brand.restricted-area",
+  "decal.brand.supply",
+]);
+
 describe("IslandScene lifecycle", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -1039,6 +1047,9 @@ describe("IslandScene lifecycle", () => {
     expect(bundle.scene.meshes.some((mesh) => mesh.name === "building-floor-slabs-batch")).toBe(true);
     expect(bundle.scene.meshes.some((mesh) => mesh.name.startsWith("town-building-silhouettes-"))).toBe(false);
     expect(bundle.scene.meshes.some((mesh) => mesh.metadata?.decoration === "town-visual-detail")).toBe(false);
+    const brandSigns = bundle.scene.meshes.filter((mesh) => mesh.metadata?.decoration === "brand-sign");
+    expect(new Set(brandSigns.map((mesh) => mesh.name))).toEqual(BRAND_SIGN_ASSET_IDS);
+    expect(brandSigns.every((mesh) => !mesh.isPickable && !mesh.checkCollisions)).toBe(true);
     expect(new Set(bundle.scene.meshes
       .filter((mesh) => mesh.metadata?.decoration === "poi")
       .map((mesh) => mesh.metadata?.poiName)
@@ -1128,6 +1139,9 @@ describe("IslandScene lifecycle", () => {
     expect(low.scene.meshes.some((mesh) => mesh.name === "island-beach")).toBe(false);
     expect(low.scene.meshes.some((mesh) => mesh.metadata?.decoration === "town-poi-paving")).toBe(false);
     expect(low.scene.meshes.some((mesh) => mesh.metadata?.decoration === "town-visual-detail")).toBe(false);
+    const brandSigns = low.scene.meshes.filter((mesh) => mesh.metadata?.decoration === "brand-sign");
+    expect(new Set(brandSigns.map((mesh) => mesh.name))).toEqual(BRAND_SIGN_ASSET_IDS);
+    expect(brandSigns.every((mesh) => !mesh.isPickable && !mesh.checkCollisions)).toBe(true);
     expect(new Set(low.scene.meshes
       .filter((mesh) => mesh.metadata?.decoration === "poi")
       .map((mesh) => mesh.metadata?.poiName)
