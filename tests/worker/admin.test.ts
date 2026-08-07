@@ -431,6 +431,38 @@ describe("admin control plane", () => {
 
     expect(remaining).toBeUndefined();
   }, 60_000);
+
+  it("expires a running room restored from a version 5 checkpoint without state", async () => {
+    const guest = await publicPost("/v1/guests", { displayName: "Corrupt Legacy" });
+    const admission = await publicPost("/v1/matchmaking/quick", guest);
+    const roomId = String(admission.roomId);
+    const stub = env.GAME_ROOMS.getByName(roomId);
+    await runInDurableObject(stub, async (_instance, state) => {
+      const room = await state.storage.get<Record<string, unknown>>("room-v1");
+      if (!room) throw new Error("corrupt room state missing");
+      const checkpoint = {
+        version: MATCH_CHECKPOINT_VERSION - 1,
+        tick: 0,
+        snapshotSequence: 0,
+        eventSequence: 0,
+      };
+      room.status = "running";
+      room.checkpoint = checkpoint;
+      await state.storage.put("room-v1", room);
+      await state.storage.put("checkpoint-v1", checkpoint);
+    });
+
+    await evictDurableObject(stub);
+    const remaining = await runInDurableObject(stub, async (_instance, state) =>
+      state.storage.get("room-v1")
+    );
+    const checkpoint = await runInDurableObject(stub, async (_instance, state) =>
+      state.storage.get("checkpoint-v1")
+    );
+
+    expect(remaining).toBeUndefined();
+    expect(checkpoint).toBeUndefined();
+  }, 60_000);
 });
 
 async function bootstrapAdministrator(): Promise<string> {

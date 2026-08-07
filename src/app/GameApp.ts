@@ -30,6 +30,11 @@ import {
 import type { LobbyView, RoomAdmission, ServerMessage } from "../network/protocol";
 import { BattleRoyaleSession } from "./BattleRoyaleSession";
 import type { GameSession } from "./GameSession";
+import {
+  admissionAttemptOwnsSideEffects,
+  MultiplayerAdmissionGate,
+  ownsMultiplayerConnection,
+} from "./MultiplayerAdmissionGate";
 import { MultiplayerSession } from "./MultiplayerSession";
 
 const SETTINGS_KEY = "last-line.settings.v1";
@@ -43,6 +48,7 @@ export class GameApp {
   private settings = loadSettings();
   private readonly menuAudio = new AudioFeedback(0);
   private readonly mobileFullscreen = new MobileFullscreenController();
+  private readonly multiplayerAdmissionGate = new MultiplayerAdmissionGate();
   private starting = false;
 
   public constructor(
@@ -134,6 +140,7 @@ export class GameApp {
   }
 
   private renderMenu(): void {
+    this.multiplayerAdmissionGate.reset();
     releasePointerLockSafely(document, this.canvas);
     if (!this.assets) return;
     this.mobileFullscreen.deactivate();
@@ -312,6 +319,7 @@ export class GameApp {
   }
 
   private renderMultiplayerMenu(): void {
+    this.multiplayerAdmissionGate.reset();
     releasePointerLockSafely(document, this.canvas);
     this.mobileFullscreen.deactivate();
     const apiUrl = getDefaultMultiplayerApiUrl();
@@ -361,7 +369,10 @@ export class GameApp {
     const setActionsEnabled = (enabled: boolean): void => {
       for (const action of ["quick", "create-public", "create-private", "join"]) {
         const button = this.uiRoot.querySelector<HTMLButtonElement>(`[data-action='${action}']`);
-        if (button) button.disabled = !enabled;
+        if (button) button.disabled = !enabled || this.multiplayerAdmissionGate.pending;
+      }
+      for (const button of this.uiRoot.querySelectorAll<HTMLButtonElement>(".room-list-entry")) {
+        button.disabled = !enabled || this.multiplayerAdmissionGate.pending;
       }
     };
     const createClient = (): MultiplayerClient => {
@@ -383,6 +394,9 @@ export class GameApp {
         if (status) status.textContent = "请先完成账号验证";
         return;
       }
+      const attempt = this.multiplayerAdmissionGate.beginAttempt();
+      if (attempt === null) return;
+      setActionsEnabled(false);
       const requestGameplayInput = multiplayerAdmissionRequestsPointerLock(admissionAction);
       if (requestGameplayInput) this.requestDesktopGameplayInputFromUserGesture();
       this.mobileFullscreen.activateFromUserGesture();
@@ -390,11 +404,27 @@ export class GameApp {
         if (status) status.textContent = "正在建立联机身份…";
         const client = createClient();
         const admission = await action(client);
+        if (!admissionAttemptOwnsSideEffects(
+          this.multiplayerAdmissionGate,
+          attempt,
+          panel?.isConnected === true,
+        )) return;
         await this.enterLobby(client, admission);
       } catch (error) {
-        if (requestGameplayInput) releasePointerLockSafely(document, this.canvas);
-        this.mobileFullscreen.deactivate();
-        if (status) status.textContent = error instanceof Error ? error.message : "联机请求失败";
+        if (admissionAttemptOwnsSideEffects(
+          this.multiplayerAdmissionGate,
+          attempt,
+          panel?.isConnected === true,
+        )) {
+          if (requestGameplayInput) releasePointerLockSafely(document, this.canvas);
+          this.mobileFullscreen.deactivate();
+          if (status) status.textContent = error instanceof Error ? error.message : "联机请求失败";
+        }
+      } finally {
+        if (this.multiplayerAdmissionGate.isActive(attempt)) {
+          this.multiplayerAdmissionGate.end(attempt);
+          if (panel?.isConnected) setActionsEnabled(true);
+        }
       }
     };
     this.uiRoot.querySelector<HTMLButtonElement>("[data-action='quick']")?.addEventListener("click", () => {
@@ -515,17 +545,37 @@ export class GameApp {
         const count = document.createElement("b");
         count.textContent = `${room.playerCount}/${room.capacity}`;
         button.append(label, count);
+        button.disabled = this.multiplayerAdmissionGate.pending;
         button.addEventListener("click", async () => {
+          const attempt = this.multiplayerAdmissionGate.beginAttempt();
+          if (attempt === null) return;
+          this.setMultiplayerAdmissionActionsEnabled(false);
           this.requestDesktopGameplayInputFromUserGesture();
           this.mobileFullscreen.activateFromUserGesture();
           try {
             if (status) status.textContent = "正在加入房间…";
             const admission = await client.joinRoom(room.code);
+            if (!admissionAttemptOwnsSideEffects(
+              this.multiplayerAdmissionGate,
+              attempt,
+              root.isConnected,
+            )) return;
             await this.enterLobby(client, admission);
           } catch (error) {
-            releasePointerLockSafely(document, this.canvas);
-            this.mobileFullscreen.deactivate();
-            if (status) status.textContent = error instanceof Error ? error.message : "加入失败";
+            if (admissionAttemptOwnsSideEffects(
+              this.multiplayerAdmissionGate,
+              attempt,
+              root.isConnected,
+            )) {
+              releasePointerLockSafely(document, this.canvas);
+              this.mobileFullscreen.deactivate();
+              if (status) status.textContent = error instanceof Error ? error.message : "加入失败";
+            }
+          } finally {
+            if (this.multiplayerAdmissionGate.isActive(attempt)) {
+              this.multiplayerAdmissionGate.end(attempt);
+              if (root.isConnected) this.setMultiplayerAdmissionActionsEnabled(true);
+            }
           }
         });
         root.append(button);
@@ -536,11 +586,13 @@ export class GameApp {
   }
 
   private async enterLobby(client: MultiplayerClient, admission: RoomAdmission): Promise<void> {
-    this.multiplayerConnection?.close();
+    const previousConnection = this.multiplayerConnection;
     const connection = client.connect(admission);
     this.multiplayerConnection = connection;
+    previousConnection?.close();
     this.renderLobbyShell(admission.code);
     connection.setStatusHandler((connectionStatus) => {
+      if (!ownsMultiplayerConnection(this.multiplayerConnection, connection)) return;
       if (connectionStatus === "closed") {
         releasePointerLockSafely(document, this.canvas);
         this.mobileFullscreen.deactivate();
@@ -555,6 +607,7 @@ export class GameApp {
             : "正在连接…";
     });
     connection.setMessageHandler((message) => {
+      if (!ownsMultiplayerConnection(this.multiplayerConnection, connection)) return;
       if (message.type === "lobby.state") this.renderLobby(client, connection, message.lobby);
       if (message.type === "match.full") void this.startMultiplayerSession(connection, message);
       if (message.type === "error") {
@@ -581,7 +634,32 @@ export class GameApp {
         }
       }
     });
-    await connection.open();
+    try {
+      await connection.open();
+    } catch (error) {
+      if (ownsMultiplayerConnection(this.multiplayerConnection, connection)) {
+        this.multiplayerConnection = null;
+        releasePointerLockSafely(document, this.canvas);
+        this.mobileFullscreen.deactivate();
+        this.renderMultiplayerMenu();
+        const status = this.uiRoot.querySelector<HTMLElement>("[data-multiplayer='status']");
+        if (status) {
+          status.textContent = error instanceof Error ? error.message : "房间连接失败";
+        }
+      }
+      connection.close();
+      throw error;
+    }
+  }
+
+  private setMultiplayerAdmissionActionsEnabled(enabled: boolean): void {
+    for (const action of ["quick", "create-public", "create-private", "join"]) {
+      const button = this.uiRoot.querySelector<HTMLButtonElement>(`[data-action='${action}']`);
+      if (button) button.disabled = !enabled || this.multiplayerAdmissionGate.pending;
+    }
+    for (const button of this.uiRoot.querySelectorAll<HTMLButtonElement>(".room-list-entry")) {
+      button.disabled = !enabled || this.multiplayerAdmissionGate.pending;
+    }
   }
 
   private renderLobbyShell(code: string): void {

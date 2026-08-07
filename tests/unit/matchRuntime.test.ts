@@ -112,6 +112,13 @@ describe("MatchRuntime", () => {
       ...checkpoint,
       version: MATCH_CHECKPOINT_VERSION - 1,
     })).toBe(true);
+    const missingMapIdState = structuredClone(checkpoint.state) as unknown as Record<string, unknown>;
+    delete missingMapIdState.mapId;
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      version: MATCH_CHECKPOINT_VERSION - 1,
+      state: missingMapIdState,
+    })).toBe(true);
     const islandCheckpoint = {
       ...checkpoint,
       version: MATCH_CHECKPOINT_VERSION - 1,
@@ -133,6 +140,68 @@ describe("MatchRuntime", () => {
       ...checkpoint,
       version: MATCH_CHECKPOINT_VERSION - 2,
     })).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      version: MATCH_CHECKPOINT_VERSION - 1,
+      state: undefined,
+    } as never)).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      version: MATCH_CHECKPOINT_VERSION - 1,
+      state: null,
+    } as never)).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      version: MATCH_CHECKPOINT_VERSION - 1,
+      state: { mapId: undefined },
+    } as never)).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: { ...checkpoint.state, actors: undefined },
+    } as never)).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: {
+        ...checkpoint.state,
+        actors: { "human-1": { id: "human-1", kind: "player" } },
+      },
+    } as never)).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: { ...checkpoint.state, safeZone: { radius: 100 } },
+    } as never)).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      tick: undefined,
+    } as never)).toBe(false);
+    const actorId = Object.keys(checkpoint.state.actors)[0];
+    if (!actorId) throw new Error("checkpoint actor fixture missing");
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: {
+        ...checkpoint.state,
+        actors: {
+          ...checkpoint.state.actors,
+          [actorId]: {
+            ...checkpoint.state.actors[actorId],
+            inventory: {
+              ...checkpoint.state.actors[actorId]?.inventory,
+              armorLevel: "1",
+            },
+          },
+        },
+      },
+    } as never)).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: {
+        ...checkpoint.state,
+        safeZone: {
+          ...checkpoint.state.safeZone,
+          stageIndex: 999,
+        },
+      },
+    } as never)).toBe(false);
   });
 
   it("redacts distant actors and expands only airborne loot replication", () => {
