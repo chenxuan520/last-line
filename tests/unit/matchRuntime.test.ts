@@ -202,6 +202,63 @@ describe("MatchRuntime", () => {
         },
       },
     } as never)).toBe(false);
+    const actorEntries = Object.entries(checkpoint.state.actors);
+    const oneActor = Object.fromEntries(actorEntries.slice(0, 1));
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: { ...checkpoint.state, actors: oneActor },
+    })).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: { ...checkpoint.state, actors: Object.fromEntries(actorEntries.slice(0, -1)) },
+    })).toBe(false);
+    const extraActorSource = actorEntries.find(([, actor]) => actor.kind === "bot")?.[1];
+    if (!extraActorSource) throw new Error("extra actor fixture missing");
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: {
+        ...checkpoint.state,
+        actors: {
+          ...checkpoint.state.actors,
+          "extra-bot": { ...extraActorSource, id: "extra-bot" },
+        },
+      },
+    })).toBe(false);
+    const [firstActorKey, firstActor] = actorEntries[0] ?? [];
+    if (!firstActorKey || !firstActor) throw new Error("checkpoint actor fixture missing");
+    const mismatchedActors = { ...checkpoint.state.actors };
+    delete mismatchedActors[firstActorKey];
+    mismatchedActors["mismatched-key"] = firstActor;
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: { ...checkpoint.state, actors: mismatchedActors },
+    })).toBe(false);
+    const replacementActors = structuredClone(checkpoint.state.actors);
+    delete replacementActors["human-1"];
+    const replacementSource = Object.values(replacementActors).find((actor) => actor.kind === "bot");
+    if (!replacementSource) throw new Error("replacement bot fixture missing");
+    replacementActors["replacement-bot"] = {
+      ...replacementSource,
+      id: "replacement-bot",
+    };
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: { ...checkpoint.state, actors: replacementActors },
+    }, ["human-1", "human-2"])).toBe(false);
+    expect(isMatchCheckpointCompatible(checkpoint, ["human-1", "human-2"])).toBe(true);
+    expect(isMatchCheckpointCompatible(checkpoint, ["human-1"])).toBe(false);
+    const botMemberActors = structuredClone(checkpoint.state.actors);
+    const humanActor = botMemberActors["human-1"];
+    if (!humanActor) throw new Error("human actor fixture missing");
+    botMemberActors["human-1"] = { ...humanActor, kind: "bot" };
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: { ...checkpoint.state, actors: botMemberActors },
+    }, ["human-1", "human-2"])).toBe(false);
+    expect(isMatchCheckpointCompatible(
+      checkpoint,
+      ["human-1", "human-1"],
+    )).toBe(false);
   });
 
   it("redacts distant actors and expands only airborne loot replication", () => {

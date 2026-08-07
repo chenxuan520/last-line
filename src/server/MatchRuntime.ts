@@ -347,8 +347,11 @@ export class MatchRuntime {
   }
 }
 
-export function isMatchCheckpointCompatible(checkpoint: unknown): checkpoint is MatchCheckpoint {
-  if (!isRecord(checkpoint) || !isRecoverableMatchState(checkpoint.state)) return false;
+export function isMatchCheckpointCompatible(
+  checkpoint: unknown,
+  requiredActorIds?: readonly EntityId[],
+): checkpoint is MatchCheckpoint {
+  if (!isRecord(checkpoint) || !isRecoverableMatchState(checkpoint.state, requiredActorIds)) return false;
   if (
     !isNonNegativeInteger(checkpoint.tick) ||
     !isNonNegativeInteger(checkpoint.snapshotSequence) ||
@@ -362,12 +365,30 @@ export function isMatchCheckpointCompatible(checkpoint: unknown): checkpoint is 
   return mapId === undefined || mapId === "island" || mapId === "town";
 }
 
-function isRecoverableMatchState(value: unknown): value is MatchState {
+function isRecoverableMatchState(
+  value: unknown,
+  requiredActorIds?: readonly EntityId[],
+): value is MatchState {
   if (!isRecord(value)) return false;
   if (!["ready", "flight", "combat", "finished"].includes(String(value.phase))) return false;
   if (!isFiniteNumber(value.elapsedSeconds) || !isUint32(value.mapSeed)) return false;
-  if (!isRecord(value.actors) || Object.keys(value.actors).length === 0) return false;
-  if (!Object.values(value.actors).every(isRecoverableActor)) return false;
+  const actors = value.actors;
+  if (!isRecord(actors)) return false;
+  const actorEntries = Object.entries(actors);
+  if (actorEntries.length !== BATTLE_ROYALE_CONFIG.participantCount) return false;
+  if (!actorEntries.every(([actorId, actor]) =>
+    isRecoverableActor(actor) && actorId === actor.id
+  )) return false;
+  if (requiredActorIds !== undefined) {
+    const requiredActors = new Set(requiredActorIds);
+    if (
+      requiredActors.size !== requiredActorIds.length ||
+      requiredActorIds.some((actorId) => (actors[actorId] as ActorState | undefined)?.kind !== "player") ||
+      actorEntries.some(([actorId, actor]) =>
+        requiredActors.has(actorId) !== ((actor as ActorState).kind === "player")
+      )
+    ) return false;
+  }
   if (!isRecord(value.groundLoot) || !Object.values(value.groundLoot).every(isRecoverableLoot)) return false;
   if (!isRecoverableSafeZone(value.safeZone) || !isRecoverableFlight(value.flight)) return false;
   return value.result === null || (
@@ -377,7 +398,7 @@ function isRecoverableMatchState(value: unknown): value is MatchState {
   );
 }
 
-function isRecoverableActor(value: unknown): boolean {
+function isRecoverableActor(value: unknown): value is ActorState {
   if (!isRecord(value) || typeof value.id !== "string") return false;
   if (value.kind !== "player" && value.kind !== "bot") return false;
   if (!isVector(value.position) || !isVector(value.velocity)) return false;

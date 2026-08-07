@@ -259,7 +259,7 @@ describe("LocalDurableObjectRuntime", () => {
         options: { mapId: "mixed", startWithBandage: true, disableAiSnipers: true },
         seed: 42,
         expiresAt: Date.now() + 60_000,
-        members: {},
+        members: persistedMatchMembers(),
         checkpoint: legacyCheckpoint,
       });
       await state.storage.put("checkpoint-v1", legacyCheckpoint);
@@ -305,7 +305,56 @@ describe("LocalDurableObjectRuntime", () => {
         options: { mapId: "town", startWithBandage: true, disableAiSnipers: true },
         seed: 44,
         expiresAt: Date.now() + 60_000,
-        members: {},
+        members: persistedMatchMembers(),
+        checkpoint: corruptedCheckpoint,
+      });
+      await state.storage.put("checkpoint-v1", corruptedCheckpoint);
+      await state.storage.setAlarm(Date.now() + 60_000);
+      await environment.close();
+
+      environment = await createStandaloneEnvironment({ databasePath });
+      const restoredState = await environment.rooms.getState(roomId);
+      expect(await restoredState.storage.get("room-v1")).toBeUndefined();
+      expect(await restoredState.storage.get("checkpoint-v1")).toBeUndefined();
+    } finally {
+      await environment.close();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("deletes a running room restored from a truncated actor roster", async () => {
+    const directory = await mkdtemp(resolve(tmpdir(), "last-line-checkpoint-truncated-roster-"));
+    const databasePath = resolve(directory, "rooms.sqlite");
+    const roomId = "room-00000000-0000-4000-8000-000000000005";
+    let environment = await createStandaloneEnvironment({ databasePath });
+    try {
+      const state = await environment.rooms.getState(roomId);
+      const runtime = new MatchRuntime({
+        humanActorIds: ["human-1", "human-2"],
+        seed: 45,
+        mapId: "town",
+        startWithBandage: true,
+        disableAiSnipers: true,
+      });
+      const checkpoint = runtime.checkpoint();
+      const corruptedCheckpoint = {
+        ...checkpoint,
+        state: {
+          ...checkpoint.state,
+          actors: Object.fromEntries(Object.entries(checkpoint.state.actors).slice(0, -1)),
+        },
+      };
+      await state.storage.put("room-v1", {
+        roomId,
+        code: "OLD237",
+        visibility: "private",
+        status: "running",
+        revision: 1,
+        countdownEndsAt: null,
+        options: { mapId: "town", startWithBandage: true, disableAiSnipers: true },
+        seed: 45,
+        expiresAt: Date.now() + 60_000,
+        members: persistedMatchMembers(),
         checkpoint: corruptedCheckpoint,
       });
       await state.storage.put("checkpoint-v1", corruptedCheckpoint);
@@ -350,7 +399,7 @@ describe("LocalDurableObjectRuntime", () => {
         options: { mapId: "town", startWithBandage: true, disableAiSnipers: true },
         seed: 43,
         expiresAt: Date.now() + 60_000,
-        members: {},
+        members: persistedMatchMembers(),
         checkpoint: legacyCheckpoint,
       });
       await state.storage.put("checkpoint-v1", legacyCheckpoint);
@@ -409,6 +458,29 @@ function deferred<Value>(): Deferred<Value> {
 }
 
 type TestEnvironment = Awaited<ReturnType<typeof createStandaloneEnvironment>>;
+
+function persistedMatchMembers(): Record<string, Record<string, unknown>> {
+  return Object.fromEntries(["human-1", "human-2"].map((actorId, index) => {
+    const playerId = `player-${index + 1}`;
+    return [playerId, {
+      playerId,
+      displayName: `Player ${index + 1}`,
+      accountId: null,
+      accountSessionRevision: null,
+      admissionToken: `admission-${index + 1}`,
+      admissionExpiresAt: Date.now() + 60_000,
+      admissionConsumed: true,
+      reconnectToken: `reconnect-${index + 1}`,
+      pendingReconnectToken: null,
+      ready: true,
+      connected: false,
+      host: index === 0,
+      joinedAt: Date.now() + index,
+      connectionEpoch: 1,
+      actorId,
+    }];
+  }));
+}
 
 async function createGuest(
   environment: TestEnvironment,

@@ -537,3 +537,224 @@ export interface MixedMapBlueprint {
 - 完整 diff 终审：MapId/display/normalize、`mapId + seed` cache、六区域/固定三类/随机三类、唯一“医院”、城区/农村/山林权威几何、250 loot/16 landing zones、Movement/Combat/LOS/GridNavigator/AI 同源、scene capability、协议 7、checkpoint 6 与 Worker/standalone 删除/恢复路径、旧 island golden、文档、无拼音标识、`src/game/` 导入边界和 unrelated-change 范围均未发现新的 blocker/high/medium。
 - 已参考验证：信任 Build 22:37 记录的完整 typecheck、unit `44/428`、Worker `4/32`、standalone `3/22`、coverage、browser/Worker/standalone builds、budgets、100-seed footprint 压力和既有 Chrome 验收/清理；本轮未重复完整命令，只只读核验当前产物与常数。产物与 Build 一致：browser `1,088,052 / 1,090,000`、Worker `489,705 / 490,000`、server `507,137 / 510,000`。
 - 残余风险：Worker 原始字节预算仅余 `295B`，implementation commit 前不要再引入无关代码；若 staged implementation 与本次审查 diff 不同，必须重新验证受影响门禁。协议 7 合并后的生产 Worker/Pages 维护 rollout 与 production smoke 仍是合并后独立交付门禁，不属于本次 PR 前静态审查。未解决计数：`blocker=0`、`high=0`、`medium=0`。
+
+## 后续阶段统一记录
+
+本节合并原 `.agents/plans/2026-08-07-compact-mixed-regions.md`、`.agents/plans/2026-08-07-codex-p2-followup.md` 和 `.agents/plans/2026-08-07-checkpoint-roster-followup.md`。从 2026-08-07 起，本文件是烬岚郡地图、联机自动进入和关联 Codex 修复的唯一 plan；后续 Build/Review 只追加到本文件，不再新建同任务 plan。
+
+后续阶段中的最终 contract 覆盖前文已经被用户修正的早期假设，尤其包括：
+
+- 六个区域不再使用固定 `3 × 2` 槽位，而是 seed 确定性的紧凑随机散点。
+- 每个区域改为更大的 `780 × 780` 近方形 footprint，六中心单轴跨度不超过 `1,400m`、包围盒面积不超过 `1,450,000m²`。
+- 宏观道路是消费真实随机中心的 5 条短、连通、无非端点交叉 connector；`urbanRoadSegments` 只含城区局部道路。
+- mixed 实体通过显式 `regionId` 维护稳定归属；城区按 nearest-owned 多边形计算的建筑覆盖率生产强制不低于 `38%`。
+- mixed 室外物资围绕所属 landing-zone anchor 采样，并要求权威无障碍走廊。
+- 森林每区最终使用 180 棵权威树，继续保持山坡、岩石和比苍岬岛显著更高的树密度。
+- 联机桌面从 quick/public/join、私人 ready/start 的真实用户手势预锁鼠标；私人未准备阶段释放，session 复用安全 helper，拒绝时保留“继续游戏”兜底。
+- 联机 admission 使用 single-flight generation gate 和 active connection identity guard；旧异步和旧连接无权影响替换连接。
+- checkpoint 兼容判断先验证完整可恢复 shape，再应用 v5/v6 map 兼容策略；本轮继续补齐完整 50 人 roster、record key/id 和 room member actor 完整性。
+
+### Phase 2：紧凑随机区域与联机桌面自动进入
+
+#### Plan
+
+目标是修正用户指出的固定六宫格、区域间大片空白和长直道路，同时修复联机桌面加载完成后仍显示“继续游戏”的输入激活回归。
+
+验收合同：
+
+1. 六个区域中心由 `mapSeed` 确定性生成，同 seed 一致、不同 seed 变化，不能退化为固定行列模板。
+2. 区域更大、更接近且整体战场更紧凑；代表 seed 和多 seed 压力均满足 span/area、地图边界和最小可玩间距。
+3. 5 条 connector 构成短、连通、非交叉骨架，不穿第三模块开发核心；局部城区/农村道路继续按实际类型生成。
+4. 每个 mixed 建筑、树、岩石和 cover 使用显式 `regionId`；生成计数和物资归属不再靠可能重叠的矩形反推。
+5. 城区 36 栋且 nearest-owned 建筑覆盖率不低于 `38%`；农村 9 栋并保留草垛、树和岩石；森林 2 栋、3 个山丘、180 树和岩石。
+6. 唯一“医院”、16 个 landing zones、250 个物资、三固定三随机区域、协议 7 和 checkpoint 6 保持不变。
+7. 联机桌面 quick/public/join 在真实点击内预锁；私人访客未准备时释放、ready 时重锁，房主 start 时锁定；touch 不锁。
+8. pointer lock API 缺失、同步异常、legacy void 或 Promise reject 不能阻止比赛加载，现有暂停卡继续作为兜底。
+9. 完成 typecheck、完整 Vitest、三套 coverage、全部 build/budget、Chrome desktop/mobile/双客户端联机验收和独立 reviewer。
+
+实现任务：
+
+- 在 `src/config/mixedMap.ts` 替换固定槽位，生成紧凑随机中心、近方形区域、平面短 connector 和尺度化局部内容。
+- 在 `src/config/map.ts` 写入并消费显式 `regionId`，按归属生成 mixed 物资与自然障碍。
+- 在 `tests/unit/mixedMapLayout.test.ts` 覆盖 seed 变化、非网格、span/area、非交叉、hill 边界、真实城区密度和归属。
+- 在 `src/controllers/pointerLock.ts` 提供单机/联机共用安全 helper；在 `GameApp` 的真实手势入口预锁，在 `MultiplayerSession` 安全恢复。
+- 同步 `AGENTS.md`、`README.md`、`docs/architecture.md` 和预算；不改变旧地图生成、联机规则、协议或 checkpoint 版本。
+
+#### Build
+
+- 2026-08-07 02:30：新增宏观失败回归；旧实现准确因跨 seed 中心不变、固定六宫格和 7 条网格 connector 失败。
+- 2026-08-07 02:40：区域替换为 seed 确定性的紧凑随机中心和 `780 × 780` footprint；代表 seed 均至少有 5 个唯一 X/Z，旧 all-rural `11`、all-town `16`、all-forest `38` 类型组合保持。
+- 2026-08-07 02:40：宏观道路改为 5 条基于真实中心的确定性最小连接骨架；城区/农村局部道路继续生成，森林树数从 150 提升为每区 180，保持面积扩大后的密度。
+- 2026-08-07 02:40：建筑、树、岩石、cover 和 mixed 物资使用显式 `regionId`；区域内容计数与物资建筑选择不再依赖重叠矩形。
+- 2026-08-07 03:27：unit 44 files / 430 tests、Worker 4 / 32、standalone 3 / 22 全通过；Worker 使用任务前已有的用户态 workerd wrapper。
+- 2026-08-07 03:56：三套 coverage 通过；application `77.78 / 71.76 / 80.60 / 79.82`，Worker `77.69 / 70.16 / 92.73 / 83.42`，standalone `77.13 / 62.25 / 86.30 / 80.43`，加权 `77.74 / 71.18 / 82.64 / 80.33`。
+- 2026-08-07 03:58：顺序构建消除并行写 `dist/` 的产物竞态；经资源审阅仅调整 browser/Worker/server raw 上限至 `1,095,000 / 500,000 / 520,000`，最终 `1,091,098 / 499,002 / 515,883`，其他预算不变。
+- 2026-08-07 04:04：Chrome desktop/mobile 验收通过，音量 `0`。六 POI 为随机不同坐标且形成连续战场，`844×390` 小地图与触控控件均在视口；两轮仅 SwiftShader warning，页面和 8798 均即时清理。
+- 2026-08-07 04:48：采纳 reviewer Round 1：中心新增 `1,400m` 单轴和 `1,450,000m²` 包围盒硬上限；connector 生成拒绝非端点交叉和穿越第三模块核心；seed `4820/12894` 反例关闭。
+- 2026-08-07 04:48：城区密度改为 deterministic Voronoi nearest-owned 多边形和建筑交集计算，生产强制覆盖率至少 `38%`；500 blueprint seeds 最低 `39.11%`，seed `256` 为 `40.95%–46.55%`。
+- 2026-08-07 04:48：hill 先生成半径再夹紧中心，完整 footprint 保持地图内；seed `423` 反例关闭。10,000 position seeds、500 blueprint seeds、100 完整 layout seeds 均通过。
+- 2026-08-07 05:00：mixed 室外物资改为围绕所属 landing-zone anchor 在 `30–175m` 内采样，并要求 anchor 到物资的 `1.5m` 权威走廊不穿建筑、树、石、草垛或坡道；三个 mixed seed 的 750 个物资可达可拾取。
+- 2026-08-07 05:00：reviewer 修复后完整测试通过：unit 44 / 431、Worker 4 / 32、standalone 3 / 22。
+- 2026-08-07 05:56：最终 coverage 通过；application `77.94 / 71.82 / 80.83 / 80.00`，Worker `77.56 / 70.08 / 92.73 / 83.28`，standalone `77.13 / 62.25 / 86.30 / 80.43`，加权 `77.86 / 71.23 / 82.79 / 80.46`。10,000 seed 压力保持全部样本和几何阈值，仅将高负载有限 timeout 调为 900s。
+- 2026-08-07 05:58：最终 shared authority 增量经资源审阅后 Worker/server raw 上限调整为 `510,000 / 530,000`；最终 browser `1,093,837 / 1,095,000`、Worker `507,944 / 510,000`、server `524,275 / 530,000`，全部预算及 `git diff --check` 通过。
+- 2026-08-07 06:05：最终 Chrome map 复验通过；desktop 六 POI 跨度约 `96×99` 小地图像素，唯一医院可见；mobile `844×390×DPR2` 小地图和 11 个可见按钮均在视口。两轮音量 `0`、仅 SwiftShader warning，并即时清理页面、preview 和 8798。
+- 2026-08-07 06:13：联机 pointer-lock 失败测试确认根因：单机在真实开始手势同步请求，旧 `MultiplayerSession.resumeInput()` 首次执行在异步加载后已失去用户激活。
+- 2026-08-07 06:39：新增 `requestDesktopPointerLockSafely` / `releasePointerLockSafely`，覆盖已锁定去重、touch 隔离、API 缺失、同步异常、legacy void 和 Promise rejection；quick/public/join 预锁，私人未准备释放、ready 重锁、host start 锁。
+- 2026-08-07 06:39：same-origin standalone 双客户端 Chrome 验收通过。Guest ready 和 Host start 后均锁定；倒计时和异步场景加载后两端 `pointerLockElement===canvas`，pause card 隐藏；音量 `0`，仅 SwiftShader warning。两个 context、standalone、8799 均即时清理，只剩 `about:blank`。
+- 2026-08-07 07:26：最终 typecheck、unit 44 / 436、Worker 4 / 32、standalone 3 / 22 通过；application coverage `77.81 / 71.80 / 80.82 / 79.84`，加权 `77.75 / 71.21 / 82.79 / 80.32`。
+- 2026-08-07 07:26：联机 UX 使 browser entry 增约 926B，经审阅仅将 browser raw 上限调至 `1,100,000`；最终 browser `1,094,763 / 1,100,000`、Worker `507,944 / 510,000`、server `524,275 / 530,000`，全部预算通过。
+
+#### Review
+
+Round 1：
+
+- 结论不通过：blocker 0、high 0、medium 3、low 1。
+- Medium 1：生成仅限制单轴 `1,440m`，大量 seed 的中心包围盒不比旧阵列紧凑；seed `4820` 面积约旧阵列 121.3%。
+- Medium 2：Kruskal 未拒绝 connector 非端点交叉；100,000 seed 扫描发现 seed `12894` 等 5 个交叉布局。
+- Medium 3：城区覆盖率断言从 `38%` 降至 `28%`，且 seed `256` 实际约 `24.11%`，违反高密城区合同。
+- Low 1：hill 边界测试只看中心/region rectangle；seed `423` 的完整 hill radius 越界约 `11.251m`。
+- disposition：全部采纳；分别通过 span/area 硬合同、平面 connector、nearest-owned `38%` 生产 gate 和 hill radius 边界生成修复。
+
+Round 2：
+
+- 重新读取统一合同并静态复审完整增量；参考外层 typecheck、完整 tests/coverage/build/budget、地图 desktop/mobile 和双客户端 pointer-lock E2E，未重复完整门禁。
+- 额外以独立 `500×500` midpoint grid 验证 seeds `0/16/42/256/498/4820/12894` 的城区 owned area/coverage，与生产精确半平面裁剪在 0.5% 容差内一致。
+- pointer-lock helper、真实手势预锁、private release/relock、所有失败/terminal/menu 释放路径和暂停兜底均未发现明确问题。
+- 结论通过：blocker 0、high 0、medium 0、low 0。
+
+### Phase 3：Codex admission 与 checkpoint shape P2
+
+#### Plan
+
+Codex 对 `ee1aca8` 指出：
+
+1. admission 可重复触发，替换连接时旧 `closed` handler 可能释放新连接需要的 pointer lock。
+2. v5 checkpoint 的 optional-chain mapId 判断把完整 legacy missing-mapId 与缺失/truncated state 混为同一 `undefined`。
+
+修复合同：
+
+- 顶部 quick/public/private/join 和公开房列表共用 single-flight generation gate。
+- pending 时同步禁用/忽略重复入口；成功、失败和 finally 都必须按 active token 与 DOM/connection owner 执行。
+- 旧 connection 的 status/message/closed handler 无权影响替换 connection。
+- active WebSocket open failure 必须由 connection owner 恢复可操作联机大厅、释放输入锁并显示具体错误。
+- checkpoint 参数按 `unknown` 验证完整 outer counters 和可恢复 state shape，再应用 v6/v5 map 策略。
+- equipment level 使用严格数字枚举；safe-zone stage 在配置范围内，closed 仅允许最后阶段。
+- Worker/standalone 继续共享同一 guard 和损坏持久化删除路径。
+
+#### Build
+
+- 2026-08-07 08:58：基线 `ee1aca8`，先添加 admission/checkpoint 失败回归。
+- 2026-08-07 09:05：实现 `MultiplayerAdmissionGate`、所有入口共享 gate、active connection identity guard 和完整 checkpoint shape validator；合法 v5 missing-mapId/island/town 保留，missing/null/array/truncated state 及损坏 actor/inventory/safe-zone/flight/loot/result 拒绝。
+- 2026-08-07 09:05：定向合同、Worker/standalone 损坏 v5 删除和 typecheck 通过；完整 unit 45 / 440、Worker 4 / 33、standalone 3 / 23 通过。
+- 2026-08-07 09:51：coverage 通过；application `77.52 / 71.63 / 80.97 / 79.64`，Worker `77.32 / 69.76 / 92.73 / 83.14`，standalone `77.13 / 62.25 / 86.30 / 80.43`，加权 `77.48 / 71.03 / 82.88 / 80.14`。
+- 2026-08-07 09:52：构建与预算通过；checkpoint validator 增量经审阅只将 Worker raw 上限从 `510,000` 调至 `515,000`。browser `1,096,496 / 1,100,000`、Worker `512,960 / 515,000`、server `528,727 / 530,000`。
+- 2026-08-07 09:55：Slow 3G Chrome double-click quick match 仅产生一次 `/v1/guests` 和一次 `/v1/matchmaking/quick`；进入公开房后 pointer lock 保持。验证后 isolated context、standalone、8800 即时清理，只剩 `about:blank`。
+- 2026-08-07 10:17：采纳 reviewer Round 1：所有 admission success/catch/finally 副作用同时要求 active generation token 与原 owner 仍 connected；补 reset→new attempt→old reject 回归。
+- 2026-08-07 10:17：equipment level 改为严格 `0|1|2`，safe-zone stage 必须小于配置长度，closed 仅允许最后阶段；补字符串 equipment 与 stage 999 拒绝回归。
+- 2026-08-07 10:17：受影响 unit 3 files / 21、Worker admin 11、standalone runtime 9 和 typecheck 通过；build/budget 通过，browser `1,096,754`、Worker `513,266`、server `528,987`。
+- 2026-08-07 10:24：采纳 reviewer Round 2：active WebSocket open failure 由 connection owner 清空 active connection、释放 pointer lock、停用 fullscreen、重渲染联机大厅并显示错误；stale connection 无权操作 UI。
+- 2026-08-07 11:02：Chrome 通过强制 WebSocket constructor 抛出验证 open-failure 恢复；页面回到可操作联机大厅，四入口恢复，pointer lock 释放。context、8801 均即时清理，只剩 `about:blank`。
+- 2026-08-07 11:02：最终 typecheck、unit 45 / 441、Worker 4 / 33、standalone 3 / 23 通过；application coverage `77.46 / 71.54 / 81.00 / 79.55`，加权 `77.43 / 70.96 / 82.90 / 80.07`。
+- 2026-08-07 11:02：最终 build/budget 通过：browser `1,096,976 / 1,100,000`、Worker `513,266 / 515,000`、server `528,987 / 530,000`；`git diff --check`、端口和 Chrome 清理通过。
+
+#### Review
+
+Round 1：
+
+- 结论不通过：blocker 0、high 0、medium 2、low 0。
+- Medium 1：旧 admission reject 在 gate reset/new attempt 后仍可无条件释放当前 pointer lock、停用 fullscreen 或写入新页面。
+- Medium 2：checkpoint guard 通过 `Number()` 接受字符串 equipment level，并接受 `stageIndex=999`，恢复首 tick 可抛错。
+- disposition：增加 token + DOM owner 副作用所有权；equipment/stage 改为严格可恢复合同并补反例。
+
+Round 2：
+
+- 结论不通过：blocker 0、high 0、medium 1、low 0。
+- Medium：HTTP admission 成功、DOM 替换后 WebSocket open reject 时，原 owner 已断开且 active connection 已清空，没有 owner 恢复 UI，页面停在“正在连接”死页。
+- disposition：把 open-failure 清理责任转移给仍拥有 lobby shell/connection 的 active connection owner。
+
+Round 3：
+
+- 复核 single-flight、stale owner、finally、WebSocket open failure、完整 v5 legacy 和合法 finished/closed；额外最小验证确认字符串 equipment 与 stage 999 拒绝。
+- 结论通过：blocker 0、high 0、medium 0、low 0。
+
+### Phase 4：Codex checkpoint actor roster P2
+
+#### Plan
+
+Codex 对 `09c7e8284b2cf841d53934405898fb163bec6a99` 指出：checkpoint `actors` 只要非空且单项 shape 合法就会通过；1 人或 49 人截断 roster 可恢复运行，悄悄改变 50 人 Battle Royale 胜负逻辑。
+
+最终合同：
+
+- `actors` 必须恰好包含 `BATTLE_ROYALE_CONFIG.participantCount`（50）项。
+- 每个 `[recordKey, actor]` 必须满足 `recordKey === actor.id`。
+- `isMatchCheckpointCompatible(checkpoint, requiredActorIds)` 的 required actor IDs 必须唯一、全部对应 `player`，并与 checkpoint 的完整 player actor 集合一致。
+- running/finished room 必须有 2–10 个成员，且每个持久化成员 actor ID 非空、唯一；成员不能指向 bot、共享 actor 或留下未绑定 player actor。
+- `worker/GameRoom.ts` 构造期和 `ensureRuntime()` 恢复均传入当前持久化 room member actor IDs。
+- 合法完整 v5 missing-mapId/island/town、v6 和 finished/closed checkpoint 继续兼容。
+- 1/49 actor、key/id mismatch、50 actor 但缺失真人 member 的 checkpoint 必须拒绝。
+- Worker Durable Object 和 standalone SQLite 重启都必须删除 truncated roster，不能进入 runtime 恢复循环。
+- 不提高 checkpoint 版本，不改变协议、房间规则或 participant count。
+
+文件与任务：
+
+1. `tests/unit/matchRuntime.test.ts`：先锁定 1 actor、49 actors、key/id mismatch、required human actor missing 的失败回归。
+2. `src/server/MatchRuntime.ts`：实现精确 50 人、key/id 和可选 required actor IDs guard。
+3. `worker/GameRoom.ts`：constructor 与 `ensureRuntime()` 一致传 room member actor IDs。
+4. `tests/worker/admin.test.ts`：增加 truncated roster 的 Worker 删除回归。
+5. `tests/standalone/localDurableObjectRuntime.test.ts`：增加 truncated roster 的 SQLite 重启删除回归。
+6. `AGENTS.md`、`docs/architecture.md`：记录 checkpoint roster 长期合同。
+7. 运行 typecheck、完整 unit/Worker/standalone、三套 coverage、browser/Worker/server/standalone build 和 budgets。
+8. presentation 未改变；仍检查本轮不需要重复实图操作。若为交付门禁执行 Chrome，则音量 `0` 并立即清理页面、context、服务和端口。
+9. 启动独立 reviewer，解决全部 blocker/high/medium 并复审通过后，把最终 Build/Review 记录写入本文件。
+10. staged set 必须包含非 plan 实现文件；一个实现 commit 包含代码、测试、文档和本 plan，随后 push、等待 CI/Pages、再次 `@codex` 并跟进到无问题。
+
+#### Build
+
+- 2026-08-07 11:16：基线 `09c7e82`，Codex actor roster P2 确认成立；本地/远端一致且开始时工作区干净。
+- 2026-08-07 11:16：已在 `tests/unit/matchRuntime.test.ts` 添加 1 actor、49 actors、key/id mismatch 和 50 actor 但缺失 required human actor 的失败回归；旧实现按预期在 one-actor 断言返回 `true`，证明测试命中问题。
+- 2026-08-07 11:31：按用户要求把三个后续 plan 的 Plan/Build/Review 合并进本 canonical plan，并删除重复文件；后续只维护本文件。
+- 2026-08-07 11:28：共享 checkpoint guard 已实现精确 `BATTLE_ROYALE_CONFIG.participantCount`（50）actor、record key 与 `actor.id` 一致、可选 required room-member actor IDs 全部存在。`GameRoom` constructor 和 `ensureRuntime()` 通过同一 `memberActorIds()` helper 传入持久化成员身份，避免只修一条恢复路径。
+- 2026-08-07 11:28：回归覆盖 1/49/51 actor、key/id mismatch、50 actor 但删除真人并补 replacement bot；Worker Durable Object 覆盖 49 actor 删除和完整数量但缺 room member 删除，standalone SQLite 重启覆盖 49 actor 删除。定向 unit 10/10、Worker admin 13/13、standalone runtime 10/10 与三端 typecheck 全部通过。
+- 2026-08-07 11:45：完整回归在保留 1 个核心给 SSH 的前提下执行。unit 使用最多 7 workers 与 120s 通用有限 timeout，45 files / 441 tests 全通过；Worker 4 files / 35 tests、standalone 3 files / 24 tests 全通过。未减少 seed、未修改业务断言或仓库 timeout。
+- 2026-08-07 12:06：coverage 首轮在宿主仍有 56 个外部 self-play 满核进程时出现多个旧地图/导航用例的 wall-clock hook timeout；用户明确要求停止 coverage，因此已终止并清空所有 coverage/Vitest worker，不再重试、不修改 coverage 阈值，也不把本轮记为 coverage 通过。上一提交 `09c7e82` 已有完整 coverage 证据；本轮新增 roster 分支由 unit/Worker/standalone 定向与完整回归覆盖。
+- 2026-08-07 12:08：顺序完成 same-origin standalone/browser、Worker dry-run 和 server build；预算全部通过且无需调整：browser `1,096,976 / 1,100,000`、all JS `3,793,631 / 3,900,000`、252 / 260 chunks、CSS `44,643 / 45,000`、dist `4,315,570 / 4,450,000`、Worker `513,774 / 515,000`、server `529,453 / 530,000`。`git diff --check` 通过，coverage 残留进程为零。
+- 2026-08-07 12:08：本轮不改变 presentation、地图布局或输入行为，沿用已记录的地图 desktop/mobile、双客户端 pointer-lock、single-flight 和 WebSocket failure Chrome 验收；未重复打开 Chrome，因而没有新增 MCP 页面、context、服务或端口需要清理。
+- 2026-08-07 12:24：采纳独立 reviewer Round 1 的 medium。shared guard 现在要求 required actor IDs 唯一、全部实际存在且对应 `player`，并与 checkpoint 的完整 player actor 集合相等；`GameRoom` 对 running/finished persistence 要求 2–10 个成员 actor ID 全部非空且唯一。由此同时拒绝 member→bot、两个 members→同一 actor、null actorId、缺 member actor 和未绑定 player actor。
+- 2026-08-07 12:24：为避免“空 members 先触发删除”造成假覆盖，既有 Worker/standalone checkpoint fixture 已改成真实两成员 `human-1/2` 映射；合法 v5 town SQLite 重启仍保留。新增 unit 覆盖 required actor 为 bot、重复 required IDs、required player 集合过短；Worker 真实持久化新增 member→bot、重复 actor、null actorId 删除路径。
+- 2026-08-07 12:24：Round 1 修复后的最终受影响门禁通过：三端 typecheck；checkpoint unit 10/10；Worker 4 files / 38 tests；standalone 3 files / 24 tests。第一次 Worker 与 standalone/build 并行时，已有 `stops and deletes a running room` 用例因 DO active references 在 30s 内未释放而失败；无断言/业务错误，串行原命令复跑 Worker 4/38 全通过，未修改 timeout 或测试合同。
+- 2026-08-07 12:24：最终 Worker/server bundle 经过等价逻辑精简后在原预算内通过，无需调整阈值：browser `1,096,976 / 1,100,000`、Worker `514,291 / 515,000`、server `529,970 / 530,000`，其余预算保持上一条记录并 PASS；`git diff --check` 通过。按用户明确要求未运行 coverage。
+
+#### Review
+
+待 roster 实现、完整验证和独立 reviewer 完成后追加。不得在 reviewer 通过前 commit/push。
+
+Round 1 — 2026-08-07：
+
+- 审查范围：完整读取 `/home/lingchen.judy/ai-workspace/subagents/code-reviewer.md`、根 `AGENTS.md`、`README.md` 和本 canonical plan，重点对照 Phase 4 Plan/Build 与 Phase 3 review；以 `09c7e8284b2cf841d53934405898fb163bec6a99` 为直接基线、`main@7a453f5` 为背景，静态审查 `git diff 09c7e82`。未恢复或新建已删除的两个重复 plan。
+- 已参考外层证据：typecheck；unit 45 files / 441 tests、Worker 4 / 35、standalone 3 / 24；定向 unit 10、Worker admin 13、standalone runtime 10；standalone/browser、Worker dry-run、server builds；最终 budgets 和 `git diff --check`。按用户要求未运行 coverage，也未重复完整 test/typecheck/build/budget/browser。
+- 额外最小只读验证：现有测试覆盖 actor 数量、key/id 和 required ID 缺失，但未覆盖 required ID 的 actor kind 与 member 映射唯一性；因此仅构造当前合法 checkpoint 调用 guard。将 required `human-1.kind` 改为 `"bot"` 后仍返回 compatible；传入重复 required IDs `["human-1", "human-1"]` 也返回 compatible，未修改文件。
+- 审查结论：**不通过，阻止提交。** Findings：blocker 0、high 0、medium 1、low 0。
+
+Medium：
+
+1. `src/server/MatchRuntime.ts:382`、`worker/GameRoom.ts:1026`：required room-member roster 只检查 ID 在 `actors` record 中存在；`memberActorIds()` 又会保留重复 ID并静默丢弃 `actorId: null`。它没有验证每个持久化 running/finished member 都具有非空、互不重复的 actor ID，也没有验证 required actor 的 `kind === "player"`。最小只读复现确认 required `human-1` 改成 bot 仍兼容，两个成员重复映射到 `human-1` 也会兼容。前者恢复后 `MatchRuntime` 同时把同一 actor 放入 `humanActorIds` 和 `bots`，bot command 会覆盖真人 command；后者会让两个 socket/成员共享同一权威 actor。两种情况都违背 2–10 个稳定真人身份与 authoritative roster 合同，且不会进入 Worker/standalone 的损坏记录删除路径。Builder 应在 `GameRoom`/共享 guard 边界验证 running/finished member actorId 全部非空且唯一，并要求每个 required actor 为 `player`；补 unit 以及至少一个真实持久化删除回归后请求复审。
+
+- 非阻塞确认：checkpoint actor 总数严格为 50，record key 与 `actor.id` 一致，缺失 required ID 会拒绝；constructor 与 `ensureRuntime()` 使用同一 `memberActorIds()` 输入。Worker 49 actor 与 missing-member、standalone SQLite 49 actor 测试都经过真实持久化恢复和 `deleteAll()` 路径。AGENTS/architecture 已同步当前 roster 合同。
+- Plan consolidation：canonical plan 已保留 Phase 2 的最终随机紧凑地图/pointer-lock Build、两轮 review findings/disposition，以及 Phase 3 admission/checkpoint 的三轮 review 和最终门禁/浏览器事实；早期固定槽位假设也被显式标记为后续合同覆盖。删除两个重复 plan 未发现丢失会影响后续实现、审查或交付判断的关键 Build/Review 事实。
+
+Round 1 disposition：
+
+- **已解决。** `isMatchCheckpointCompatible()` 通过 required actor set 与全部 player actor 的逐项等价比较，保证 required IDs 唯一、存在、为 `player` 且没有未绑定 player；`memberActorIds()` 要求 running/finished room 恰有 2–10 个非空唯一 actor IDs。constructor 与 `ensureRuntime()` 继续消费同一 helper。
+- 新增 unit 的 bot/duplicate/short-player-set 反例，以及 Worker 的 member→bot、duplicate member actor、null actorId 真实持久化删除回归；所有旧 checkpoint persistence fixtures 使用真实两成员，避免由空成员提前拒绝掩盖目标条件。
+- 修复后受影响 typecheck、unit、Worker、standalone、build/budget 和 diff check 证据见 Phase 4 Build；未降低断言、未扩大预算、未运行用户要求停止的 coverage。
+
+Round 2 — 2026-08-07：
+
+- 审查范围：重新完整读取 canonical plan Phase 4 最新 Plan/Build/Review、根 `AGENTS.md`、`README.md` 和 reviewer 提示；继续以 `09c7e8284b2cf841d53934405898fb163bec6a99` 为直接基线、`main@7a453f5` 为背景，静态审查当前完整 diff。未恢复或新建已删除的重复 plan。
+- 已参考外层最终证据：三端 typecheck；checkpoint unit 10/10；Worker 串行 4 files / 38 tests；standalone 3 / 24；Worker/server build；browser `1,096,976`、Worker `514,291 / 515,000`、server `529,970 / 530,000` budgets；`git diff --check`。未重复完整 unit/build/browser，按用户要求未运行 coverage。
+- Round 1 disposition 核对：`isMatchCheckpointCompatible()` 在提供 required IDs 时先拒绝重复 required ID，要求每个 required ID 实际存在且为 `player`，并逐项验证 required set 与 checkpoint 全部 `kind: "player"` actor 集合完全一致；因此 member→bot、缺 member、未绑定 player 和 duplicate required 均拒绝。actor 总数 50、record key/id 一致合同继续保留。
+- `GameRoom` 核对：constructor 与 `ensureRuntime()` 均使用同一个 `memberActorIds()`；running/finished persistence 的成员数量必须为 2–10，每个 actorId 非空且互不重复。constructor 对 helper 返回 null 或 shared guard 不兼容统一关闭并 `deleteAll()`；`ensureRuntime()` 同样不会绕过该合同。
+- 持久化 fixture 核对：既有 Worker/standalone checkpoint fixtures 均改成真实 `human-1/2` 两成员映射，目标 checkpoint 损坏不再被空 members 提前拒绝掩盖。Worker 的 49 actor、完整 50 但缺 player、member→bot、duplicate actor 和 null actorId 分别到达对应 roster 条件后验证 room/checkpoint 删除；standalone SQLite 真实重启验证 49 actor 删除。合法 v5 town fixture 使用相同真实两成员并确认 room/checkpoint 保留。
+- Plan consolidation 与文档：canonical plan 继续保留 Phase 2/3 关键 Build/Review 和 Phase 4 Round 1 finding/disposition；两个重复 plan 保持删除。`AGENTS.md` 与 `docs/architecture.md` 准确记录 50 actor、2–10 member、非空唯一 member actor ID 和完整 player-set 等价合同。
+- 审查结论：**通过。** 本次审查未发现明确问题。Findings：blocker 0、high 0、medium 0、low 0；没有阻止提交的 unresolved finding。
+- 残余风险：standalone 本轮新增的是 truncated 49-actor SQLite 删除回归，member→bot/duplicate/null 的平台持久化回归集中在共享 Worker `GameRoom` 测试；standalone 复用同一个 `GameRoom` 和 `memberActorIds()`，且完整 standalone suite 已通过，因此这是非阻塞的平台测试分布差异，不是实现分叉。

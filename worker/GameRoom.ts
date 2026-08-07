@@ -133,9 +133,13 @@ export class GameRoom extends DurableService<WorkerEnv> {
         && (!this.data.checkpoint || checkpoint.tick > this.data.checkpoint.tick)
       ) this.data.checkpoint = checkpoint;
       if (this.data) {
+        const requiredActorIds = memberActorIds(this.data);
         if (
           (this.data.status === "running" || this.data.status === "finished") &&
-          !isMatchCheckpointCompatible(this.data.checkpoint)
+          (
+            requiredActorIds === null ||
+            !isMatchCheckpointCompatible(this.data.checkpoint, requiredActorIds)
+          )
         ) {
           this.data.status = "finished";
           for (const socket of this.ctx.getWebSockets()) {
@@ -688,8 +692,9 @@ export class GameRoom extends DurableService<WorkerEnv> {
   private ensureRuntime(): MatchRuntime | null {
     const data = this.data;
     if (this.runtime || !data?.checkpoint) return this.runtime;
-    if (!isMatchCheckpointCompatible(data.checkpoint)) return null;
-    const humanActorIds = Object.values(data.members).flatMap((member) => member.actorId ? [member.actorId] : []);
+    const humanActorIds = memberActorIds(data);
+    if (humanActorIds === null) return null;
+    if (!isMatchCheckpointCompatible(data.checkpoint, humanActorIds)) return null;
     this.runtime = new MatchRuntime({
       humanActorIds,
       seed: data.seed,
@@ -1020,6 +1025,17 @@ function createMember(guest: GuestRecord, host: boolean, ready: boolean): RoomMe
     connectionEpoch: 0,
     actorId: null,
   };
+}
+
+function memberActorIds(data: Pick<PersistedRoom, "members">): EntityId[] | null {
+  const actorIds = Object.values(data.members).map((member) => member.actorId);
+  if (
+    actorIds.length < MIN_HUMAN_PLAYERS ||
+    actorIds.length > MAX_HUMAN_PLAYERS ||
+    actorIds.some((actorId) => !actorId) ||
+    new Set(actorIds).size !== actorIds.length
+  ) return null;
+  return actorIds as EntityId[];
 }
 
 function randomUint32(): number {
