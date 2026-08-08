@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { createMinimapView, projectToMinimap } from "../../src/client/ui/minimap";
+import {
+  createMinimapView,
+  layoutMinimapLabels,
+  minimapLabelBounds,
+  minimapMarkerBounds,
+  projectToMinimap,
+  rectanglesOverlap,
+} from "../../src/client/ui/minimap";
 import {
   combatCounterLabel,
   createLeaderboardSignature,
@@ -9,6 +16,7 @@ import {
   sortLeaderboardActors,
 } from "../../src/client/ui/GameHud";
 import { MAP_HALF_SIZE } from "../../src/config/map";
+import { createMapLayout } from "../../src/config/map";
 import { createBattleRoyaleState } from "../../src/game/modes/BattleRoyaleMode";
 import { getPoiDecalAssetId, getPoiVisualType } from "../../src/client/poiVisuals";
 
@@ -30,6 +38,7 @@ describe("minimap projection", () => {
       "西风农场",
       "东岭营地",
       "医院",
+      "弹药库",
     ].map((name) => getPoiDecalAssetId(name))).toEqual([
       "decal.poi.harbor",
       "decal.poi.town",
@@ -40,6 +49,7 @@ describe("minimap projection", () => {
       "decal.poi.warehouse",
       "decal.poi.town",
       "decal.poi.hospital",
+      "decal.poi.ammo-depot",
     ]);
     expect(getPoiVisualType("未知区域")).toBeNull();
     expect(getPoiDecalAssetId("未知区域")).toBeNull();
@@ -95,6 +105,38 @@ describe("minimap projection", () => {
       "decal.poi.station",
       "decal.poi.station",
     ]);
+  });
+
+  it.each([
+    ["island", 0],
+    ["island", 42],
+    ["town", 0],
+    ["town", 42],
+    ["mixed", 0],
+    ["mixed", 42],
+  ] as const)("keeps every named marker clear on %s seed %i", (mapId, seed) => {
+    const layout = createMapLayout(mapId, seed);
+    const markers = [...layout.mapPoints, layout.hospital, layout.ammunitionDepot].map((point) => ({
+      name: point.name,
+      point: projectToMinimap(point.position),
+    }));
+    const placements = layoutMinimapLabels(markers);
+
+    for (const [index, placement] of placements.entries()) {
+      const label = minimapLabelBounds(placement.name, placement.point, placement.offset);
+      for (const [otherIndex, other] of placements.entries()) {
+        if (otherIndex > index) {
+          expect(rectanglesOverlap(
+            label,
+            minimapLabelBounds(other.name, other.point, other.offset),
+          ), `${mapId}:${seed}:${placement.name}:${other.name}:label`).toBe(false);
+        }
+        expect(rectanglesOverlap(
+          label,
+          minimapMarkerBounds(other.point),
+        ), `${mapId}:${seed}:${placement.name}:${other.name}:icon`).toBe(false);
+      }
+    }
   });
 
   it("builds player, route, and safe-zone markers without exposing enemies", () => {

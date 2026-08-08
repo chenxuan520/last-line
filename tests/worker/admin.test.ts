@@ -1,6 +1,7 @@
 import { env, evictDurableObject, reset, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
 import { BATTLE_ROYALE_CONFIG } from "../../src/config/battleRoyale";
+import { createMapLayout } from "../../src/config/map";
 import { MATCH_CHECKPOINT_VERSION, MatchRuntime } from "../../src/server/MatchRuntime";
 import worker from "../../worker/index";
 
@@ -419,13 +420,14 @@ describe("admin control plane", () => {
       }>("room-v1");
       if (!room) throw new Error("legacy room state missing");
       assignMemberActorIds(room.members);
-      const legacy = {
-        version: MATCH_CHECKPOINT_VERSION - 2,
-        state: {},
-        tick: 0,
-        snapshotSequence: 0,
-        eventSequence: 0,
-      };
+      const runtime = new MatchRuntime({
+        humanActorIds: ["human-1", "human-2"],
+        seed: 42,
+        mapId: "mixed",
+        startWithBandage: true,
+        disableAiSnipers: true,
+      });
+      const legacy = { ...runtime.checkpoint(), version: MATCH_CHECKPOINT_VERSION - 1 };
       room.status = "running";
       room.checkpoint = legacy;
       await state.storage.put("room-v1", room);
@@ -440,7 +442,7 @@ describe("admin control plane", () => {
     expect(remaining).toBeUndefined();
   }, 60_000);
 
-  it("expires a running room restored from a version 6 checkpoint without state", async () => {
+  it("expires a running room restored from a previous-version checkpoint without state", async () => {
     const guest = await publicPost("/v1/guests", { displayName: "Corrupt Legacy" });
     const admission = await publicPost("/v1/matchmaking/quick", guest);
     const secondGuest = await publicPost("/v1/guests", { displayName: "Corrupt Legacy Two" });
@@ -509,6 +511,57 @@ describe("admin control plane", () => {
         ...checkpoint,
         state: { ...checkpoint.state, actors },
       };
+      room.status = "running";
+      room.checkpoint = corruptedCheckpoint;
+      await state.storage.put("room-v1", room);
+      await state.storage.put("checkpoint-v1", corruptedCheckpoint);
+    });
+
+    await evictDurableObject(stub);
+    const remaining = await runInDurableObject(stub, async (_instance, state) =>
+      state.storage.get("room-v1")
+    );
+    const checkpoint = await runInDurableObject(stub, async (_instance, state) =>
+      state.storage.get("checkpoint-v1")
+    );
+
+    expect(remaining).toBeUndefined();
+    expect(checkpoint).toBeUndefined();
+  }, 60_000);
+
+  it("expires a running room restored without the complete canonical loot roster", async () => {
+    const guest = await publicPost("/v1/guests", { displayName: "Corrupt Loot" });
+    const admission = await publicPost("/v1/matchmaking/quick", guest);
+    const secondGuest = await publicPost("/v1/guests", { displayName: "Corrupt Loot Two" });
+    const secondAdmission = await publicPost("/v1/matchmaking/quick", secondGuest);
+    const roomId = String(admission.roomId);
+    expect(secondAdmission.roomId).toBe(roomId);
+    const stub = env.GAME_ROOMS.getByName(roomId);
+    await runInDurableObject(stub, async (_instance, state) => {
+      const room = await state.storage.get<{
+        status: string;
+        members: Record<string, { actorId: string | null }>;
+        checkpoint?: unknown;
+      }>("room-v1");
+      if (!room) throw new Error("corrupt loot room state missing");
+      const runtime = new MatchRuntime({
+        humanActorIds: ["human-1", "human-2"],
+        seed: 0,
+        mapId: "mixed",
+        startWithBandage: true,
+        disableAiSnipers: true,
+      });
+      const checkpoint = runtime.checkpoint();
+      const layout = createMapLayout(checkpoint.state.mapId, checkpoint.state.mapSeed);
+      expect(layout.ammunitionDepot.levels).toHaveLength(3);
+      const canonicalLootCount = layout.lootSpawnPoints.length;
+      const groundLoot = structuredClone(checkpoint.state.groundLoot);
+      delete groundLoot[`loot-${canonicalLootCount - 1}`];
+      const corruptedCheckpoint = {
+        ...checkpoint,
+        state: { ...checkpoint.state, groundLoot },
+      };
+      assignMemberActorIds(room.members);
       room.status = "running";
       room.checkpoint = corruptedCheckpoint;
       await state.storage.put("room-v1", room);

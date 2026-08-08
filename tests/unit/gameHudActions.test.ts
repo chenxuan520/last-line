@@ -79,4 +79,15 @@ describe("GameHud actions", () => {
     expect(optionRule).toMatch(/color:\s*var\(--ink\);/);
     expect(optionRule).toMatch(/background:\s*#111714;/);
   });
+
+  it("styles the ammunition-depot minimap marker like every other POI", async () => {
+    const stylesheet = await readFile(resolve(process.cwd(), "src/styles/main.css"), "utf8");
+
+    expect(stylesheet).toMatch(
+      /\.minimap-pois circle,\s*\.minimap-hospital circle,\s*\.minimap-ammunition-depot circle\s*\{/s,
+    );
+    expect(stylesheet).toMatch(
+      /\.minimap-pois text,\s*\.minimap-hospital text,\s*\.minimap-ammunition-depot text\s*\{/s,
+    );
+  });
 });

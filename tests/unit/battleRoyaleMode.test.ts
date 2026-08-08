@@ -6,11 +6,12 @@ import {
 } from "../../src/config/battleRoyale";
 import { ITEMS } from "../../src/config/items";
 import {
+  AMMUNITION_DEPOT_AMMO,
   BASE_LOOT_POINTS,
   createMapLayout,
+  GLOBAL_LOOT_POINTS,
   MAP_HALF_SIZE,
   PRE_GRENADE_LOOT_POINTS,
-  TOTAL_LOOT_POINTS,
 } from "../../src/config/map";
 import { FRAG_GRENADE_ITEM_ID } from "../../src/config/throwables";
 import { WEAPONS } from "../../src/config/weapons";
@@ -89,10 +90,22 @@ describe("BattleRoyaleMode", () => {
       quantity: 1,
       position: layout.lootSpawnPoints[layout.hospital.medkitLootIndex],
     });
-    const supplementalMedical = Object.values(state.groundLoot).slice(BASE_LOOT_POINTS, PRE_GRENADE_LOOT_POINTS);
-    expect(supplementalMedical.filter((loot) => loot.itemId === "bandage")).toHaveLength(5);
-    expect(supplementalMedical.filter((loot) => loot.itemId === "medkit")).toHaveLength(5);
-    const supplementalGrenades = Object.values(state.groundLoot).slice(PRE_GRENADE_LOOT_POINTS);
+    for (const level of layout.ammunitionDepot.levels) {
+      for (const [offset, ammo] of AMMUNITION_DEPOT_AMMO.entries()) {
+        const lootIndex = level.lootIndices[offset];
+        if (lootIndex === undefined) throw new Error(`ammunition depot loot index missing: ${level.level}:${offset}`);
+        expect(state.groundLoot[`loot-${lootIndex}`]).toMatchObject({
+          itemId: ammo.itemId,
+          quantity: ammo.quantity,
+          position: layout.lootSpawnPoints[lootIndex],
+        });
+      }
+    }
+    expect(Object.values(state.groundLoot)).toHaveLength(layout.lootSpawnPoints.length);
+    const supplemental = Object.values(state.groundLoot).slice(BASE_LOOT_POINTS, GLOBAL_LOOT_POINTS);
+    expect(supplemental.filter((loot) => loot.itemId === "bandage")).toHaveLength(5);
+    expect(supplemental.filter((loot) => loot.itemId === "medkit")).toHaveLength(5);
+    const supplementalGrenades = Object.values(state.groundLoot).slice(layout.grenadeLootStartIndex);
     expect(supplementalGrenades).toHaveLength(10);
     expect(supplementalGrenades.every((loot) =>
       loot.itemId === FRAG_GRENADE_ITEM_ID && loot.quantity === 2
@@ -119,8 +132,40 @@ describe("BattleRoyaleMode", () => {
     expect(() => JSON.parse(JSON.stringify(state)) as unknown).not.toThrow();
   });
 
+  it.each([
+    ["island", 4, 3],
+    ["mixed", 5, 4],
+  ] as const)("initializes fixed ammunition through the final depot floor on %s", (mapId, mapSeed, stories) => {
+    const state = createBattleRoyaleState(
+      "player",
+      FAST_BATTLE_ROYALE_CONFIG,
+      mapSeedRandom(mapSeed),
+      { mapId },
+    );
+    const layout = createMapLayout(mapId, mapSeed);
+    const finalLevel = layout.ammunitionDepot.levels.at(-1);
+    if (!finalLevel) throw new Error(`ammunition depot level missing: ${mapId}:${mapSeed}`);
+
+    expect(state.mapSeed).toBe(mapSeed);
+    expect(layout.ammunitionDepot.levels).toHaveLength(stories);
+    expect(Object.values(state.groundLoot)).toHaveLength(layout.lootSpawnPoints.length);
+    for (const [offset, ammo] of AMMUNITION_DEPOT_AMMO.entries()) {
+      const lootIndex = finalLevel.lootIndices[offset];
+      if (lootIndex === undefined) throw new Error(`final ammunition index missing: ${mapId}:${mapSeed}:${offset}`);
+      expect(state.groundLoot[`loot-${lootIndex}`]).toEqual({
+        id: `loot-${lootIndex}`,
+        generation: 0,
+        itemId: ammo.itemId,
+        quantity: ammo.quantity,
+        position: layout.lootSpawnPoints[lootIndex],
+        available: true,
+        source: "spawn",
+      });
+    }
+  });
+
   it.each(["island", "town", "mixed"] as const)(
-    "keeps %s loot partitioned as 240 base, 10 medical, and 10 grenade records",
+    "keeps %s loot partitioned as 240 base, 10 medical, per-floor depot ammo, and 10 grenade records",
     (mapId) => {
       const state = createBattleRoyaleState(
         "player",
@@ -132,13 +177,21 @@ describe("BattleRoyaleMode", () => {
       const loot = Object.values(state.groundLoot);
 
       expect(layout.lootZoneCounts.reduce((total, count) => total + count, 0)).toBe(BASE_LOOT_POINTS);
-      expect(layout.grenadeLootStartIndex).toBe(PRE_GRENADE_LOOT_POINTS);
-      expect(loot).toHaveLength(TOTAL_LOOT_POINTS);
+      expect(layout.grenadeLootStartIndex).toBe(
+        PRE_GRENADE_LOOT_POINTS + layout.ammunitionDepot.levels.length * AMMUNITION_DEPOT_AMMO.length,
+      );
+      expect(loot).toHaveLength(layout.lootSpawnPoints.length);
       const medical = loot.slice(BASE_LOOT_POINTS, PRE_GRENADE_LOOT_POINTS);
       expect(medical).toHaveLength(10);
       expect(medical.filter((entry) => entry.itemId === "bandage")).toHaveLength(5);
       expect(medical.filter((entry) => entry.itemId === "medkit")).toHaveLength(5);
-      const grenades = loot.slice(PRE_GRENADE_LOOT_POINTS);
+      const depotAmmunition = loot.slice(PRE_GRENADE_LOOT_POINTS, layout.grenadeLootStartIndex);
+      expect(depotAmmunition.map((entry) => [entry.itemId, entry.quantity])).toEqual(
+        layout.ammunitionDepot.levels.flatMap(() =>
+          AMMUNITION_DEPOT_AMMO.map((entry) => [entry.itemId, entry.quantity])
+        ),
+      );
+      const grenades = loot.slice(layout.grenadeLootStartIndex);
       expect(grenades).toHaveLength(10);
       expect(grenades.every((entry) =>
         entry.itemId === FRAG_GRENADE_ITEM_ID && entry.quantity === 2
@@ -158,7 +211,7 @@ describe("BattleRoyaleMode", () => {
     const loot = Object.values(state.groundLoot);
     const layout = createMapLayout(state.mapSeed);
 
-    expect(loot).toHaveLength(TOTAL_LOOT_POINTS);
+    expect(loot).toHaveLength(layout.lootSpawnPoints.length);
     let start = 0;
     for (const zoneCount of layout.lootZoneCounts) {
       const poiLoot = loot.slice(start, start + zoneCount);
@@ -197,12 +250,17 @@ describe("BattleRoyaleMode", () => {
       }
       start += zoneCount;
     }
-    const additionalMedical = loot.slice(start, PRE_GRENADE_LOOT_POINTS);
+    const additionalMedical = loot.slice(start, GLOBAL_LOOT_POINTS);
     expect(additionalMedical).toHaveLength(10);
     expect(additionalMedical.every((entry) => lootCategory(entry.itemId) === "medical")).toBe(true);
     expect(additionalMedical.filter((entry) => entry.itemId === "bandage")).toHaveLength(5);
     expect(additionalMedical.filter((entry) => entry.itemId === "medkit")).toHaveLength(5);
-    const additionalGrenades = loot.slice(PRE_GRENADE_LOOT_POINTS);
+    expect(loot.slice(GLOBAL_LOOT_POINTS, layout.grenadeLootStartIndex).map((entry) => [entry.itemId, entry.quantity])).toEqual(
+      layout.ammunitionDepot.levels.flatMap(() =>
+        AMMUNITION_DEPOT_AMMO.map((entry) => [entry.itemId, entry.quantity])
+      ),
+    );
+    const additionalGrenades = loot.slice(layout.grenadeLootStartIndex);
     expect(additionalGrenades).toHaveLength(10);
     expect(additionalGrenades.every((entry) =>
       entry.itemId === FRAG_GRENADE_ITEM_ID && entry.quantity === 2
@@ -466,5 +524,16 @@ function seededRandom(seed: number): () => number {
     result = Math.imul(result ^ (result >>> 15), result | 1);
     result ^= result + Math.imul(result ^ (result >>> 7), result | 61);
     return ((result ^ (result >>> 14)) >>> 0) / 4_294_967_296;
+  };
+}
+
+function mapSeedRandom(seed: number): () => number {
+  let first = true;
+  return () => {
+    if (first) {
+      first = false;
+      return seed / 4_294_967_296;
+    }
+    return 0.5;
   };
 }

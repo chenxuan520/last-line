@@ -45,25 +45,38 @@ describe("map selection", () => {
   });
 
   it.each([
-    [0, "82798bfb431d6ff854764c8056a1ca814e18b9a0c28f67f94a85874680e0ab1e"],
-    [42, "ecaddfb71b4a189a9ef8e04f0e7c3de25f1556b719be9e8baef535b6e5f699a1"],
-    [2026, "441e50c64bb714978fb40d745e6ad2db0560dbc800fef8008600e0ed6f256698"],
-  ])("preserves the island layout payload for seed %i", (seed, expectedHash) => {
+    [0, "ef5662a40cbad541a7aefe729cfbad581326d364544defdaa34d16aa088a05bd"],
+    [42, "e3ab2f3cc0e8cd4919c82442c169add18daab7b509a78e8fcba82c60d03f4e40"],
+    [2026, "63cf0791cf78a613ac7cb6ddc4e4c623e33683e0b66d1e1a5bbc9bc145e6c40e"],
+  ])("preserves the island non-stair geometry and first 250 loot points for seed %i", (seed, expectedHash) => {
     const layout = createMapLayout("island", seed);
-    const {
-      mapId: _mapId,
-      displayName: _displayName,
-      roadSegments: _roadSegments,
-      urbanRoadSegments: _urbanRoadSegments,
-      skybridges: _skybridges,
-      grenadeLootStartIndex: _grenadeLootStartIndex,
-      ...currentPayload
-    } = layout;
-    const legacyPayload = {
-      ...currentPayload,
-      lootSpawnPoints: currentPayload.lootSpawnPoints.slice(0, layout.grenadeLootStartIndex),
+    const stablePayload = {
+      mapPoints: layout.mapPoints,
+      landingZones: layout.landingZones,
+      terrainHills: layout.terrainHills,
+      obstacles: layout.obstacles.map((building) => ({
+        id: building.id,
+        ...(building.regionId ? { regionId: building.regionId } : {}),
+        center: building.center,
+        width: building.width,
+        height: building.height,
+        depth: building.depth,
+        baseY: building.baseY,
+        storyCount: building.storyCount,
+        storyHeight: building.storyHeight,
+        ...(building.townKind ? { townKind: building.townKind } : {}),
+      })),
+      hospital: layout.hospital,
+      rocks: layout.rockObstacles,
+      trees: layout.treeTrunks,
+      covers: layout.coverObstacles,
+      loot: layout.lootSpawnPoints.slice(0, 250),
+      lootZoneCounts: layout.lootZoneCounts,
+      roads: layout.roadSegments,
+      urbanRoads: layout.urbanRoadSegments,
+      skybridges: layout.skybridges,
     };
 
-    expect(createHash("sha256").update(JSON.stringify(legacyPayload)).digest("hex")).toBe(expectedHash);
+    expect(createHash("sha256").update(JSON.stringify(stablePayload)).digest("hex")).toBe(expectedHash);
   });
 });

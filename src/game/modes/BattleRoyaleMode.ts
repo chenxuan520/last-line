@@ -4,7 +4,12 @@ import {
   type SafeZoneStageConfig,
 } from "../../config/battleRoyale";
 import { ITEMS } from "../../config/items";
-import { createMapLayout, MAP_HALF_SIZE } from "../../config/map";
+import {
+  AMMUNITION_DEPOT_AMMO,
+  createMapLayout,
+  GLOBAL_LOOT_POINTS,
+  MAP_HALF_SIZE,
+} from "../../config/map";
 import { DEFAULT_MAP_ID, type MapId } from "../../config/maps";
 import { FRAG_GRENADE_ITEM_ID } from "../../config/throwables";
 import type { GameMode } from "./GameMode";
@@ -348,6 +353,7 @@ export function createBattleRoyaleStateForHumans(
       layout.lootSpawnPoints,
       layout.lootZoneCounts,
       layout.hospital,
+      layout.ammunitionDepot,
       layout.grenadeLootStartIndex,
       createLootRandom(mapSeed),
     ),
@@ -379,6 +385,7 @@ function createGroundLoot(
   lootSpawnPoints: readonly Vector3State[],
   lootZoneCounts: readonly number[],
   hospital: ReturnType<typeof createMapLayout>["hospital"],
+  ammunitionDepot: ReturnType<typeof createMapLayout>["ammunitionDepot"],
   grenadeLootStartIndex: number,
   random: () => number,
 ): Record<EntityId, GroundLootState> {
@@ -426,7 +433,7 @@ function createGroundLoot(
     }
     zoneStart += zoneCount;
   }
-  for (let index = zoneStart; index < grenadeLootStartIndex; index += 1) {
+  for (let index = zoneStart; index < GLOBAL_LOOT_POINTS; index += 1) {
     const position = lootSpawnPoints[index];
     if (!position) continue;
     const itemId = index === hospital.bandageLootIndex
@@ -444,6 +451,25 @@ function createGroundLoot(
       available: true,
       source: "spawn",
     };
+  }
+  for (const level of ammunitionDepot.levels) {
+    for (const [offset, ammo] of AMMUNITION_DEPOT_AMMO.entries()) {
+      const index = level.lootIndices[offset];
+      const position = index === undefined ? undefined : lootSpawnPoints[index];
+      if (index === undefined || !position) {
+        throw new Error(`弹药库物资点缺失: ${level.level}:${offset}`);
+      }
+      const id = `loot-${index}`;
+      groundLoot[id] = {
+        id,
+        generation: 0,
+        itemId: ammo.itemId,
+        quantity: ammo.quantity,
+        position: { ...position },
+        available: true,
+        source: "spawn",
+      };
+    }
   }
   for (let index = grenadeLootStartIndex; index < lootSpawnPoints.length; index += 1) {
     const position = lootSpawnPoints[index];

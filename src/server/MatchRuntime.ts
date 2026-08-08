@@ -27,7 +27,7 @@ const TAKEOVER_TICKS = SIMULATION_TICK_RATE * 5;
 const ACTOR_REPLICATION_RANGE = 400;
 const LOOT_REPLICATION_RANGE = 60;
 const AIRBORNE_LOOT_REPLICATION_RANGE = ACTOR_REPLICATION_RANGE;
-export const MATCH_CHECKPOINT_VERSION = 7;
+export const MATCH_CHECKPOINT_VERSION = 8;
 const MINIMUM_CLOSED_SAFE_ZONE_SECONDS = BATTLE_ROYALE_CONFIG.safeZoneStages.reduce(
   (total, stage) => total + stage.waitSeconds + stage.shrinkSeconds / 2,
   0,
@@ -393,12 +393,10 @@ export function isMatchCheckpointCompatible(
     !isNonNegativeInteger(checkpoint.snapshotSequence) ||
     !isNonNegativeInteger(checkpoint.eventSequence)
   ) return false;
+  if (checkpoint.version !== MATCH_CHECKPOINT_VERSION) return false;
   if (!isRecoverableMatchState(checkpoint.state, checkpoint.tick, requiredActorIds)) return false;
   const mapId: unknown = checkpoint.state.mapId;
-  if (checkpoint.version === MATCH_CHECKPOINT_VERSION) {
-    return mapId === "island" || mapId === "town" || mapId === "mixed";
-  }
-  return false;
+  return mapId === "island" || mapId === "town" || mapId === "mixed";
 }
 
 function isRecoverableMatchState(
@@ -409,6 +407,8 @@ function isRecoverableMatchState(
   if (!isRecord(value)) return false;
   if (!["flight", "combat", "finished"].includes(String(value.phase))) return false;
   if (!isNonNegativeNumber(value.elapsedSeconds) || !isUint32(value.mapSeed)) return false;
+  const mapId = value.mapId;
+  if (mapId !== "island" && mapId !== "town" && mapId !== "mixed") return false;
   const actors = value.actors;
   if (!isRecord(actors)) return false;
   const actorEntries = Object.entries(actors);
@@ -426,9 +426,13 @@ function isRecoverableMatchState(
       )
     ) return false;
   }
-  if (!isRecord(value.groundLoot) || !Object.entries(value.groundLoot).every(
-    ([lootId, loot]) => isRecoverableLoot(lootId, loot),
-  )) return false;
+  let canonicalLootCount: number;
+  try {
+    canonicalLootCount = createMapLayout(mapId, value.mapSeed).lootSpawnPoints.length;
+  } catch {
+    return false;
+  }
+  if (!isRecoverableGroundLoot(value.groundLoot, canonicalLootCount)) return false;
   if (!isRecoverableGrenades(value.activeGrenades, value.nextGrenadeSequence, actors)) return false;
   if (!isRecoverableSafeZone(value.safeZone, value.phase, value.elapsedSeconds, tick) ||
     !isRecoverableFlight(value.flight)) return false;
@@ -507,6 +511,19 @@ function isRecoverableLoot(lootId: string, value: unknown): boolean {
     typeof value.available === "boolean" &&
     (value.source === undefined || ["spawn", "drop", "death"].includes(String(value.source))) &&
     (value.weapon === undefined || isRecoverableWeapon(value.weapon));
+}
+
+function isRecoverableGroundLoot(
+  value: unknown,
+  canonicalLootCount: number,
+): value is Record<EntityId, GroundLootState> {
+  if (!isRecord(value)) return false;
+  const entries = Object.entries(value);
+  if (!entries.every(([lootId, loot]) => isRecoverableLoot(lootId, loot))) return false;
+  for (let index = 0; index < canonicalLootCount; index += 1) {
+    if (!Object.hasOwn(value, `loot-${index}`)) return false;
+  }
+  return true;
 }
 
 function isRecoverableGrenades(

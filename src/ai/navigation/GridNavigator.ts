@@ -96,6 +96,17 @@ export class GridNavigator {
     if (skybridgePath.length > 0) return skybridgePath;
 
     if (this.layout && usesBuildingEnvelopeNavigation(this.layout)) {
+      if (
+        startLocation.building &&
+        targetLocation.building?.id === startLocation.building.id
+      ) {
+        return this.findPathWithinBuilding(
+          normalizedStart,
+          startLocation,
+          normalizedTarget,
+          targetLocation,
+        );
+      }
       const groundPath = this.findPathViaExteriorGround(
         normalizedStart,
         startLocation,
@@ -117,6 +128,31 @@ export class GridNavigator {
     }
 
     return this.findPathViaGround(normalizedStart, startLocation, normalizedTarget, targetLocation);
+  }
+
+  private findPathWithinBuilding(
+    start: Vector3State,
+    startLocation: SurfaceLocation,
+    target: Vector3State,
+    targetLocation: SurfaceLocation,
+  ): Vector3State[] {
+    const building = startLocation.building;
+    if (!building || targetLocation.building?.id !== building.id) return [];
+    const startExit = this.pathToGround(start, startLocation);
+    const targetEntrance = this.pathFromGround(target, targetLocation);
+    if (!startExit || !targetEntrance) return [];
+    const insideLocation: SurfaceLocation = {
+      building,
+      level: 0,
+      supportY: this.groundSupport(startExit.ground),
+      ramp: null,
+    };
+    const groundPath = this.findSurfacePath(startExit.ground, targetEntrance.ground, insideLocation);
+    if (groundPath.length === 0) return [];
+    const path = [...startExit.path];
+    appendPath(path, groundPath);
+    appendPath(path, targetEntrance.path);
+    return path;
   }
 
   private findPathViaGround(
@@ -596,7 +632,7 @@ export class GridNavigator {
     obstacle: MapObstacle,
     blockers: Pick<SurfaceBlockers, "supportY" | "ground">,
   ): boolean {
-    const supportY = blockers.ground && this.layout && isTreeTrunk(obstacle)
+    const supportY = blockers.ground && this.layout
       ? getTerrainHeight(obstacle.center.x, obstacle.center.z, this.layout)
       : blockers.supportY;
     return obstacleOverlapsSurface(obstacle, supportY);
@@ -703,10 +739,6 @@ function isMapLayout(value: MapLayout | readonly MapObstacle[]): value is MapLay
 
 function isMapBuilding(obstacle: MapObstacle): obstacle is MapBuilding {
   return "storyCount" in obstacle && "storyHeight" in obstacle && "baseY" in obstacle;
-}
-
-function isTreeTrunk(obstacle: MapObstacle): boolean {
-  return "kind" in obstacle && obstacle.kind === "tree-trunk";
 }
 
 interface PathSearchNode {
@@ -826,7 +858,7 @@ function getLayoutBlockingObstacles(layout: MapLayout): readonly MapObstacle[] {
 }
 
 function usesBuildingEnvelopeNavigation(layout: MapLayout): boolean {
-  return layout.mapId === "town" || layout.mapId === "mixed";
+  return layout.mapId === "island" || layout.mapId === "town" || layout.mapId === "mixed";
 }
 
 function createBlockerIndex(

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { BATTLE_ROYALE_CONFIG } from "../../src/config/battleRoyale";
+import { createMapLayout } from "../../src/config/map";
 import {
   DurableService,
   type PlatformDurableObjectState,
@@ -277,7 +278,7 @@ describe("LocalDurableObjectRuntime", () => {
     }
   });
 
-  it("deletes a running room restored from a version 6 checkpoint without state", async () => {
+  it("deletes a running room restored from a previous-version checkpoint without state", async () => {
     const directory = await mkdtemp(resolve(tmpdir(), "last-line-checkpoint-missing-state-"));
     const databasePath = resolve(directory, "rooms.sqlite");
     const roomId = "room-00000000-0000-4000-8000-000000000004";
@@ -372,6 +373,57 @@ describe("LocalDurableObjectRuntime", () => {
     }
   });
 
+  it("deletes a running room restored without the complete canonical loot roster", async () => {
+    const directory = await mkdtemp(resolve(tmpdir(), "last-line-checkpoint-truncated-loot-"));
+    const databasePath = resolve(directory, "rooms.sqlite");
+    const roomId = "room-00000000-0000-4000-8000-000000000007";
+    let environment = await createStandaloneEnvironment({ databasePath });
+    try {
+      const state = await environment.rooms.getState(roomId);
+      const runtime = new MatchRuntime({
+        humanActorIds: ["human-1", "human-2"],
+        seed: 0,
+        mapId: "mixed",
+        startWithBandage: true,
+        disableAiSnipers: true,
+      });
+      const checkpoint = runtime.checkpoint();
+      const layout = createMapLayout(checkpoint.state.mapId, checkpoint.state.mapSeed);
+      expect(layout.ammunitionDepot.levels).toHaveLength(3);
+      const canonicalLootCount = layout.lootSpawnPoints.length;
+      const groundLoot = structuredClone(checkpoint.state.groundLoot);
+      delete groundLoot[`loot-${canonicalLootCount - 1}`];
+      const corruptedCheckpoint = {
+        ...checkpoint,
+        state: { ...checkpoint.state, groundLoot },
+      };
+      await state.storage.put("room-v1", {
+        roomId,
+        code: "OLD238",
+        visibility: "private",
+        status: "running",
+        revision: 1,
+        countdownEndsAt: null,
+        options: { mapId: "mixed", startWithBandage: true, disableAiSnipers: true },
+        seed: 0,
+        expiresAt: Date.now() + 60_000,
+        members: persistedMatchMembers(),
+        checkpoint: corruptedCheckpoint,
+      });
+      await state.storage.put("checkpoint-v1", corruptedCheckpoint);
+      await state.storage.setAlarm(Date.now() + 60_000);
+      await environment.close();
+
+      environment = await createStandaloneEnvironment({ databasePath });
+      const restoredState = await environment.rooms.getState(roomId);
+      expect(await restoredState.storage.get("room-v1")).toBeUndefined();
+      expect(await restoredState.storage.get("checkpoint-v1")).toBeUndefined();
+    } finally {
+      await environment.close();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
   it("deletes running rooms restored from malformed members containers", async () => {
     const directory = await mkdtemp(resolve(tmpdir(), "last-line-checkpoint-members-shape-"));
     const databasePath = resolve(directory, "rooms.sqlite");
@@ -434,8 +486,8 @@ describe("LocalDurableObjectRuntime", () => {
     }
   });
 
-  it("deletes a version 6 town checkpoint across a SQLite restart", async () => {
-    const directory = await mkdtemp(resolve(tmpdir(), "last-line-checkpoint-town-v6-"));
+  it("keeps a current version 8 town checkpoint recoverable across a SQLite restart", async () => {
+    const directory = await mkdtemp(resolve(tmpdir(), "last-line-checkpoint-town-v8-"));
     const databasePath = resolve(directory, "rooms.sqlite");
     const roomId = "room-00000000-0000-4000-8000-000000000003";
     let environment = await createStandaloneEnvironment({ databasePath });
@@ -448,10 +500,7 @@ describe("LocalDurableObjectRuntime", () => {
         startWithBandage: true,
         disableAiSnipers: true,
       });
-      const legacyCheckpoint = {
-        ...runtime.checkpoint(),
-        version: MATCH_CHECKPOINT_VERSION - 1,
-      };
+      const currentCheckpoint = runtime.checkpoint();
       await state.storage.put("room-v1", {
         roomId,
         code: "OLD235",
@@ -463,16 +512,23 @@ describe("LocalDurableObjectRuntime", () => {
         seed: 43,
         expiresAt: Date.now() + 60_000,
         members: persistedMatchMembers(),
-        checkpoint: legacyCheckpoint,
+        checkpoint: currentCheckpoint,
       });
-      await state.storage.put("checkpoint-v1", legacyCheckpoint);
+      await state.storage.put("checkpoint-v1", currentCheckpoint);
       await state.storage.setAlarm(Date.now() + 60_000);
       await environment.close();
 
       environment = await createStandaloneEnvironment({ databasePath });
       const restoredState = await environment.rooms.getState(roomId);
-      expect(await restoredState.storage.get("room-v1")).toBeUndefined();
-      expect(await restoredState.storage.get("checkpoint-v1")).toBeUndefined();
+      expect(await restoredState.storage.get("room-v1")).toMatchObject({
+        status: "running",
+        options: { mapId: "town" },
+        checkpoint: { version: MATCH_CHECKPOINT_VERSION, state: { mapId: "town" } },
+      });
+      expect(await restoredState.storage.get("checkpoint-v1")).toMatchObject({
+        version: MATCH_CHECKPOINT_VERSION,
+        state: { mapId: "town" },
+      });
     } finally {
       await environment.close();
       await rm(directory, { force: true, recursive: true });

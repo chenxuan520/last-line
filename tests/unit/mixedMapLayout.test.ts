@@ -1,14 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { GridNavigator } from "../../src/ai/navigation/GridNavigator";
 import {
+  AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL,
   BUILDING_ROOF_CAP_HEIGHT,
   createMapLayout,
+  GLOBAL_LOOT_POINTS,
   getTerrainHeight,
   HOSPITAL_WALL_COLOR,
   MAP_HALF_SIZE,
   MIXED_NATURAL_OBSTACLE_MAX_TERRAIN_DELTA,
   PRE_GRENADE_LOOT_POINTS,
-  TOTAL_LOOT_POINTS,
 } from "../../src/config/map";
 import {
   createMixedMapBlueprint,
@@ -186,8 +187,15 @@ describe("mixed map layout", () => {
       const blueprint = createMixedMapBlueprint(seed);
       const layout = createMapLayout("mixed", seed);
 
-      expect(layout.lootSpawnPoints).toHaveLength(TOTAL_LOOT_POINTS);
-      expect(layout.grenadeLootStartIndex).toBe(PRE_GRENADE_LOOT_POINTS);
+      expect(layout.lootSpawnPoints).toHaveLength(
+        GLOBAL_LOOT_POINTS +
+        layout.ammunitionDepot.levels.length * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL +
+        10,
+      );
+      expect(layout.grenadeLootStartIndex).toBe(
+        PRE_GRENADE_LOOT_POINTS +
+        layout.ammunitionDepot.levels.length * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL,
+      );
       expect(layout.lootSpawnPoints.slice(layout.grenadeLootStartIndex)).toHaveLength(10);
       expect(layout.lootZoneCounts).toHaveLength(16);
       expect(layout.lootZoneCounts.reduce((total, count) => total + count, 0)).toBe(240);
@@ -299,10 +307,16 @@ describe("mixed map layout", () => {
           const point = layout.lootSpawnPoints[index];
           const other = layout.lootSpawnPoints[otherIndex];
           if (!point || !other) throw new Error(`loot point missing: ${seed}:${index}:${otherIndex}`);
+          if (Math.abs(point.y - other.y) > 2) continue;
           const hospitalPair = index === layout.hospital.bandageLootIndex &&
             otherIndex === layout.hospital.medkitLootIndex;
+          const depotLevel = layout.ammunitionDepot.levels.find((level) => level.lootIndices.includes(index));
+          const otherDepotLevel = layout.ammunitionDepot.levels.find((level) =>
+            level.lootIndices.includes(otherIndex)
+          );
+          const depotPair = depotLevel !== undefined && depotLevel === otherDepotLevel;
           expect(Math.hypot(point.x - other.x, point.z - other.z))
-            .toBeGreaterThanOrEqual(hospitalPair ? 7.9 : 11.9);
+            .toBeGreaterThanOrEqual(depotPair ? 3.9 : hospitalPair ? 7.9 : 11.9);
         }
       }
     }

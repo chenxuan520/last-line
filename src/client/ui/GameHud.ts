@@ -20,7 +20,7 @@ import {
   type MatchResult,
   type MatchState,
 } from "../../game/state/types";
-import { createMinimapView, projectToMinimap } from "./minimap";
+import { createMinimapView, layoutMinimapLabels, projectToMinimap } from "./minimap";
 import { findNearbyLootCandidate, findPickupCandidate } from "../../game/systems/InventorySystem";
 import { getPoiDecalAssetId } from "../poiVisuals";
 
@@ -63,6 +63,15 @@ export class GameHud {
     const mapLayout = createMapLayout(options.mapId ?? "island", mapSeed);
     const mapPoints = mapLayout.mapPoints;
     const hospitalPoint = projectToMinimap(mapLayout.hospital.position);
+    const ammunitionDepotPoint = projectToMinimap(mapLayout.ammunitionDepot.position);
+    const minimapLabels = layoutMinimapLabels([
+      ...mapPoints.map((point) => ({ name: point.name, point: projectToMinimap(point.position) })),
+      { name: mapLayout.hospital.name, point: hospitalPoint },
+      { name: mapLayout.ammunitionDepot.name, point: ammunitionDepotPoint },
+    ]);
+    const mapPointLabels = minimapLabels.slice(0, mapPoints.length);
+    const hospitalLabel = minimapLabels[mapPoints.length];
+    const ammunitionDepotLabel = minimapLabels[mapPoints.length + 1];
     const mapRoadPath = mapLayout.roadSegments.map(([startX, startZ, endX, endZ]) => {
       const start = projectToMinimap({ x: startX, y: 0, z: startZ });
       const end = projectToMinimap({ x: endX, y: 0, z: endZ });
@@ -91,11 +100,25 @@ export class GameHud {
               <path d="M50 10V190 M100 10V190 M150 10V190 M10 50H190 M10 100H190 M10 150H190" />
             </g>
             <g class="minimap-roads"><path d="${mapRoadPath}" /></g>
-            <g class="minimap-pois">${mapPoints.map((point) => {
-              const projected = projectToMinimap(point.position);
-              return minimapPoiMarker(assets, point.name, projected.x, projected.y);
+            <g class="minimap-pois">${mapPoints.map((point, index) => {
+              const label = mapPointLabels[index];
+              const projected = label?.point ?? projectToMinimap(point.position);
+              return minimapPoiMarker(assets, point.name, projected.x, projected.y, label?.offset);
             }).join("")}</g>
-            <g class="minimap-hospital">${minimapPoiMarker(assets, "医院", hospitalPoint.x, hospitalPoint.y)}</g>
+            <g class="minimap-hospital">${minimapPoiMarker(
+              assets,
+              "医院",
+              hospitalPoint.x,
+              hospitalPoint.y,
+              hospitalLabel?.offset,
+            )}</g>
+            <g class="minimap-ammunition-depot">${minimapPoiMarker(
+              assets,
+              "弹药库",
+              ammunitionDepotPoint.x,
+              ammunitionDepotPoint.y,
+              ammunitionDepotLabel?.offset,
+            )}</g>
             <line class="minimap-flight" data-hud="map-flight" />
             <circle class="minimap-target-zone" data-hud="map-target-zone" />
             <circle class="minimap-current-zone" data-hud="map-current-zone" />
@@ -775,14 +798,20 @@ function assetUrl(url: string | undefined): string {
   return url ? new URL(url, document.baseURI).href : "";
 }
 
-function minimapPoiMarker(assets: AssetCatalog, name: string, x: number, y: number): string {
+function minimapPoiMarker(
+  assets: AssetCatalog,
+  name: string,
+  x: number,
+  y: number,
+  labelOffset: { x: number; y: number } = { x: 0, y: -10 },
+): string {
   const assetId = getPoiDecalAssetId(name);
   const descriptor = assetId ? assets.resolve(assetId, "image") : null;
   const iconUrl = descriptor?.id === assetId ? assetUrl(descriptor.url) : "";
   const marker = iconUrl
     ? `<image class="minimap-poi-icon" href="${iconUrl}" x="-6" y="-6" width="12" height="12" />`
     : `<circle r="2" />`;
-  return `<g transform="translate(${x} ${y})"><title>${name}</title>${marker}<text y="-8">${name}</text></g>`;
+  return `<g transform="translate(${x} ${y})"><title>${name}</title>${marker}<text x="${labelOffset.x}" y="${labelOffset.y}">${name}</text></g>`;
 }
 
 function defaultActorLabel(actorId: string): string {

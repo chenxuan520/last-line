@@ -34,13 +34,14 @@ export interface BuildingStairwell {
   width: number;
   depth: number;
   side: -1 | 1;
+  direction: -1 | 1;
 }
 
 export interface MapBuilding extends MapObstacle {
   baseY: number;
   storyCount: 1 | 2 | 3 | 4 | 5;
   storyHeight: number;
-  stairwell: BuildingStairwell | null;
+  stairwell: BuildingStairwell;
   townKind?: TownBuildingKind;
 }
 
@@ -86,6 +87,16 @@ export interface HospitalPoi extends MapPoint {
   medkitLootIndex: number;
 }
 
+export interface AmmunitionDepotPoi extends MapPoint {
+  buildingId: string;
+  levels: readonly AmmunitionDepotLevel[];
+}
+
+export interface AmmunitionDepotLevel {
+  level: number;
+  lootIndices: readonly [number, number, number, number];
+}
+
 export interface TerrainHill {
   x: number;
   z: number;
@@ -93,18 +104,21 @@ export interface TerrainHill {
   height: number;
 }
 
-export interface RoofRamp {
-  id: string;
-  obstacleId: string;
-  kind: "exterior" | "interior";
-  fromLevel: number;
-  toLevel: number;
+interface RampFootprint {
   centerX: number;
   width: number;
   startZ: number;
   endZ: number;
   bottomY: number;
   topY: number;
+}
+
+export interface RoofRamp extends RampFootprint {
+  id: string;
+  obstacleId: string;
+  kind: "interior";
+  fromLevel: number;
+  toLevel: number;
 }
 
 export interface MapSkybridge {
@@ -140,6 +154,7 @@ export interface MapLayout {
   readonly urbanRoadSegments: readonly (readonly [number, number, number, number])[];
   readonly skybridges: readonly MapSkybridge[];
   readonly hospital: HospitalPoi;
+  readonly ammunitionDepot: AmmunitionDepotPoi;
   readonly lootSpawnPoints: readonly Vector3State[];
   readonly lootZoneCounts: readonly number[];
   readonly grenadeLootStartIndex: number;
@@ -151,6 +166,7 @@ export const TERRAIN_GRID_SUBDIVISIONS = 200;
 export const BUILDING_ROOF_CAP_HEIGHT = 0.18;
 export const BUILDING_WINDOW_SILL_HEIGHT = 1.5;
 export const HOSPITAL_WALL_COLOR = "#eef2ef";
+export const AMMUNITION_DEPOT_WALL_COLOR = "#35413d";
 export const DEFAULT_MAP_SEED = 0;
 export const MIXED_NATURAL_OBSTACLE_MAX_TERRAIN_DELTA = 0.798;
 
@@ -158,9 +174,16 @@ export const MAP_POINT_COUNT = 8;
 export const LANDING_ZONE_COUNT = 16;
 export const BASE_LOOT_POINTS = 240;
 export const ADDITIONAL_MEDICAL_LOOT_POINTS = 10;
+export const GLOBAL_LOOT_POINTS = BASE_LOOT_POINTS + ADDITIONAL_MEDICAL_LOOT_POINTS;
+export const AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL = 4;
+export const AMMUNITION_DEPOT_AMMO = [
+  { itemId: "ammo.rifle", quantity: 90 },
+  { itemId: "ammo.light", quantity: 96 },
+  { itemId: "ammo.shell", quantity: 18 },
+  { itemId: "ammo.sniper", quantity: 16 },
+] as const;
 export const ADDITIONAL_GRENADE_LOOT_POINTS = 10;
-export const PRE_GRENADE_LOOT_POINTS = BASE_LOOT_POINTS + ADDITIONAL_MEDICAL_LOOT_POINTS;
-export const TOTAL_LOOT_POINTS = PRE_GRENADE_LOOT_POINTS + ADDITIONAL_GRENADE_LOOT_POINTS;
+export const PRE_GRENADE_LOOT_POINTS = GLOBAL_LOOT_POINTS;
 export const TREE_TRUNK_COUNT = 384;
 const HOSPITAL_MEDICAL_LOOT_POINTS = 2;
 const RANDOM_MEDICAL_LOOT_POINTS = ADDITIONAL_MEDICAL_LOOT_POINTS - HOSPITAL_MEDICAL_LOOT_POINTS;
@@ -178,6 +201,10 @@ interface BuildingArea extends MapPoint {
 interface HospitalSelection {
   buildingId: string;
   stairwellSide: -1 | 1;
+}
+
+interface AmmunitionDepotSelection {
+  buildingId: string;
 }
 
 const BASE_TERRAIN_HILLS: readonly TerrainHill[] = [
@@ -287,22 +314,22 @@ export function createMapLayout(mapIdOrSeed: MapId | number, explicitSeed?: numb
   const obstacleRandom = createSeededRandom(normalizedSeed ^ 0x85ebca6b);
   const baseObstacles = createSeededBuildings(terrainHills, buildingAreas, obstacleRandom);
   const baseWallGeometry = createWallSegments(baseObstacles, terrainHills);
-  const baseRoofRamps = baseObstacles.map((obstacle) => {
+  const basePlacementRamps = baseObstacles.map((obstacle) => {
     const pointIndex = Number(obstacle.id.split("-")[1]);
     const poi = buildingAreas[pointIndex] ?? buildingAreas[0];
-    return createRoofRamp(obstacle, poi as MapPoint, terrainHills);
+    return createLegacyRampClearance(obstacle, poi as MapPoint, terrainHills);
   });
   const rockObstacles = createCoverRocks(
     terrainHills,
     baseObstacles,
-    baseRoofRamps,
+    basePlacementRamps,
     landingZones,
     createSeededRandom(normalizedSeed ^ 0x165667b1),
   );
   const coverObstacles = createCoverObstacles(
     terrainHills,
     baseObstacles,
-    baseRoofRamps,
+    basePlacementRamps,
     rockObstacles,
     landingZones,
     createSeededRandom(normalizedSeed ^ 0xa24baed5),
@@ -322,35 +349,55 @@ export function createMapLayout(mapIdOrSeed: MapId | number, explicitSeed?: numb
     terrainHills,
     baseObstacles,
     baseWallGeometry.wallSegments,
-    baseRoofRamps,
+    basePlacementRamps,
     rockObstacles,
     coverObstacles,
     createSeededRandom(normalizedSeed ^ 0xc2b2ae35),
     createSeededRandom(normalizedSeed ^ 0xd3a2646c),
   );
-  const obstacles = assignBuildingStories(
+  const assignedObstacles = assignBuildingStories(
     storyObstacles,
     terrainHills,
     createSeededRandom(normalizedSeed ^ 0x7f4a7c15),
     hospitalSelection,
   );
-  const { wallSegments, wallOpenings } = createWallSegments(obstacles, terrainHills);
-  const floorSlabs = obstacles.flatMap(createBuildingFloorSlabs);
-  const roofRamps = obstacles.flatMap((obstacle) => {
-    if (obstacle.storyCount > 1) return createInternalRamps(obstacle, terrainHills);
-    const pointIndex = Number(obstacle.id.split("-")[1]);
+  const depotSelection = selectAmmunitionDepotBuilding(
+    assignedObstacles,
+    hospitalSelection.buildingId,
+    (building) => building.id.startsWith(`building-${POI_NAMES.indexOf("旧仓区")}-`),
+    mapPoints[POI_NAMES.indexOf("旧仓区")]?.position,
+  );
+  const coloredObstacles = assignedObstacles.map((building) =>
+    building.id === depotSelection.buildingId
+      ? { ...building, color: AMMUNITION_DEPOT_WALL_COLOR }
+      : building
+  );
+  const legacyFinalRamps = coloredObstacles.flatMap((building) => {
+    if (building.storyCount > 1) return createInternalRamps(building, terrainHills);
+    const pointIndex = Number(building.id.split("-")[1]);
     const poi = buildingAreas[pointIndex] ?? buildingAreas[0];
-    return [createRoofRamp(obstacle, poi as MapPoint, terrainHills)];
+    return [createLegacyRampClearance(building, poi as MapPoint, terrainHills)];
   });
-  const hospitalBuilding = obstacles.find((building) => building.id === hospitalSelection.buildingId);
-  if (!hospitalBuilding) throw new Error("Hospital building missing");
+  const hospitalBuildingBeforeStairwell = coloredObstacles.find(
+    (building) => building.id === hospitalSelection.buildingId,
+  );
+  if (!hospitalBuildingBeforeStairwell) throw new Error("Hospital building missing");
   const hospitalMedicalPoints = createHospitalMedicalPoints(
-    hospitalBuilding,
+    hospitalBuildingBeforeStairwell,
     terrainHills,
-    wallSegments.filter((wall) => wall.obstacleId === hospitalBuilding.id),
-    roofRamps.filter((ramp) => ramp.obstacleId === hospitalBuilding.id),
+    createWallSegments(coloredObstacles, terrainHills).wallSegments.filter(
+      (wall) => wall.obstacleId === hospitalBuildingBeforeStairwell.id,
+    ),
+    createInternalRamps(hospitalBuildingBeforeStairwell, terrainHills),
     baseLootSpawnPoints,
   );
+  const globalLootSpawnPoints = [...baseLootSpawnPoints, ...hospitalMedicalPoints];
+  const obstacles = assignStairwellsAvoidingLoot(coloredObstacles, globalLootSpawnPoints, terrainHills);
+  const { wallSegments, wallOpenings } = createWallSegments(obstacles, terrainHills);
+  const floorSlabs = obstacles.flatMap(createBuildingFloorSlabs);
+  const roofRamps = obstacles.flatMap((obstacle) => createInternalRamps(obstacle, terrainHills));
+  const hospitalBuilding = obstacles.find((building) => building.id === hospitalSelection.buildingId);
+  if (!hospitalBuilding) throw new Error("Hospital building missing");
   const hospital: HospitalPoi = {
     name: "医院",
     buildingId: hospitalBuilding.id,
@@ -362,15 +409,25 @@ export function createMapLayout(mapIdOrSeed: MapId | number, explicitSeed?: numb
     bandageLootIndex: baseLootSpawnPoints.length,
     medkitLootIndex: baseLootSpawnPoints.length + 1,
   };
-  const existingLootSpawnPoints = [...baseLootSpawnPoints, ...hospitalMedicalPoints];
+  const depotBuilding = obstacles.find((building) => building.id === depotSelection.buildingId);
+  if (!depotBuilding) throw new Error("Ammunition depot building missing");
+  const depotLootPoints = createBuildingInteriorLootPoints(
+    depotBuilding,
+    terrainHills,
+    wallSegments.filter((wall) => wall.obstacleId === depotBuilding.id),
+    roofRamps.filter((ramp) => ramp.obstacleId === depotBuilding.id),
+    globalLootSpawnPoints,
+  );
+  const ammunitionDepot = createAmmunitionDepotPoi(depotBuilding, terrainHills, globalLootSpawnPoints.length);
+  const preGrenadeLootSpawnPoints = [...globalLootSpawnPoints, ...depotLootPoints];
   const treeTrunks = createTreeTrunks(
     terrainHills,
     obstacles,
-    roofRamps,
+    legacyFinalRamps,
     rockObstacles,
     coverObstacles,
     landingZones,
-    existingLootSpawnPoints,
+    globalLootSpawnPoints,
     createSeededRandom(normalizedSeed ^ 0x68bc21eb),
   );
   const grenadeLootSpawnPoints = createGrenadeLootSpawnPoints(
@@ -379,10 +436,11 @@ export function createMapLayout(mapIdOrSeed: MapId | number, explicitSeed?: numb
     wallSegments,
     roofRamps,
     [...obstacles, ...rockObstacles, ...coverObstacles, ...treeTrunks],
-    existingLootSpawnPoints,
+    preGrenadeLootSpawnPoints,
     createSeededRandom(normalizedSeed ^ 0x3c6ef372),
   );
-  const lootSpawnPoints = [...existingLootSpawnPoints, ...grenadeLootSpawnPoints];
+  const grenadeLootStartIndex = preGrenadeLootSpawnPoints.length;
+  const lootSpawnPoints = [...preGrenadeLootSpawnPoints, ...grenadeLootSpawnPoints];
   const layout: MapLayout = {
     mapId,
     displayName: mapDisplayName(mapId),
@@ -402,9 +460,10 @@ export function createMapLayout(mapIdOrSeed: MapId | number, explicitSeed?: numb
     urbanRoadSegments: [],
     skybridges: [],
     hospital,
+    ammunitionDepot,
     lootSpawnPoints,
     lootZoneCounts,
-    grenadeLootStartIndex: existingLootSpawnPoints.length,
+    grenadeLootStartIndex,
   };
   return cacheMapLayout(cacheKey, layout);
 }
@@ -412,10 +471,10 @@ export function createMapLayout(mapIdOrSeed: MapId | number, explicitSeed?: numb
 function createTownMapLayout(seed: number): MapLayout {
   const blueprint = createTownMapBlueprint(seed);
   const terrainHills = createTownTerrainHills(seed);
-  const obstacles = blueprint.buildings.map<MapBuilding>((building) => {
+  const baseObstacles = blueprint.buildings.map<MapBuilding>((building) => {
     const baseY = round(terrainHeightFromHills(building.x, building.z, terrainHills) - BUILDING_GROUND_EMBED);
     const height = round(building.storyHeight * building.storyCount);
-    const base: MapBuilding = {
+    const geometry: Omit<MapBuilding, "stairwell"> = {
       id: building.id,
       center: { x: building.x, y: round(baseY + height / 2), z: building.z },
       width: building.width,
@@ -425,33 +484,35 @@ function createTownMapLayout(seed: number): MapLayout {
       baseY,
       storyCount: building.storyCount,
       storyHeight: building.storyHeight,
-      stairwell: null,
       townKind: building.kind,
     };
-    return {
-      ...base,
-      stairwell: building.storyCount > 1
-        ? createBuildingStairwell(base, building.stairwellSide)
-        : null,
-    };
+    return { ...geometry, stairwell: createBuildingStairwell(geometry, building.stairwellSide) };
   });
-  const hospitalBase = obstacles.find((building) => building.id === blueprint.hospitalBuildingId);
+  const hospitalBase = baseObstacles.find((building) => building.id === blueprint.hospitalBuildingId);
   if (!hospitalBase) throw new Error("Town hospital building missing");
   const hospitalBuilding = hospitalBase.storyCount < 2
     ? promoteBuilding(hospitalBase, 2, 1)
     : { ...hospitalBase, color: HOSPITAL_WALL_COLOR };
-  const hospitalIndex = obstacles.findIndex((building) => building.id === hospitalBuilding.id);
-  obstacles[hospitalIndex] = { ...hospitalBuilding, color: HOSPITAL_WALL_COLOR };
-  const roofRamps = obstacles.flatMap((building) =>
-    building.storyCount > 1
-      ? createInternalRamps(building, terrainHills)
-      : []
+  const hospitalIndex = baseObstacles.findIndex((building) => building.id === hospitalBuilding.id);
+  baseObstacles[hospitalIndex] = { ...hospitalBuilding, color: HOSPITAL_WALL_COLOR };
+  const depotSelection = selectAmmunitionDepotBuilding(
+    baseObstacles,
+    hospitalBuilding.id,
+    (building) => building.townKind === "warehouse" || building.townKind === "factory",
+    { x: 540, y: 0, z: 540 },
   );
-  const skybridges = createTownSkybridges(blueprint.skybridges, obstacles);
-  const baseWallGeometry = createWallSegments(obstacles, terrainHills);
+  const depotIndex = baseObstacles.findIndex((building) => building.id === depotSelection.buildingId);
+  const depotBase = baseObstacles[depotIndex];
+  if (!depotBase) throw new Error("Town ammunition depot building missing");
+  baseObstacles[depotIndex] = { ...depotBase, color: AMMUNITION_DEPOT_WALL_COLOR };
+  const legacyRamps = baseObstacles.flatMap((building) =>
+    building.storyCount > 1 ? createInternalRamps(building, terrainHills) : []
+  );
+  const skybridges = createTownSkybridges(blueprint.skybridges, baseObstacles);
+  const baseWallGeometry = createWallSegments(baseObstacles, terrainHills);
   const bridgeWallGeometry = createTownSkybridgeWallGeometry(
     skybridges,
-    obstacles,
+    baseObstacles,
     terrainHills,
     baseWallGeometry,
   );
@@ -461,7 +522,11 @@ function createTownMapLayout(seed: number): MapLayout {
   ];
   const wallOpenings = bridgeWallGeometry.wallOpenings;
   const floorSlabs = [
-    ...obstacles.flatMap(createBuildingFloorSlabs),
+    ...baseObstacles.flatMap((building) =>
+      building.storyCount > 1
+        ? createBuildingFloorSlabs(building)
+        : [floorSlab(building, 1, "roof", "full", building.center.x, building.center.z, building.width, building.depth)]
+    ),
     ...createTownSkybridgeFloorSlabs(skybridges),
   ];
   const rockObstacles = createTownRockObstacles(seed, terrainHills);
@@ -470,21 +535,21 @@ function createTownMapLayout(seed: number): MapLayout {
     terrainHills,
     blueprint.roadSegments,
     blueprint.landingZones,
-    obstacles,
-    roofRamps,
+    baseObstacles,
+    legacyRamps,
   );
   const lootZoneCounts = createTownLootZoneCounts(blueprint.landingZones.length);
   const baseLootSpawnPoints = createTownLootSpawnPoints(
     blueprint.landingZones,
     lootZoneCounts,
-    obstacles,
+    baseObstacles,
     wallOpenings,
     terrainHills,
     seed,
   );
   const supplementalMedicalPoints = createTownSupplementalMedicalPoints(
     blueprint.landingZones,
-    obstacles,
+    baseObstacles,
     wallOpenings,
     terrainHills,
     baseLootSpawnPoints,
@@ -492,7 +557,7 @@ function createTownMapLayout(seed: number): MapLayout {
     seed,
   );
   const hospitalMedicalPoints = createTownHospitalMedicalPoints(
-    obstacles[hospitalIndex] as MapBuilding,
+    baseObstacles[hospitalIndex] as MapBuilding,
     terrainHills,
   );
   const existingLootSpawnPoints = [
@@ -511,6 +576,31 @@ function createTownMapLayout(seed: number): MapLayout {
     bandageLootIndex: existingLootSpawnPoints.length - 2,
     medkitLootIndex: existingLootSpawnPoints.length - 1,
   };
+  const obstacles = assignStairwellsAvoidingLoot(baseObstacles, existingLootSpawnPoints, terrainHills);
+  const roofRamps = obstacles.flatMap((building) => createInternalRamps(building, terrainHills));
+  const finalBaseWallGeometry = createWallSegments(obstacles, terrainHills);
+  const finalBridgeGeometry = createTownSkybridgeWallGeometry(
+    skybridges,
+    obstacles,
+    terrainHills,
+    finalBaseWallGeometry,
+  );
+  wallSegments.length = 0;
+  wallSegments.push(...finalBridgeGeometry.wallSegments, ...createTownSkybridgeRails(skybridges));
+  wallOpenings.length = 0;
+  wallOpenings.push(...finalBridgeGeometry.wallOpenings);
+  floorSlabs.length = 0;
+  floorSlabs.push(...obstacles.flatMap(createBuildingFloorSlabs), ...createTownSkybridgeFloorSlabs(skybridges));
+  const depotBuilding = obstacles[depotIndex] as MapBuilding;
+  const depotLootPoints = createBuildingInteriorLootPoints(
+    depotBuilding,
+    terrainHills,
+    wallSegments.filter((wall) => wall.obstacleId === depotBuilding.id),
+    roofRamps.filter((ramp) => ramp.obstacleId === depotBuilding.id),
+    existingLootSpawnPoints,
+  );
+  const ammunitionDepot = createAmmunitionDepotPoi(depotBuilding, terrainHills, existingLootSpawnPoints.length);
+  const preGrenadeLootSpawnPoints = [...existingLootSpawnPoints, ...depotLootPoints];
   const landingZones = blueprint.landingZones.map<MapPoint>((point) => ({
     name: point.name,
     position: {
@@ -541,9 +631,11 @@ function createTownMapLayout(seed: number): MapLayout {
     terrainHills,
     obstacles,
     wallOpenings,
-    existingLootSpawnPoints,
+    preGrenadeLootSpawnPoints,
     seed,
   );
+  const grenadeLootStartIndex = preGrenadeLootSpawnPoints.length;
+  const lootSpawnPoints = [...preGrenadeLootSpawnPoints, ...grenadeLootSpawnPoints];
   return {
     mapId: "town",
     displayName: mapDisplayName("town"),
@@ -563,9 +655,10 @@ function createTownMapLayout(seed: number): MapLayout {
     urbanRoadSegments: blueprint.roadSegments,
     skybridges,
     hospital,
-    lootSpawnPoints: [...existingLootSpawnPoints, ...grenadeLootSpawnPoints],
+    ammunitionDepot,
+    lootSpawnPoints,
     lootZoneCounts,
-    grenadeLootStartIndex: existingLootSpawnPoints.length,
+    grenadeLootStartIndex,
   };
 }
 
@@ -577,13 +670,15 @@ function createMixedMapLayout(seed: number): MapLayout {
     radius: hill.radius,
     height: hill.height,
   }));
-  const obstacles = blueprint.buildings.map<MapBuilding>((building) => {
+  const fixedTown = blueprint.regions.find((region) => region.fixed && region.kind === "town");
+  if (!fixedTown) throw new Error("Mixed map fixed town region missing");
+  const generatedObstacles = blueprint.buildings.map<MapBuilding>((building) => {
     const baseY = round(terrainHeightFromHills(building.x, building.z, terrainHills) - BUILDING_GROUND_EMBED);
     const storyCount = building.id === blueprint.hospitalBuildingId
       ? Math.max(2, building.storyCount) as 2 | 3 | 4
       : building.storyCount;
     const height = round(building.storyHeight * storyCount);
-    const base: MapBuilding = {
+    const geometry: Omit<MapBuilding, "stairwell"> = {
       id: building.id,
       regionId: building.regionId,
       center: { x: building.x, y: round(baseY + height / 2), z: building.z },
@@ -594,19 +689,30 @@ function createMixedMapLayout(seed: number): MapLayout {
       baseY,
       storyCount,
       storyHeight: building.storyHeight,
-      stairwell: null,
       ...(building.townKind ? { townKind: building.townKind } : {}),
     };
     return {
-      ...base,
-      stairwell: storyCount > 1 ? createBuildingStairwell(base, building.stairwellSide) : null,
+      ...geometry,
+      stairwell: createBuildingStairwell(geometry, building.stairwellSide),
     };
   });
-  const roofRamps = obstacles.flatMap((building) =>
+  const depotSelection = selectAmmunitionDepotBuilding(
+    generatedObstacles,
+    blueprint.hospitalBuildingId,
+    (building) =>
+      building.regionId === fixedTown.id &&
+      (building.townKind === "warehouse" || building.townKind === "factory"),
+    { x: fixedTown.centerX, y: 0, z: fixedTown.centerZ },
+  );
+  const coloredObstacles = generatedObstacles.map((building) =>
+    building.id === depotSelection.buildingId
+      ? { ...building, color: AMMUNITION_DEPOT_WALL_COLOR }
+      : building
+  );
+  const legacyRamps = coloredObstacles.flatMap((building) =>
     building.storyCount > 1 ? createInternalRamps(building, terrainHills) : []
   );
-  const { wallSegments, wallOpenings } = createWallSegments(obstacles, terrainHills);
-  const floorSlabs = obstacles.flatMap(createBuildingFloorSlabs);
+  const legacyWallGeometry = createWallSegments(coloredObstacles, terrainHills);
   const landingZones = blueprint.landingZones.map<MapPoint>((point) => ({
     name: point.name,
     position: {
@@ -623,20 +729,20 @@ function createMixedMapLayout(seed: number): MapLayout {
       z: point.z,
     },
   }));
-  const rockObstacles = createMixedRockObstacles(blueprint, terrainHills, obstacles, roofRamps, seed);
+  const rockObstacles = createMixedRockObstacles(blueprint, terrainHills, coloredObstacles, legacyRamps, seed);
   const coverObstacles = createMixedCoverObstacles(
     blueprint,
     terrainHills,
-    obstacles,
-    roofRamps,
+    coloredObstacles,
+    legacyRamps,
     rockObstacles,
     seed,
   );
   const treeTrunks = createMixedTreeTrunks(
     blueprint,
     terrainHills,
-    obstacles,
-    roofRamps,
+    coloredObstacles,
+    legacyRamps,
     rockObstacles,
     coverObstacles,
     seed,
@@ -647,47 +753,42 @@ function createMixedMapLayout(seed: number): MapLayout {
     landingZones,
     lootZoneCounts,
     terrainHills,
-    obstacles,
-    wallSegments,
-    roofRamps,
+    coloredObstacles,
+    legacyWallGeometry.wallSegments,
+    legacyRamps,
     rockObstacles,
     coverObstacles,
     treeTrunks,
     seed,
   );
-  const hospitalBuilding = obstacles.find((building) => building.id === blueprint.hospitalBuildingId);
-  if (!hospitalBuilding) throw new Error("Mixed map hospital building missing");
+  const hospitalBuildingBeforeStairwell = coloredObstacles.find(
+    (building) => building.id === blueprint.hospitalBuildingId,
+  );
+  if (!hospitalBuildingBeforeStairwell) throw new Error("Mixed map hospital building missing");
   const supplementalMedicalPoints = createMixedSupplementalMedicalPoints(
     blueprint,
     terrainHills,
-    obstacles,
-    wallSegments,
-    roofRamps,
+    coloredObstacles,
+    legacyWallGeometry.wallSegments,
+    legacyRamps,
     rockObstacles,
     coverObstacles,
     treeTrunks,
     baseLootSpawnPoints,
     seed,
   );
-  const hospitalMedicalPoints = createTownHospitalMedicalPoints(hospitalBuilding, terrainHills);
+  const hospitalMedicalPoints = createTownHospitalMedicalPoints(hospitalBuildingBeforeStairwell, terrainHills);
   const existingLootSpawnPoints = [
     ...baseLootSpawnPoints,
     ...supplementalMedicalPoints,
     ...hospitalMedicalPoints,
   ];
-  const grenadeLootSpawnPoints = createMixedGrenadeLootSpawnPoints(
-    blueprint,
-    terrainHills,
-    obstacles,
-    wallSegments,
-    roofRamps,
-    rockObstacles,
-    coverObstacles,
-    treeTrunks,
-    existingLootSpawnPoints,
-    seed,
-  );
-  const lootSpawnPoints = [...existingLootSpawnPoints, ...grenadeLootSpawnPoints];
+  const obstacles = assignStairwellsAvoidingLoot(coloredObstacles, existingLootSpawnPoints, terrainHills);
+  const roofRamps = obstacles.flatMap((building) => createInternalRamps(building, terrainHills));
+  const { wallSegments, wallOpenings } = createWallSegments(obstacles, terrainHills);
+  const floorSlabs = obstacles.flatMap(createBuildingFloorSlabs);
+  const hospitalBuilding = obstacles.find((building) => building.id === blueprint.hospitalBuildingId);
+  if (!hospitalBuilding) throw new Error("Mixed map final hospital building missing");
   const hospital: HospitalPoi = {
     name: "医院",
     buildingId: hospitalBuilding.id,
@@ -699,6 +800,31 @@ function createMixedMapLayout(seed: number): MapLayout {
     bandageLootIndex: existingLootSpawnPoints.length - 2,
     medkitLootIndex: existingLootSpawnPoints.length - 1,
   };
+  const depotBuilding = obstacles.find((building) => building.id === depotSelection.buildingId);
+  if (!depotBuilding) throw new Error("Mixed map ammunition depot building missing");
+  const depotLootPoints = createBuildingInteriorLootPoints(
+    depotBuilding,
+    terrainHills,
+    wallSegments.filter((wall) => wall.obstacleId === depotBuilding.id),
+    roofRamps.filter((ramp) => ramp.obstacleId === depotBuilding.id),
+    existingLootSpawnPoints,
+  );
+  const ammunitionDepot = createAmmunitionDepotPoi(depotBuilding, terrainHills, existingLootSpawnPoints.length);
+  const preGrenadeLootSpawnPoints = [...existingLootSpawnPoints, ...depotLootPoints];
+  const grenadeLootSpawnPoints = createMixedGrenadeLootSpawnPoints(
+    blueprint,
+    terrainHills,
+    obstacles,
+    wallSegments,
+    roofRamps,
+    rockObstacles,
+    coverObstacles,
+    treeTrunks,
+    preGrenadeLootSpawnPoints,
+    seed,
+  );
+  const grenadeLootStartIndex = preGrenadeLootSpawnPoints.length;
+  const lootSpawnPoints = [...preGrenadeLootSpawnPoints, ...grenadeLootSpawnPoints];
   return {
     mapId: "mixed",
     displayName: mapDisplayName("mixed"),
@@ -718,9 +844,10 @@ function createMixedMapLayout(seed: number): MapLayout {
     urbanRoadSegments: blueprint.urbanRoadSegments,
     skybridges: [],
     hospital,
+    ammunitionDepot,
     lootSpawnPoints,
     lootZoneCounts,
-    grenadeLootStartIndex: existingLootSpawnPoints.length,
+    grenadeLootStartIndex,
   };
 }
 
@@ -728,7 +855,7 @@ function createMixedRockObstacles(
   blueprint: MixedMapBlueprint,
   terrainHills: readonly TerrainHill[],
   buildings: readonly MapBuilding[],
-  roofRamps: readonly RoofRamp[],
+  roofRamps: readonly RampFootprint[],
   seed: number,
 ): MapRockObstacle[] {
   const rocks: MapRockObstacle[] = [];
@@ -770,7 +897,7 @@ function createMixedCoverObstacles(
   blueprint: MixedMapBlueprint,
   terrainHills: readonly TerrainHill[],
   buildings: readonly MapBuilding[],
-  roofRamps: readonly RoofRamp[],
+  roofRamps: readonly RampFootprint[],
   rocks: readonly MapRockObstacle[],
   seed: number,
 ): MapCoverObstacle[] {
@@ -811,7 +938,7 @@ function createMixedTreeTrunks(
   blueprint: MixedMapBlueprint,
   terrainHills: readonly TerrainHill[],
   buildings: readonly MapBuilding[],
-  roofRamps: readonly RoofRamp[],
+  roofRamps: readonly RampFootprint[],
   rocks: readonly MapRockObstacle[],
   covers: readonly MapCoverObstacle[],
   seed: number,
@@ -865,7 +992,7 @@ function createMixedLootSpawnPoints(
   terrainHills: readonly TerrainHill[],
   buildings: readonly MapBuilding[],
   wallSegments: readonly MapWallSegment[],
-  roofRamps: readonly RoofRamp[],
+  roofRamps: readonly RampFootprint[],
   rocks: readonly MapRockObstacle[],
   covers: readonly MapCoverObstacle[],
   trees: readonly MapTreeTrunk[],
@@ -947,7 +1074,7 @@ function mixedLootCorridorIsClear(
   start: Vector3State,
   end: Vector3State,
   obstacles: readonly MapObstacle[],
-  roofRamps: readonly RoofRamp[],
+  roofRamps: readonly RampFootprint[],
 ): boolean {
   return (
     obstacles.every((obstacle) =>
@@ -1071,7 +1198,7 @@ function createMixedSupplementalMedicalPoints(
   terrainHills: readonly TerrainHill[],
   buildings: readonly MapBuilding[],
   wallSegments: readonly MapWallSegment[],
-  roofRamps: readonly RoofRamp[],
+  roofRamps: readonly RampFootprint[],
   rocks: readonly MapRockObstacle[],
   covers: readonly MapCoverObstacle[],
   trees: readonly MapTreeTrunk[],
@@ -1184,7 +1311,7 @@ function mixedPlacementIsClear(
   candidate: MapObstacle,
   blueprint: MixedMapBlueprint,
   buildings: readonly MapBuilding[],
-  roofRamps: readonly RoofRamp[],
+  roofRamps: readonly RampFootprint[],
   fixedObstacles: readonly MapObstacle[],
   placedObstacles: readonly MapObstacle[],
   spacing: number,
@@ -1424,7 +1551,7 @@ function createTownCoverObstacles(
   roads: readonly (readonly [number, number, number, number])[],
   reservedPoints: readonly { x: number; z: number }[],
   buildings: readonly MapBuilding[],
-  ramps: readonly RoofRamp[],
+  ramps: readonly RampFootprint[],
 ): MapCoverObstacle[] {
   const random = createSeededRandom(seed ^ 0xa24baed5);
   const covers: MapCoverObstacle[] = [];
@@ -1989,7 +2116,7 @@ function createSeededBuildings(
       const terrainRange = getFootprintTerrainRange(x, z, width, depth, terrainHills);
       if (terrainRange.maximum - terrainRange.minimum > height - MINIMUM_INTERIOR_CLEARANCE) continue;
       const baseY = terrainRange.minimum - BUILDING_GROUND_EMBED;
-      const candidate: MapBuilding = {
+      const geometry: Omit<MapBuilding, "stairwell"> = {
         id: `building-${pointIndex}-${selected.length}`,
         center: { x, y: round(baseY + height / 2), z },
         width,
@@ -1999,16 +2126,23 @@ function createSeededBuildings(
         baseY: round(baseY),
         storyCount: 1,
         storyHeight: height,
-        stairwell: null,
       };
-      const candidateRamp = createRoofRamp(candidate, point, terrainHills);
+      const candidate: MapBuilding = {
+        ...geometry,
+        stairwell: createBuildingStairwell(geometry, selected.length % 2 === 0 ? -1 : 1),
+      };
+      const candidateRamp = createLegacyRampClearance(candidate, point, terrainHills);
       if (!rampInsideMap(candidateRamp) || !rampClearsTerrain(candidateRamp, terrainHills)) continue;
       if (
         allSelected.every((existing) =>
           !buildingsOverlap(candidate, existing, 10) &&
           !rampIntersectsBuilding(candidateRamp, existing, 1) &&
           !rampIntersectsBuilding(
-            createRoofRamp(existing, buildingAreas[Number(existing.id.split("-")[1])] ?? point, terrainHills),
+            createLegacyRampClearance(
+              existing,
+              buildingAreas[Number(existing.id.split("-")[1])] ?? point,
+              terrainHills,
+            ),
             candidate,
             1,
           ),
@@ -2085,6 +2219,105 @@ function selectHospitalBuilding(
   throw new Error("Not enough buildings support a hospital");
 }
 
+function selectAmmunitionDepotBuilding(
+  buildings: readonly MapBuilding[],
+  hospitalBuildingId: string,
+  preferred: (building: MapBuilding) => boolean,
+  anchor: Vector3State | undefined,
+): AmmunitionDepotSelection {
+  const eligible = buildings.filter((building) => building.id !== hospitalBuildingId);
+  const preferredBuildings = eligible.filter(preferred);
+  const pool = preferredBuildings.length > 0 ? preferredBuildings : eligible;
+  const selected = [...pool].sort((left, right) => {
+    const leftDistance = anchor
+      ? distanceSquared2d(left.center.x, left.center.z, anchor.x, anchor.z)
+      : 0;
+    const rightDistance = anchor
+      ? distanceSquared2d(right.center.x, right.center.z, anchor.x, anchor.z)
+      : 0;
+    return leftDistance - rightDistance ||
+      right.width * right.depth - left.width * left.depth ||
+      left.id.localeCompare(right.id);
+  })[0];
+  if (!selected) throw new Error("Ammunition depot building selection failed");
+  return { buildingId: selected.id };
+}
+
+function assignStairwellsAvoidingLoot(
+  buildings: readonly MapBuilding[],
+  lootPoints: readonly Vector3State[],
+  terrainHills: readonly TerrainHill[],
+): MapBuilding[] {
+  return buildings.map((building) => {
+    const preferredSide = building.stairwell.side;
+    const zOffsets = [0, -0.15, 0.15, -0.3, 0.3].map((fraction) => building.depth * fraction);
+    let footprintFailures = 0;
+    let lootFailures = 0;
+    let terrainFailures = 0;
+    for (const zOffset of zOffsets) {
+      for (const side of [preferredSide, preferredSide === -1 ? 1 : -1] as const) {
+        for (const direction of [1, -1] as const) {
+          const stairwell = {
+            ...createBuildingStairwell(building, side),
+            centerZ: round(building.center.z + zOffset),
+            direction,
+          };
+        if (
+          Math.abs(stairwell.centerZ - building.center.z) + stairwell.depth / 2 >
+          building.depth / 2 - BUILDING_WALL_THICKNESS - STAIRWELL_FLOOR_BORDER + 0.001
+        ) {
+          footprintFailures += 1;
+          continue;
+        }
+        const candidate = { ...building, stairwell };
+        const interiorLoot = lootPoints.filter((point) =>
+          Math.abs(point.x - building.center.x) < building.width / 2 &&
+          Math.abs(point.z - building.center.z) < building.depth / 2
+        );
+        if (interiorLoot.some((point) => pointInsideStairwell(point, candidate, LOOT_OBSTACLE_CLEARANCE))) {
+          lootFailures += 1;
+          continue;
+        }
+        if (!createInternalRamps(candidate, terrainHills).every((ramp) => rampClearsTerrain(ramp, terrainHills))) {
+          terrainFailures += 1;
+          continue;
+        }
+        return candidate;
+        }
+      }
+    }
+    throw new Error(
+      `Building ${building.id} cannot fit an internal stairwell ` +
+      `(footprint=${footprintFailures}, loot=${lootFailures}, terrain=${terrainFailures})`,
+    );
+  });
+}
+
+function createAmmunitionDepotPoi(
+  building: MapBuilding,
+  terrainHills: readonly TerrainHill[],
+  firstLootIndex: number,
+): AmmunitionDepotPoi {
+  return {
+    name: "弹药库",
+    buildingId: building.id,
+    position: {
+      x: building.center.x,
+      y: round(terrainHeightFromHills(building.center.x, building.center.z, terrainHills)),
+      z: building.center.z,
+    },
+    levels: Array.from({ length: building.storyCount }, (_, level) => ({
+      level,
+      lootIndices: [
+        firstLootIndex + level * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL,
+        firstLootIndex + level * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL + 1,
+        firstLootIndex + level * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL + 2,
+        firstLootIndex + level * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL + 3,
+      ],
+    })),
+  };
+}
+
 function hospitalEntranceClear(building: MapBuilding, blockers: readonly MapObstacle[]): boolean {
   const doorWidth = Math.min(4.2, building.width * 0.34);
   const entranceCenterZ = building.center.z - building.depth / 2 - 2;
@@ -2109,7 +2342,10 @@ function promoteBuilding(
   };
 }
 
-function createBuildingStairwell(building: MapBuilding, side: -1 | 1): BuildingStairwell {
+function createBuildingStairwell(
+  building: Pick<MapBuilding, "center" | "width" | "depth" | "storyHeight">,
+  side: -1 | 1,
+): BuildingStairwell {
   const width = Math.min(STAIRWELL_WIDTH, building.width - BUILDING_WALL_THICKNESS * 2 - 2);
   const runLength = Math.min(
     Math.max(8, building.storyHeight * 2.8),
@@ -2126,21 +2362,28 @@ function createBuildingStairwell(building: MapBuilding, side: -1 | 1): BuildingS
     width: round(width),
     depth: round(depth),
     side,
+    direction: 1,
   };
 }
 
 function createInternalRamps(building: MapBuilding, terrainHills: readonly TerrainHill[]): RoofRamp[] {
   const stairwell = building.stairwell;
-  if (!stairwell) return [];
   const runLength = stairwell.depth - STAIRWELL_LANDING_DEPTH * 2;
   const rampWidth = stairwell.width / 2;
   return Array.from({ length: building.storyCount }, (_, level) => {
-    const direction = level % 2 === 0 ? 1 : -1;
+    const direction = stairwell.direction * (level % 2 === 0 ? 1 : -1);
     const lane = level % 2 === 0 ? -1 : 1;
+    const centerX = stairwell.centerX + lane * rampWidth / 2;
     const startZ = stairwell.centerZ - direction * runLength / 2;
     const endZ = stairwell.centerZ + direction * runLength / 2;
     const bottomY = level === 0
-      ? terrainHeightFromHills(stairwell.centerX, startZ, terrainHills)
+      ? building.storyCount > 1
+        ? terrainHeightFromHills(stairwell.centerX, startZ, terrainHills)
+        : Math.max(
+            terrainHeightFromHills(centerX - rampWidth / 2, startZ, terrainHills),
+            terrainHeightFromHills(centerX, startZ, terrainHills),
+            terrainHeightFromHills(centerX + rampWidth / 2, startZ, terrainHills),
+          )
       : building.baseY + level * building.storyHeight + BUILDING_ROOF_CAP_HEIGHT;
     return {
       id: `ramp-${building.id}-level-${level}`,
@@ -2148,7 +2391,7 @@ function createInternalRamps(building: MapBuilding, terrainHills: readonly Terra
       kind: "interior",
       fromLevel: level,
       toLevel: level + 1,
-      centerX: round(stairwell.centerX + lane * rampWidth / 2),
+      centerX: round(centerX),
       width: round(rampWidth),
       startZ: round(startZ),
       endZ: round(endZ),
@@ -2159,18 +2402,6 @@ function createInternalRamps(building: MapBuilding, terrainHills: readonly Terra
 }
 
 function createBuildingFloorSlabs(building: MapBuilding): MapFloorSlab[] {
-  if (!building.stairwell) {
-    return [floorSlab(
-      building,
-      building.storyCount,
-      "roof",
-      "full",
-      building.center.x,
-      building.center.z,
-      building.width,
-      building.depth,
-    )];
-  }
   const minimumX = building.center.x - building.width / 2;
   const maximumX = building.center.x + building.width / 2;
   const minimumZ = building.center.z - building.depth / 2;
@@ -2186,24 +2417,22 @@ function createBuildingFloorSlabs(building: MapBuilding): MapFloorSlab[] {
     const levelMaximumX = maximumX - wallInset;
     const levelMinimumZ = minimumZ + wallInset;
     const levelMaximumZ = maximumZ - wallInset;
-    const landingDirection = (level - 1) % 2 === 0 ? 1 : -1;
-    const rampRunLength = building.stairwell?.depth
-      ? building.stairwell.depth - STAIRWELL_LANDING_DEPTH * 2
-      : 0;
-    const landingZ = (building.stairwell?.centerZ ?? building.center.z) + landingDirection * rampRunLength / 2;
+    const landingDirection = building.stairwell.direction * ((level - 1) % 2 === 0 ? 1 : -1);
+    const rampRunLength = building.stairwell.depth - STAIRWELL_LANDING_DEPTH * 2;
+    const landingZ = building.stairwell.centerZ + landingDirection * rampRunLength / 2;
     return [
       floorSlab(building, level, kind, "left", (levelMinimumX + openingMinimumX) / 2, building.center.z, openingMinimumX - levelMinimumX, levelMaximumZ - levelMinimumZ),
       floorSlab(building, level, kind, "right", (openingMaximumX + levelMaximumX) / 2, building.center.z, levelMaximumX - openingMaximumX, levelMaximumZ - levelMinimumZ),
-      floorSlab(building, level, kind, "front", building.stairwell?.centerX ?? building.center.x, (levelMinimumZ + openingMinimumZ) / 2, building.stairwell?.width ?? 0, openingMinimumZ - levelMinimumZ),
-      floorSlab(building, level, kind, "back", building.stairwell?.centerX ?? building.center.x, (openingMaximumZ + levelMaximumZ) / 2, building.stairwell?.width ?? 0, levelMaximumZ - openingMaximumZ),
+      floorSlab(building, level, kind, "front", building.stairwell.centerX, (levelMinimumZ + openingMinimumZ) / 2, building.stairwell.width, openingMinimumZ - levelMinimumZ),
+      floorSlab(building, level, kind, "back", building.stairwell.centerX, (openingMaximumZ + levelMaximumZ) / 2, building.stairwell.width, levelMaximumZ - openingMaximumZ),
       floorSlab(
         building,
         level,
         kind,
         "stair-landing",
-        building.stairwell?.centerX ?? building.center.x,
+        building.stairwell.centerX,
         landingZ,
-        building.stairwell?.width ?? 0,
+        building.stairwell.width,
         STAIRWELL_LANDING_DEPTH * 2,
       ),
     ].filter((slab) => slab.width > 0.1 && slab.depth > 0.1);
@@ -2241,31 +2470,26 @@ function buildingsOverlap(left: MapObstacle, right: MapObstacle, padding: number
   );
 }
 
-function createRoofRamp(
+function createLegacyRampClearance(
   obstacle: MapObstacle,
   poi: MapPoint,
   terrainHills: readonly TerrainHill[],
-): RoofRamp {
+): RampFootprint {
   const preferredDirection = obstacle.center.z >= poi.position.z ? 1 : -1;
-  const preferred = createRoofRampInDirection(obstacle, preferredDirection, terrainHills);
+  const preferred = createLegacyRampClearanceInDirection(obstacle, preferredDirection, terrainHills);
   if (rampInsideMap(preferred) && rampClearsTerrain(preferred, terrainHills)) return preferred;
-  const opposite = createRoofRampInDirection(obstacle, -preferredDirection, terrainHills);
+  const opposite = createLegacyRampClearanceInDirection(obstacle, -preferredDirection, terrainHills);
   return rampInsideMap(opposite) && rampClearsTerrain(opposite, terrainHills) ? opposite : preferred;
 }
 
-function createRoofRampInDirection(
+function createLegacyRampClearanceInDirection(
   obstacle: MapObstacle,
   direction: number,
   terrainHills: readonly TerrainHill[],
-): RoofRamp {
+): RampFootprint {
   const endZ = obstacle.center.z + direction * (obstacle.depth / 2 + 0.48);
   const startZ = endZ + direction * Math.max(8, obstacle.height * 2.8);
   return {
-    id: `ramp-${obstacle.id}`,
-    obstacleId: obstacle.id,
-    kind: "exterior",
-    fromLevel: 0,
-    toLevel: 1,
     centerX: obstacle.center.x,
     width: 3.6,
     startZ: round(startZ),
@@ -2275,7 +2499,7 @@ function createRoofRampInDirection(
   };
 }
 
-function rampIntersectsBuilding(ramp: RoofRamp, obstacle: MapObstacle, padding: number): boolean {
+function rampIntersectsBuilding(ramp: RampFootprint, obstacle: MapObstacle, padding: number): boolean {
   const rampMinimumZ = Math.min(ramp.startZ, ramp.endZ) - padding;
   const rampMaximumZ = Math.max(ramp.startZ, ramp.endZ) + padding;
   return (
@@ -2293,7 +2517,7 @@ function footprintInsideMap(x: number, z: number, width: number, depth: number):
 function createCoverRocks(
   terrainHills: readonly TerrainHill[],
   obstacles: readonly MapObstacle[],
-  roofRamps: readonly RoofRamp[],
+  roofRamps: readonly RampFootprint[],
   landingZones: readonly MapPoint[],
   random: () => number,
 ): MapRockObstacle[] {
@@ -2335,7 +2559,7 @@ function createCoverRocks(
 function createCoverObstacles(
   terrainHills: readonly TerrainHill[],
   obstacles: readonly MapBuilding[],
-  roofRamps: readonly RoofRamp[],
+  roofRamps: readonly RampFootprint[],
   rocks: readonly MapRockObstacle[],
   landingZones: readonly MapPoint[],
   random: () => number,
@@ -2398,7 +2622,7 @@ function createCoverObstacles(
 function createTreeTrunks(
   terrainHills: readonly TerrainHill[],
   obstacles: readonly MapBuilding[],
-  roofRamps: readonly RoofRamp[],
+  roofRamps: readonly RampFootprint[],
   rocks: readonly MapRockObstacle[],
   covers: readonly MapCoverObstacle[],
   landingZones: readonly MapPoint[],
@@ -2485,7 +2709,7 @@ function pointToSegmentDistance(
   return Math.hypot(x - (startX + deltaX * progress), z - (startZ + deltaZ * progress));
 }
 
-function rampInsideMap(ramp: RoofRamp): boolean {
+function rampInsideMap(ramp: RampFootprint): boolean {
   const limit = MAP_HALF_SIZE - MAP_GEOMETRY_MARGIN;
   return (
     Math.abs(ramp.centerX) + ramp.width / 2 <= limit &&
@@ -2494,7 +2718,7 @@ function rampInsideMap(ramp: RoofRamp): boolean {
   );
 }
 
-function rampClearsTerrain(ramp: RoofRamp, terrainHills: readonly TerrainHill[]): boolean {
+function rampClearsTerrain(ramp: RampFootprint, terrainHills: readonly TerrainHill[]): boolean {
   const horizontalLength = Math.abs(ramp.endZ - ramp.startZ);
   const sampleCount = Math.max(8, Math.ceil(horizontalLength * 2));
   for (let sample = 0; sample <= sampleCount; sample += 1) {
@@ -2708,7 +2932,7 @@ function createLootSpawnPoints(
   terrainHills: readonly TerrainHill[],
   obstacles: readonly MapObstacle[],
   wallSegments: readonly MapWallSegment[],
-  roofRamps: readonly RoofRamp[],
+  roofRamps: readonly RampFootprint[],
   rockObstacles: readonly MapRockObstacle[],
   coverObstacles: readonly MapCoverObstacle[],
   random: () => number,
@@ -2809,7 +3033,7 @@ function createHospitalMedicalPoints(
   hospital: MapBuilding,
   terrainHills: readonly TerrainHill[],
   wallSegments: readonly MapWallSegment[],
-  roofRamps: readonly RoofRamp[],
+  roofRamps: readonly RampFootprint[],
   existingLoot: readonly Vector3State[],
 ): [Vector3State, Vector3State] {
   const xOffsets = [-1, 0, 1];
@@ -2836,6 +3060,45 @@ function createHospitalMedicalPoints(
   }
   if (!selected) throw new Error(`Hospital ${hospital.id} has no clear ground-floor medical points`);
   return selected;
+}
+
+function createBuildingInteriorLootPoints(
+  building: MapBuilding,
+  terrainHills: readonly TerrainHill[],
+  wallSegments: readonly MapWallSegment[],
+  roofRamps: readonly RoofRamp[],
+  existingLoot: readonly Vector3State[],
+): Vector3State[] {
+  const xFractions = [-0.32, 0, 0.32];
+  const zFractions = [-0.3, -0.12, 0.12, 0.3];
+  return Array.from({ length: building.storyCount }, (_, level) => {
+    const candidates = xFractions.flatMap((xFraction) => zFractions.map((zFraction) => {
+      const x = round(building.center.x + building.width * xFraction);
+      const z = round(building.center.z + building.depth * zFraction);
+      const supportY = level === 0
+        ? terrainHeightFromHills(x, z, terrainHills)
+        : building.baseY + level * building.storyHeight + BUILDING_ROOF_CAP_HEIGHT;
+      return {
+        x,
+        y: round(supportY + GROUND_LOOT_POSITION_HEIGHT),
+        z,
+      };
+    })).filter((candidate) =>
+      !pointInsideStairwell(candidate, building, LOOT_OBSTACLE_CLEARANCE) &&
+      isClearLootPoint(candidate, wallSegments, roofRamps, existingLoot, [], 2.5)
+    );
+    const selected: Vector3State[] = [];
+    for (const candidate of candidates) {
+      if (selected.every((point) => Math.hypot(point.x - candidate.x, point.z - candidate.z) >= 4)) {
+        selected.push(candidate);
+      }
+      if (selected.length === AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL) return selected;
+    }
+    throw new Error(
+      `${building.id} has no clear level-${level} special loot layout ` +
+      `(${selected.length}/${AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL})`,
+    );
+  }).flat();
 }
 
 function createGrenadeLootSpawnPoints(
@@ -2897,7 +3160,7 @@ function createLootZoneCounts(random: () => number): number[] {
 function isClearLootPoint(
   candidate: Vector3State,
   wallSegments: readonly MapWallSegment[],
-  roofRamps: readonly RoofRamp[],
+  roofRamps: readonly RampFootprint[],
   selected: readonly Vector3State[],
   blockedFootprints: readonly MapObstacle[] = [],
   minimumSpacing = 12,
@@ -2909,6 +3172,13 @@ function isClearLootPoint(
     wallSegments.every((wall) => !pointInsideObstacle(candidate, wall, LOOT_OBSTACLE_CLEARANCE)) &&
     roofRamps.every((ramp) => !pointInsideRamp(candidate, ramp, LOOT_OBSTACLE_CLEARANCE)) &&
     selected.every((spawnPoint) => Math.hypot(spawnPoint.x - candidate.x, spawnPoint.z - candidate.z) >= minimumSpacing)
+  );
+}
+
+function pointInsideStairwell(point: Vector3State, building: MapBuilding, clearance: number): boolean {
+  return (
+    Math.abs(point.x - building.stairwell.centerX) <= building.stairwell.width / 2 + clearance &&
+    Math.abs(point.z - building.stairwell.centerZ) <= building.stairwell.depth / 2 + clearance
   );
 }
 
@@ -2971,7 +3241,7 @@ function pointInsideObstacle(point: Vector3State, obstacle: MapObstacle, clearan
   );
 }
 
-function pointInsideRamp(point: Vector3State, ramp: RoofRamp, clearance: number): boolean {
+function pointInsideRamp(point: Vector3State, ramp: RampFootprint, clearance: number): boolean {
   return (
     Math.abs(point.x - ramp.centerX) <= ramp.width / 2 + clearance &&
     point.z >= Math.min(ramp.startZ, ramp.endZ) - clearance &&

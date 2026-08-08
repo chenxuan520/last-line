@@ -6,7 +6,6 @@ import {
   getTerrainHeight,
   LOOT_SPAWN_POINTS,
   MAP_WALL_SEGMENTS,
-  TOTAL_LOOT_POINTS,
 } from "../../src/config/map";
 import type { MapId } from "../../src/config/maps";
 import { WEAPONS } from "../../src/config/weapons";
@@ -40,7 +39,7 @@ describe("AI loot reachability", () => {
     player.deployment = "grounded";
     const inventory = new InventorySystem();
 
-    expect(LOOT_SPAWN_POINTS).toHaveLength(TOTAL_LOOT_POINTS);
+    expect(LOOT_SPAWN_POINTS).toHaveLength(createMapLayout(0).lootSpawnPoints.length);
     LOOT_SPAWN_POINTS.forEach((point, index) => {
       const insideExpandedWall = MAP_WALL_SEGMENTS.some(
         (wall) =>
@@ -204,7 +203,7 @@ describe("AI loot reachability", () => {
       };
       const target = {
         x: point.x,
-        y: getTerrainHeight(point.x, point.z, layout) + 1.76,
+        y: point.y + 1.31,
         z: point.z,
       };
       expect(navigator.findPath(outside, target), `${seed}:${index}:path`).not.toHaveLength(0);
@@ -245,7 +244,7 @@ describe("AI loot reachability", () => {
         : nearestLandingZone(layout, point.x, point.z);
       const target = {
         x: point.x,
-        y: getTerrainHeight(point.x, point.z, layout) + 1.76,
+        y: point.y + 1.31,
         z: point.z,
       };
       expect(navigator.findPath(start, target), `${seed}:${index}:path`).not.toHaveLength(0);
@@ -265,6 +264,42 @@ describe("AI loot reachability", () => {
       expect(state.groundLoot.loot?.available, `${seed}:${index}:pickup`).toBe(false);
     }
   }, 120_000);
+
+  it("keeps the fourth ammunition-depot floor navigable and interactable", () => {
+    const layout = createMapLayout("mixed", 5);
+    const finalLevel = layout.ammunitionDepot.levels.at(-1);
+    const depot = layout.obstacles.find((building) => building.id === layout.ammunitionDepot.buildingId);
+    if (!finalLevel || !depot) throw new Error("Four-story ammunition depot missing");
+    const navigator = new GridNavigator(layout);
+    const inventory = new InventorySystem(layout);
+    const state = createBattleRoyaleState("player", TEST_CONFIG, mapSeedRandom(5), { mapId: "mixed" });
+    const player = state.actors.player;
+    if (!player) throw new Error("Four-story depot test player missing");
+    const start = outsideBuildingDoor(layout, depot.id);
+
+    expect(layout.ammunitionDepot.levels).toHaveLength(4);
+    for (const index of finalLevel.lootIndices) {
+      const point = layout.lootSpawnPoints[index];
+      if (!point) throw new Error(`Four-story depot loot missing: ${index}`);
+      const target = { x: point.x, y: point.y + 1.31, z: point.z };
+      expect(navigator.findPath(start, target), `mixed:5:${index}:path`).not.toHaveLength(0);
+
+      player.position = target;
+      player.deployment = "grounded";
+      player.inventory.backpack = [];
+      state.groundLoot = {
+        loot: {
+          id: "loot",
+          itemId: "ammo.rifle",
+          quantity: 1,
+          position: { ...point },
+          available: true,
+        },
+      };
+      inventory.processCommand(state, player.id, { ...createIdleCommand(), interact: true }, []);
+      expect(state.groundLoot.loot?.available, `mixed:5:${index}:pickup`).toBe(false);
+    }
+  });
 
   it.each([
     ["island", "island"],
@@ -409,6 +444,17 @@ function seededRandom(seed: number): () => number {
     result = Math.imul(result ^ (result >>> 15), result | 1);
     result ^= result + Math.imul(result ^ (result >>> 7), result | 61);
     return ((result ^ (result >>> 14)) >>> 0) / 4_294_967_296;
+  };
+}
+
+function mapSeedRandom(seed: number): () => number {
+  let first = true;
+  return () => {
+    if (first) {
+      first = false;
+      return seed / 4_294_967_296;
+    }
+    return 0.5;
   };
 }
 

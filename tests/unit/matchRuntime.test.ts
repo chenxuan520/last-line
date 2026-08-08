@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BATTLE_ROYALE_CONFIG } from "../../src/config/battleRoyale";
-import { getTerrainHeight } from "../../src/config/map";
+import { createMapLayout, getTerrainHeight } from "../../src/config/map";
 import { createIdleCommand } from "../../src/game/commands/ActorCommand";
 import { SIMULATION_TICK_RATE } from "../../src/game/simulationTiming";
 import { createWeaponState } from "../../src/game/state/types";
@@ -94,17 +94,19 @@ describe("MatchRuntime", () => {
     expect(restored.state).toEqual(checkpoint.state);
   });
 
-  it("accepts only complete version 7 checkpoints for explicit map identities", () => {
+  it("accepts only complete version 8 checkpoints for explicit map identities", () => {
     const runtime = new MatchRuntime({
       humanActorIds: ["human-1", "human-2"],
-      seed: 42,
-      mapId: "town",
+      seed: 0,
+      mapId: "mixed",
       startWithBandage: false,
       disableAiSnipers: true,
     });
     const checkpoint = runtime.checkpoint();
+    const checkpointLayout = createMapLayout(checkpoint.state.mapId, checkpoint.state.mapSeed);
 
-    expect(MATCH_CHECKPOINT_VERSION).toBe(7);
+    expect(MATCH_CHECKPOINT_VERSION).toBe(8);
+    expect(checkpointLayout.ammunitionDepot.levels).toHaveLength(3);
     expect(isMatchCheckpointCompatible(checkpoint)).toBe(true);
     expect(isMatchCheckpointCompatible({
       ...checkpoint,
@@ -118,7 +120,6 @@ describe("MatchRuntime", () => {
     delete missingMapIdState.mapId;
     expect(isMatchCheckpointCompatible({
       ...checkpoint,
-      version: MATCH_CHECKPOINT_VERSION - 1,
       state: missingMapIdState,
     })).toBe(false);
     const islandCheckpoint = {
@@ -172,6 +173,44 @@ describe("MatchRuntime", () => {
       ...checkpoint,
       state: { ...checkpoint.state, safeZone: { radius: 100 } },
     } as never)).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: { ...checkpoint.state, groundLoot: {} },
+    })).toBe(false);
+    const canonicalLootCount = checkpointLayout.lootSpawnPoints.length;
+    const missingCanonicalLoot = structuredClone(checkpoint.state.groundLoot);
+    delete missingCanonicalLoot[`loot-${canonicalLootCount - 1}`];
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: { ...checkpoint.state, groundLoot: missingCanonicalLoot },
+    })).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: {
+        ...checkpoint.state,
+        groundLoot: {
+          ...checkpoint.state.groundLoot,
+          "loot-250": { ...checkpoint.state.groundLoot["loot-250"], id: "loot-other" },
+        },
+      },
+    })).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      state: {
+        ...checkpoint.state,
+        groundLoot: {
+          ...checkpoint.state.groundLoot,
+          "dynamic-extra": {
+            id: "dynamic-extra",
+            itemId: "ammo.rifle",
+            quantity: 1,
+            position: { x: 0, y: 0.45, z: 0 },
+            available: true,
+            source: "drop",
+          },
+        },
+      },
+    })).toBe(true);
     expect(isMatchCheckpointCompatible({
       ...checkpoint,
       tick: undefined,
@@ -852,7 +891,9 @@ describe("MatchRuntime", () => {
 
     expect(humanActorIds).toHaveLength(10);
     expect(Object.keys(runtime.state.actors)).toHaveLength(50);
-    expect(Object.keys(runtime.state.groundLoot)).toHaveLength(260);
+    expect(Object.keys(runtime.state.groundLoot)).toHaveLength(
+      createMapLayout(runtime.state.mapId, runtime.state.mapSeed).lootSpawnPoints.length,
+    );
 
     const localActorId = humanActorIds[0] ?? "human-1";
     const fullMessage = {

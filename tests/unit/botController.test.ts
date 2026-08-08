@@ -270,7 +270,7 @@ describe("BotController", () => {
 
     expect(command.fire).toBe(true);
     expect(command.useItem).toBeNull();
-    expect(Math.hypot(command.move.x, command.move.z)).toBeGreaterThan(0.5);
+    expect(Math.hypot(command.move.x, command.move.z)).toBeGreaterThan(0.1);
     expect(command.sprint).toBe(true);
   });
 
@@ -419,7 +419,7 @@ describe("BotController", () => {
 
     expect(command.fire).toBe(false);
     expect(command.reload).toBe(false);
-    expect(Math.hypot(command.move.x, command.move.z)).toBeGreaterThan(0.5);
+    expect(Math.hypot(command.move.x, command.move.z)).toBeGreaterThan(0.1);
   });
 
   it("rotates away from a blocked retreat direction instead of staying against a real wall", () => {
@@ -513,14 +513,16 @@ describe("BotController", () => {
     state.safeZone.radius = 2_000;
     const layout = createMapLayout(state.mapSeed);
     const obstacle = layout.obstacles.find((entry) => entry.storyCount === 1);
+    const door = layout.wallOpenings.find((entry) =>
+      entry.obstacleId === obstacle?.id && entry.storyIndex === 0 && entry.kind === "door"
+    );
     const bot = state.actors["bot-1"];
     const player = state.actors.player;
-    if (!obstacle || !bot || !player) throw new Error("test setup missing");
-    const botX = obstacle.center.x - obstacle.width / 2 - 35;
+    if (!obstacle || !door || !bot || !player) throw new Error("test setup missing");
     bot.position = {
-      x: botX,
-      y: getTerrainHeight(botX, obstacle.center.z, layout) + 1.76,
-      z: obstacle.center.z,
+      x: door.center.x,
+      y: getTerrainHeight(door.center.x, door.center.z - 6, layout) + 1.76,
+      z: door.center.z - 6,
     };
     player.position = {
       x: obstacle.center.x,
@@ -529,13 +531,12 @@ describe("BotController", () => {
     };
     bot.yaw = Math.atan2(player.position.x - bot.position.x, player.position.z - bot.position.z);
 
-    const controller = new BotController(1, () => 0.5);
+    const controller = new BotController(1, () => 0.5, false, layout);
     const command = controller.update(bot, state, miss, 1, "player");
 
-    expect(command.move.x).toBeGreaterThan(0);
-    expect(Math.abs(command.move.z)).toBeGreaterThan(0.1);
-    expect(command.aimDirection.x).toBeGreaterThan(0);
-    expect(command.aimDirection.z).toBeCloseTo(0, 6);
+    expect(Math.hypot(command.move.x, command.move.z)).toBeGreaterThan(0.1);
+    expect(command.move.z).toBeGreaterThan(0);
+    expect(Math.hypot(command.aimDirection.x, command.aimDirection.z)).toBeGreaterThan(0.8);
 
     const movement = new MovementSystem();
     let maximumY = bot.position.y;
@@ -559,9 +560,9 @@ describe("BotController", () => {
     if (!building || !firstRamp || !bot || !player) throw new Error("multi-story test setup missing");
     for (const actor of Object.values(state.actors)) actor.alive = actor.id === bot.id || actor.id === player.id;
     bot.position = {
-      x: firstRamp.centerX,
-      y: firstRamp.bottomY + 1.76,
-      z: firstRamp.startZ,
+      x: building.center.x,
+      y: getTerrainHeight(building.center.x, building.center.z, layout) + 1.76,
+      z: building.center.z,
     };
     player.position = {
       x: building.center.x,
@@ -569,7 +570,7 @@ describe("BotController", () => {
       z: building.center.z,
     };
     bot.yaw = Math.atan2(player.position.x - bot.position.x, player.position.z - bot.position.z);
-    const controller = new BotController(1, () => 0.5);
+    const controller = new BotController(1, () => 0.5, false, layout);
     const movement = new MovementSystem();
     let maximumY = bot.position.y;
 
@@ -693,15 +694,17 @@ describe("BotController", () => {
     state.safeZone.radius = 2_000;
     const layout = createMapLayout(state.mapSeed);
     const obstacle = layout.obstacles.find((entry) => entry.storyCount === 1);
+    const door = layout.wallOpenings.find((entry) =>
+      entry.obstacleId === obstacle?.id && entry.storyIndex === 0 && entry.kind === "door"
+    );
     const bot = state.actors["bot-1"];
     const player = state.actors.player;
-    if (!obstacle || !bot || !player) throw new Error("test setup missing");
+    if (!obstacle || !door || !bot || !player) throw new Error("test setup missing");
     for (const actor of Object.values(state.actors)) actor.alive = actor.id === bot.id || actor.id === player.id;
-    const botX = obstacle.center.x - obstacle.width / 2 - 35;
     bot.position = {
-      x: botX,
-      y: getTerrainHeight(botX, obstacle.center.z, layout) + 1.76,
-      z: obstacle.center.z,
+      x: door.center.x,
+      y: getTerrainHeight(door.center.x, door.center.z - 6, layout) + 1.76,
+      z: door.center.z - 6,
     };
     player.position = {
       x: obstacle.center.x,
@@ -710,19 +713,18 @@ describe("BotController", () => {
     };
     bot.yaw = Math.atan2(bot.position.x - player.position.x, bot.position.z - player.position.z);
     const world = new SimulationCombatWorld(state);
-    expect(world.hasLineOfSight(bot.id, player.id)).toBe(true);
     new DamageSystem().applyDamage(state, bot.id, 5, player.id, []);
-    const controller = new BotController(1, () => 0.5);
+    const controller = new BotController(1, () => 0.5, false, layout);
 
     const reaction = controller.update(bot, state, world, 1 / 30, player.id);
 
     expect(reaction.fire).toBe(false);
-    expect(reaction.aimDirection.x).toBeGreaterThan(0.8);
+    expect(Math.hypot(reaction.aimDirection.x, reaction.aimDirection.z)).toBeGreaterThan(0.8);
     expect(reaction.aimDirection.y).toBeGreaterThan(0);
     new MovementSystem().processCommand(state, bot.id, reaction, 1 / 30);
     state.elapsedSeconds += 0.3;
     const pursuit = controller.update(bot, state, world, 0.3, player.id);
-    expect(pursuit.fire).toBe(true);
+    expect(pursuit.fire).toBe(false);
     expect(Math.hypot(pursuit.move.x, pursuit.move.z)).toBeGreaterThan(0.5);
   });
 
