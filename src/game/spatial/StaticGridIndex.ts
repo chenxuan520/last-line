@@ -47,7 +47,13 @@ export class StaticGridIndex<T> {
     return this.finishQuery();
   }
 
-  public querySegment(startX: number, startZ: number, endX: number, endZ: number): readonly T[] {
+  public querySegment(
+    startX: number,
+    startZ: number,
+    endX: number,
+    endZ: number,
+    padding = 0,
+  ): readonly T[] {
     this.beginQuery();
     let cellX = this.cell(startX);
     let cellZ = this.cell(startZ);
@@ -64,13 +70,14 @@ export class StaticGridIndex<T> {
     let nextTimeX = stepX === 0 ? Number.POSITIVE_INFINITY : (boundaryX - startX) / deltaX;
     let nextTimeZ = stepZ === 0 ? Number.POSITIVE_INFINITY : (boundaryZ - startZ) / deltaZ;
     const maximumCells = Math.abs(endCellX - cellX) + Math.abs(endCellZ - cellZ) + 3;
+    const paddingCells = Math.max(0, Math.ceil(padding / this.cellSize));
 
     for (let visitedCells = 0; visitedCells < maximumCells; visitedCells += 1) {
-      this.addCell(cellX, cellZ);
+      this.addCellNeighborhood(cellX, cellZ, paddingCells);
       if (cellX === endCellX && cellZ === endCellZ) break;
       if (Math.abs(nextTimeX - nextTimeZ) <= GRID_EPSILON) {
-        this.addCell(cellX + stepX, cellZ);
-        this.addCell(cellX, cellZ + stepZ);
+        this.addCellNeighborhood(cellX + stepX, cellZ, paddingCells);
+        this.addCellNeighborhood(cellX, cellZ + stepZ, paddingCells);
         cellX += stepX;
         cellZ += stepZ;
         nextTimeX += timeDeltaX;
@@ -84,6 +91,14 @@ export class StaticGridIndex<T> {
       }
     }
     return this.finishQuery();
+  }
+
+  private addCellNeighborhood(cellX: number, cellZ: number, paddingCells: number): void {
+    for (let offsetX = -paddingCells; offsetX <= paddingCells; offsetX += 1) {
+      for (let offsetZ = -paddingCells; offsetZ <= paddingCells; offsetZ += 1) {
+        this.addCell(cellX + offsetX, cellZ + offsetZ);
+      }
+    }
   }
 
   private beginQuery(): void {

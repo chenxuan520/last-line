@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { GridNavigator } from "../../src/ai/navigation/GridNavigator";
 import {
+  ADDITIONAL_GRENADE_LOOT_POINTS,
   AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL,
   AMMUNITION_DEPOT_WALL_COLOR,
   BUILDING_ROOF_CAP_HEIGHT,
@@ -14,6 +15,7 @@ import {
   LANDING_ZONE_COUNT,
   MAP_POINT_COUNT,
   MAP_HALF_SIZE,
+  PRE_GRENADE_LOOT_POINTS,
   TREE_TRUNK_COUNT,
 } from "../../src/config/map";
 import type { MapId } from "../../src/config/maps";
@@ -54,12 +56,18 @@ describe("map layouts", () => {
 
       expect(layout.lootSpawnPoints).toHaveLength(
         GLOBAL_LOOT_POINTS +
-        layout.ammunitionDepot.levels.length * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL,
+        layout.ammunitionDepot.levels.length * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL +
+        ADDITIONAL_GRENADE_LOOT_POINTS,
       );
       expect(hospital.storyCount).toBe(2);
       expect(hospital.color).toBe(HOSPITAL_WALL_COLOR);
       expect(layout.hospital.bandageLootIndex).toBe(GLOBAL_LOOT_POINTS - 2);
       expect(layout.hospital.medkitLootIndex).toBe(GLOBAL_LOOT_POINTS - 1);
+      expect(layout.grenadeLootStartIndex).toBe(
+        PRE_GRENADE_LOOT_POINTS +
+        layout.ammunitionDepot.levels.length * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL,
+      );
+      expect(layout.lootSpawnPoints.slice(layout.grenadeLootStartIndex)).toHaveLength(10);
       for (const point of [bandagePoint, medkitPoint]) {
         expect(Math.abs(point.x - hospital.center.x)).toBeLessThan(hospital.width / 2);
         expect(Math.abs(point.z - hospital.center.z)).toBeLessThan(hospital.depth / 2);
@@ -102,7 +110,9 @@ describe("map layouts", () => {
     expect(layout.ammunitionDepot.buildingId).not.toBe(layout.hospital.buildingId);
     expect(depot.color).toBe(AMMUNITION_DEPOT_WALL_COLOR);
     expect(layout.lootSpawnPoints).toHaveLength(
-      GLOBAL_LOOT_POINTS + depot.storyCount * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL,
+      GLOBAL_LOOT_POINTS +
+      depot.storyCount * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL +
+      ADDITIONAL_GRENADE_LOOT_POINTS,
     );
     expect(depotLootIndices).toEqual(
       Array.from(
@@ -166,7 +176,9 @@ describe("map layouts", () => {
       expect(depot.storyCount).toBe(expectedStories);
       expect(layout.ammunitionDepot.levels).toHaveLength(expectedStories);
       expect(layout.lootSpawnPoints).toHaveLength(
-        GLOBAL_LOOT_POINTS + expectedStories * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL,
+        GLOBAL_LOOT_POINTS +
+        expectedStories * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL +
+        ADDITIONAL_GRENADE_LOOT_POINTS,
       );
       for (const [level, record] of layout.ammunitionDepot.levels.entries()) {
         expect(record.level).toBe(level);
@@ -520,7 +532,8 @@ describe("map layouts", () => {
 
     expect(layout.lootSpawnPoints).toHaveLength(
       GLOBAL_LOOT_POINTS +
-      layout.ammunitionDepot.levels.length * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL,
+      layout.ammunitionDepot.levels.length * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL +
+      ADDITIONAL_GRENADE_LOOT_POINTS,
     );
     expect(layout.lootZoneCounts).toHaveLength(LANDING_ZONE_COUNT);
     expect(new Set(layout.lootZoneCounts).size).toBeGreaterThanOrEqual(8);
@@ -595,6 +608,29 @@ describe("map layouts", () => {
       }
     }
   }, 60_000);
+
+  it("appends ten deterministic grenade points after global and ammunition-depot loot", () => {
+    for (const [mapId, seed] of [["island", 86_753_009], ["town", 42], ["mixed", 42]] as const) {
+      const layout = createMapLayout(mapId, seed);
+      const preGrenadePoints = layout.lootSpawnPoints.slice(0, layout.grenadeLootStartIndex);
+      const grenadePoints = layout.lootSpawnPoints.slice(layout.grenadeLootStartIndex);
+
+      expect(layout.grenadeLootStartIndex).toBe(
+        PRE_GRENADE_LOOT_POINTS +
+        layout.ammunitionDepot.levels.length * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL,
+      );
+      expect(grenadePoints).toHaveLength(10);
+      expect(layout.hospital.bandageLootIndex).toBeLessThan(layout.grenadeLootStartIndex);
+      expect(layout.hospital.medkitLootIndex).toBeLessThan(layout.grenadeLootStartIndex);
+      expect(createMapLayout(mapId, seed).lootSpawnPoints).toEqual(layout.lootSpawnPoints);
+      for (const point of grenadePoints) {
+        expect(point.y).toBeCloseTo(getTerrainHeight(point.x, point.z, layout) + 0.45, 3);
+        expect(Math.min(...preGrenadePoints.map((existing) =>
+          Math.hypot(point.x - existing.x, point.z - existing.z)
+        ))).toBeGreaterThanOrEqual(11.9);
+      }
+    }
+  }, 30_000);
 
   it("adds scattered wilderness houses and loot outside named POI clusters", () => {
     const layout = createMapLayout(20_260_718);

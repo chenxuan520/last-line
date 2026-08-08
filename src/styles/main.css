@@ -2050,6 +2050,39 @@ h1 {
   bottom: max(22px, env(safe-area-inset-bottom));
 }
 
+.touch-grenade {
+  right: max(166px, calc(env(safe-area-inset-right) + 148px));
+  bottom: max(82px, calc(env(safe-area-inset-bottom) + 60px));
+}
+
+.touch-grenade img {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.touch-grenade b {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  display: grid;
+  min-width: 18px;
+  height: 18px;
+  place-items: center;
+  padding: 0 3px;
+  border: 1px solid rgb(224 233 207 / 42%);
+  border-radius: 9px;
+  background: rgb(7 12 9 / 86%);
+  color: #f4f0ce;
+  font: 800 10px/1 var(--tactical-font);
+  pointer-events: none;
+}
+
+.touch-grenade:disabled {
+  opacity: 0.36;
+}
+
 .touch-bandage {
   right: max(226px, calc(env(safe-area-inset-right) + 208px));
   bottom: max(22px, env(safe-area-inset-bottom));

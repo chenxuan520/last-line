@@ -51,6 +51,21 @@ describe("multiplayer protocol", () => {
     })?.dropItem).toBe(dropItem);
   });
 
+  it("accepts only bounded grenade throw modes", () => {
+    expect(sanitizeActorCommand({
+      ...createIdleCommand(),
+      throwGrenade: "high",
+    })?.throwGrenade).toBe("high");
+    expect(sanitizeActorCommand({
+      ...createIdleCommand(),
+      throwGrenade: "low",
+    })?.throwGrenade).toBe("low");
+    expect(sanitizeActorCommand({
+      ...createIdleCommand(),
+      throwGrenade: "invalid",
+    })).toBeNull();
+  });
+
   it("accepts a bounded server render tick while remaining compatible with older input", () => {
     expect(parseClientMessage({
       type: "match.input",

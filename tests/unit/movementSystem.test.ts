@@ -476,6 +476,8 @@ function createState(x: number, z: number, y = GROUND_HEIGHT): MatchState {
     elapsedSeconds: 0,
     actors: { actor },
     groundLoot: {},
+    activeGrenades: {},
+    nextGrenadeSequence: 1,
     safeZone: {
       center: { x: 0, y: 0, z: 0 },
       radius: MAP_HALF_SIZE,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { GridNavigator } from "../../src/ai/navigation/GridNavigator";
 import {
+  ADDITIONAL_GRENADE_LOOT_POINTS,
   AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL,
   BUILDING_ROOF_CAP_HEIGHT,
   createMapLayout,
@@ -48,7 +49,8 @@ describe("town map layout", () => {
     expect(first.roadSegments.length).toBeLessThanOrEqual(170);
     expect(first.lootSpawnPoints).toHaveLength(
       GLOBAL_LOOT_POINTS +
-      first.ammunitionDepot.levels.length * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL,
+      first.ammunitionDepot.levels.length * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL +
+      ADDITIONAL_GRENADE_LOOT_POINTS,
     );
     expect(first.treeTrunks).toHaveLength(96);
     expect(first.coverObstacles).toHaveLength(168);
@@ -694,6 +696,8 @@ function matchState(seed: number, ...actors: ReturnType<typeof createActorState>
     elapsedSeconds: 0,
     actors: Object.fromEntries(actors.map((actor) => [actor.id, actor])),
     groundLoot: {},
+    activeGrenades: {},
+    nextGrenadeSequence: 1,
     safeZone: {
       center: { x: 0, y: 0, z: 0 },
       radius: 1_000,

@@ -11,7 +11,9 @@ import {
   createMapLayout,
   GLOBAL_LOOT_POINTS,
   MAP_HALF_SIZE,
+  PRE_GRENADE_LOOT_POINTS,
 } from "../../src/config/map";
+import { FRAG_GRENADE_ITEM_ID } from "../../src/config/throwables";
 import { WEAPONS } from "../../src/config/weapons";
 import { BattleRoyaleMode, createBattleRoyaleState } from "../../src/game/modes/BattleRoyaleMode";
 import { createIdleCommand } from "../../src/game/commands/ActorCommand";
@@ -103,6 +105,11 @@ describe("BattleRoyaleMode", () => {
     const supplemental = Object.values(state.groundLoot).slice(BASE_LOOT_POINTS, GLOBAL_LOOT_POINTS);
     expect(supplemental.filter((loot) => loot.itemId === "bandage")).toHaveLength(5);
     expect(supplemental.filter((loot) => loot.itemId === "medkit")).toHaveLength(5);
+    const supplementalGrenades = Object.values(state.groundLoot).slice(layout.grenadeLootStartIndex);
+    expect(supplementalGrenades).toHaveLength(10);
+    expect(supplementalGrenades.every((loot) =>
+      loot.itemId === FRAG_GRENADE_ITEM_ID && loot.quantity === 2
+    )).toBe(true);
     expect(itemIds).toEqual(
       new Set([
         "weapon.rifle",
@@ -119,6 +126,7 @@ describe("BattleRoyaleMode", () => {
         "helmet.2",
         "bandage",
         "medkit",
+        FRAG_GRENADE_ITEM_ID,
       ]),
     );
     expect(() => JSON.parse(JSON.stringify(state)) as unknown).not.toThrow();
@@ -155,6 +163,42 @@ describe("BattleRoyaleMode", () => {
       });
     }
   });
+
+  it.each(["island", "town", "mixed"] as const)(
+    "keeps %s loot partitioned as 240 base, 10 medical, per-floor depot ammo, and 10 grenade records",
+    (mapId) => {
+      const state = createBattleRoyaleState(
+        "player",
+        FAST_BATTLE_ROYALE_CONFIG,
+        () => 0.5,
+        { mapId },
+      );
+      const layout = createMapLayout(mapId, state.mapSeed);
+      const loot = Object.values(state.groundLoot);
+
+      expect(layout.lootZoneCounts.reduce((total, count) => total + count, 0)).toBe(BASE_LOOT_POINTS);
+      expect(layout.grenadeLootStartIndex).toBe(
+        PRE_GRENADE_LOOT_POINTS + layout.ammunitionDepot.levels.length * AMMUNITION_DEPOT_AMMO.length,
+      );
+      expect(loot).toHaveLength(layout.lootSpawnPoints.length);
+      const medical = loot.slice(BASE_LOOT_POINTS, PRE_GRENADE_LOOT_POINTS);
+      expect(medical).toHaveLength(10);
+      expect(medical.filter((entry) => entry.itemId === "bandage")).toHaveLength(5);
+      expect(medical.filter((entry) => entry.itemId === "medkit")).toHaveLength(5);
+      const depotAmmunition = loot.slice(PRE_GRENADE_LOOT_POINTS, layout.grenadeLootStartIndex);
+      expect(depotAmmunition.map((entry) => [entry.itemId, entry.quantity])).toEqual(
+        layout.ammunitionDepot.levels.flatMap(() =>
+          AMMUNITION_DEPOT_AMMO.map((entry) => [entry.itemId, entry.quantity])
+        ),
+      );
+      const grenades = loot.slice(layout.grenadeLootStartIndex);
+      expect(grenades).toHaveLength(10);
+      expect(grenades.every((entry) =>
+        entry.itemId === FRAG_GRENADE_ITEM_ID && entry.quantity === 2
+      )).toBe(true);
+    },
+    30_000,
+  );
 
   it("can disable the shared starter bandage for both player and AI", () => {
     const state = createBattleRoyaleState("player", damageConfig, () => 0.5, { startWithBandage: false });
@@ -211,11 +255,16 @@ describe("BattleRoyaleMode", () => {
     expect(additionalMedical.every((entry) => lootCategory(entry.itemId) === "medical")).toBe(true);
     expect(additionalMedical.filter((entry) => entry.itemId === "bandage")).toHaveLength(5);
     expect(additionalMedical.filter((entry) => entry.itemId === "medkit")).toHaveLength(5);
-    expect(loot.slice(GLOBAL_LOOT_POINTS).map((entry) => [entry.itemId, entry.quantity])).toEqual(
+    expect(loot.slice(GLOBAL_LOOT_POINTS, layout.grenadeLootStartIndex).map((entry) => [entry.itemId, entry.quantity])).toEqual(
       layout.ammunitionDepot.levels.flatMap(() =>
         AMMUNITION_DEPOT_AMMO.map((entry) => [entry.itemId, entry.quantity])
       ),
     );
+    const additionalGrenades = loot.slice(layout.grenadeLootStartIndex);
+    expect(additionalGrenades).toHaveLength(10);
+    expect(additionalGrenades.every((entry) =>
+      entry.itemId === FRAG_GRENADE_ITEM_ID && entry.quantity === 2
+    )).toBe(true);
   });
 
   it("reproduces loot for the same seed and varies it for a different seed", () => {
@@ -459,7 +508,7 @@ describe("BattleRoyaleMode", () => {
   });
 });
 
-function lootCategory(itemId: string): "weapon" | "ammo" | "medical" | "equipment" {
+function lootCategory(itemId: string): "weapon" | "ammo" | "medical" | "equipment" | "throwable" {
   const kind = ITEMS[itemId]?.kind;
   if (!kind) {
     throw new Error(`unknown item: ${itemId}`);

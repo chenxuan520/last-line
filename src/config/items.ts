@@ -1,4 +1,6 @@
-export type ItemKind = "weapon" | "ammo" | "medical" | "armor" | "helmet";
+import { FRAG_GRENADE_ITEM_ID } from "./throwables";
+
+export type ItemKind = "weapon" | "ammo" | "medical" | "armor" | "helmet" | "throwable";
 
 export interface ItemConfig {
   id: string;
@@ -22,6 +24,12 @@ export const ITEMS: Readonly<Record<string, ItemConfig>> = {
   "ammo.sniper": { id: "ammo.sniper", label: "狙击弹", kind: "ammo", maxStack: 40 },
   bandage: { id: "bandage", label: "绷带", kind: "medical", maxStack: 5, healAmount: 18, useSeconds: 2.5 },
   medkit: { id: "medkit", label: "急救包", kind: "medical", maxStack: 2, healAmount: 65, useSeconds: 5 },
+  [FRAG_GRENADE_ITEM_ID]: {
+    id: FRAG_GRENADE_ITEM_ID,
+    label: "破片手雷",
+    kind: "throwable",
+    maxStack: 3,
+  },
   "armor.1": { id: "armor.1", label: "一级护甲", kind: "armor", maxStack: 1, level: 1 },
   "armor.2": { id: "armor.2", label: "二级护甲", kind: "armor", maxStack: 1, level: 2 },
   "helmet.1": { id: "helmet.1", label: "一级头盔", kind: "helmet", maxStack: 1, level: 1 },

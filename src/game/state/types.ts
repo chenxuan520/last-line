@@ -68,6 +68,15 @@ export interface GroundLootState {
   source?: "spawn" | "drop" | "death";
 }
 
+export interface ActiveGrenadeState {
+  id: EntityId;
+  ownerId: EntityId;
+  aiControlled: boolean;
+  position: Vector3State;
+  velocity: Vector3State;
+  fuseSeconds: number;
+}
+
 export interface SafeZoneState {
   center: Vector3State;
   radius: number;
@@ -100,6 +109,8 @@ export interface MatchState {
   mapSeed: number;
   actors: Record<EntityId, ActorState>;
   groundLoot: Record<EntityId, GroundLootState>;
+  activeGrenades: Record<EntityId, ActiveGrenadeState>;
+  nextGrenadeSequence: number;
   safeZone: SafeZoneState;
   flight: FlightState;
   result: MatchResult | null;
@@ -124,6 +135,14 @@ export type GameEvent =
   | { type: "reload-completed"; actorId: EntityId }
   | { type: "item-picked"; actorId: EntityId; lootId: EntityId; itemId: string; quantity: number }
   | { type: "item-dropped"; actorId: EntityId; lootId: EntityId; itemId: string; quantity: number }
+  | {
+      type: "grenade-thrown";
+      actorId: EntityId;
+      grenadeId: EntityId;
+      position: Vector3State;
+      velocity: Vector3State;
+    }
+  | { type: "grenade-exploded"; grenadeId: EntityId; actorId: EntityId; position: Vector3State }
   | { type: "weapon-switched"; actorId: EntityId; slot: WeaponSlot }
   | { type: "healing-started"; actorId: EntityId; itemId: string }
   | { type: "healing-completed"; actorId: EntityId; itemId: string }

@@ -76,6 +76,27 @@ describe("LagCompensatedCombatWorld", () => {
     });
   });
 
+  it("forwards throwable collision and explosion obstruction to the current map", () => {
+    const wall = MAP_WALL_SEGMENTS[0];
+    if (!wall) throw new Error("test wall missing");
+    const state = createState(createActorState("shooter", "player", { x: 0, y: 1.76, z: 0 }));
+    const current = new SimulationCombatWorld(state);
+    const world = new LagCompensatedCombatWorld(state, current);
+    const origin = {
+      x: wall.center.x,
+      y: wall.center.y,
+      z: wall.center.z - wall.depth / 2 - 2,
+    };
+    const target = {
+      x: wall.center.x,
+      y: wall.center.y,
+      z: wall.center.z + wall.depth / 2 + 2,
+    };
+
+    expect(world.traceThrowable(origin, { x: 0, y: 0, z: 4 }, 0.18)).not.toBeNull();
+    expect(world.hasExplosionLineOfSight(origin, target)).toBe(false);
+  });
+
   it("bounds render ticks to sent and monotonic connection history", () => {
     expect(boundClientRenderTick(12, 10, 8)).toBe(10);
     expect(boundClientRenderTick(5, 10, 8)).toBe(8);
@@ -114,6 +135,8 @@ function createState(...actors: ReturnType<typeof createActorState>[]): MatchSta
     mapSeed: 0,
     actors: Object.fromEntries(actors.map((actor) => [actor.id, actor])),
     groundLoot: {},
+    activeGrenades: {},
+    nextGrenadeSequence: 1,
     safeZone: {
       center: { x: 0, y: 0, z: 0 },
       radius: 1_000,

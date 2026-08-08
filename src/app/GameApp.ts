@@ -39,7 +39,6 @@ import { MultiplayerSession } from "./MultiplayerSession";
 
 const SETTINGS_KEY = "last-line.settings.v1";
 const MULTIPLAYER_NAME_KEY = "last-line.multiplayer-name.v1";
-
 export class GameApp {
   private readonly engine: Engine;
   private assets: AssetCatalog | null = null;
@@ -62,6 +61,7 @@ export class GameApp {
   public async initialize(): Promise<void> {
     this.renderLoading(0);
     try {
+      if (__SINGLE_PLAYER_DEBUG__) await import("../styles/debug.css");
       this.assets = await AssetCatalog.load("./assets/asset-manifest.json", (progress) => this.renderLoading(progress));
       this.renderMenu();
     } catch (error) {
@@ -154,6 +154,7 @@ export class GameApp {
       <section class="menu-panel" aria-labelledby="game-title">
         <div class="menu-index"><span>OPERATION</span><b>LL-01</b></div>
         <p class="eyebrow">${BATTLE_ROYALE_CONFIG.participantCount} 人 BATTLE ROYALE</p>
+        ${__SINGLE_PLAYER_DEBUG__ ? '<p class="debug-menu-badge">LOCAL DEBUG · 单机无敌与物资面板已启用</p>' : ""}
         <h1 id="game-title"><span class="sr-only">最后防线</span><img class="game-logo" src="${logo.url}" alt="" /></h1>
         <p class="menu-description">穿越随机航线空降${MAP_DISPLAY_NAMES[this.settings.mapId]}，搜集武器和补给，在不断收缩的安全区内成为最后一名幸存者。</p>
         <div class="settings-grid" aria-label="游戏设置">
@@ -200,12 +201,12 @@ export class GameApp {
             <article>
               <span class="about-index">03 // CONTROLS</span>
               <h3>桌面操作</h3>
-              <dl><div><dt>WASD / Shift</dt><dd>移动 / 冲刺</dd></div><div><dt>鼠标</dt><dd>视角 / 开火 / 瞄准</dd></div><div><dt>Space / F / R</dt><dd>跳跃 / 拾取 / 换弹</dd></div><div><dt>1·2 / 4–9 / G</dt><dd>切枪 / 丢背包物品 / 丢当前武器</dd></div><div><dt>Q / H</dt><dd>绷带 / 急救包</dd></div></dl>
+              <dl><div><dt>WASD / Shift</dt><dd>移动 / 冲刺</dd></div><div><dt>鼠标</dt><dd>视角 / 开火 / 瞄准；持雷时按住预览、松开投掷</dd></div><div><dt>Space / F / R</dt><dd>跳跃 / 拾取 / 换弹</dd></div><div><dt>1·2·3 / 4–9 / G</dt><dd>切枪 / 手雷 / 丢背包物品 / 丢当前武器</dd></div><div><dt>Q / H</dt><dd>绷带 / 急救包</dd></div></dl>
             </article>
             <article>
               <span class="about-index">04 // MOBILE</span>
               <h3>手机横屏</h3>
-              <p>左侧摇杆移动，右侧滑动视角；左右双开火键支持两指操作，右侧开火时可继续拖动瞄准。屏幕按钮还支持瞄准、跳跃、拾取、换弹、切枪、治疗和暂停。</p>
+              <p>左侧摇杆移动，右侧滑动视角；左右双开火键支持两指操作，右侧开火时可继续拖动瞄准。手雷按钮显示数量，选中后按住开火键拖动瞄准、松手投掷；切枪可取消。屏幕按钮还支持瞄准、跳跃、拾取、换弹、治疗和暂停。</p>
               <small>建议使用最新版 Chrome 或 Edge，并允许全屏横屏以获得完整操作空间。</small>
             </article>
           </div>

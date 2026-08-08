@@ -1,5 +1,6 @@
 import { env, evictDurableObject, reset, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
+import { BATTLE_ROYALE_CONFIG } from "../../src/config/battleRoyale";
 import { createMapLayout } from "../../src/config/map";
 import { MATCH_CHECKPOINT_VERSION, MatchRuntime } from "../../src/server/MatchRuntime";
 import worker from "../../worker/index";
@@ -441,7 +442,7 @@ describe("admin control plane", () => {
     expect(remaining).toBeUndefined();
   }, 60_000);
 
-  it("expires a running room restored from a version 6 checkpoint without state", async () => {
+  it("expires a running room restored from a previous-version checkpoint without state", async () => {
     const guest = await publicPost("/v1/guests", { displayName: "Corrupt Legacy" });
     const admission = await publicPost("/v1/matchmaking/quick", guest);
     const secondGuest = await publicPost("/v1/guests", { displayName: "Corrupt Legacy Two" });
@@ -827,6 +828,163 @@ describe("admin control plane", () => {
     expect(remaining).toBeUndefined();
     expect(checkpoint).toBeUndefined();
   }, 60_000);
+
+  it.each([
+    {
+      name: "grenade backpack stack above the configured limit",
+      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => {
+        const actors = structuredClone(checkpoint.state.actors);
+        const actor = actors["human-1"];
+        if (!actor) throw new Error("actor fixture missing");
+        actor.inventory.backpack = [{ itemId: "grenade.frag", quantity: 4 }];
+        return {
+          ...checkpoint,
+          state: { ...checkpoint.state, actors },
+        };
+      },
+    },
+    {
+      name: "grenade fuse above the configured duration",
+      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => ({
+        ...checkpoint,
+        state: {
+          ...checkpoint.state,
+          activeGrenades: {
+            "grenade-1": {
+              id: "grenade-1",
+              ownerId: "human-1",
+              aiControlled: false,
+              position: { x: 0, y: 1, z: 0 },
+              velocity: { x: 0, y: 0, z: 0 },
+              fuseSeconds: 1e9,
+            },
+          },
+          nextGrenadeSequence: 2,
+        },
+      }),
+    },
+    {
+      name: "negative actor health",
+      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => {
+        const actors = structuredClone(checkpoint.state.actors);
+        const actor = actors["human-1"];
+        if (!actor) throw new Error("actor fixture missing");
+        actor.health = -1;
+        return {
+          ...checkpoint,
+          state: { ...checkpoint.state, actors },
+        };
+      },
+    },
+    {
+      name: "missing grenade state",
+      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => ({
+        ...checkpoint,
+        state: { ...checkpoint.state, activeGrenades: undefined },
+      }),
+    },
+    {
+      name: "prematurely closed safe zone",
+      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => ({
+        ...checkpoint,
+        state: {
+          ...checkpoint.state,
+          phase: "combat" as const,
+          actors: groundedActors(checkpoint.state.actors),
+          safeZone: {
+            ...checkpoint.state.safeZone,
+            stageIndex: 0,
+            status: "closed" as const,
+            secondsRemaining: 0,
+          },
+        },
+      }),
+    },
+    {
+      name: "final-stage closed large safe zone",
+      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => ({
+        ...checkpoint,
+        state: {
+          ...checkpoint.state,
+          phase: "combat" as const,
+          actors: groundedActors(checkpoint.state.actors),
+          safeZone: {
+            ...checkpoint.state.safeZone,
+            stageIndex: BATTLE_ROYALE_CONFIG.safeZoneStages.length - 1,
+            status: "closed" as const,
+            secondsRemaining: 0,
+          },
+        },
+      }),
+    },
+    {
+      name: "final-stage closed before minimum timeline",
+      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => {
+        const finalStage = BATTLE_ROYALE_CONFIG.safeZoneStages.at(-1);
+        if (!finalStage) throw new Error("final safe-zone stage missing");
+        return {
+          ...checkpoint,
+          state: {
+            ...checkpoint.state,
+            phase: "combat" as const,
+            actors: groundedActors(checkpoint.state.actors),
+            safeZone: {
+              ...checkpoint.state.safeZone,
+              center: { ...checkpoint.state.safeZone.targetCenter },
+              radius: finalStage.radius,
+              targetRadius: finalStage.radius,
+              stageIndex: BATTLE_ROYALE_CONFIG.safeZoneStages.length - 1,
+              status: "closed" as const,
+              secondsRemaining: 0,
+              damagePerSecond: finalStage.damagePerSecond,
+            },
+          },
+        };
+      },
+    },
+  ])("expires a running room restored with $name", async ({ corrupt }) => {
+    const roomId = `grenade-corrupt-${String(corrupt).length}`;
+    const stub = env.GAME_ROOMS.getByName(roomId);
+    await runInDurableObject(stub, async (_instance, state) => {
+      const runtime = new MatchRuntime({
+        humanActorIds: ["human-1", "human-2"],
+        seed: 52,
+        mapId: "mixed",
+        startWithBandage: true,
+        disableAiSnipers: true,
+      });
+      const checkpoint = corrupt(runtime.checkpoint()) as ReturnType<MatchRuntime["checkpoint"]>;
+      const members = {
+        "player-1": persistedCheckpointMember("player-1", "human-1", true),
+        "player-2": persistedCheckpointMember("player-2", "human-2", false),
+      };
+      await state.storage.put("room-v1", {
+        roomId,
+        code: "BAD252",
+        visibility: "private",
+        status: "running",
+        revision: 1,
+        countdownEndsAt: null,
+        options: { mapId: "mixed", startWithBandage: true, disableAiSnipers: true },
+        seed: 52,
+        expiresAt: Date.now() + 60_000,
+        members,
+        checkpoint,
+      });
+      await state.storage.put("checkpoint-v1", checkpoint);
+      await state.storage.setAlarm(Date.now() + 60_000);
+    });
+
+    await evictDurableObject(stub);
+    const [room, checkpoint] = await runInDurableObject(stub, async (_instance, state) =>
+      Promise.all([
+        state.storage.get("room-v1"),
+        state.storage.get("checkpoint-v1"),
+      ])
+    );
+    expect(room).toBeUndefined();
+    expect(checkpoint).toBeUndefined();
+  }, 60_000);
 });
 
 async function bootstrapAdministrator(): Promise<string> {
@@ -906,4 +1064,37 @@ function assignMemberActorIds(members: Record<string, { actorId: string | null }
   entries.forEach((member, index) => {
     member.actorId = `human-${index + 1}`;
   });
+}
+
+function persistedCheckpointMember(
+  playerId: string,
+  actorId: string,
+  host: boolean,
+): Record<string, unknown> {
+  return {
+    playerId,
+    displayName: playerId,
+    accountId: null,
+    accountSessionRevision: null,
+    admissionToken: `admission-${playerId}`,
+    admissionExpiresAt: Date.now() + 60_000,
+    admissionConsumed: true,
+    reconnectToken: `reconnect-${playerId}`,
+    pendingReconnectToken: null,
+    ready: true,
+    connected: false,
+    host,
+    joinedAt: Date.now(),
+    connectionEpoch: 1,
+    actorId,
+  };
+}
+
+function groundedActors(
+  actors: ReturnType<MatchRuntime["checkpoint"]>["state"]["actors"],
+): ReturnType<MatchRuntime["checkpoint"]>["state"]["actors"] {
+  return Object.fromEntries(Object.entries(actors).map(([actorId, actor]) => [
+    actorId,
+    { ...actor, deployment: "grounded" as const },
+  ]));
 }

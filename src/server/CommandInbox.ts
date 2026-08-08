@@ -27,6 +27,7 @@ type PendingOneShot = Pick<
   | "switchWeapon"
   | "useItem"
   | "dropItem"
+  | "throwGrenade"
 >;
 
 const INPUT_TIMEOUT_TICKS = 6;
@@ -136,7 +137,8 @@ function oneShotCommand(command: ActorCommand): PendingOneShot | null {
     !command.interact &&
     command.switchWeapon === null &&
     command.useItem === null &&
-    command.dropItem === null
+    command.dropItem === null &&
+    command.throwGrenade === null
   ) return null;
   return {
     reload: command.reload,
@@ -147,6 +149,7 @@ function oneShotCommand(command: ActorCommand): PendingOneShot | null {
     switchWeapon: command.switchWeapon,
     useItem: command.useItem,
     dropItem: command.dropItem,
+    throwGrenade: command.throwGrenade,
   };
 }
 
@@ -162,5 +165,6 @@ function mergeOneShot(current: PendingOneShot | null, next: PendingOneShot | nul
     switchWeapon: next.switchWeapon ?? current.switchWeapon,
     useItem: next.useItem ?? current.useItem,
     dropItem: next.dropItem ?? current.dropItem,
+    throwGrenade: next.throwGrenade ?? current.throwGrenade,
   };
 }

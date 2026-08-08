@@ -25,6 +25,8 @@ function createState(): MatchState {
     elapsedSeconds: 0,
     actors: { player: actor },
     groundLoot: {},
+    activeGrenades: {},
+    nextGrenadeSequence: 1,
     safeZone: {
       center: { x: 0, y: 0, z: 0 },
       radius: 100,

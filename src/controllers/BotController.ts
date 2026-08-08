@@ -1,6 +1,11 @@
 import { GridNavigator } from "../ai/navigation/GridNavigator";
 import { ITEMS } from "../config/items";
 import {
+  createGrenadeThrowVelocity,
+  FRAG_GRENADE_CONFIG,
+  FRAG_GRENADE_ITEM_ID,
+} from "../config/throwables";
+import {
   createMapLayout,
   BUILDING_ROOF_CAP_HEIGHT,
   getTerrainHeight,
@@ -22,6 +27,10 @@ import {
 } from "../game/state/types";
 import type { CombatWorld } from "../game/systems/CombatSystem";
 import { SPRINT_SPEED } from "../game/systems/MovementSystem";
+import {
+  MAX_ACTIVE_BOT_GRENADES,
+  sampleGrenadeTrajectory,
+} from "../game/systems/ThrowableSystem";
 
 const WAYPOINT_REACHED_DISTANCE = 0.5;
 const LATE_GAME_PATROL_RADIUS = 350;
@@ -50,6 +59,10 @@ const PARACHUTE_TARGET_DEAD_ZONE = 0.75;
 const PARACHUTE_APPROACH_DISTANCE = 12;
 const SNIPER_WEAPON_ITEM_ID = "weapon.sniper";
 const SNIPER_AMMO_ITEM_ID = "ammo.sniper";
+const GRENADE_MINIMUM_TARGET_DISTANCE = 8;
+const GRENADE_MAXIMUM_TARGET_DISTANCE = 32;
+const GRENADE_MINIMUM_SELF_DISTANCE = 10;
+const GRENADE_MAXIMUM_LANDING_ERROR = 4.5;
 type LootPurpose = "general" | "medical" | "compatible-ammo";
 
 interface LootSelection {
@@ -73,6 +86,8 @@ export class BotController {
   private weaponLandingTarget: Vector3State | null = null;
   private decisionSeconds = 0;
   private fireSeconds = 0;
+  private grenadeCooldownSeconds = 0;
+  private grenadeEvaluationSeconds = 0;
   private cached = createIdleCommand();
   private waypoint: Vector3State | null = null;
   private navigationPath: Vector3State[] = [];
@@ -228,6 +243,8 @@ export class BotController {
     const endgameSearch = livingActors <= ENDGAME_SEARCH_ACTORS;
     this.decisionSeconds -= deltaSeconds;
     this.fireSeconds -= deltaSeconds;
+    this.grenadeCooldownSeconds -= deltaSeconds;
+    this.grenadeEvaluationSeconds -= deltaSeconds;
     const interval = endgameSearch ? 0.1 : playerDistance < 80 ? 0.08 : 0.22 + (this.controlledActorNumericId % 4) * 0.04;
     if (livenessTriggered) this.decisionSeconds = 0;
     if (this.decisionSeconds > 0) {
@@ -242,6 +259,7 @@ export class BotController {
         switchWeapon: null,
         useItem: null,
         dropItem: null,
+        throwGrenade: null,
       };
       if (this.navigationPath.length > 0) {
         this.updateNavigationMovement(actor, command);
@@ -420,6 +438,16 @@ export class BotController {
       }
     }
     if (state.elapsedSeconds > this.retreatUntilSeconds) this.clearRetreat();
+    if (target && !lowHealth) {
+      const grenadeAim = this.findGrenadeAim(actor, target, state, world);
+      if (grenadeAim) {
+        this.clearNavigation();
+        command.aimDirection = grenadeAim;
+        command.throwGrenade = "high";
+        this.grenadeCooldownSeconds = 12 + this.random() * 8;
+        return this.cache(command);
+      }
+    }
     if (target && (!activeWeapon || activeWeapon.ammoInMagazine === 0)) {
       if (alternateWeapon?.ammoInMagazine && alternateWeapon.ammoInMagazine > 0) {
         command.switchWeapon = alternateSlot;
@@ -645,6 +673,51 @@ export class BotController {
     return null;
   }
 
+  private findGrenadeAim(
+    actor: ActorState,
+    target: ActorState,
+    state: MatchState,
+    world: CombatWorld,
+  ): Vector3State | null {
+    if (
+      this.grenadeCooldownSeconds > 0 ||
+      this.grenadeEvaluationSeconds > 0 ||
+      getItemQuantity(actor, FRAG_GRENADE_ITEM_ID) <= 0 ||
+      Object.values(state.activeGrenades).filter(
+        (grenade) => grenade.aiControlled,
+      ).length >= MAX_ACTIVE_BOT_GRENADES
+    ) return null;
+    this.grenadeEvaluationSeconds = 0.75 + this.random() * 0.5;
+    const targetDistance = horizontalDistance(actor.position, target.position);
+    if (
+      targetDistance < GRENADE_MINIMUM_TARGET_DISTANCE ||
+      targetDistance > GRENADE_MAXIMUM_TARGET_DISTANCE
+    ) return null;
+
+    const errorRadius = 0.8 + targetDistance * 0.035;
+    const targetPoint = {
+      x: target.position.x + target.velocity.x * 0.35 + randomBetween(this.random, -errorRadius, errorRadius),
+      y: target.position.y - ACTOR_EYE_HEIGHT,
+      z: target.position.z + target.velocity.z * 0.35 + randomBetween(this.random, -errorRadius, errorRadius),
+    };
+    const origin = { x: actor.position.x, y: actor.position.y - 0.3, z: actor.position.z };
+    const flatOffset = subtract(targetPoint, origin);
+    const horizontal = Math.hypot(flatOffset.x, flatOffset.z);
+    const direction = highArcGrenadeDirection(flatOffset, horizontal);
+    const trajectory = sampleGrenadeTrajectory(
+      origin,
+      createGrenadeThrowVelocity(direction, "high"),
+      world,
+    );
+    const landing = trajectory.at(-1);
+    if (
+      !landing ||
+      horizontalDistance(landing, targetPoint) > GRENADE_MAXIMUM_LANDING_ERROR ||
+      horizontalDistance(actor.position, landing) < GRENADE_MINIMUM_SELF_DISTANCE
+    ) return null;
+    return direction;
+  }
+
   private retreatFromThreat(
     actor: ActorState,
     state: MatchState,
@@ -782,6 +855,7 @@ export class BotController {
       return hasWeapon
         ? (item.kind === "ammo" && (!needsAmmo || item.id === weaponConfig?.ammoItemId) && replacementItemId === null) ||
           (item.kind === "medical" && actor.health < 90 && replacementItemId === null) ||
+          (item.kind === "throwable" && replacementItemId === null) ||
           (item.kind === "armor" && (
             (item.level ?? 0) > actor.inventory.armorLevel ||
             ((item.level ?? 0) === actor.inventory.armorLevel && actor.armor < actor.maxArmor)
@@ -1298,6 +1372,42 @@ function normalize(value: Vector3State): Vector3State {
 function normalizeFlat(value: Vector3State): Vector3State {
   const length = Math.hypot(value.x, value.z);
   return length > 0 ? { x: value.x / length, y: 0, z: value.z / length } : { x: 0, y: 0, z: 0 };
+}
+
+function highArcGrenadeDirection(
+  offset: Vector3State,
+  horizontalDistanceToTarget: number,
+): Vector3State {
+  const horizontalDirection = horizontalDistanceToTarget > 0
+    ? {
+        x: offset.x / horizontalDistanceToTarget,
+        z: offset.z / horizontalDistanceToTarget,
+      }
+    : { x: 0, z: 1 };
+  let minimumHorizontalScale = 0.02;
+  let maximumHorizontalScale = 0.72;
+  for (let iteration = 0; iteration < 20; iteration += 1) {
+    const horizontalScale = (minimumHorizontalScale + maximumHorizontalScale) / 2;
+    const verticalScale = Math.sqrt(Math.max(0, 1 - horizontalScale ** 2));
+    const horizontalSpeed = FRAG_GRENADE_CONFIG.highThrowSpeed * horizontalScale;
+    const verticalSpeed =
+      FRAG_GRENADE_CONFIG.highThrowSpeed * verticalScale +
+      FRAG_GRENADE_CONFIG.highThrowLift;
+    const discriminant = verticalSpeed ** 2 -
+      2 * FRAG_GRENADE_CONFIG.gravity * offset.y;
+    const flightSeconds = discriminant > 0
+      ? (verticalSpeed + Math.sqrt(discriminant)) / FRAG_GRENADE_CONFIG.gravity
+      : 0;
+    const range = horizontalSpeed * flightSeconds;
+    if (range < horizontalDistanceToTarget) minimumHorizontalScale = horizontalScale;
+    else maximumHorizontalScale = horizontalScale;
+  }
+  const horizontalScale = (minimumHorizontalScale + maximumHorizontalScale) / 2;
+  return {
+    x: horizontalDirection.x * horizontalScale,
+    y: Math.sqrt(Math.max(0, 1 - horizontalScale ** 2)),
+    z: horizontalDirection.z * horizontalScale,
+  };
 }
 
 function rotateFlat(value: Vector3State, angle: number): Vector3State {

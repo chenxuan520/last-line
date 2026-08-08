@@ -9,6 +9,7 @@ import {
   HOSPITAL_WALL_COLOR,
   MAP_HALF_SIZE,
   MIXED_NATURAL_OBSTACLE_MAX_TERRAIN_DELTA,
+  PRE_GRENADE_LOOT_POINTS,
 } from "../../src/config/map";
 import {
   createMixedMapBlueprint,
@@ -188,8 +189,14 @@ describe("mixed map layout", () => {
 
       expect(layout.lootSpawnPoints).toHaveLength(
         GLOBAL_LOOT_POINTS +
+        layout.ammunitionDepot.levels.length * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL +
+        10,
+      );
+      expect(layout.grenadeLootStartIndex).toBe(
+        PRE_GRENADE_LOOT_POINTS +
         layout.ammunitionDepot.levels.length * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL,
       );
+      expect(layout.lootSpawnPoints.slice(layout.grenadeLootStartIndex)).toHaveLength(10);
       expect(layout.lootZoneCounts).toHaveLength(16);
       expect(layout.lootZoneCounts.reduce((total, count) => total + count, 0)).toBe(240);
       expect(blueprint.landingZones).toHaveLength(16);
@@ -315,6 +322,50 @@ describe("mixed map layout", () => {
     }
   }, 30_000);
 
+  it.each([0, 1, 42, 2026])(
+    "keeps supplemental mixed medical loot owned, clear, and corridor-reachable for seed %i",
+    (seed) => {
+      const blueprint = createMixedMapBlueprint(seed);
+      const layout = createMapLayout("mixed", seed);
+      const medicalPoints = layout.lootSpawnPoints.slice(240, 248);
+
+      expect(medicalPoints).toHaveLength(8);
+      for (const [index, point] of medicalPoints.entries()) {
+        const anchor = blueprint.landingZones[index % blueprint.landingZones.length];
+        const region = anchor && blueprint.regions.find((candidate) => candidate.id === anchor.regionId);
+        if (!anchor || !region) throw new Error(`medical anchor missing: ${seed}:${index}`);
+        expect(pointOwnedByMixedRegion(
+          blueprint.regions,
+          region,
+          point.x,
+          point.z,
+        ), `${seed}:${index}:ownership`).toBe(true);
+        expect(layout.obstacles.every((obstacle) =>
+          pointClearsObstacle(point, obstacle, 8)
+        ), `${seed}:${index}:building-clearance`).toBe(true);
+        expect([
+          ...layout.rockObstacles,
+          ...layout.coverObstacles,
+          ...layout.treeTrunks,
+        ].every((obstacle) =>
+          pointClearsObstacle(point, obstacle, 14)
+        ), `${seed}:${index}:natural-clearance`).toBe(true);
+        expect(corridorClearsMixedObstacles(
+          anchor,
+          point,
+          [
+            ...layout.obstacles,
+            ...layout.rockObstacles,
+            ...layout.coverObstacles,
+            ...layout.treeTrunks,
+          ],
+          layout.roofRamps,
+        ), `${seed}:${index}:corridor`).toBe(true);
+      }
+    },
+    30_000,
+  );
+
   it("navigates from mixed-region streets through internal ramps to town roofs", () => {
     const layout = createMapLayout("mixed", 42);
     const building = layout.obstacles.find((candidate) =>
@@ -422,6 +473,79 @@ function regionFootprintGap(
   return Math.hypot(gapX, gapZ);
 }
 
+function pointClearsObstacle(
+  point: { x: number; z: number },
+  obstacle: { center: { x: number; z: number }; width: number; depth: number },
+  clearance: number,
+): boolean {
+  return Math.abs(point.x - obstacle.center.x) > obstacle.width / 2 + clearance ||
+    Math.abs(point.z - obstacle.center.z) > obstacle.depth / 2 + clearance;
+}
+
+function corridorClearsMixedObstacles(
+  start: { x: number; z: number },
+  end: { x: number; z: number },
+  obstacles: readonly { center: { x: number; z: number }; width: number; depth: number }[],
+  ramps: readonly { centerX: number; startZ: number; endZ: number; width: number }[],
+): boolean {
+  return obstacles.every((obstacle) =>
+    !segmentIntersectsRectangle(
+      start.x,
+      start.z,
+      end.x,
+      end.z,
+      obstacle.center.x,
+      obstacle.center.z,
+      obstacle.width + 3,
+      obstacle.depth + 3,
+    )
+  ) && ramps.every((ramp) =>
+    !segmentIntersectsRectangle(
+      start.x,
+      start.z,
+      end.x,
+      end.z,
+      ramp.centerX,
+      (ramp.startZ + ramp.endZ) / 2,
+      ramp.width + 3,
+      Math.abs(ramp.endZ - ramp.startZ) + 3,
+    )
+  );
+}
+
+function segmentIntersectsRectangle(
+  startX: number,
+  startZ: number,
+  endX: number,
+  endZ: number,
+  centerX: number,
+  centerZ: number,
+  width: number,
+  depth: number,
+): boolean {
+  const minimumX = centerX - width / 2;
+  const maximumX = centerX + width / 2;
+  const minimumZ = centerZ - depth / 2;
+  const maximumZ = centerZ + depth / 2;
+  let entry = 0;
+  let exit = 1;
+  for (const [start, delta, minimum, maximum] of [
+    [startX, endX - startX, minimumX, maximumX],
+    [startZ, endZ - startZ, minimumZ, maximumZ],
+  ] as const) {
+    if (Math.abs(delta) < 1e-9) {
+      if (start < minimum || start > maximum) return false;
+      continue;
+    }
+    const first = (minimum - start) / delta;
+    const second = (maximum - start) / delta;
+    entry = Math.max(entry, Math.min(first, second));
+    exit = Math.min(exit, Math.max(first, second));
+    if (entry > exit) return false;
+  }
+  return exit >= 0 && entry <= 1;
+}
+
 function segmentsCross(
   left: readonly [number, number, number, number],
   right: readonly [number, number, number, number],
@@ -457,6 +581,8 @@ function createMixedCombatState(
     elapsedSeconds: 0,
     actors: Object.fromEntries(actors.map((actor) => [actor.id, actor])),
     groundLoot: {},
+    activeGrenades: {},
+    nextGrenadeSequence: 1,
     safeZone: {
       center: { x: 0, y: 0, z: 0 },
       radius: 400,

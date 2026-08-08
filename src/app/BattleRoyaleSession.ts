@@ -3,6 +3,7 @@ import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { AssetCatalog } from "../assets/AssetCatalog";
 import { AudioFeedback } from "../client/audio/AudioFeedback";
 import { CombatEffects } from "../client/render/CombatEffects";
+import { GrenadePresentation } from "../client/render/GrenadePresentation";
 import {
   applyActorVisualPose,
   createIslandScene,
@@ -14,7 +15,12 @@ import { GameHud } from "../client/ui/GameHud";
 import type { MobileFullscreenController } from "../client/ui/MobileFullscreenController";
 import type { GameSettings } from "../config/settings";
 import { createMapLayout } from "../config/map";
+import { ITEMS } from "../config/items";
 import { WEAPONS } from "../config/weapons";
+import {
+  createGrenadeThrowVelocity,
+  FRAG_GRENADE_ITEM_ID,
+} from "../config/throwables";
 import { BotController } from "../controllers/BotController";
 import { HumanController } from "../controllers/HumanController";
 import { requestDesktopPointerLockSafely } from "../controllers/pointerLock";
@@ -30,7 +36,13 @@ import {
   type GameEvent,
   type MatchState,
 } from "../game/state/types";
+import type { DamageSystem } from "../game/systems/DamageSystem";
 import { SimulationCombatWorld } from "../game/systems/SimulationCombatWorld";
+import type {
+  SinglePlayerDebugAction,
+  SinglePlayerDebugSystem,
+} from "../game/systems/SinglePlayerDebugSystem";
+import { sampleGrenadeTrajectory } from "../game/systems/ThrowableSystem";
 
 const PLAYER_ID = "player";
 const LANDING_VISUAL_SECONDS = 0.24;
@@ -46,6 +58,21 @@ export interface JumpVisualPose {
   cameraY: number;
   weaponY: number;
   weaponRotationX: number;
+}
+
+interface SinglePlayerDebugPanelHandle {
+  update(state: MatchState, player: ActorState, frameSeconds: number): void;
+  dispose(): void;
+  focus(): void;
+}
+
+interface SinglePlayerDebugSupport {
+  damage: DamageSystem;
+  system: SinglePlayerDebugSystem;
+  createPanel(
+    root: HTMLDivElement,
+    onAction: (action: SinglePlayerDebugAction) => void,
+  ): SinglePlayerDebugPanelHandle;
 }
 
 export class BattleRoyaleSession {
@@ -66,9 +93,13 @@ export class BattleRoyaleSession {
   private readonly combatWorld: SimulationCombatWorld;
   private readonly audio: AudioFeedback;
   private readonly effects: CombatEffects;
+  private readonly grenadePresentation: GrenadePresentation;
   private readonly actorVisualSignatures = new Map<EntityId, string>();
   private readonly jumpVisualStates = new Map<EntityId, JumpVisualState>();
   private hud: GameHud | null = null;
+  private debugPanel: SinglePlayerDebugPanelHandle | null = null;
+  private readonly debugSystem: SinglePlayerDebugSystem | null;
+  private readonly createDebugPanel: SinglePlayerDebugSupport["createPanel"] | null;
   private active = false;
   private playerEliminated = false;
   private spectatorActorId: EntityId | null = null;
@@ -85,12 +116,16 @@ export class BattleRoyaleSession {
     private readonly mobileFullscreen: MobileFullscreenController,
     private readonly onRestart: () => void,
     private readonly onExit: () => void,
+    debugSupport: SinglePlayerDebugSupport | null,
     bundle: Awaited<ReturnType<typeof createIslandScene>>,
     state: MatchState,
   ) {
-    const mode = new BattleRoyaleMode();
     const layout = createMapLayout(state.mapId, state.mapSeed);
-    this.simulation = new GameSimulation(state, mode, WEAPONS, layout);
+    const damage = debugSupport?.damage;
+    const mode = new BattleRoyaleMode(undefined, undefined, damage);
+    this.simulation = new GameSimulation(state, mode, WEAPONS, layout, damage);
+    this.debugSystem = debugSupport?.system ?? null;
+    this.createDebugPanel = debugSupport?.createPanel ?? null;
     this.scene = bundle.scene;
     this.camera = bundle.camera;
     this.actorRoots = bundle.actorRoots;
@@ -107,6 +142,7 @@ export class BattleRoyaleSession {
     });
     this.audio = audio;
     this.effects = new CombatEffects(this.scene);
+    this.grenadePresentation = new GrenadePresentation(this.scene);
     this.combatWorld = new SimulationCombatWorld(state, true, layout);
     Object.values(state.actors).forEach((actor, index) => {
       if (actor.kind === "bot") {
@@ -130,6 +166,7 @@ export class BattleRoyaleSession {
       startWithBandage: settings.startWithBandage,
       mapId: settings.mapId,
     });
+    const debugSupport = await loadSinglePlayerDebugSupport(state);
     const bundle = await createIslandScene(
       engine,
       assets,
@@ -150,6 +187,7 @@ export class BattleRoyaleSession {
       mobileFullscreen,
       onRestart,
       onExit,
+      debugSupport,
       bundle,
       state,
     );
@@ -176,6 +214,13 @@ export class BattleRoyaleSession {
     );
     this.audio.start();
     this.simulation.start();
+    if (this.debugSystem && this.createDebugPanel) {
+      this.debugPanel = this.createDebugPanel(
+        this.uiRoot,
+        (action) => this.debugSystem?.apply(this.simulation.state, action),
+      );
+      document.addEventListener("keydown", this.handleDebugKeyDown);
+    }
     this.processEvents();
     this.syncVisuals();
     this.resumeInput();
@@ -213,7 +258,11 @@ export class BattleRoyaleSession {
       this.humanController.isLeaderboardVisible(),
       orientationBlocked,
       this.mobileFullscreen.needsAction(orientationBlocked),
+      this.humanController.isGrenadeSelected(),
+      this.humanController.isGrenadePreparing(),
+      this.humanController.getGrenadeThrowMode(),
     );
+    this.debugPanel?.update(this.simulation.state, player, frameSeconds);
   }
 
   public dispose(): void {
@@ -221,7 +270,11 @@ export class BattleRoyaleSession {
     this.humanController.dispose();
     this.hud?.dispose();
     this.hud = null;
+    this.debugPanel?.dispose();
+    this.debugPanel = null;
+    document.removeEventListener("keydown", this.handleDebugKeyDown);
     this.effects.dispose();
+    this.grenadePresentation.dispose();
     this.scene.dispose();
   }
 
@@ -248,7 +301,12 @@ export class BattleRoyaleSession {
         ));
       }
     }
-    this.simulation.step(deltaSeconds, commands, this.combatWorld);
+    this.simulation.step(
+      deltaSeconds,
+      commands,
+      this.combatWorld,
+      new Set(this.botControllers.keys()),
+    );
     this.processEvents();
   }
 
@@ -282,7 +340,9 @@ export class BattleRoyaleSession {
           const placement = Object.values(this.simulation.state.actors).filter((actor) => actor.alive).length + 1;
           const killer = event.sourceId ? this.simulation.state.actors[event.sourceId] : undefined;
           const killerLabel = killer?.kind === "bot" ? `AI-${/\d+$/.exec(killer.id)?.[0] ?? killer.id}` : killer ? "玩家" : "安全区";
-          const weaponLabel = event.weaponId ? WEAPONS[event.weaponId]?.label ?? event.weaponId : null;
+          const weaponLabel = event.weaponId
+            ? WEAPONS[event.weaponId]?.label ?? ITEMS[event.weaponId]?.label ?? event.weaponId
+            : null;
           this.hud?.showEliminated(
             placement,
             this.getActor(PLAYER_ID).kills,
@@ -309,12 +369,15 @@ export class BattleRoyaleSession {
     const spectator = this.spectatorActorId ? this.simulation.state.actors[this.spectatorActorId] : undefined;
     const cameraActor = spectator ?? player;
     const activeViewWeapon = getActiveWeapon(cameraActor);
+    const grenadeSelected = cameraActor.id === PLAYER_ID && this.humanController.isGrenadeSelected();
     const scoped = cameraActor.id === PLAYER_ID && this.humanController.isScoped(player);
     const targetFov = scoped ? WEAPONS[activeViewWeapon?.weaponId ?? ""]?.scopeFov ?? 1.18 : 1.18;
     if (this.camera.fov !== targetFov) this.camera.fov = targetFov;
-    const viewWeaponEnabled = Boolean(activeViewWeapon) && !scoped && cameraActor.deployment === "grounded";
+    const viewWeaponEnabled = Boolean(activeViewWeapon || grenadeSelected) &&
+      !scoped &&
+      cameraActor.deployment === "grounded";
     if (this.viewWeaponRoot.isEnabled() !== viewWeaponEnabled) this.viewWeaponRoot.setEnabled(viewWeaponEnabled);
-    const viewWeaponId = activeViewWeapon?.weaponId ?? null;
+    const viewWeaponId = grenadeSelected ? FRAG_GRENADE_ITEM_ID : activeViewWeapon?.weaponId ?? null;
     if (this.lastViewWeaponId !== viewWeaponId) {
       setActorWeaponVisual(this.viewWeaponRoot, viewWeaponId);
       this.lastViewWeaponId = viewWeaponId;
@@ -348,7 +411,7 @@ export class BattleRoyaleSession {
       if (!this.camera.rotation.equalsToFloats(cameraActor.pitch, cameraActor.yaw, 0)) {
         this.camera.rotation.set(cameraActor.pitch, cameraActor.yaw, 0);
       }
-      this.syncViewWeaponVisual(activeViewWeapon, cameraJumpPose);
+      this.syncViewWeaponVisual(activeViewWeapon, cameraJumpPose, grenadeSelected);
       for (const [actorId, root] of this.actorRoots) {
         const actor = this.getActor(actorId);
         if (!root.position.equalsToFloats(actor.position.x, actor.position.y, actor.position.z)) {
@@ -377,16 +440,29 @@ export class BattleRoyaleSession {
       }
       const zone = this.simulation.state.safeZone;
       this.syncSafeZoneRing(zone.center.x, zone.center.z, zone.radius);
+      this.grenadePresentation.sync(this.simulation.state.activeGrenades, visualDeltaSeconds);
+      this.grenadePresentation.showTrajectory(this.localGrenadeTrajectory(player));
     }
+  }
+
+  private localGrenadeTrajectory(player: ActorState): ReturnType<typeof sampleGrenadeTrajectory> | null {
+    if (!this.humanController.isGrenadePreparing() || player.deployment !== "grounded") return null;
+    const origin = { x: player.position.x, y: player.position.y - 0.3, z: player.position.z };
+    const velocity = createGrenadeThrowVelocity(
+      this.humanController.getAimDirection(),
+      this.humanController.getGrenadeThrowMode(),
+    );
+    return sampleGrenadeTrajectory(origin, velocity, this.combatWorld);
   }
 
   private syncViewWeaponVisual(
     weapon: ReturnType<typeof getActiveWeapon>,
     jumpPose: JumpVisualPose,
+    grenadeSelected = false,
   ): void {
     const reload = getReloadVisualTransform(weapon);
-    const y = (reload?.y ?? 0) + jumpPose.weaponY;
-    const rotationX = (reload?.rotationX ?? 0) + jumpPose.weaponRotationX;
+    const y = (reload?.y ?? 0) + jumpPose.weaponY + (grenadeSelected ? 0.03 : 0);
+    const rotationX = (reload?.rotationX ?? 0) + jumpPose.weaponRotationX + (grenadeSelected ? -0.08 : 0);
     const rotationZ = reload?.rotationZ ?? 0;
     if (!this.viewWeaponRoot.position.equalsToFloats(0, y, 0)) this.viewWeaponRoot.position.set(0, y, 0);
     if (!this.viewWeaponRoot.rotation.equalsToFloats(rotationX, 0, rotationZ)) {
@@ -421,6 +497,28 @@ export class BattleRoyaleSession {
       document.pointerLockElement,
     );
   }
+
+  private readonly handleDebugKeyDown = (event: KeyboardEvent): void => {
+    if (event.code !== "F10" || event.repeat || !this.debugPanel) return;
+    event.preventDefault();
+    if (document.pointerLockElement === this.canvas) void document.exitPointerLock();
+    this.debugPanel.focus();
+  };
+}
+
+async function loadSinglePlayerDebugSupport(state: MatchState): Promise<SinglePlayerDebugSupport | null> {
+  if (!__SINGLE_PLAYER_DEBUG__) return null;
+  const [{ SinglePlayerDebugPanel }, debug] = await Promise.all([
+    import("../client/ui/SinglePlayerDebugPanel"),
+    import("../game/systems/SinglePlayerDebugSystem"),
+    import("../styles/debug.css"),
+  ]);
+  const layout = createMapLayout(state.mapId, state.mapSeed);
+  return {
+    damage: debug.createSinglePlayerDebugDamageSystem(PLAYER_ID),
+    system: new debug.SinglePlayerDebugSystem(PLAYER_ID, layout),
+    createPanel: (root, onAction) => new SinglePlayerDebugPanel(root, onAction),
+  };
 }
 
 export function resolveSpectatorActorId(

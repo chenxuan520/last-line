@@ -3,10 +3,13 @@ import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   GameHud,
+  getBackpackItemQuantity,
   hudRootClassName,
   leaderboardScrollPixels,
   pauseExitLabel,
 } from "../../src/client/ui/GameHud";
+import { FRAG_GRENADE_ITEM_ID } from "../../src/config/throwables";
+import { createActorState } from "../../src/game/state/types";
 
 describe("GameHud actions", () => {
   it("uses mode-specific pause exit labels", () => {
@@ -54,6 +57,19 @@ describe("GameHud actions", () => {
     expect(hudRootClassName(true, "high")).toBe("is-playing is-touch-input is-high-quality-hud");
     expect(hudRootClassName(false, "medium")).toBe("is-playing");
     expect(hudRootClassName(true, "low")).toBe("is-playing is-touch-input");
+  });
+
+  it("sums every matching grenade stack for HUD counts", () => {
+    const actor = createActorState("player", "player", { x: 0, y: 1.76, z: 0 });
+    actor.inventory.backpack = [
+      { itemId: FRAG_GRENADE_ITEM_ID, quantity: 3 },
+      { itemId: "bandage", quantity: 2 },
+      { itemId: FRAG_GRENADE_ITEM_ID, quantity: 2 },
+    ];
+
+    expect(getBackpackItemQuantity(actor, FRAG_GRENADE_ITEM_ID)).toBe(5);
+    actor.inventory.backpack.shift();
+    expect(getBackpackItemQuantity(actor, FRAG_GRENADE_ITEM_ID)).toBe(2);
   });
 
   it("keeps native settings selects readable in dark menus", async () => {

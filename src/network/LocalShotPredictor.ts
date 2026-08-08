@@ -86,6 +86,7 @@ export class LocalShotPredictor {
       command.switchWeapon !== null ||
       command.useItem !== null ||
       command.dropItem !== null ||
+      command.throwGrenade !== null ||
       !actor.alive ||
       actor.deployment !== "grounded" ||
       !weapon ||

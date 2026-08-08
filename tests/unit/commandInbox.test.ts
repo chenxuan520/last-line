@@ -34,6 +34,24 @@ describe("CommandInbox", () => {
     expect(inbox.acknowledge("human-1")).toBe(2);
   });
 
+  it("consumes a grenade throw exactly once", () => {
+    const inbox = new CommandInbox();
+    inbox.accept("human-1", 1, {
+      ...createIdleCommand(),
+      throwGrenade: "low",
+    }, 1);
+    inbox.accept("human-1", 2, {
+      ...createIdleCommand(),
+      move: { x: 1, y: 0, z: 0 },
+    }, 1);
+
+    expect(inbox.consume("human-1", 1)).toMatchObject({
+      move: { x: 1, y: 0, z: 0 },
+      throwGrenade: "low",
+    });
+    expect(inbox.consume("human-1", 2).throwGrenade).toBeNull();
+  });
+
   it("retains the render tick associated with the latest continuous input", () => {
     const inbox = new CommandInbox();
     inbox.accept("human-1", 1, { ...createIdleCommand(), fire: true }, 10, 6);
