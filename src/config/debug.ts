@@ -7,6 +7,13 @@ export function isSinglePlayerDebugValue(value: unknown): boolean {
   return value === "true";
 }
 
+export function singlePlayerDebugEnabledForVite(
+  command: "serve" | "build",
+  value: unknown,
+): boolean {
+  return command === "serve" && isSinglePlayerDebugValue(value);
+}
+
 export function parseSinglePlayerDebugArguments(arguments_: readonly string[]): SinglePlayerDebugArguments {
   let enabled = false;
   const viteArguments: string[] = [];

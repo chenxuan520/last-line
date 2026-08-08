@@ -2,7 +2,10 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { BATTLE_ROYALE_CONFIG } from "../../src/config/battleRoyale";
-import { parseSinglePlayerDebugArguments } from "../../src/config/debug";
+import {
+  parseSinglePlayerDebugArguments,
+  singlePlayerDebugEnabledForVite,
+} from "../../src/config/debug";
 import { ITEMS } from "../../src/config/items";
 import { createMapLayout } from "../../src/config/map";
 import { WEAPONS } from "../../src/config/weapons";
@@ -72,6 +75,13 @@ describe("single-player debug mode", () => {
       enabled: true,
       viteArguments: ["--strictPort"],
     });
+  });
+
+  it("enables debug only for the Vite development server", () => {
+    expect(singlePlayerDebugEnabledForVite("serve", "true")).toBe(true);
+    expect(singlePlayerDebugEnabledForVite("serve", "false")).toBe(false);
+    expect(singlePlayerDebugEnabledForVite("build", "true")).toBe(false);
+    expect(singlePlayerDebugEnabledForVite("build", "false")).toBe(false);
   });
 
   it("keeps the debug flag out of multiplayer and server entry points", async () => {
