@@ -1354,7 +1354,8 @@ h1 {
 }
 
 .minimap-pois circle,
-.minimap-hospital circle {
+.minimap-hospital circle,
+.minimap-ammunition-depot circle {
   fill: #c3b678;
   stroke: rgb(18 24 18 / 70%);
   stroke-width: 0.75;
@@ -1366,7 +1367,8 @@ h1 {
 }
 
 .minimap-pois text,
-.minimap-hospital text {
+.minimap-hospital text,
+.minimap-ammunition-depot text {
   fill: #dce2d7;
   font-family: var(--tactical-font);
   font-size: 6.5px;

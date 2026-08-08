@@ -87,3 +87,55 @@ Pending implementation, validation, and independent review.
 - The focused mixed seed `5` reachability fixture checks all four final-floor points from the authoritative door and exercises pickup through the normal `InventorySystem` interaction path with the actor positioned at the point's three-dimensional interaction height.
 - `docs/architecture.md` now records 254/258/262/266 canonical initial records, and `Final review finding disposition` accurately describes the reviewed changes and evidence.
 - Existing outer evidence was accepted without repetition: layout `10 passed`, BattleRoyale `2 passed`, AI pickup `1 passed`, Node 24 app typecheck, and `git diff --check`. This review ran no tests, builds, browser checks, or other validation commands.
+
+## 2026-08-08 Minimap Visual Alignment Follow-up
+
+### Context
+
+The ammunition-depot minimap marker existed and used the correct icon/position, but its wrapper class was omitted from the shared POI label and fallback-circle CSS selectors. This is a visual defect in the ammunition-depot feature and remains in this plan rather than creating a separate plan.
+
+### Contract
+
+- The ammunition-depot minimap label must use exactly the same font family, size, weight, fill, letter spacing, text anchor, stroke, paint order, and vertical offset as ordinary POIs and the hospital.
+- Its fallback circle must use the same fill, stroke, and stroke width as the other POI fallback markers.
+- Its dedicated icon and authoritative position remain unchanged.
+- Every visible feature change requires a production Chrome/Edge screenshot at volume `0`, visual inspection of the affected region, and explicit comparison against adjacent same-role elements before completion.
+
+### Plan
+
+1. Preserve a repair-before screenshot and computed-style comparison for ordinary POI, hospital, and ammunition-depot labels.
+2. Add a focused failing stylesheet regression before editing CSS.
+3. Add the ammunition-depot wrapper to the existing shared POI text and fallback-circle selectors without a special override.
+4. Run focused unit tests, app typecheck, production build, budgets, and `git diff --check`; do not run coverage.
+5. Open the production build at volume `0`, capture the minimap after repair, visually inspect font/color/size/alignment/overlap, and confirm computed styles exactly match the hospital and ordinary POIs.
+6. Run an independent reviewer, resolve blocker/high/medium findings, commit/push this new repair cycle, then require latest-SHA CI, Pages, and Codex approval.
+
+### Build
+
+- 2026-08-08: Production screenshot `/tmp/last-line-minimap-before.png` showed the defect directly: the black default-size `弹药库` text covered the minimap center while all other labels used small outlined tactical text.
+- 2026-08-08: Computed styles confirmed ordinary POI and hospital labels used `6.5px`, weight `700`, `rgb(220, 226, 215)`, centered text, tactical font, and stroke paint order. The ammunition-depot label incorrectly used `16px`, weight `400`, black fill, start alignment, Inter/system font, and normal paint order.
+- 2026-08-08: Root `AGENTS.md` now requires every visible feature change to be inspected through an actual production screenshot and visually aligned with adjacent elements of the same role; DOM/tests/computed styles alone cannot substitute for screenshot review.
+- 2026-08-08: After the shared font/color repair, the implementation agent personally opened `/tmp/last-line-minimap-island-after.png`; the island depot label matched the surrounding POIs and no longer covered the map center. Computed font, size, weight, fill, spacing, anchor, stroke, and paint order exactly matched ordinary POIs and the hospital.
+- 2026-08-08: The required second screenshot check found a remaining Greyfurnace defect instead of accepting the CSS-only fix. In `/tmp/last-line-minimap-town-after.png`, the depot label used the correct visual style but sat too close to the dense upper-right labels. Browser bounding boxes confirmed `弹药库` overlapped `仓储港区`; deterministic label collision avoidance is therefore required before this repair can pass.
+- 2026-08-08: Label layout was generalized to every named minimap marker instead of adding a depot-only offset. All POIs, the hospital, and the ammunition depot share the same visual style and deterministic candidate placement; labels avoid every other label and every 12px icon while staying inside the map frame.
+- 2026-08-08: Focused stylesheet/minimap regressions passed `23/23`. A three-map scan covering `160` seeds per map (`480` layouts) verified every named label pair is disjoint, every label clears every icon, and every label remains inside the minimap frame. App typecheck, production build, budgets, and `git diff --check` passed; coverage was not run.
+- 2026-08-08: The implementation agent personally opened the final MCP screenshots `/tmp/last-line-minimap-town-zero-overlap.png`, `/tmp/last-line-minimap-island42-zero-overlap.png`, and `/tmp/last-line-minimap-mixed-zero-overlap.png`. Greyfurnace's dense labels, island seed 42's near-coincident depot/warehouse markers, and the mixed map all rendered with consistent tactical font, size, weight, color, alignment, and visible icon spacing.
+- 2026-08-08: Real browser bounding boxes confirmed zero label/label and zero label/icon intersections on all three final screenshots (`10/10`, `10/10`, and `8/8` labels/icons respectively), with volume `0`. Console output contained only the local SwiftShader warning. Each isolated context and preview server was closed immediately; final MCP state returned to the single unavoidable `about:blank` page with no port 8798 listener.
+- 2026-08-08: Final Node 24 validation passed full unit `46 files / 483 tests`, full standalone `3 files / 26 tests`, three-target typecheck, production build, budgets, and `git diff --check`. A parallel standalone run exceeded unchanged 5-second limits in two SQLite restore tests under concurrent full-unit load (`5.232s / 5.280s`); the complete standalone suite passed unchanged with one worker. Coverage was not run.
+
+### Review
+
+Pending implementation, validation, and independent review.
+
+#### 2026-08-08 Minimap Visual Alignment Independent Review
+
+- Scope: static review of the uncommitted minimap visual-alignment diff on baseline `ed1624da3a86c6dc752579f43ea49edc8285b7e0`, with the complete feature branch also compared against `main`. Reviewed this follow-up contract and recorded evidence, root `AGENTS.md`, shared minimap CSS, deterministic label placement, the `GameHud` marker-to-SVG call chain, and focused regressions. No test, typecheck, build, budget, seed scan, or browser command was repeated.
+- Conclusion: **passed; commit is not blocked**.
+- Findings: blocker 0, high 0, medium 0, low 0.
+- The ammunition-depot fallback circle and text now share the exact CSS declaration blocks used by ordinary POIs and the hospital, with no later selector overriding their font family, size, weight, fill, spacing, anchor, stroke, paint order, or marker colors.
+- Every ordinary POI, the hospital, and the ammunition depot enters one stable layout sequence; the greedy candidate order is deterministic, all marker icons are blockers before label placement begins, accepted labels become blockers in sequence, and the selected offsets are wired directly to each rendered SVG `<text>` element through both `x` and `y`.
+- The current width model is conservative for the controlled all-CJK marker names under the shared `6.5px` font, `0.04em` letter spacing, and `2px` centered stroke; the 9px vertical box likewise includes the font-size box plus stroke. The 12px icon blocker matches the rendered image dimensions, while fallback circles receive an intentionally larger conservative blocker.
+- Candidate exhaustion falls back to the historical offset and therefore remains a residual consideration if future maps add substantially more markers, longer names, or different font metrics. It is not a current blocking defect: the recorded 480-layout scan covered every marker in each generated layout without exhausting placement, and the three production-browser boundary cases used actual rendered boxes with zero label/label and label/icon intersections.
+- Focused tests cover every marker category in the shared layout input, pairwise label and icon clearance for island/town/mixed fixtures, stable visual assets, and the shared CSS selector regression. Static call-chain review plus the recorded production screenshots confirms the pure placement result is consumed by the actual HUD renderer.
+- The new `AGENTS.md` rule is explicit that the implementation agent must capture and personally open a production MCP screenshot at volume `0`; it names the required visual comparisons and clearly rejects DOM, computed-style, unit-test, console, or second-agent reports as substitutes.
+- Existing outer evidence was accepted as recorded: focused `23/23`, app typecheck, production build, budgets, `git diff --check`, the 480-layout scan, three personally inspected production screenshots, three real-browser zero-intersection checks, volume `0`, console review, and immediate MCP/preview cleanup.
