@@ -39,7 +39,6 @@ import { MultiplayerSession } from "./MultiplayerSession";
 
 const SETTINGS_KEY = "last-line.settings.v1";
 const MULTIPLAYER_NAME_KEY = "last-line.multiplayer-name.v1";
-
 export class GameApp {
   private readonly engine: Engine;
   private assets: AssetCatalog | null = null;
@@ -62,6 +61,7 @@ export class GameApp {
   public async initialize(): Promise<void> {
     this.renderLoading(0);
     try {
+      if (__SINGLE_PLAYER_DEBUG__) await import("../styles/debug.css");
       this.assets = await AssetCatalog.load("./assets/asset-manifest.json", (progress) => this.renderLoading(progress));
       this.renderMenu();
     } catch (error) {
@@ -154,6 +154,7 @@ export class GameApp {
       <section class="menu-panel" aria-labelledby="game-title">
         <div class="menu-index"><span>OPERATION</span><b>LL-01</b></div>
         <p class="eyebrow">${BATTLE_ROYALE_CONFIG.participantCount} 人 BATTLE ROYALE</p>
+        ${__SINGLE_PLAYER_DEBUG__ ? '<p class="debug-menu-badge">LOCAL DEBUG · 单机无敌与物资面板已启用</p>' : ""}
         <h1 id="game-title"><span class="sr-only">最后防线</span><img class="game-logo" src="${logo.url}" alt="" /></h1>
         <p class="menu-description">穿越随机航线空降${MAP_DISPLAY_NAMES[this.settings.mapId]}，搜集武器和补给，在不断收缩的安全区内成为最后一名幸存者。</p>
         <div class="settings-grid" aria-label="游戏设置">

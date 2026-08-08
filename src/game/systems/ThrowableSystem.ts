@@ -5,7 +5,6 @@ import {
   type FragGrenadeConfig,
 } from "../../config/throwables";
 import type { ActorCommand } from "../commands/ActorCommand";
-import { calculateProtectedDamage } from "../rules/damage";
 import { selectSimultaneousSurvivor } from "../rules/resolveSimultaneous";
 import type {
   ActiveGrenadeState,
@@ -154,7 +153,11 @@ export class ThrowableSystem {
     }
     const allWouldDie =
       living.length > 0 &&
-      living.every((actor) => wouldBeLethal(actor, rawDamageByTarget.get(actor.id) ?? 0));
+      living.every((actor) => this.damage.wouldBeLethal(
+        state,
+        actor.id,
+        rawDamageByTarget.get(actor.id) ?? 0,
+      ));
     const survivorId = allWouldDie
       ? selectSimultaneousSurvivor(living.map((actor) => actor.id), state.elapsedSeconds)
       : undefined;
@@ -254,10 +257,6 @@ function removeOne(actor: ActorState, itemId: string): boolean {
   stack.quantity -= 1;
   if (stack.quantity === 0) actor.inventory.backpack.splice(stackIndex, 1);
   return true;
-}
-
-function wouldBeLethal(actor: ActorState, rawDamage: number): boolean {
-  return calculateProtectedDamage(actor, rawDamage).healthDamage >= actor.health;
 }
 
 function selectDamageSource(pending: readonly PendingExplosionDamage[]): PendingExplosionDamage {

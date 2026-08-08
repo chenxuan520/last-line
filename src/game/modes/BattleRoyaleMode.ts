@@ -53,11 +53,10 @@ const LOOT_TABLE: readonly { category: LootCategory; itemId: string; quantity: n
 ];
 
 export class BattleRoyaleMode implements GameMode {
-  private readonly damage = new DamageSystem();
-
   public constructor(
     private readonly config: BattleRoyaleConfig = BATTLE_ROYALE_CONFIG,
     private readonly random: () => number = Math.random,
+    private readonly damage: DamageSystem = new DamageSystem(),
   ) {
     getFirstStage(config);
   }
@@ -236,7 +235,9 @@ export class BattleRoyaleMode implements GameMode {
       horizontalDistance(actor.position, state.safeZone.center) > state.safeZone.radius
     );
     const allWouldDie =
-      outside.length === living.length && outside.every((actor) => actor.health <= damage);
+      outside.length === living.length && outside.every((actor) =>
+        this.damage.wouldBeLethal(state, actor.id, damage, true)
+      );
     const survivorId = allWouldDie
       ? selectSimultaneousSurvivor(living.map((actor) => actor.id), state.elapsedSeconds)
       : undefined;

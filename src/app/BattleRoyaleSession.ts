@@ -36,7 +36,12 @@ import {
   type GameEvent,
   type MatchState,
 } from "../game/state/types";
+import type { DamageSystem } from "../game/systems/DamageSystem";
 import { SimulationCombatWorld } from "../game/systems/SimulationCombatWorld";
+import type {
+  SinglePlayerDebugAction,
+  SinglePlayerDebugSystem,
+} from "../game/systems/SinglePlayerDebugSystem";
 import { sampleGrenadeTrajectory } from "../game/systems/ThrowableSystem";
 
 const PLAYER_ID = "player";
@@ -53,6 +58,21 @@ export interface JumpVisualPose {
   cameraY: number;
   weaponY: number;
   weaponRotationX: number;
+}
+
+interface SinglePlayerDebugPanelHandle {
+  update(state: MatchState, player: ActorState, frameSeconds: number): void;
+  dispose(): void;
+  focus(): void;
+}
+
+interface SinglePlayerDebugSupport {
+  damage: DamageSystem;
+  system: SinglePlayerDebugSystem;
+  createPanel(
+    root: HTMLDivElement,
+    onAction: (action: SinglePlayerDebugAction) => void,
+  ): SinglePlayerDebugPanelHandle;
 }
 
 export class BattleRoyaleSession {
@@ -77,6 +97,9 @@ export class BattleRoyaleSession {
   private readonly actorVisualSignatures = new Map<EntityId, string>();
   private readonly jumpVisualStates = new Map<EntityId, JumpVisualState>();
   private hud: GameHud | null = null;
+  private debugPanel: SinglePlayerDebugPanelHandle | null = null;
+  private readonly debugSystem: SinglePlayerDebugSystem | null;
+  private readonly createDebugPanel: SinglePlayerDebugSupport["createPanel"] | null;
   private active = false;
   private playerEliminated = false;
   private spectatorActorId: EntityId | null = null;
@@ -93,12 +116,16 @@ export class BattleRoyaleSession {
     private readonly mobileFullscreen: MobileFullscreenController,
     private readonly onRestart: () => void,
     private readonly onExit: () => void,
+    debugSupport: SinglePlayerDebugSupport | null,
     bundle: Awaited<ReturnType<typeof createIslandScene>>,
     state: MatchState,
   ) {
-    const mode = new BattleRoyaleMode();
     const layout = createMapLayout(state.mapId, state.mapSeed);
-    this.simulation = new GameSimulation(state, mode, WEAPONS, layout);
+    const damage = debugSupport?.damage;
+    const mode = new BattleRoyaleMode(undefined, undefined, damage);
+    this.simulation = new GameSimulation(state, mode, WEAPONS, layout, damage);
+    this.debugSystem = debugSupport?.system ?? null;
+    this.createDebugPanel = debugSupport?.createPanel ?? null;
     this.scene = bundle.scene;
     this.camera = bundle.camera;
     this.actorRoots = bundle.actorRoots;
@@ -139,6 +166,7 @@ export class BattleRoyaleSession {
       startWithBandage: settings.startWithBandage,
       mapId: settings.mapId,
     });
+    const debugSupport = await loadSinglePlayerDebugSupport(state);
     const bundle = await createIslandScene(
       engine,
       assets,
@@ -159,6 +187,7 @@ export class BattleRoyaleSession {
       mobileFullscreen,
       onRestart,
       onExit,
+      debugSupport,
       bundle,
       state,
     );
@@ -185,6 +214,13 @@ export class BattleRoyaleSession {
     );
     this.audio.start();
     this.simulation.start();
+    if (this.debugSystem && this.createDebugPanel) {
+      this.debugPanel = this.createDebugPanel(
+        this.uiRoot,
+        (action) => this.debugSystem?.apply(this.simulation.state, action),
+      );
+      document.addEventListener("keydown", this.handleDebugKeyDown);
+    }
     this.processEvents();
     this.syncVisuals();
     this.resumeInput();
@@ -226,6 +262,7 @@ export class BattleRoyaleSession {
       this.humanController.isGrenadePreparing(),
       this.humanController.getGrenadeThrowMode(),
     );
+    this.debugPanel?.update(this.simulation.state, player, frameSeconds);
   }
 
   public dispose(): void {
@@ -233,6 +270,9 @@ export class BattleRoyaleSession {
     this.humanController.dispose();
     this.hud?.dispose();
     this.hud = null;
+    this.debugPanel?.dispose();
+    this.debugPanel = null;
+    document.removeEventListener("keydown", this.handleDebugKeyDown);
     this.effects.dispose();
     this.grenadePresentation.dispose();
     this.scene.dispose();
@@ -457,6 +497,28 @@ export class BattleRoyaleSession {
       document.pointerLockElement,
     );
   }
+
+  private readonly handleDebugKeyDown = (event: KeyboardEvent): void => {
+    if (event.code !== "F10" || event.repeat || !this.debugPanel) return;
+    event.preventDefault();
+    if (document.pointerLockElement === this.canvas) void document.exitPointerLock();
+    this.debugPanel.focus();
+  };
+}
+
+async function loadSinglePlayerDebugSupport(state: MatchState): Promise<SinglePlayerDebugSupport | null> {
+  if (!__SINGLE_PLAYER_DEBUG__) return null;
+  const [{ SinglePlayerDebugPanel }, debug] = await Promise.all([
+    import("../client/ui/SinglePlayerDebugPanel"),
+    import("../game/systems/SinglePlayerDebugSystem"),
+    import("../styles/debug.css"),
+  ]);
+  const layout = createMapLayout(state.mapId, state.mapSeed);
+  return {
+    damage: debug.createSinglePlayerDebugDamageSystem(PLAYER_ID),
+    system: new debug.SinglePlayerDebugSystem(PLAYER_ID, layout),
+    createPanel: (root, onAction) => new SinglePlayerDebugPanel(root, onAction),
+  };
 }
 
 export function resolveSpectatorActorId(

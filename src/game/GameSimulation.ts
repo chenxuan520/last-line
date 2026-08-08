@@ -5,6 +5,7 @@ import type { GameMode } from "./modes/GameMode";
 import { compareActorTurns } from "./rules/resolveSimultaneous";
 import type { CombatWorld } from "./systems/CombatSystem";
 import { CombatSystem } from "./systems/CombatSystem";
+import { DamageSystem } from "./systems/DamageSystem";
 import { InventorySystem } from "./systems/InventorySystem";
 import { MovementSystem } from "./systems/MovementSystem";
 import { ThrowableSystem } from "./systems/ThrowableSystem";
@@ -22,11 +23,12 @@ export class GameSimulation {
     private readonly mode: GameMode,
     weapons: Readonly<Record<string, WeaponConfig>>,
     layout: MapLayout = createMapLayout(state.mapId, state.mapSeed),
+    damage: DamageSystem = new DamageSystem(),
   ) {
-    this.combat = new CombatSystem(weapons);
+    this.combat = new CombatSystem(weapons, damage);
     this.inventory = new InventorySystem(layout);
     this.movement = new MovementSystem(layout);
-    this.throwables = new ThrowableSystem();
+    this.throwables = new ThrowableSystem(undefined, damage);
   }
 
   public start(): void {

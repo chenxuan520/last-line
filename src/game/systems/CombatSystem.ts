@@ -1,6 +1,5 @@
 import type { WeaponConfig } from "../../config/weapons";
 import type { ActorCommand } from "../commands/ActorCommand";
-import { calculateProtectedDamage } from "../rules/damage";
 import { selectSimultaneousSurvivor } from "../rules/resolveSimultaneous";
 import {
   getActiveWeapon,
@@ -220,7 +219,11 @@ export class CombatSystem {
 
     const allWouldDie =
       living.length > 0 &&
-      living.every((actor) => wouldBeLethal(actor, damageByTarget.get(actor.id) ?? 0));
+      living.every((actor) => this.damage.wouldBeLethal(
+        state,
+        actor.id,
+        damageByTarget.get(actor.id) ?? 0,
+      ));
     const survivorId = allWouldDie
       ? selectSimultaneousSurvivor(living.map((actor) => actor.id), state.elapsedSeconds)
       : undefined;
@@ -290,13 +293,6 @@ export class CombatSystem {
 
 function compareIds(left: EntityId, right: EntityId): number {
   return left < right ? -1 : left > right ? 1 : 0;
-}
-
-function wouldBeLethal(actor: ActorState, rawDamage: number): boolean {
-  if (rawDamage <= 0) {
-    return false;
-  }
-  return calculateProtectedDamage(actor, rawDamage).healthDamage >= actor.health;
 }
 
 function normalize(value: Vector3State): Vector3State {
