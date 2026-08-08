@@ -68,6 +68,106 @@ describe("SimulationCombatWorld", () => {
     expect(world.hasLineOfSight("shooter", "target")).toBe(false);
   });
 
+  it("sweeps grenade collision volumes against terrain and wall geometry", () => {
+    const layout = createMapLayout(0);
+    const world = new SimulationCombatWorld(createState(createActorState(
+      "shooter",
+      "player",
+      { x: 0, y: 1.76, z: 0 },
+    )));
+    const terrainY = getTerrainHeight(0, 0, layout);
+    const groundHit = world.traceThrowable(
+      { x: 0, y: terrainY + 3, z: 0 },
+      { x: 0, y: -5, z: 0 },
+      0.18,
+    );
+    expect(groundHit?.normal.y).toBeGreaterThan(0.9);
+    expect(groundHit?.point.y).toBeGreaterThanOrEqual(terrainY + 0.17);
+
+    const wall = layout.wallSegments.find((candidate) => candidate.width > candidate.depth);
+    if (!wall) throw new Error("wall missing");
+    const origin = {
+      x: wall.center.x,
+      y: wall.center.y,
+      z: wall.center.z - wall.depth / 2 - 3,
+    };
+    const wallHit = world.traceThrowable(origin, { x: 0, y: 0, z: 6 }, 0.18);
+    expect(wallHit).not.toBeNull();
+    expect(wallHit?.normal.z).toBeLessThan(-0.9);
+  });
+
+  it("sweeps grenade spheres against ramp faces, sides, and ends consistently", () => {
+    const layout = createMapLayout(0);
+    const ramp = layout.roofRamps[0];
+    if (!ramp) throw new Error("ramp missing");
+    const shooter = createActorState("shooter", "player", { x: 0, y: 1.76, z: 0 });
+    const state = createState(shooter);
+    const indexed = new SimulationCombatWorld(state);
+    const completeScan = new SimulationCombatWorld(state, false);
+    const middleZ = (ramp.startZ + ramp.endZ) / 2;
+    const middleY = getRampHeight(ramp, ramp.centerX, middleZ);
+    if (middleY === null) throw new Error("ramp middle missing");
+    const sweeps = [
+      {
+        origin: { x: ramp.centerX, y: middleY + 2, z: middleZ },
+        displacement: { x: 0, y: -4, z: 0 },
+      },
+      {
+        origin: { x: ramp.centerX + ramp.width / 2 + 0.16, y: middleY + 0.1, z: middleZ },
+        displacement: { x: -0.4, y: 0, z: 0 },
+      },
+      {
+        origin: {
+          x: ramp.centerX,
+          y: ramp.bottomY + 0.1,
+          z: ramp.startZ + Math.sign(ramp.startZ - ramp.endZ) * 0.16,
+        },
+        displacement: { x: 0, y: 0, z: Math.sign(ramp.endZ - ramp.startZ) * 0.4 },
+      },
+    ];
+
+    for (const sweep of sweeps) {
+      const indexedHit = indexed.traceThrowable(sweep.origin, sweep.displacement, 0.18);
+      const completeHit = completeScan.traceThrowable(sweep.origin, sweep.displacement, 0.18);
+      expect(indexedHit).not.toBeNull();
+      expect(indexedHit).toEqual(completeHit);
+      expect(Math.hypot(
+        indexedHit?.normal.x ?? 0,
+        indexedHit?.normal.y ?? 0,
+        indexedHit?.normal.z ?? 0,
+      )).toBeCloseTo(1);
+    }
+  });
+
+  it("blocks explosion visibility with authoritative walls but not open space", () => {
+    const layout = createMapLayout(0);
+    const wall = layout.wallSegments.find((candidate) => candidate.width > candidate.depth);
+    if (!wall) throw new Error("wall missing");
+    const world = new SimulationCombatWorld(createState(createActorState(
+      "shooter",
+      "player",
+      { x: 0, y: 1.76, z: 0 },
+    )));
+    const origin = {
+      x: wall.center.x,
+      y: wall.center.y,
+      z: wall.center.z - wall.depth / 2 - 2,
+    };
+    const blockedTarget = {
+      x: wall.center.x,
+      y: wall.center.y,
+      z: wall.center.z + wall.depth / 2 + 2,
+    };
+    const openTarget = {
+      x: wall.center.x,
+      y: wall.center.y,
+      z: origin.z - 3,
+    };
+
+    expect(world.hasExplosionLineOfSight(origin, blockedTarget)).toBe(false);
+    expect(world.hasExplosionLineOfSight(origin, openTarget)).toBe(true);
+  });
+
   it("blocks shots and line of sight with authoritative cover rocks", () => {
     const rock = MAP_ROCK_OBSTACLES[0];
     if (!rock) throw new Error("test cover rock missing");
@@ -360,6 +460,8 @@ function createState(...actors: ReturnType<typeof createActorState>[]): MatchSta
     elapsedSeconds: 0,
     actors: Object.fromEntries(actors.map((actor) => [actor.id, actor])),
     groundLoot: {},
+    activeGrenades: {},
+    nextGrenadeSequence: 1,
     safeZone: {
       center: { x: 0, y: 0, z: 0 },
       radius: 400,

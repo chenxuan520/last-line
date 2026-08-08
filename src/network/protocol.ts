@@ -2,6 +2,7 @@ import type { ActorCommand } from "../game/commands/ActorCommand";
 import { createIdleCommand } from "../game/commands/ActorCommand";
 import type { MapId } from "../config/maps";
 import type {
+  ActiveGrenadeState,
   ActorState,
   EntityId,
   FlightState,
@@ -14,7 +15,7 @@ import type {
   WeaponSlot,
 } from "../game/state/types";
 
-export const MULTIPLAYER_PROTOCOL_VERSION = 7;
+export const MULTIPLAYER_PROTOCOL_VERSION = 8;
 export const MULTIPLAYER_PROTOCOL_HEADER = "X-Last-Line-Protocol";
 export const MIN_HUMAN_PLAYERS = 2;
 export const MAX_HUMAN_PLAYERS = 10;
@@ -94,6 +95,7 @@ export interface MatchFrame {
   result: MatchResult | null;
   actors: Record<EntityId, ActorState>;
   visibleActorIds: EntityId[];
+  activeGrenades: Record<EntityId, ActiveGrenadeState>;
   lootChanges: GroundLootState[];
   events: SequencedGameEvent[];
 }
@@ -211,12 +213,16 @@ export function sanitizeActorCommand(value: unknown): ActorCommand | null {
     : undefined;
   const useItem = nullableShortString(value.useItem);
   const dropItem = nullableShortString(value.dropItem);
+  const throwGrenade = value.throwGrenade === null || value.throwGrenade === "high" || value.throwGrenade === "low"
+    ? value.throwGrenade
+    : undefined;
   if (
     interactLootId === undefined ||
     interactLootGeneration === undefined ||
     switchWeapon === undefined ||
     useItem === undefined ||
-    dropItem === undefined
+    dropItem === undefined ||
+    throwGrenade === undefined
   ) return null;
   const moveLength = Math.hypot(move.x, move.z);
   const moveScale = moveLength > 1 ? 1 / moveLength : 1;
@@ -237,6 +243,7 @@ export function sanitizeActorCommand(value: unknown): ActorCommand | null {
     switchWeapon,
     useItem,
     dropItem,
+    throwGrenade,
   };
 }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BUILDING_ROOF_CAP_HEIGHT, createMapLayout, getTerrainHeight } from "../../src/config/map";
+import { FRAG_GRENADE_CONFIG, FRAG_GRENADE_ITEM_ID } from "../../src/config/throwables";
 import { BotController } from "../../src/controllers/BotController";
 import { createIdleCommand } from "../../src/game/commands/ActorCommand";
 import { createBattleRoyaleState } from "../../src/game/modes/BattleRoyaleMode";
@@ -13,6 +14,67 @@ import { SimulationCombatWorld } from "../../src/game/systems/SimulationCombatWo
 const miss: CombatWorld = { traceShot: () => null, hasLineOfSight: () => true };
 
 describe("BotController", () => {
+  it("throws a carried grenade at a visible target only when the authoritative trajectory is safe", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    for (const actor of Object.values(state.actors)) {
+      actor.alive = actor.id === bot.id || actor.id === player.id;
+      actor.armor = 0;
+      actor.inventory.armorLevel = 0;
+    }
+    bot.position = { x: 0, y: 1.76, z: 0 };
+    bot.yaw = 0;
+    bot.inventory.backpack = [{ itemId: FRAG_GRENADE_ITEM_ID, quantity: 1 }];
+    player.position = { x: 0, y: 1.76, z: 20 };
+    const controller = new BotController(1, () => 0.5);
+
+    const command = controller.update(bot, state, grenadeGroundWorld(), 1, player.id);
+
+    expect(command.throwGrenade).toBe("high");
+    expect(command.fire).toBe(false);
+    expect(command.aimDirection.z).toBeGreaterThan(0.2);
+    expect(command.aimDirection.y).toBeGreaterThan(0.9);
+  });
+
+  it("does not throw a grenade at unsafe close range or above the global active limit", () => {
+    for (const setup of ["close", "saturated"] as const) {
+      const state = groundedState();
+      const bot = state.actors["bot-1"];
+      const player = state.actors.player;
+      if (!bot || !player) throw new Error("actors missing");
+      for (const actor of Object.values(state.actors)) actor.alive = actor.id === bot.id || actor.id === player.id;
+      bot.position = { x: 0, y: 1.76, z: 0 };
+      bot.yaw = 0;
+      bot.inventory.backpack = [{ itemId: FRAG_GRENADE_ITEM_ID, quantity: 1 }];
+      player.position = { x: 0, y: 1.76, z: setup === "close" ? 5 : 20 };
+      if (setup === "saturated") {
+        for (let index = 0; index < 6; index += 1) {
+          state.activeGrenades[`grenade-${index}`] = {
+            id: `grenade-${index}`,
+            ownerId: player.id,
+            aiControlled: true,
+            position: { x: 100 + index, y: 1.76, z: 100 },
+            velocity: { x: 0, y: 0, z: 0 },
+            fuseSeconds: 2,
+          };
+        }
+      }
+
+      const command = new BotController(1, () => 0.5).update(
+        bot,
+        state,
+        grenadeGroundWorld(),
+        1,
+        player.id,
+      );
+
+      expect(command.throwGrenade).toBeNull();
+      expect(command.fire).toBe(true);
+    }
+  });
+
   it("uses the current map layout for its fallback landing target", () => {
     const layout = createMapLayout(42);
     const state = createBattleRoyaleState("player", undefined, seededRandom(42));
@@ -1651,6 +1713,29 @@ function groundedState() {
   state.safeZone.targetCenter = { x: 0, y: 0, z: 0 };
   state.safeZone.targetRadius = 2_000;
   return state;
+}
+
+function grenadeGroundWorld(): CombatWorld {
+  return {
+    traceShot: () => null,
+    hasLineOfSight: () => true,
+    traceThrowable(origin, displacement) {
+      const minimumY = FRAG_GRENADE_CONFIG.collisionRadius;
+      if (origin.y + displacement.y > minimumY) return null;
+      const fraction = displacement.y === 0
+        ? 0
+        : Math.max(0, Math.min(1, (minimumY - origin.y) / displacement.y));
+      return {
+        point: {
+          x: origin.x + displacement.x * fraction,
+          y: minimumY,
+          z: origin.z + displacement.z * fraction,
+        },
+        normal: { x: 0, y: 1, z: 0 },
+      };
+    },
+    hasExplosionLineOfSight: () => true,
+  };
 }
 
 function seededRandom(seed: number): () => number {

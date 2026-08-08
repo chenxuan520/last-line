@@ -1,6 +1,10 @@
 import type { ActorCommand } from "../game/commands/ActorCommand";
 import { createBackpackStackDropRequest, createIdleCommand } from "../game/commands/ActorCommand";
 import { WEAPONS } from "../config/weapons";
+import {
+  FRAG_GRENADE_ITEM_ID,
+  type GrenadeThrowMode,
+} from "../config/throwables";
 import { getActiveWeapon, getItemQuantity, type ActorState, type WeaponSlot } from "../game/state/types";
 import { TouchInputAdapter, type TouchAction, type TouchInputSink } from "./TouchInputAdapter";
 
@@ -35,6 +39,10 @@ export class HumanController implements TouchInputSink {
   private switchWeaponRequested: WeaponSlot | null = null;
   private useItemRequested: string | null = null;
   private dropItemRequested: string | null = null;
+  private throwGrenadeRequested: GrenadeThrowMode | null = null;
+  private grenadeSelected = false;
+  private grenadePreparing = false;
+  private grenadeThrowMode: GrenadeThrowMode = "high";
   private spectatorSwitchRequested: SpectatorSwitchDirection | null = null;
   private readonly touchEnabled: boolean;
   private readonly touchAdapter: TouchInputAdapter | null;
@@ -97,6 +105,7 @@ export class HumanController implements TouchInputSink {
       command.switchWeapon = this.switchWeaponRequested;
       command.useItem = this.useItemRequested;
       command.dropItem = this.dropItemRequested;
+      command.throwGrenade = this.throwGrenadeRequested;
     }
 
     if (this.reloadRequestTicks > 0) this.reloadRequestTicks -= 1;
@@ -105,6 +114,7 @@ export class HumanController implements TouchInputSink {
     this.switchWeaponRequested = null;
     this.useItemRequested = null;
     this.dropItemRequested = null;
+    this.throwGrenadeRequested = null;
     return command;
   }
 
@@ -149,12 +159,26 @@ export class HumanController implements TouchInputSink {
   }
 
   public setTouchFire(held: boolean): void {
+    if (this.grenadeSelected) {
+      if (held) {
+        if (this.canPrepareGrenade()) this.grenadePreparing = true;
+      } else if (this.grenadePreparing) {
+        this.requestGrenadeThrow();
+      }
+      return;
+    }
     if (!held) {
       this.fireHeld = false;
       this.fireSuppressedUntilRelease = false;
       return;
     }
     if (this.isGameplayInputActive() && !this.fireSuppressedUntilRelease) this.fireHeld = true;
+  }
+
+  public cancelTouchFire(): void {
+    this.fireHeld = false;
+    this.fireSuppressedUntilRelease = false;
+    this.grenadePreparing = false;
   }
 
   public requestDropBackpackItem(index: number, itemId: string, expectedSnapshot?: string): void {
@@ -197,6 +221,7 @@ export class HumanController implements TouchInputSink {
     if (action === "interact") this.interactRequested = true;
     if (action === "reload") this.requestReload();
     if (action === "switch-weapon") this.requestNextWeapon();
+    if (action === "grenade") this.requestGrenadeSelection();
     if (action === "bandage") this.requestMedicalItem("bandage");
     if (action === "medkit") this.requestMedicalItem("medkit");
   }
@@ -213,6 +238,27 @@ export class HumanController implements TouchInputSink {
     return this.leaderboardHeld;
   }
 
+  public isGrenadeSelected(): boolean {
+    return this.grenadeSelected;
+  }
+
+  public isGrenadePreparing(): boolean {
+    return this.grenadePreparing;
+  }
+
+  public getGrenadeThrowMode(): GrenadeThrowMode {
+    return this.grenadeThrowMode;
+  }
+
+  public getAimDirection(): { x: number; y: number; z: number } {
+    const horizontal = Math.cos(this.pitch);
+    return {
+      x: Math.sin(this.yaw) * horizontal,
+      y: -Math.sin(this.pitch),
+      z: Math.cos(this.yaw) * horizontal,
+    };
+  }
+
   public consumeSpectatorSwitchRequest(): SpectatorSwitchDirection | null {
     const request = this.spectatorSwitchRequested;
     this.spectatorSwitchRequested = null;
@@ -222,6 +268,12 @@ export class HumanController implements TouchInputSink {
   public acknowledgeActorState(actor: ActorState): void {
     this.lastActor = actor;
     if (!this.canScope(actor)) this.scopeHeld = false;
+    if (
+      !actor.alive ||
+      actor.deployment !== "grounded" ||
+      actor.inventory.usingItem ||
+      getItemQuantity(actor, FRAG_GRENADE_ITEM_ID) <= 0
+    ) this.cancelGrenadeSelection();
     const weapon = getActiveWeapon(actor);
     if (weapon?.reloadSeconds && weapon.reloadSeconds > 0) this.reloadRequestTicks = 0;
   }
@@ -274,6 +326,9 @@ export class HumanController implements TouchInputSink {
     if (event.code === "Digit2" || event.code === "Numpad2") {
       this.requestWeaponSlot(1);
     }
+    if (event.code === "Digit3" || event.code === "Numpad3") {
+      this.requestGrenadeSelection();
+    }
     const backpackIndex = BACKPACK_DROP_KEYS.get(event.code);
     if (backpackIndex !== undefined) {
       const itemId = this.lastActor?.inventory.backpack[backpackIndex]?.itemId;
@@ -309,16 +364,25 @@ export class HumanController implements TouchInputSink {
 
   private readonly handleMouseDown = (event: MouseEvent): void => {
     if (event.button === 0 && document.pointerLockElement === this.canvas && !this.fireSuppressedUntilRelease) {
-      this.fireHeld = true;
+      if (this.grenadeSelected) {
+        if (this.canPrepareGrenade()) this.grenadePreparing = true;
+      } else {
+        this.fireHeld = true;
+      }
     }
-    if (event.button === 2 && document.pointerLockElement === this.canvas && this.lastActor && this.canScope(this.lastActor)) {
-      this.scopeHeld = true;
+    if (event.button === 2 && document.pointerLockElement === this.canvas) {
+      if (this.grenadeSelected) {
+        this.grenadeThrowMode = this.grenadeThrowMode === "high" ? "low" : "high";
+      } else if (this.lastActor && this.canScope(this.lastActor)) {
+        this.scopeHeld = true;
+      }
     }
   };
 
   private readonly handleMouseUp = (event: MouseEvent): void => {
     if (event.button === 0) {
-      this.fireHeld = false;
+      if (this.grenadePreparing) this.requestGrenadeThrow();
+      else this.fireHeld = false;
       this.fireSuppressedUntilRelease = false;
     }
     if (event.button === 2) this.scopeHeld = false;
@@ -367,6 +431,7 @@ export class HumanController implements TouchInputSink {
     this.fireSuppressedUntilRelease = false;
     this.scopeHeld = false;
     this.leaderboardHeld = false;
+    this.grenadePreparing = false;
   }
 
   private clearAllInput(): void {
@@ -377,6 +442,8 @@ export class HumanController implements TouchInputSink {
     this.switchWeaponRequested = null;
     this.useItemRequested = null;
     this.dropItemRequested = null;
+    this.throwGrenadeRequested = null;
+    this.grenadeSelected = false;
     this.touchAdapter?.reset();
   }
 
@@ -415,14 +482,63 @@ export class HumanController implements TouchInputSink {
   private requestNextWeapon(): void {
     const actor = this.lastActor;
     if (!actor) return;
+    if (this.grenadeSelected) {
+      this.cancelGrenadeSelection();
+      return;
+    }
     const nextSlot: WeaponSlot = actor.inventory.activeWeaponSlot === 0 ? 1 : 0;
     if (actor.inventory.weaponSlots[nextSlot]) this.requestWeaponSlot(nextSlot);
   }
 
   private requestWeaponSlot(slot: WeaponSlot): void {
     this.switchWeaponRequested = slot;
+    this.cancelGrenadeSelection();
     this.scopeHeld = false;
     this.reloadRequestTicks = 0;
+  }
+
+  private requestGrenadeSelection(): void {
+    if (
+      !this.lastActor?.alive ||
+      this.lastActor.deployment !== "grounded" ||
+      this.lastActor.inventory.usingItem ||
+      getItemQuantity(this.lastActor, FRAG_GRENADE_ITEM_ID) <= 0
+    ) return;
+    if (this.grenadeSelected) {
+      this.grenadeThrowMode = this.grenadeThrowMode === "high" ? "low" : "high";
+      return;
+    }
+    this.grenadeSelected = true;
+    this.grenadePreparing = false;
+    this.fireHeld = false;
+    this.scopeHeld = false;
+    this.reloadRequestTicks = 0;
+  }
+
+  private requestGrenadeThrow(): void {
+    if (!this.canPrepareGrenade()) {
+      this.cancelGrenadeSelection();
+      return;
+    }
+    this.throwGrenadeRequested = this.grenadeThrowMode;
+    this.grenadePreparing = false;
+    this.grenadeSelected = false;
+  }
+
+  private cancelGrenadeSelection(): void {
+    if (this.grenadePreparing) this.fireSuppressedUntilRelease = true;
+    this.grenadeSelected = false;
+    this.grenadePreparing = false;
+  }
+
+  private canPrepareGrenade(): boolean {
+    const actor = this.lastActor;
+    return Boolean(
+      actor?.alive &&
+      actor.deployment === "grounded" &&
+      !actor.inventory.usingItem &&
+      getItemQuantity(actor, FRAG_GRENADE_ITEM_ID) > 0
+    );
   }
 
   private applyLookDelta(deltaX: number, deltaY: number, baseScale: number): void {

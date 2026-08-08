@@ -23,12 +23,15 @@ const GUNSHOT_PROFILES: Readonly<Record<string, GunshotProfile>> = {
 const MAX_REMOTE_GUNSHOTS_PER_TICK = 4;
 const MAX_ACTIVE_LOCAL_GUNSHOTS = 2;
 const MAX_ACTIVE_REMOTE_GUNSHOTS = 6;
+const MAX_ACTIVE_GRENADE_EXPLOSIONS = 4;
+const GRENADE_AUDIBLE_RANGE = 240;
 
 export class AudioFeedback {
   private context: AudioContext | null = null;
   private gain: GainNode | null = null;
   private activeLocalGunshots = 0;
   private activeRemoteGunshots = 0;
+  private activeGrenadeExplosions = 0;
 
   public constructor(private volume: number) {}
 
@@ -77,6 +80,14 @@ export class AudioFeedback {
     for (const event of events) {
       if (event.type === "actor-damaged" && event.actorId === listener.playerId) this.tone(62, 0.14, "square");
       if (event.type === "item-picked" && event.actorId === listener.playerId) this.tone(620, 0.08, "sine");
+      if (event.type === "grenade-exploded") {
+        const distance = Math.hypot(
+          event.position.x - listener.position.x,
+          event.position.y - listener.position.y,
+          event.position.z - listener.position.z,
+        );
+        this.grenadeExplosion(gunshotDistanceGain(distance, GRENADE_AUDIBLE_RANGE));
+      }
     }
   }
 
@@ -92,6 +103,7 @@ export class AudioFeedback {
     this.gain = null;
     this.activeLocalGunshots = 0;
     this.activeRemoteGunshots = 0;
+    this.activeGrenadeExplosions = 0;
   }
 
   private gunshot(weaponId: string, gainScale: number, remote: boolean): void {
@@ -140,6 +152,34 @@ export class AudioFeedback {
     };
     oscillator.start();
     oscillator.stop(context.currentTime + duration);
+  }
+
+  private grenadeExplosion(gainScale: number): void {
+    const context = this.context;
+    const gain = this.gain;
+    if (
+      !context ||
+      !gain ||
+      gainScale <= 0 ||
+      this.activeGrenadeExplosions >= MAX_ACTIVE_GRENADE_EXPLOSIONS
+    ) return;
+    this.activeGrenadeExplosions += 1;
+    const oscillator = context.createOscillator();
+    const envelope = context.createGain();
+    oscillator.type = "sawtooth";
+    oscillator.frequency.setValueAtTime(92, context.currentTime);
+    oscillator.frequency.exponentialRampToValueAtTime(34, context.currentTime + 0.34);
+    envelope.gain.setValueAtTime(Math.max(0.001, gainScale), context.currentTime);
+    envelope.gain.exponentialRampToValueAtTime(0.001, context.currentTime + 0.34);
+    oscillator.connect(envelope);
+    envelope.connect(gain);
+    oscillator.onended = () => {
+      this.activeGrenadeExplosions = Math.max(0, this.activeGrenadeExplosions - 1);
+      oscillator.disconnect();
+      envelope.disconnect();
+    };
+    oscillator.start();
+    oscillator.stop(context.currentTime + 0.34);
   }
 }
 

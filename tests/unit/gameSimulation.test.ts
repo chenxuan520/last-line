@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { WEAPONS } from "../../src/config/weapons";
+import { FRAG_GRENADE_ITEM_ID } from "../../src/config/throwables";
 import { getTerrainHeight } from "../../src/config/map";
 import { createIdleCommand, type ActorCommand } from "../../src/game/commands/ActorCommand";
 import { GameSimulation } from "../../src/game/GameSimulation";
@@ -12,6 +13,7 @@ import {
   type JumpVisualState,
 } from "../../src/app/BattleRoyaleSession";
 import { TrainingMode } from "../../src/game/modes/TrainingMode";
+import { BattleRoyaleMode } from "../../src/game/modes/BattleRoyaleMode";
 import { createActorState, createWeaponState, getActiveWeapon, type MatchState } from "../../src/game/state/types";
 import { CombatSystem, type CombatWorld } from "../../src/game/systems/CombatSystem";
 
@@ -25,6 +27,8 @@ function createSimulation(weaponId = "rifle"): GameSimulation {
     elapsedSeconds: 0,
     actors: { player, "bot-1": bot },
     groundLoot: {},
+    activeGrenades: {},
+    nextGrenadeSequence: 1,
     safeZone: {
       center: { x: 0, y: 0, z: 0 },
       radius: 400,
@@ -302,6 +306,27 @@ describe("GameSimulation combat", () => {
     expect(forward.droppedWeaponAmmo).toBe(44);
   });
 
+  it("uses a fixed shots-before-grenades sub-tick order in both command insertion orders", () => {
+    const forward = runMixedShotAndGrenade(["player", "bot-1"]);
+    const reversed = runMixedShotAndGrenade(["bot-1", "player"]);
+
+    expect(reversed).toEqual(forward);
+    expect(forward.eventTypes.indexOf("actor-died")).toBeLessThan(
+      forward.eventTypes.indexOf("grenade-exploded"),
+    );
+    expect(forward.livingActorIds).toHaveLength(1);
+    expect(forward.survivorHealth).toBe(1);
+  });
+
+  it("settles grenade explosions before safe-zone damage in both command insertion orders", () => {
+    const forward = runGrenadeThenZone(["player", "bot-1", "bot-2"]);
+    const reversed = runGrenadeThenZone(["bot-2", "bot-1", "player"]);
+
+    expect(reversed).toEqual(forward);
+    expect(forward.grenadeDeathIndex).toBeLessThan(forward.zoneDeathIndex);
+    expect(forward.winnerId, JSON.stringify(forward)).toBe("player");
+  });
+
   it("does not always award simultaneous fire to the same actor class", () => {
     const winners = new Set<string | null | undefined>();
     for (let tick = 0; tick < 24; tick += 1) {
@@ -399,6 +424,148 @@ function runMutualFire(commandOrder: readonly string[], elapsedSeconds = 0) {
     droppedWeaponAmmo: Object.values(simulation.state.groundLoot).find((loot) => loot.weapon)?.weapon?.ammoInMagazine,
     survivorHealth: Object.values(simulation.state.actors).find((actor) => actor.alive)?.health,
     events,
+  };
+}
+
+function runMixedShotAndGrenade(commandOrder: readonly string[]) {
+  const simulation = createSimulation();
+  simulation.state.elapsedSeconds = 10;
+  const player = simulation.state.actors.player;
+  const bot = simulation.state.actors["bot-1"];
+  if (!player || !bot) throw new Error("actors missing");
+  for (const actor of [player, bot]) {
+    actor.health = 30;
+    actor.armor = 0;
+    actor.inventory.armorLevel = 0;
+  }
+  simulation.state.activeGrenades["grenade-1"] = {
+    id: "grenade-1",
+    ownerId: bot.id,
+    aiControlled: true,
+    position: { x: player.position.x, y: player.position.y, z: player.position.z },
+    velocity: { x: 0, y: 0, z: 0 },
+    fuseSeconds: 0.01,
+  };
+  simulation.state.nextGrenadeSequence = 2;
+  const reciprocalHits: CombatWorld = {
+    traceShot: ({ shooterId }) => (shooterId === player.id ? bot.id : player.id),
+    traceThrowable: () => null,
+    hasExplosionLineOfSight: () => true,
+  };
+
+  simulation.step(
+    1 / 30,
+    new Map(commandOrder.map((actorId) => [actorId, fireCommand] as const)),
+    reciprocalHits,
+  );
+  const events = simulation.drainEvents();
+  return {
+    eventTypes: events.map((event) => event.type),
+    livingActorIds: Object.values(simulation.state.actors)
+      .filter((actor) => actor.alive)
+      .map((actor) => actor.id)
+      .sort(),
+    survivorHealth: Object.values(simulation.state.actors).find((actor) => actor.alive)?.health,
+    grenadeDeaths: events.filter((event) =>
+      event.type === "actor-died" && event.weaponId === FRAG_GRENADE_ITEM_ID
+    ).length,
+  };
+}
+
+function runGrenadeThenZone(commandOrder: readonly string[]) {
+  const player = createActorState("player", "player", {
+    x: 0,
+    y: getTerrainHeight(0, 0, 0) + 1.76,
+    z: 0,
+  });
+  const grenadeTarget = createActorState("bot-1", "bot", {
+    x: 4,
+    y: getTerrainHeight(4, 0, 0) + 1.76,
+    z: 0,
+  });
+  const zoneTarget = createActorState("bot-2", "bot", {
+    x: 20,
+    y: getTerrainHeight(20, 0, 0) + 1.76,
+    z: 0,
+  });
+  for (const actor of [player, grenadeTarget, zoneTarget]) {
+    actor.armor = 0;
+    actor.maxArmor = 0;
+    actor.inventory.armorLevel = 0;
+  }
+  grenadeTarget.health = 20;
+  zoneTarget.health = 10;
+  const state: MatchState = {
+    mapId: "island",
+    mapSeed: 0,
+    phase: "combat",
+    elapsedSeconds: 10,
+    actors: {
+      player,
+      [grenadeTarget.id]: grenadeTarget,
+      [zoneTarget.id]: zoneTarget,
+    },
+    groundLoot: {},
+    activeGrenades: {
+      "grenade-1": {
+        id: "grenade-1",
+        ownerId: player.id,
+        aiControlled: false,
+        position: { ...grenadeTarget.position },
+        velocity: { x: 0, y: 0, z: 0 },
+        fuseSeconds: 0.01,
+      },
+    },
+    nextGrenadeSequence: 2,
+    safeZone: {
+      center: { x: 0, y: 0, z: 0 },
+      radius: 5,
+      startCenter: { x: 0, y: 0, z: 0 },
+      startRadius: 5,
+      targetCenter: { x: 0, y: 0, z: 0 },
+      targetRadius: 5,
+      stageIndex: 0,
+      status: "waiting",
+      secondsRemaining: 60,
+      damagePerSecond: 100,
+    },
+    flight: {
+      start: { x: -400, y: 180, z: 0 },
+      end: { x: 400, y: 180, z: 0 },
+      durationSeconds: 20,
+      progress: 1,
+    },
+    result: null,
+  };
+  const simulation = new GameSimulation(
+    state,
+    new BattleRoyaleMode({
+      participantCount: 3,
+      flightSeconds: 1,
+      safeZoneStages: [{ waitSeconds: 60, shrinkSeconds: 1, radius: 5, damagePerSecond: 100 }],
+    }, () => 0.5),
+    WEAPONS,
+  );
+  const world: CombatWorld = {
+    traceShot: () => null,
+    traceThrowable: () => null,
+    hasExplosionLineOfSight: () => true,
+  };
+  simulation.step(
+    1,
+    new Map(commandOrder.map((actorId) => [actorId, createIdleCommand()] as const)),
+    world,
+  );
+  const events = simulation.drainEvents();
+  return {
+    grenadeDeathIndex: events.findIndex((event) =>
+      event.type === "actor-died" && event.weaponId === FRAG_GRENADE_ITEM_ID
+    ),
+    zoneDeathIndex: events.findIndex((event) =>
+      event.type === "actor-died" && event.actorId === zoneTarget.id && event.sourceId === null
+    ),
+    winnerId: state.result?.winnerId,
+    eventTypes: events.map((event) => event.type),
   };
 }
 

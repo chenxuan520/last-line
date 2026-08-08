@@ -40,10 +40,12 @@ describe("touch input adapter", () => {
     const movement: Array<readonly [number, number, number]> = [];
     const looks: Array<readonly [number, number]> = [];
     const fire: boolean[] = [];
+    const cancellations: number[] = [];
     const sink: TouchInputSink = {
       setTouchMovement: (right, forward, magnitude) => movement.push([right, forward, magnitude]),
       applyTouchLook: (x, y) => looks.push([x, y]),
       setTouchFire: (held) => fire.push(held),
+      cancelTouchFire: () => cancellations.push(cancellations.length + 1),
       triggerTouchAction: () => undefined,
     };
     const adapter = new TouchInputAdapter(root, sink);
@@ -74,41 +76,44 @@ describe("touch input adapter", () => {
     expect(fire.at(-1)).toBe(false);
     expect(knob.style.translate).toBe("0 0");
     adapter.dispose();
+    expect(cancellations).toHaveLength(1);
   });
 
   it("releases dual fire through cancellation, capture loss, reset, and disposal", () => {
     const root = createTouchRoot();
     const fire: boolean[] = [];
+    const cancellations: number[] = [];
     const adapter = new TouchInputAdapter(root, {
       setTouchMovement: () => undefined,
       applyTouchLook: () => undefined,
       setTouchFire: (held) => fire.push(held),
+      cancelTouchFire: () => cancellations.push(cancellations.length + 1),
       triggerTouchAction: () => undefined,
     });
 
     pressFire(root, 1, "fire-look");
     pressFire(root, 2, "fire");
     root.dispatchEvent(pointerEvent("pointercancel", 1, 0, 0));
-    expect(fire.at(-1)).toBe(true);
+    expect(cancellations).toHaveLength(1);
     root.dispatchEvent(pointerEvent("lostpointercapture", 2, 0, 0));
-    expect(fire.at(-1)).toBe(false);
+    expect(cancellations).toHaveLength(2);
 
     pressFire(root, 3, "fire-look");
     pressFire(root, 4, "fire");
     root.dispatchEvent(pointerEvent("lostpointercapture", 4, 0, 0));
-    expect(fire.at(-1)).toBe(true);
+    expect(cancellations).toHaveLength(3);
     root.dispatchEvent(pointerEvent("pointercancel", 3, 0, 0));
-    expect(fire.at(-1)).toBe(false);
+    expect(cancellations).toHaveLength(4);
 
     pressFire(root, 5, "fire-look");
     pressFire(root, 6, "fire");
     adapter.reset();
-    expect(fire.at(-1)).toBe(false);
+    expect(cancellations).toHaveLength(5);
 
     pressFire(root, 7, "fire-look");
     pressFire(root, 8, "fire");
     adapter.dispose();
-    expect(fire.at(-1)).toBe(false);
+    expect(cancellations).toHaveLength(6);
   });
 });
 

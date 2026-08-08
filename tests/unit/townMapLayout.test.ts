@@ -690,6 +690,8 @@ function matchState(seed: number, ...actors: ReturnType<typeof createActorState>
     elapsedSeconds: 0,
     actors: Object.fromEntries(actors.map((actor) => [actor.id, actor])),
     groundLoot: {},
+    activeGrenades: {},
+    nextGrenadeSequence: 1,
     safeZone: {
       center: { x: 0, y: 0, z: 0 },
       radius: 1_000,

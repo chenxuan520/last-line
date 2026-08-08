@@ -1,6 +1,5 @@
 import type { WeaponConfig } from "../../config/weapons";
 import type { ActorCommand } from "../commands/ActorCommand";
-import { calculateProtectedDamage } from "../rules/damage";
 import { selectSimultaneousSurvivor } from "../rules/resolveSimultaneous";
 import {
   getActiveWeapon,
@@ -28,10 +27,17 @@ export interface ShotResult {
   hitType: "actor" | "environment" | "miss";
 }
 
+export interface ThrowableCollision {
+  point: Vector3State;
+  normal: Vector3State;
+}
+
 export interface CombatWorld {
   traceShot(trace: ShotTrace): EntityId | null;
   traceShotDetailed?(trace: ShotTrace): ShotResult;
   hasLineOfSight?(observerId: EntityId, targetId: EntityId): boolean;
+  traceThrowable?(origin: Vector3State, displacement: Vector3State, radius: number): ThrowableCollision | null;
+  hasExplosionLineOfSight?(origin: Vector3State, target: Vector3State): boolean;
 }
 
 interface PendingDamage {
@@ -112,7 +118,7 @@ export class CombatSystem {
     if (command.reload) {
       this.startReload(actor, events);
     }
-    if (command.fire) {
+    if (command.fire && command.throwGrenade === null) {
       this.fire(actor, command, world, events, pendingDamage);
     }
   }
@@ -213,7 +219,11 @@ export class CombatSystem {
 
     const allWouldDie =
       living.length > 0 &&
-      living.every((actor) => wouldBeLethal(actor, damageByTarget.get(actor.id) ?? 0));
+      living.every((actor) => this.damage.wouldBeLethal(
+        state,
+        actor.id,
+        damageByTarget.get(actor.id) ?? 0,
+      ));
     const survivorId = allWouldDie
       ? selectSimultaneousSurvivor(living.map((actor) => actor.id), state.elapsedSeconds)
       : undefined;
@@ -283,13 +293,6 @@ export class CombatSystem {
 
 function compareIds(left: EntityId, right: EntityId): number {
   return left < right ? -1 : left > right ? 1 : 0;
-}
-
-function wouldBeLethal(actor: ActorState, rawDamage: number): boolean {
-  if (rawDamage <= 0) {
-    return false;
-  }
-  return calculateProtectedDamage(actor, rawDamage).healthDamage >= actor.health;
 }
 
 function normalize(value: Vector3State): Vector3State {

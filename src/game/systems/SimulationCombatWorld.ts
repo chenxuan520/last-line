@@ -10,7 +10,12 @@ import {
 import { ACTOR_EYE_HEIGHT, ACTOR_HEIGHT, ACTOR_RADIUS } from "../rules/actorGeometry";
 import type { ActorState, EntityId, MatchState, Vector3State } from "../state/types";
 import { StaticGridIndex } from "../spatial/StaticGridIndex";
-import type { CombatWorld, ShotResult, ShotTrace } from "./CombatSystem";
+import type {
+  CombatWorld,
+  ShotResult,
+  ShotTrace,
+  ThrowableCollision,
+} from "./CombatSystem";
 
 const GEOMETRY_EPSILON = 1e-9;
 const COMBAT_GRID_CELL_SIZE = 32;
@@ -146,6 +151,72 @@ export class SimulationCombatWorld implements CombatWorld {
       direction: offset,
       range: distance + GEOMETRY_EPSILON,
     }) === targetId;
+  }
+
+  public traceThrowable(
+    origin: Vector3State,
+    displacement: Vector3State,
+    radius: number,
+  ): ThrowableCollision | null {
+    const distance = length(displacement);
+    const direction = normalize(displacement);
+    if (!direction || !Number.isFinite(radius) || radius < 0) return null;
+    const layout = this.getLayout();
+    let nearest = intersectTerrain(
+      { ...origin, y: origin.y - radius },
+      direction,
+      distance,
+      layout,
+    );
+    const obstacles = this.useSpatialIndex
+      ? this.obstacleIndex.querySegment(
+        origin.x,
+        origin.z,
+        origin.x + displacement.x,
+        origin.z + displacement.z,
+        radius,
+      )
+      : this.environmentObstacles;
+    for (const obstacle of obstacles) {
+      const hit = intersectExpandedObstacle(origin, direction, distance, obstacle, radius);
+      if (hit && (!nearest || hit.distance < nearest.distance)) nearest = hit;
+    }
+    const ramps = this.useSpatialIndex
+      ? this.rampIndex.querySegment(
+        origin.x,
+        origin.z,
+        origin.x + displacement.x,
+        origin.z + displacement.z,
+        radius,
+      )
+      : layout.roofRamps;
+    for (const ramp of ramps) {
+      const hit = intersectExpandedRamp(origin, direction, distance, ramp, radius);
+      if (hit && (!nearest || hit.distance < nearest.distance)) nearest = hit;
+    }
+    return nearest
+      ? {
+          point: pointAlong(origin, direction, Math.max(0, nearest.distance - 0.001)),
+          normal: nearest.normal,
+        }
+      : null;
+  }
+
+  public hasExplosionLineOfSight(origin: Vector3State, target: Vector3State): boolean {
+    const offset = subtract(target, origin);
+    const distance = length(offset);
+    const direction = normalize(offset);
+    if (!direction || distance <= GEOMETRY_EPSILON) return true;
+    const result = this.traceShotDetailedAgainstActors(
+      {
+        shooterId: "__grenade__",
+        origin,
+        direction,
+        range: Math.max(0, distance - 0.05),
+      },
+      {},
+    );
+    return result.hitType === "miss";
   }
 
   private getLayout(): MapLayout {
@@ -327,6 +398,26 @@ function intersectObstacle(
   );
 }
 
+function intersectExpandedObstacle(
+  origin: Vector3State,
+  direction: Vector3State,
+  range: number,
+  obstacle: MapObstacle,
+  radius: number,
+): SurfaceHit | null {
+  return intersectBoxBounds(
+    origin,
+    direction,
+    range,
+    obstacle.center.x - obstacle.width / 2 - radius,
+    obstacle.center.x + obstacle.width / 2 + radius,
+    obstacle.center.y - obstacle.height / 2 - radius,
+    obstacle.center.y + obstacle.height / 2 + radius,
+    obstacle.center.z - obstacle.depth / 2 - radius,
+    obstacle.center.z + obstacle.depth / 2 + radius,
+  );
+}
+
 function intersectBoxBounds(
   origin: Vector3State,
   direction: Vector3State,
@@ -460,6 +551,102 @@ function intersectRamp(
   let normal = normalize({ x: 0, y: 1, z: -slope }) ?? { x: 0, y: 1, z: 0 };
   if (dot(normal, direction) > 0) normal = scale(normal, -1);
   return { distance, normal };
+}
+
+function intersectExpandedRamp(
+  origin: Vector3State,
+  direction: Vector3State,
+  range: number,
+  ramp: RoofRamp,
+  radius: number,
+): SurfaceHit | null {
+  const radiusSquared = radius ** 2;
+  const start = rampDistanceSquared(origin, ramp);
+  if (start.distanceSquared <= radiusSquared) {
+    return {
+      distance: 0,
+      normal: rampContactNormal(origin, start.closest, direction, ramp),
+    };
+  }
+
+  let minimum = 0;
+  let maximum = range;
+  for (let iteration = 0; iteration < 28; iteration += 1) {
+    const first = minimum + (maximum - minimum) / 3;
+    const second = maximum - (maximum - minimum) / 3;
+    const firstDistance = rampDistanceSquared(pointAlong(origin, direction, first), ramp).distanceSquared;
+    const secondDistance = rampDistanceSquared(pointAlong(origin, direction, second), ramp).distanceSquared;
+    if (firstDistance <= secondDistance) maximum = second;
+    else minimum = first;
+  }
+  const nearestDistance = (minimum + maximum) / 2;
+  if (
+    nearestDistance <= GEOMETRY_EPSILON ||
+    rampDistanceSquared(pointAlong(origin, direction, nearestDistance), ramp).distanceSquared >
+      radiusSquared + GEOMETRY_EPSILON
+  ) return null;
+
+  let outsideDistance = 0;
+  let insideDistance = nearestDistance;
+  for (let iteration = 0; iteration < 24; iteration += 1) {
+    const middle = (outsideDistance + insideDistance) / 2;
+    const distanceSquared = rampDistanceSquared(pointAlong(origin, direction, middle), ramp).distanceSquared;
+    if (distanceSquared <= radiusSquared) insideDistance = middle;
+    else outsideDistance = middle;
+  }
+  const point = pointAlong(origin, direction, insideDistance);
+  const contact = rampDistanceSquared(point, ramp);
+  return {
+    distance: insideDistance,
+    normal: rampContactNormal(point, contact.closest, direction, ramp),
+  };
+}
+
+function rampDistanceSquared(
+  point: Vector3State,
+  ramp: RoofRamp,
+): { distanceSquared: number; closest: Vector3State } {
+  const center = {
+    x: ramp.centerX,
+    y: (ramp.bottomY + ramp.topY) / 2,
+    z: (ramp.startZ + ramp.endZ) / 2,
+  };
+  const deltaY = ramp.topY - ramp.bottomY;
+  const deltaZ = ramp.endZ - ramp.startZ;
+  const rampLength = Math.hypot(deltaY, deltaZ);
+  const alongY = rampLength > GEOMETRY_EPSILON ? deltaY / rampLength : 0;
+  const alongZ = rampLength > GEOMETRY_EPSILON ? deltaZ / rampLength : 1;
+  const offset = subtract(point, center);
+  const across = clamp(offset.x, -ramp.width / 2, ramp.width / 2);
+  const along = clamp(
+    offset.y * alongY + offset.z * alongZ,
+    -rampLength / 2,
+    rampLength / 2,
+  );
+  const closest = {
+    x: center.x + across,
+    y: center.y + alongY * along,
+    z: center.z + alongZ * along,
+  };
+  const distance = subtract(point, closest);
+  return {
+    distanceSquared: dot(distance, distance),
+    closest,
+  };
+}
+
+function rampContactNormal(
+  point: Vector3State,
+  closest: Vector3State,
+  direction: Vector3State,
+  ramp: RoofRamp,
+): Vector3State {
+  const contactNormal = normalize(subtract(point, closest));
+  if (contactNormal) return contactNormal;
+  const slope = (ramp.topY - ramp.bottomY) / (ramp.endZ - ramp.startZ);
+  let planeNormal = normalize({ x: 0, y: 1, z: -slope }) ?? { x: 0, y: 1, z: 0 };
+  if (dot(planeNormal, direction) > 0) planeNormal = scale(planeNormal, -1);
+  return planeNormal;
 }
 
 function terrainOffsetAt(x: number, y: number, z: number, layout: MapLayout): number | null {

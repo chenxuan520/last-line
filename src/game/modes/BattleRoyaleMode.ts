@@ -6,6 +6,7 @@ import {
 import { ITEMS } from "../../config/items";
 import { createMapLayout, MAP_HALF_SIZE } from "../../config/map";
 import { DEFAULT_MAP_ID, type MapId } from "../../config/maps";
+import { FRAG_GRENADE_ITEM_ID } from "../../config/throwables";
 import type { GameMode } from "./GameMode";
 import { ACTOR_RADIUS } from "../rules/actorGeometry";
 import { selectSimultaneousSurvivor } from "../rules/resolveSimultaneous";
@@ -52,11 +53,10 @@ const LOOT_TABLE: readonly { category: LootCategory; itemId: string; quantity: n
 ];
 
 export class BattleRoyaleMode implements GameMode {
-  private readonly damage = new DamageSystem();
-
   public constructor(
     private readonly config: BattleRoyaleConfig = BATTLE_ROYALE_CONFIG,
     private readonly random: () => number = Math.random,
+    private readonly damage: DamageSystem = new DamageSystem(),
   ) {
     getFirstStage(config);
   }
@@ -235,7 +235,9 @@ export class BattleRoyaleMode implements GameMode {
       horizontalDistance(actor.position, state.safeZone.center) > state.safeZone.radius
     );
     const allWouldDie =
-      outside.length === living.length && outside.every((actor) => actor.health <= damage);
+      outside.length === living.length && outside.every((actor) =>
+        this.damage.wouldBeLethal(state, actor.id, damage, true)
+      );
     const survivorId = allWouldDie
       ? selectSimultaneousSurvivor(living.map((actor) => actor.id), state.elapsedSeconds)
       : undefined;
@@ -342,7 +344,15 @@ export function createBattleRoyaleStateForHumans(
     mapId,
     mapSeed,
     actors,
-    groundLoot: createGroundLoot(layout.lootSpawnPoints, layout.lootZoneCounts, layout.hospital, createLootRandom(mapSeed)),
+    groundLoot: createGroundLoot(
+      layout.lootSpawnPoints,
+      layout.lootZoneCounts,
+      layout.hospital,
+      layout.grenadeLootStartIndex,
+      createLootRandom(mapSeed),
+    ),
+    activeGrenades: {},
+    nextGrenadeSequence: 1,
     safeZone: createInitialSafeZone(config, random),
     flight,
     result: null,
@@ -369,6 +379,7 @@ function createGroundLoot(
   lootSpawnPoints: readonly Vector3State[],
   lootZoneCounts: readonly number[],
   hospital: ReturnType<typeof createMapLayout>["hospital"],
+  grenadeLootStartIndex: number,
   random: () => number,
 ): Record<EntityId, GroundLootState> {
   const groundLoot: Record<EntityId, GroundLootState> = {};
@@ -415,7 +426,7 @@ function createGroundLoot(
     }
     zoneStart += zoneCount;
   }
-  for (let index = zoneStart; index < lootSpawnPoints.length; index += 1) {
+  for (let index = zoneStart; index < grenadeLootStartIndex; index += 1) {
     const position = lootSpawnPoints[index];
     if (!position) continue;
     const itemId = index === hospital.bandageLootIndex
@@ -429,6 +440,20 @@ function createGroundLoot(
       generation: 0,
       itemId,
       quantity: itemId === "bandage" ? 2 : 1,
+      position: { ...position },
+      available: true,
+      source: "spawn",
+    };
+  }
+  for (let index = grenadeLootStartIndex; index < lootSpawnPoints.length; index += 1) {
+    const position = lootSpawnPoints[index];
+    if (!position) continue;
+    const id = `loot-${index}`;
+    groundLoot[id] = {
+      id,
+      generation: 0,
+      itemId: FRAG_GRENADE_ITEM_ID,
+      quantity: 2,
       position: { ...position },
       available: true,
       source: "spawn",

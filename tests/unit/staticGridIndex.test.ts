@@ -38,6 +38,19 @@ describe("StaticGridIndex", () => {
       "boundary",
     ]);
   });
+
+  it("includes neighboring cells for padded swept-volume queries", () => {
+    const items = [
+      { id: "adjacent", bounds: bounds(32.1, 33, 10, 12) },
+      { id: "far", bounds: bounds(65, 66, 10, 12) },
+    ];
+    const index = new StaticGridIndex(items, 32, (item) => item.bounds);
+
+    expect(index.querySegment(31.8, 0, 31.8, 20).map((item) => item.id)).toEqual([]);
+    expect(index.querySegment(31.8, 0, 31.8, 20, 0.5).map((item) => item.id)).toEqual([
+      "adjacent",
+    ]);
+  });
 });
 
 function bounds(minimumX: number, maximumX: number, minimumZ: number, maximumZ: number): StaticGridBounds {

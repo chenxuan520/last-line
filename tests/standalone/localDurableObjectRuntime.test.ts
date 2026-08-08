@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { BATTLE_ROYALE_CONFIG } from "../../src/config/battleRoyale";
 import {
   DurableService,
   type PlatformDurableObjectState,
@@ -276,7 +277,7 @@ describe("LocalDurableObjectRuntime", () => {
     }
   });
 
-  it("deletes a running room restored from a version 5 checkpoint without state", async () => {
+  it("deletes a running room restored from a version 6 checkpoint without state", async () => {
     const directory = await mkdtemp(resolve(tmpdir(), "last-line-checkpoint-missing-state-"));
     const databasePath = resolve(directory, "rooms.sqlite");
     const roomId = "room-00000000-0000-4000-8000-000000000004";
@@ -433,8 +434,8 @@ describe("LocalDurableObjectRuntime", () => {
     }
   });
 
-  it("keeps a version 5 town checkpoint recoverable across a SQLite restart", async () => {
-    const directory = await mkdtemp(resolve(tmpdir(), "last-line-checkpoint-town-v5-"));
+  it("deletes a version 6 town checkpoint across a SQLite restart", async () => {
+    const directory = await mkdtemp(resolve(tmpdir(), "last-line-checkpoint-town-v6-"));
     const databasePath = resolve(directory, "rooms.sqlite");
     const roomId = "room-00000000-0000-4000-8000-000000000003";
     let environment = await createStandaloneEnvironment({ databasePath });
@@ -470,15 +471,173 @@ describe("LocalDurableObjectRuntime", () => {
 
       environment = await createStandaloneEnvironment({ databasePath });
       const restoredState = await environment.rooms.getState(roomId);
-      expect(await restoredState.storage.get("room-v1")).toMatchObject({
+      expect(await restoredState.storage.get("room-v1")).toBeUndefined();
+      expect(await restoredState.storage.get("checkpoint-v1")).toBeUndefined();
+    } finally {
+      await environment.close();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it.each([
+    {
+      suffix: "000000000198",
+      name: "grenade backpack stack above the configured limit",
+      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => {
+        const actors = structuredClone(checkpoint.state.actors);
+        const actor = actors["human-1"];
+        if (!actor) throw new Error("actor fixture missing");
+        actor.inventory.backpack = [{ itemId: "grenade.frag", quantity: 4 }];
+        return {
+          ...checkpoint,
+          state: { ...checkpoint.state, actors },
+        };
+      },
+    },
+    {
+      suffix: "000000000199",
+      name: "grenade fuse above the configured duration",
+      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => {
+        const ownerId = "human-1";
+        return {
+          ...checkpoint,
+          state: {
+            ...checkpoint.state,
+            activeGrenades: {
+              "grenade-1": {
+                id: "grenade-1",
+                ownerId,
+                aiControlled: false,
+                position: { x: 0, y: 1, z: 0 },
+                velocity: { x: 0, y: 0, z: 0 },
+                fuseSeconds: 1e9,
+              },
+            },
+            nextGrenadeSequence: 2,
+          },
+        };
+      },
+    },
+    {
+      suffix: "000000000200",
+      name: "negative actor health",
+      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => {
+        const actors = structuredClone(checkpoint.state.actors);
+        const actor = actors["human-1"];
+        if (!actor) throw new Error("actor fixture missing");
+        actor.health = -1;
+        return {
+          ...checkpoint,
+          state: { ...checkpoint.state, actors },
+        };
+      },
+    },
+    {
+      suffix: "000000000201",
+      name: "missing grenade state",
+      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => ({
+        ...checkpoint,
+        state: { ...checkpoint.state, activeGrenades: undefined },
+      }),
+    },
+    {
+      suffix: "000000000202",
+      name: "prematurely closed safe zone",
+      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => ({
+        ...checkpoint,
+        state: {
+          ...checkpoint.state,
+          phase: "combat" as const,
+          actors: groundedActors(checkpoint.state.actors),
+          safeZone: {
+            ...checkpoint.state.safeZone,
+            stageIndex: 0,
+            status: "closed" as const,
+            secondsRemaining: 0,
+          },
+        },
+      }),
+    },
+    {
+      suffix: "000000000203",
+      name: "final-stage closed large safe zone",
+      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => ({
+        ...checkpoint,
+        state: {
+          ...checkpoint.state,
+          phase: "combat" as const,
+          actors: groundedActors(checkpoint.state.actors),
+          safeZone: {
+            ...checkpoint.state.safeZone,
+            stageIndex: BATTLE_ROYALE_CONFIG.safeZoneStages.length - 1,
+            status: "closed" as const,
+            secondsRemaining: 0,
+          },
+        },
+      }),
+    },
+    {
+      suffix: "000000000204",
+      name: "final-stage closed before minimum timeline",
+      corrupt: (checkpoint: ReturnType<MatchRuntime["checkpoint"]>) => {
+        const finalStage = BATTLE_ROYALE_CONFIG.safeZoneStages.at(-1);
+        if (!finalStage) throw new Error("final safe-zone stage missing");
+        return {
+          ...checkpoint,
+          state: {
+            ...checkpoint.state,
+            phase: "combat" as const,
+            actors: groundedActors(checkpoint.state.actors),
+            safeZone: {
+              ...checkpoint.state.safeZone,
+              center: { ...checkpoint.state.safeZone.targetCenter },
+              radius: finalStage.radius,
+              targetRadius: finalStage.radius,
+              stageIndex: BATTLE_ROYALE_CONFIG.safeZoneStages.length - 1,
+              status: "closed" as const,
+              secondsRemaining: 0,
+              damagePerSecond: finalStage.damagePerSecond,
+            },
+          },
+        };
+      },
+    },
+  ])("deletes a running room restored with $name", async ({ suffix, corrupt }) => {
+    const directory = await mkdtemp(resolve(tmpdir(), "last-line-checkpoint-grenade-"));
+    const databasePath = resolve(directory, "rooms.sqlite");
+    const roomId = `room-00000000-0000-4000-8000-${suffix}`;
+    let environment = await createStandaloneEnvironment({ databasePath });
+    try {
+      const state = await environment.rooms.getState(roomId);
+      const runtime = new MatchRuntime({
+        humanActorIds: ["human-1", "human-2"],
+        seed: 52,
+        mapId: "mixed",
+        startWithBandage: true,
+        disableAiSnipers: true,
+      });
+      const checkpoint = corrupt(runtime.checkpoint()) as ReturnType<MatchRuntime["checkpoint"]>;
+      await state.storage.put("room-v1", {
+        roomId,
+        code: "BAD252",
+        visibility: "private",
         status: "running",
-        options: { mapId: "town" },
-        checkpoint: { version: MATCH_CHECKPOINT_VERSION - 1, state: { mapId: "town" } },
+        revision: 1,
+        countdownEndsAt: null,
+        options: { mapId: "mixed", startWithBandage: true, disableAiSnipers: true },
+        seed: 52,
+        expiresAt: Date.now() + 60_000,
+        members: persistedMatchMembers(),
+        checkpoint,
       });
-      expect(await restoredState.storage.get("checkpoint-v1")).toMatchObject({
-        version: MATCH_CHECKPOINT_VERSION - 1,
-        state: { mapId: "town" },
-      });
+      await state.storage.put("checkpoint-v1", checkpoint);
+      await state.storage.setAlarm(Date.now() + 60_000);
+      await environment.close();
+
+      environment = await createStandaloneEnvironment({ databasePath });
+      const restoredState = await environment.rooms.getState(roomId);
+      expect(await restoredState.storage.get("room-v1")).toBeUndefined();
+      expect(await restoredState.storage.get("checkpoint-v1")).toBeUndefined();
     } finally {
       await environment.close();
       await rm(directory, { force: true, recursive: true });
@@ -542,6 +701,15 @@ function persistedMatchMembers(): Record<string, Record<string, unknown>> {
       actorId,
     }];
   }));
+}
+
+function groundedActors(
+  actors: ReturnType<MatchRuntime["checkpoint"]>["state"]["actors"],
+): ReturnType<MatchRuntime["checkpoint"]>["state"]["actors"] {
+  return Object.fromEntries(Object.entries(actors).map(([actorId, actor]) => [
+    actorId,
+    { ...actor, deployment: "grounded" as const },
+  ]));
 }
 
 async function createGuest(

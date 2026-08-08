@@ -401,7 +401,9 @@ describe("IslandScene lifecycle", () => {
       expect(weaponMeshes.filter((mesh) => mesh.metadata?.weaponId !== "shotgun").every((mesh) => !mesh.isEnabled(false))).toBe(true);
       const viewWeaponMeshes = bundle.viewWeaponRoot.getChildMeshes(false)
         .filter((mesh) => mesh.metadata?.actorVisual === "weapon");
-      expect(new Set(viewWeaponMeshes.map((mesh) => mesh.metadata?.weaponId))).toEqual(new Set(["rifle", "smg", "shotgun", "sniper"]));
+      expect(new Set(viewWeaponMeshes.map((mesh) => mesh.metadata?.weaponId))).toEqual(
+        new Set(["rifle", "smg", "shotgun", "sniper", "grenade.frag"]),
+      );
       setActorWeaponVisual(bundle.viewWeaponRoot, "smg");
       expect(viewWeaponMeshes.filter((mesh) => mesh.metadata?.weaponId === "smg").every((mesh) => mesh.isEnabled(false))).toBe(true);
       expect(viewWeaponMeshes.filter((mesh) => mesh.metadata?.weaponId !== "smg").every((mesh) => !mesh.isEnabled(false))).toBe(true);
@@ -442,8 +444,8 @@ describe("IslandScene lifecycle", () => {
     expect(marker.getTotalVertices()).toBeGreaterThan(24);
     expect(marker.getChildMeshes()).toHaveLength(0);
     expect(bundle.lootMeshes.size).toBe(Object.keys(state.groundLoot).length);
-    expect(bundle.scene.meshes.filter((mesh) => mesh.name.startsWith("loot-model-template-"))).toHaveLength(15);
-    expect(bundle.scene.materials.filter((entry) => entry.name.startsWith("loot-model-material-"))).toHaveLength(14);
+    expect(bundle.scene.meshes.filter((mesh) => mesh.name.startsWith("loot-model-template-"))).toHaveLength(16);
+    expect(bundle.scene.materials.filter((entry) => entry.name.startsWith("loot-model-material-"))).toHaveLength(15);
     expect(bundle.scene.materials
       .filter((entry) => entry.name.startsWith("loot-model-material-"))
       .every((entry) => (entry as StandardMaterial).diffuseColor.toHexString() === "#E2C66D")).toBe(true);
@@ -457,6 +459,15 @@ describe("IslandScene lifecycle", () => {
       return ammoMarker.getTotalVertices();
     });
     expect(ammoModelVertexCounts).toEqual([116, 150, 184, 218]);
+    const grenadeMarker = [...bundle.lootMeshes.values()].find((candidate) =>
+      candidate.metadata?.itemId === "grenade.frag"
+    );
+    expect(grenadeMarker?.metadata).toMatchObject({
+      lootModel: true,
+      lootModelScale: 1.45,
+      modelId: "grenade.frag",
+    });
+    expect(grenadeMarker?.getChildMeshes()).toHaveLength(0);
     expect([...bundle.lootMeshes.values()].every((modelMarker) => {
       const expectedScale = String(modelMarker.metadata?.itemId).startsWith("weapon.") ? 2 : 1.45;
       return modelMarker.scaling.equals(new Vector3(expectedScale, expectedScale, expectedScale));
@@ -589,8 +600,8 @@ describe("IslandScene lifecycle", () => {
       modelId: "bandage",
     });
     expect(marker.getTotalVertices()).toBeGreaterThan(24);
-    expect(bundle.scene.meshes.filter((mesh) => mesh.name.startsWith("loot-model-template-"))).toHaveLength(15);
-    expect(bundle.scene.materials.filter((entry) => entry.name.startsWith("loot-model-material-"))).toHaveLength(14);
+    expect(bundle.scene.meshes.filter((mesh) => mesh.name.startsWith("loot-model-template-"))).toHaveLength(16);
+    expect(bundle.scene.materials.filter((entry) => entry.name.startsWith("loot-model-material-"))).toHaveLength(15);
 
     const roof = layout.floorSlabs.find((slab) => slab.kind === "roof");
     if (!roof) throw new Error("roof slab missing");
