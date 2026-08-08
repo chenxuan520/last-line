@@ -365,6 +365,54 @@ describe("MovementSystem", () => {
     expect(Math.hypot(actor.position.x - ground.x, actor.position.z - ground.z)).toBeLessThan(0.8);
   });
 
+  it("blocks roof movement with the authoritative architectural edge", () => {
+    const layout = createMapLayout(0);
+    const edge = layout.wallSegments.find((wall) =>
+      wall.role === "architectural" &&
+      wall.architecturalFeature === "roof-edge" &&
+      wall.id.endsWith("roof-edge-left")
+    );
+    const building = layout.obstacles.find((entry) => entry.id === edge?.obstacleId);
+    if (!building || !edge) throw new Error("architectural roof edge missing");
+    const roofY = building.baseY + building.storyHeight * building.storyCount + BUILDING_ROOF_CAP_HEIGHT;
+    const state = createState(
+      edge.center.x + edge.width / 2 + ACTOR_RADIUS + 1,
+      edge.center.z,
+      roofY + GROUND_HEIGHT,
+    );
+    state.mapSeed = layout.seed;
+    const actor = state.actors.actor;
+    if (!actor) throw new Error("roof actor missing");
+
+    advance(state, movingCommand(-1, 0, true), 120, 1 / 60);
+
+    expect(actor.position.x).toBeGreaterThanOrEqual(edge.center.x + edge.width / 2 + ACTOR_RADIUS - 0.002);
+    expect(actor.position.y).toBeCloseTo(roofY + GROUND_HEIGHT, 2);
+  });
+
+  it("does not add an invisible roof cap above architectural wall records", () => {
+    const layout = createMapLayout(0);
+    const edge = layout.wallSegments.find((wall) =>
+      wall.role === "architectural" &&
+      wall.architecturalFeature === "roof-edge" &&
+      wall.id.endsWith("roof-edge-left")
+    );
+    if (!edge) throw new Error("architectural roof edge missing");
+    const wallTop = edge.center.y + edge.height / 2;
+    const state = createState(
+      edge.center.x + edge.width / 2 + ACTOR_RADIUS + 0.08,
+      edge.center.z,
+      wallTop + GROUND_HEIGHT + 0.09,
+    );
+    state.mapSeed = layout.seed;
+    const actor = state.actors.actor;
+    if (!actor) throw new Error("roof-boundary actor missing");
+
+    new MovementSystem().processCommand(state, actor.id, movingCommand(-1, 0), 0.12);
+
+    expect(actor.position.x).toBeLessThan(edge.center.x - edge.width / 2 - 0.01);
+  });
+
   it("physically traverses every seed-zero internal staircase in both directions", () => {
     const layout = createMapLayout(0);
     const navigator = new GridNavigator(layout);

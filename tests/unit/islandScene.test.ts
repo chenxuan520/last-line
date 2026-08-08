@@ -1,10 +1,12 @@
 import { NullEngine } from "@babylonjs/core/Engines/nullEngine";
+import type { Scene } from "@babylonjs/core/scene";
 import { BackgroundMaterial } from "@babylonjs/core/Materials/Background/backgroundMaterial";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { MultiMaterial } from "@babylonjs/core/Materials/multiMaterial";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { VertexBuffer } from "@babylonjs/core/Buffers/buffer";
 import { InstancedMesh } from "@babylonjs/core/Meshes/instancedMesh";
+import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { Ray } from "@babylonjs/core/Culling/ray";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
@@ -31,6 +33,7 @@ import {
   getTerrainHeight,
   HOSPITAL_WALL_COLOR,
   MAP_SIZE,
+  type MapLayout,
 } from "../../src/config/map";
 import { mixedFootprintClearsRoads } from "../../src/config/mixedMap";
 import { createMixedMapBlueprint, MIXED_REGION_COUNT } from "../../src/config/mixedMap";
@@ -56,6 +59,25 @@ const BRAND_SIGN_ASSET_IDS = new Set([
   "decal.brand.restricted-area",
   "decal.brand.supply",
 ]);
+
+function expectedRenderedBuildingWallCount(layout: MapLayout): number {
+  const doorSillIds = new Set(
+    layout.wallOpenings
+      .filter((opening) => opening.kind === "door")
+      .map((opening) => `${opening.obstacleId}-wall-${opening.side}-${opening.storyIndex}-sill`),
+  );
+  return layout.wallSegments.filter((wall) => !doorSillIds.has(wall.id)).length;
+}
+
+function renderedBuildingWallCount(scene: Scene): number {
+  return scene.meshes
+    .filter((mesh) => mesh.name.startsWith("building-walls-"))
+    .reduce((total, mesh) => total + Number(mesh.metadata?.sourceCount ?? 0), 0);
+}
+
+function expectedRenderedWallVertices(walls: readonly MapLayout["wallSegments"][number][]): number {
+  return walls.some((wall) => wall.role === "architectural") ? 24 : walls.length * 24;
+}
 
 describe("IslandScene lifecycle", () => {
   afterEach(() => {
@@ -239,16 +261,70 @@ describe("IslandScene lifecycle", () => {
       const hospitalWallBatch = bundle.scene.getMeshByName(
         `building-walls-${HOSPITAL_WALL_COLOR.replace("#", "")}`,
       );
+      const hospitalArchitectureBatch = bundle.scene.getMeshByName(
+        `building-walls-${HOSPITAL_WALL_COLOR.replace("#", "")}-architecture`,
+      ) as Mesh | null;
+      const hospitalFacadeWalls = hospitalWalls.filter((wall) =>
+        wall.role !== "architectural" && !hospitalDoorSills.has(wall.id)
+      );
+      const hospitalArchitectureWalls = hospitalWalls.filter((wall) =>
+        wall.role === "architectural"
+      );
       expect(hospitalWallBatch?.metadata?.sourceCount).toBe(
-        hospitalWalls.filter((wall) => !hospitalDoorSills.has(wall.id)).length,
+        hospitalFacadeWalls.length,
       );
-      expect(hospitalWallBatch?.getTotalVertices()).toBe(
-        hospitalWalls.filter((wall) => !hospitalDoorSills.has(wall.id)).length * 24,
+      expect(hospitalWallBatch?.getTotalVertices()).toBe(expectedRenderedWallVertices(hospitalFacadeWalls));
+      expect(hospitalArchitectureBatch?.metadata?.sourceCount).toBe(hospitalArchitectureWalls.length);
+      expect(hospitalArchitectureBatch?.getTotalVertices()).toBe(
+        expectedRenderedWallVertices(hospitalArchitectureWalls),
       );
+      const hospitalArchitectureMatrices = hospitalArchitectureBatch?.thinInstanceGetWorldMatrices() ?? [];
+      expect(hospitalArchitectureMatrices).toHaveLength(hospitalArchitectureWalls.length);
+      for (const [index, wall] of hospitalArchitectureWalls.entries()) {
+        const values = hospitalArchitectureMatrices[index]?.m;
+        if (!values) throw new Error(`hospital architecture matrix missing: ${wall.id}`);
+        expect(values[0], wall.id).toBeCloseTo(wall.width, 4);
+        expect(values[5], wall.id).toBeCloseTo(wall.height, 4);
+        expect(values[10], wall.id).toBeCloseTo(wall.depth, 4);
+        expect(values[12], wall.id).toBeCloseTo(wall.center.x, 4);
+        expect(values[13], wall.id).toBeCloseTo(wall.center.y, 4);
+        expect(values[14], wall.id).toBeCloseTo(wall.center.z, 4);
+      }
+      const architectureBounds = hospitalArchitectureBatch?.getBoundingInfo().boundingBox;
+      const expectedArchitectureBounds = hospitalArchitectureWalls.reduce(
+        (bounds, wall) => ({
+          minimumX: Math.min(bounds.minimumX, wall.center.x - wall.width / 2),
+          minimumY: Math.min(bounds.minimumY, wall.center.y - wall.height / 2),
+          minimumZ: Math.min(bounds.minimumZ, wall.center.z - wall.depth / 2),
+          maximumX: Math.max(bounds.maximumX, wall.center.x + wall.width / 2),
+          maximumY: Math.max(bounds.maximumY, wall.center.y + wall.height / 2),
+          maximumZ: Math.max(bounds.maximumZ, wall.center.z + wall.depth / 2),
+        }),
+        {
+          minimumX: Number.POSITIVE_INFINITY,
+          minimumY: Number.POSITIVE_INFINITY,
+          minimumZ: Number.POSITIVE_INFINITY,
+          maximumX: Number.NEGATIVE_INFINITY,
+          maximumY: Number.NEGATIVE_INFINITY,
+          maximumZ: Number.NEGATIVE_INFINITY,
+        },
+      );
+      expect(architectureBounds?.minimumWorld.x).toBeCloseTo(expectedArchitectureBounds.minimumX, 4);
+      expect(architectureBounds?.minimumWorld.y).toBeCloseTo(expectedArchitectureBounds.minimumY, 4);
+      expect(architectureBounds?.minimumWorld.z).toBeCloseTo(expectedArchitectureBounds.minimumZ, 4);
+      expect(architectureBounds?.maximumWorld.x).toBeCloseTo(expectedArchitectureBounds.maximumX, 4);
+      expect(architectureBounds?.maximumWorld.y).toBeCloseTo(expectedArchitectureBounds.maximumY, 4);
+      expect(architectureBounds?.maximumWorld.z).toBeCloseTo(expectedArchitectureBounds.maximumZ, 4);
       expect((hospitalWallBatch?.material as StandardMaterial).diffuseColor.toHexString().toLowerCase()).toBe(
         "#ffffff",
       );
       expect((hospitalWallBatch?.material as StandardMaterial).diffuseTexture).toBeNull();
+      expect((hospitalWallBatch?.material as StandardMaterial).backFaceCulling).toBe(true);
+      expect((hospitalArchitectureBatch?.material as StandardMaterial).backFaceCulling).toBe(true);
+      expect((hospitalArchitectureBatch?.material as StandardMaterial).twoSidedLighting).toBe(false);
+      expect((hospitalArchitectureBatch?.material as StandardMaterial).diffuseColor.toHexString().toLowerCase())
+        .toBe("#ffffff");
+      expect((hospitalArchitectureBatch?.material as StandardMaterial).diffuseTexture).toBeNull();
       const wallMaterials = bundle.scene.materials.filter((sceneMaterial) =>
         sceneMaterial.name.startsWith("building-material-")
       ) as StandardMaterial[];
@@ -326,7 +402,11 @@ describe("IslandScene lifecycle", () => {
         expect(getTerrainHeight(x, z, layout)).toBeCloseTo(y, 5);
       }
       expect(decorations.every((mesh) => !mesh.isPickable && !mesh.checkCollisions)).toBe(true);
-      expect(collisionMeshes).toHaveLength(new Set(layout.wallSegments.map((wall) => wall.color)).size + 1);
+      expect(collisionMeshes).toHaveLength(
+        new Set(layout.wallSegments.map((wall) =>
+          `${wall.color}:${wall.role === "architectural" ? "architecture" : "facade"}`
+        )).size + 1,
+      );
       expect(bundle.scene.meshes.length).toBeLessThan(4_000);
       const hospitalSurfaces = layout.floorSlabs.filter((slab) =>
         slab.obstacleId === layout.hospital.buildingId
@@ -1152,6 +1232,7 @@ describe("IslandScene lifecycle", () => {
       flightSeconds: 1,
       safeZoneStages: [{ waitSeconds: 1, shrinkSeconds: 1, radius: 100, damagePerSecond: 1 }],
     }, () => 0.5, { mapId: "town" });
+    const layout = createMapLayout("town", state.mapSeed);
 
     const bundle = await createIslandScene(
       engine,
@@ -1174,6 +1255,7 @@ describe("IslandScene lifecycle", () => {
     expect(bundle.scene.fogEnd).toBeCloseTo(MAP_SIZE * 1.1, 5);
     expect(bundle.scene.fogColor.asArray()).toEqual([0.46, 0.53, 0.53]);
     expect(bundle.scene.meshes.some((mesh) => mesh.metadata?.decoration === "town-visual-detail")).toBe(false);
+    expect(renderedBuildingWallCount(bundle.scene)).toBe(expectedRenderedBuildingWallCount(layout));
 
     bundle.scene.dispose();
     engine.dispose();
@@ -1326,6 +1408,7 @@ describe("IslandScene lifecycle", () => {
       poiType: "hospital",
       obstacleId: layout.hospital.buildingId,
     });
+    expect(renderedBuildingWallCount(low.scene)).toBe(expectedRenderedBuildingWallCount(layout));
 
     low.scene.dispose();
 
@@ -1343,6 +1426,7 @@ describe("IslandScene lifecycle", () => {
     const townVisualBatches = high.scene.meshes.filter((mesh) =>
       mesh.metadata?.decoration === "town-visual-detail"
     );
+    expect(renderedBuildingWallCount(high.scene)).toBe(expectedRenderedBuildingWallCount(layout));
     expect(townVisualBatches.length).toBeGreaterThan(8);
     const townBuildingIds = new Set(layout.obstacles
       .filter((building) => Boolean(building.townKind))
@@ -1524,23 +1608,13 @@ describe("IslandScene lifecycle", () => {
     expect(cockpitMaterial?.specularColor.g).toBeCloseTo(56 / 255 * 0.08, 8);
     expect(cockpitMaterial?.specularColor.b).toBeCloseTo(59 / 255 * 0.08, 8);
     expect(cockpitMaterial?.backFaceCulling).toBe(true);
-    expect(bundle.scene.meshes
-      .filter((mesh) => mesh.name.startsWith("town-building-silhouettes-"))
-      .map((mesh) => mesh.metadata?.townKind)
-      .sort()).toEqual(["commercial", "corner", "factory", "rowhouse", "tower", "warehouse"]);
+    expect(bundle.scene.meshes.some((mesh) => mesh.name.startsWith("town-building-silhouettes-"))).toBe(false);
+    expect(renderedBuildingWallCount(bundle.scene)).toBe(expectedRenderedBuildingWallCount(layout));
     const hospital = layout.obstacles.find((building) => building.id === layout.hospital.buildingId);
     if (!hospital?.townKind) throw new Error("Town hospital building missing");
     const hospitalSlabs = layout.floorSlabs.filter((slab) => slab.obstacleId === hospital.id);
-    const rooftopPieceCount = {
-      factory: 2,
-      warehouse: 1,
-      rowhouse: 2,
-      commercial: 1,
-      corner: 1,
-      tower: 2,
-    }[hospital.townKind];
     expect(bundle.scene.getMeshByName("hospital-surfaces-batch")?.metadata?.sourceCount)
-      .toBe(hospitalSlabs.length + rooftopPieceCount);
+      .toBe(hospitalSlabs.length);
     expect(bundle.viewWeaponRoot.getChildMeshes(false)
       .some((mesh) => mesh.metadata?.actorVisual === "view-arm")).toBe(false);
     expect(bundle.scene.meshes.some((mesh) => mesh.metadata?.actorVisual === "high-detail-gear")).toBe(true);

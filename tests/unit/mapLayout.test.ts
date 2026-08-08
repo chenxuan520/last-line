@@ -253,6 +253,56 @@ describe("map layouts", () => {
     }
   }, 120_000);
 
+  it.each([
+    ["island", 7],
+    ["town", 42],
+    ["mixed", 2026],
+  ] as const)("creates deterministic authoritative architectural profiles on %s", (mapId: MapId, seed) => {
+    const layout = createMapLayout(mapId, seed);
+    const architectureWalls = layout.wallSegments.filter((wall) => wall.role === "architectural");
+    const profileNames = new Set(layout.obstacles.map((building) => building.architecturalProfile));
+
+    expect(layout.obstacles.every((building) => Boolean(building.architecturalProfile))).toBe(true);
+    expect(profileNames.size).toBeGreaterThanOrEqual(6);
+    expect(architectureWalls.length).toBeGreaterThan(layout.obstacles.length * 4);
+
+    for (const building of layout.obstacles) {
+      const buildingArchitecture = architectureWalls.filter((wall) => wall.obstacleId === building.id);
+      const roofEdges = buildingArchitecture.filter((wall) => wall.architecturalFeature === "roof-edge");
+      const roofScreens = buildingArchitecture.filter((wall) => wall.architecturalFeature === "roof-screen");
+      const eastEdges = roofEdges.filter((wall) => wall.id.includes("roof-edge-right-"));
+      const roofY = building.baseY + building.storyHeight * building.storyCount + BUILDING_ROOF_CAP_HEIGHT;
+
+      expect(buildingArchitecture.length, `${mapId}:${building.id}:architecture`).toBeGreaterThanOrEqual(5);
+      expect(roofEdges.length, `${mapId}:${building.id}:roof-edges`).toBe(5);
+      expect(roofEdges.every((wall) => wall.center.y - wall.height / 2 >= roofY - 0.001)).toBe(true);
+      expect(Math.max(...buildingArchitecture.map((wall) => wall.center.y + wall.height / 2)) - roofY)
+        .toBeGreaterThanOrEqual(2.2);
+      expect(roofEdges.every((wall) =>
+        Math.abs(wall.center.x - building.stairwell.centerX) > wall.width / 2 + building.stairwell.width / 2 ||
+        Math.abs(wall.center.z - building.stairwell.centerZ) > wall.depth / 2 + building.stairwell.depth / 2
+      ), `${mapId}:${building.id}:roof-exit`).toBe(true);
+      expect(eastEdges).toHaveLength(2);
+      const eastGapMinimumZ = Math.min(...eastEdges.map((wall) => wall.center.z + wall.depth / 2));
+      const eastGapMaximumZ = Math.max(...eastEdges.map((wall) => wall.center.z - wall.depth / 2));
+      expect(eastGapMaximumZ - eastGapMinimumZ, `${mapId}:${building.id}:east-gap`).toBeGreaterThanOrEqual(5);
+      expect(eastGapMinimumZ).toBeLessThanOrEqual(building.center.z);
+      expect(eastGapMaximumZ).toBeGreaterThanOrEqual(building.center.z);
+      expect(roofScreens.every((wall) =>
+        Math.abs(wall.center.x - building.stairwell.centerX) >
+          wall.width / 2 + building.stairwell.width / 2 + 0.5 ||
+        Math.abs(wall.center.z - building.stairwell.centerZ) >
+          wall.depth / 2 + building.stairwell.depth / 2 + 0.5
+      ), `${mapId}:${building.id}:roof-screen-stairwell`).toBe(true);
+      expect(buildingArchitecture.every((wall) =>
+        wall.center.x - wall.width / 2 >= building.center.x - building.width / 2 - 0.001 &&
+        wall.center.x + wall.width / 2 <= building.center.x + building.width / 2 + 0.001 &&
+        wall.center.z - wall.depth / 2 >= building.center.z - building.depth / 2 - 0.001 &&
+        wall.center.z + wall.depth / 2 <= building.center.z + building.depth / 2 + 0.001
+      ), `${mapId}:${building.id}:footprint`).toBe(true);
+    }
+  }, 120_000);
+
   it.each([832, 859])("generates the former coverage failure seed %i", (seed) => {
     const layout = createMapLayout(seed);
     expect(layout.mapPoints).toHaveLength(MAP_POINT_COUNT);

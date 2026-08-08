@@ -263,7 +263,12 @@ function collidesWithBlocker(
 ): boolean {
   const actorTopY = feetY + ACTOR_HEIGHT;
   const wallBottomY = wall.center.y - wall.height / 2;
-  const roofCapHeight = "obstacleId" in wall && !wall.id.endsWith("-sill") ? BUILDING_ROOF_CAP_HEIGHT : 0;
+  const roofCapHeight =
+    "obstacleId" in wall &&
+    (!("role" in wall) || wall.role === "facade") &&
+    !wall.id.endsWith("-sill")
+      ? BUILDING_ROOF_CAP_HEIGHT
+      : 0;
   const roofY = wall.center.y + wall.height / 2 + roofCapHeight;
   if (feetY >= roofY - SURFACE_EPSILON || actorTopY <= wallBottomY + SURFACE_EPSILON) return false;
   const halfWidth = wall.width / 2;

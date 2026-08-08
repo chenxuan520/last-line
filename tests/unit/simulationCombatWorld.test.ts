@@ -96,6 +96,46 @@ describe("SimulationCombatWorld", () => {
     expect(wallHit?.normal.z).toBeLessThan(-0.9);
   });
 
+  it("uses the same architectural roof edge for shots and grenade sweeps", () => {
+    const layout = createMapLayout(0);
+    const edge = layout.wallSegments.find((wall) =>
+      wall.role === "architectural" &&
+      wall.architecturalFeature === "roof-edge" &&
+      wall.width > wall.depth
+    );
+    if (!edge) throw new Error("architectural roof edge missing");
+    const shooter = createActorState("shooter", "player", {
+      x: edge.center.x,
+      y: edge.center.y,
+      z: edge.center.z - edge.depth / 2 - 3,
+    });
+    const state = createState(shooter);
+    shooter.position = {
+      x: edge.center.x,
+      y: edge.center.y,
+      z: edge.center.z - edge.depth / 2 - 3,
+    };
+    const world = new SimulationCombatWorld(state);
+
+    const shot = world.traceShotDetailed(trace(shooter.position, { x: 0, y: 0, z: 1 }));
+    const grenade = world.traceThrowable(shooter.position, { x: 0, y: 0, z: 6 }, 0.18);
+
+    expect(shot).toMatchObject({ hitType: "environment", targetId: null });
+    expect(shot.point.z).toBeCloseTo(edge.center.z - edge.depth / 2, 5);
+    expect(shot.normal.z).toBeLessThan(-0.9);
+    expect(grenade?.point.z).toBeCloseTo(edge.center.z - edge.depth / 2 - 0.181, 2);
+    expect(grenade?.normal.z).toBeLessThan(-0.9);
+
+    const wallTop = edge.center.y + edge.height / 2;
+    const aboveOrigin = {
+      x: edge.center.x,
+      y: wallTop + 0.09,
+      z: edge.center.z - edge.depth / 2 - 2,
+    };
+    expect(world.traceShotDetailed(trace(aboveOrigin, { x: 0, y: 0, z: 1 }, 4)).hitType).toBe("miss");
+    expect(world.traceThrowable(aboveOrigin, { x: 0, y: 0, z: 4 }, 0.05)).toBeNull();
+  });
+
   it("sweeps grenade spheres against ramp faces, sides, and ends consistently", () => {
     const layout = createMapLayout(0);
     const ramp = layout.roofRamps[0];
@@ -484,8 +524,8 @@ function createState(...actors: ReturnType<typeof createActorState>[]): MatchSta
   };
 }
 
-function trace(origin: Vector3State, direction: Vector3State): ShotTrace {
-  return { shooterId: "shooter", origin, direction, range: 100 };
+function trace(origin: Vector3State, direction: Vector3State, range = 100): ShotTrace {
+  return { shooterId: "shooter", origin, direction, range };
 }
 
 function subtract(left: Vector3State, right: Vector3State): Vector3State {

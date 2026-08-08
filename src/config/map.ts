@@ -37,16 +37,27 @@ export interface BuildingStairwell {
   direction: -1 | 1;
 }
 
+export type BuildingArchitecturalProfile =
+  | "corner-piers"
+  | "horizontal-bands"
+  | "vertical-bays"
+  | "service-crown"
+  | "split-monitor"
+  | "stepped-parapet";
+
 export interface MapBuilding extends MapObstacle {
   baseY: number;
   storyCount: 1 | 2 | 3 | 4 | 5;
   storyHeight: number;
   stairwell: BuildingStairwell;
+  architecturalProfile: BuildingArchitecturalProfile;
   townKind?: TownBuildingKind;
 }
 
 export interface MapWallSegment extends MapObstacle {
   obstacleId: string;
+  role?: "facade" | "architectural" | "skybridge-rail";
+  architecturalFeature?: "roof-edge" | "facade-pier" | "cornice" | "roof-screen";
 }
 
 export interface MapRockObstacle extends MapObstacle {}
@@ -246,6 +257,14 @@ const STAIRWELL_WIDTH = 4.8;
 const STAIRWELL_LANDING_DEPTH = 1.2;
 const STAIRWELL_FLOOR_BORDER = 0.3;
 const MAP_LAYOUT_CACHE_LIMIT = 8;
+const BUILDING_ARCHITECTURAL_PROFILES = [
+  "corner-piers",
+  "horizontal-bands",
+  "vertical-bays",
+  "service-crown",
+  "split-monitor",
+  "stepped-parapet",
+] as const satisfies readonly BuildingArchitecturalProfile[];
 const mapLayoutCache = new Map<string, MapLayout>();
 const terrainGridCache = new WeakMap<readonly TerrainHill[], Float32Array>();
 
@@ -312,8 +331,13 @@ export function createMapLayout(mapIdOrSeed: MapId | number, explicitSeed?: numb
   );
   const buildingAreas = createBuildingAreas(mapPoints, wildernessPoints, coveragePoints);
   const obstacleRandom = createSeededRandom(normalizedSeed ^ 0x85ebca6b);
-  const baseObstacles = createSeededBuildings(terrainHills, buildingAreas, obstacleRandom);
-  const baseWallGeometry = createWallSegments(baseObstacles, terrainHills);
+  const baseObstacles = createSeededBuildings(
+    terrainHills,
+    buildingAreas,
+    obstacleRandom,
+    normalizedSeed,
+  );
+  const baseWallGeometry = createWallSegments(baseObstacles, terrainHills, false);
   const basePlacementRamps = baseObstacles.map((obstacle) => {
     const pointIndex = Number(obstacle.id.split("-")[1]);
     const poi = buildingAreas[pointIndex] ?? buildingAreas[0];
@@ -385,7 +409,7 @@ export function createMapLayout(mapIdOrSeed: MapId | number, explicitSeed?: numb
   const hospitalMedicalPoints = createHospitalMedicalPoints(
     hospitalBuildingBeforeStairwell,
     terrainHills,
-    createWallSegments(coloredObstacles, terrainHills).wallSegments.filter(
+    createWallSegments(coloredObstacles, terrainHills, false).wallSegments.filter(
       (wall) => wall.obstacleId === hospitalBuildingBeforeStairwell.id,
     ),
     createInternalRamps(hospitalBuildingBeforeStairwell, terrainHills),
@@ -414,7 +438,9 @@ export function createMapLayout(mapIdOrSeed: MapId | number, explicitSeed?: numb
   const depotLootPoints = createBuildingInteriorLootPoints(
     depotBuilding,
     terrainHills,
-    wallSegments.filter((wall) => wall.obstacleId === depotBuilding.id),
+    wallSegments.filter((wall) =>
+      wall.obstacleId === depotBuilding.id && wall.role !== "architectural"
+    ),
     roofRamps.filter((ramp) => ramp.obstacleId === depotBuilding.id),
     globalLootSpawnPoints,
   );
@@ -433,7 +459,7 @@ export function createMapLayout(mapIdOrSeed: MapId | number, explicitSeed?: numb
   const grenadeLootSpawnPoints = createGrenadeLootSpawnPoints(
     landingZones,
     terrainHills,
-    wallSegments,
+    wallSegments.filter((wall) => wall.role !== "architectural"),
     roofRamps,
     [...obstacles, ...rockObstacles, ...coverObstacles, ...treeTrunks],
     preGrenadeLootSpawnPoints,
@@ -484,6 +510,7 @@ function createTownMapLayout(seed: number): MapLayout {
       baseY,
       storyCount: building.storyCount,
       storyHeight: building.storyHeight,
+      architecturalProfile: selectArchitecturalProfile("town", seed, building.id, building.kind),
       townKind: building.kind,
     };
     return { ...geometry, stairwell: createBuildingStairwell(geometry, building.stairwellSide) };
@@ -509,7 +536,7 @@ function createTownMapLayout(seed: number): MapLayout {
     building.storyCount > 1 ? createInternalRamps(building, terrainHills) : []
   );
   const skybridges = createTownSkybridges(blueprint.skybridges, baseObstacles);
-  const baseWallGeometry = createWallSegments(baseObstacles, terrainHills);
+  const baseWallGeometry = createWallSegments(baseObstacles, terrainHills, false);
   const bridgeWallGeometry = createTownSkybridgeWallGeometry(
     skybridges,
     baseObstacles,
@@ -595,7 +622,9 @@ function createTownMapLayout(seed: number): MapLayout {
   const depotLootPoints = createBuildingInteriorLootPoints(
     depotBuilding,
     terrainHills,
-    wallSegments.filter((wall) => wall.obstacleId === depotBuilding.id),
+    wallSegments.filter((wall) =>
+      wall.obstacleId === depotBuilding.id && wall.role !== "architectural"
+    ),
     roofRamps.filter((ramp) => ramp.obstacleId === depotBuilding.id),
     existingLootSpawnPoints,
   );
@@ -689,6 +718,7 @@ function createMixedMapLayout(seed: number): MapLayout {
       baseY,
       storyCount,
       storyHeight: building.storyHeight,
+      architecturalProfile: selectArchitecturalProfile("mixed", seed, building.id, building.townKind),
       ...(building.townKind ? { townKind: building.townKind } : {}),
     };
     return {
@@ -712,7 +742,7 @@ function createMixedMapLayout(seed: number): MapLayout {
   const legacyRamps = coloredObstacles.flatMap((building) =>
     building.storyCount > 1 ? createInternalRamps(building, terrainHills) : []
   );
-  const legacyWallGeometry = createWallSegments(coloredObstacles, terrainHills);
+  const legacyWallGeometry = createWallSegments(coloredObstacles, terrainHills, false);
   const landingZones = blueprint.landingZones.map<MapPoint>((point) => ({
     name: point.name,
     position: {
@@ -805,7 +835,9 @@ function createMixedMapLayout(seed: number): MapLayout {
   const depotLootPoints = createBuildingInteriorLootPoints(
     depotBuilding,
     terrainHills,
-    wallSegments.filter((wall) => wall.obstacleId === depotBuilding.id),
+    wallSegments.filter((wall) =>
+      wall.obstacleId === depotBuilding.id && wall.role !== "architectural"
+    ),
     roofRamps.filter((ramp) => ramp.obstacleId === depotBuilding.id),
     existingLootSpawnPoints,
   );
@@ -815,7 +847,7 @@ function createMixedMapLayout(seed: number): MapLayout {
     blueprint,
     terrainHills,
     obstacles,
-    wallSegments,
+    wallSegments.filter((wall) => wall.role !== "architectural"),
     roofRamps,
     rockObstacles,
     coverObstacles,
@@ -1507,6 +1539,7 @@ function createTownSkybridgeRails(skybridges: readonly MapSkybridge[]): MapWallS
   return skybridges.flatMap((bridge) => [-1, 1].map((side) => ({
     id: `${bridge.id}-rail-${side < 0 ? "north" : "south"}`,
     obstacleId: bridge.id,
+    role: "skybridge-rail",
     center: {
       x: bridge.center.x,
       y: round(bridge.floorY + bridge.height / 2),
@@ -2097,6 +2130,7 @@ function createSeededBuildings(
   terrainHills: readonly TerrainHill[],
   buildingAreas: readonly BuildingArea[],
   random: () => number,
+  seed: number,
 ): MapBuilding[] {
   const allSelected: MapBuilding[] = [];
   return buildingAreas.flatMap((point, pointIndex) => {
@@ -2126,6 +2160,11 @@ function createSeededBuildings(
         baseY: round(baseY),
         storyCount: 1,
         storyHeight: height,
+        architecturalProfile: selectArchitecturalProfile(
+          "island",
+          seed,
+          `building-${pointIndex}-${selected.length}`,
+        ),
       };
       const candidate: MapBuilding = {
         ...geometry,
@@ -2764,7 +2803,11 @@ function terrainSampleCoordinates(minimum: number, maximum: number): number[] {
   return coordinates;
 }
 
-function createWallSegments(obstacles: readonly MapBuilding[], terrainHills: readonly TerrainHill[]): {
+function createWallSegments(
+  obstacles: readonly MapBuilding[],
+  terrainHills: readonly TerrainHill[],
+  includeArchitecture = true,
+): {
   wallSegments: MapWallSegment[];
   wallOpenings: MapWallOpening[];
 } {
@@ -2779,8 +2822,240 @@ function createWallSegments(obstacles: readonly MapBuilding[], terrainHills: rea
         wallOpenings.push(geometry.opening);
       }
     }
+    if (includeArchitecture) wallSegments.push(...createBuildingArchitecture(obstacle));
   }
   return { wallSegments, wallOpenings };
+}
+
+function createBuildingArchitecture(building: MapBuilding): MapWallSegment[] {
+  const roofY = building.baseY + building.storyHeight * building.storyCount + BUILDING_ROOF_CAP_HEIGHT;
+  const edgeThickness = 0.42;
+  const sideDepth = Math.max(0.5, building.depth - edgeThickness * 2);
+  const escapeGapDepth = Math.min(5.4, Math.max(5.04, sideDepth * 0.32));
+  const splitRightDepth = Math.max(0.2, (sideDepth - escapeGapDepth) / 2);
+  const splitRightOffset = (escapeGapDepth + splitRightDepth) / 2;
+  const heights = roofEdgeHeights(building.architecturalProfile);
+  const architecture = [
+    architecturalWallAt(
+      building,
+      "roof-edge-front",
+      building.center.x,
+      roofY + heights.front / 2,
+      building.center.z - building.depth / 2 + edgeThickness / 2,
+      building.width,
+      heights.front,
+      edgeThickness,
+      "roof-edge",
+    ),
+    architecturalWallAt(
+      building,
+      "roof-edge-back",
+      building.center.x,
+      roofY + heights.back / 2,
+      building.center.z + building.depth / 2 - edgeThickness / 2,
+      building.width,
+      heights.back,
+      edgeThickness,
+      "roof-edge",
+    ),
+    architecturalWallAt(
+      building,
+      "roof-edge-left",
+      building.center.x - building.width / 2 + edgeThickness / 2,
+      roofY + heights.left / 2,
+      building.center.z,
+      edgeThickness,
+      heights.left,
+      sideDepth,
+      "roof-edge",
+    ),
+    architecturalWallAt(
+      building,
+      "roof-edge-right-front",
+      building.center.x + building.width / 2 - edgeThickness / 2,
+      roofY + heights.right / 2,
+      building.center.z - splitRightOffset,
+      edgeThickness,
+      heights.right,
+      splitRightDepth,
+      "roof-edge",
+    ),
+    architecturalWallAt(
+      building,
+      "roof-edge-right-back",
+      building.center.x + building.width / 2 - edgeThickness / 2,
+      roofY + heights.right / 2,
+      building.center.z + splitRightOffset,
+      edgeThickness,
+      heights.right,
+      splitRightDepth,
+      "roof-edge",
+    ),
+  ];
+  const facadeHeight = building.storyHeight * building.storyCount;
+  const facadeCenterY = building.baseY + facadeHeight / 2;
+  const pierWidth = Math.min(0.72, Math.max(0.48, Math.min(building.width, building.depth) * 0.025));
+  const frontZ = building.center.z - building.depth / 2 + pierWidth / 2;
+  const addFacadePier = (
+    suffix: string,
+    x: number,
+    z: number,
+    extension: number,
+    width = pierWidth,
+    depth = pierWidth,
+  ): void => {
+    architecture.push(architecturalWallAt(
+      building,
+      suffix,
+      x,
+      facadeCenterY + extension / 2,
+      z,
+      width,
+      facadeHeight + extension,
+      depth,
+      "facade-pier",
+    ));
+  };
+
+  switch (building.architecturalProfile) {
+    case "corner-piers":
+      for (const [xSide, zSide] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+        addFacadePier(
+          `corner-pier-${xSide < 0 ? "west" : "east"}-${zSide < 0 ? "north" : "south"}`,
+          building.center.x + xSide * (building.width / 2 - pierWidth / 2),
+          building.center.z + zSide * (building.depth / 2 - pierWidth / 2),
+          3.2,
+        );
+      }
+      break;
+    case "horizontal-bands": {
+      const bandHeight = 0.26;
+      const bandY = building.baseY + building.storyHeight + bandHeight / 2;
+      architecture.push(
+        architecturalWallAt(
+          building,
+          "cornice-front",
+          building.center.x,
+          bandY,
+          building.center.z - building.depth / 2 + 0.09,
+          building.width,
+          bandHeight,
+          0.18,
+          "cornice",
+        ),
+        architecturalWallAt(
+          building,
+          "cornice-back",
+          building.center.x,
+          bandY,
+          building.center.z + building.depth / 2 - 0.09,
+          building.width,
+          bandHeight,
+          0.18,
+          "cornice",
+        ),
+      );
+      break;
+    }
+    case "vertical-bays":
+      for (const side of [-1, 1] as const) {
+        addFacadePier(
+          `facade-bay-${side < 0 ? "west" : "east"}`,
+          building.center.x + side * building.width * 0.31,
+          frontZ,
+          2.8,
+        );
+      }
+      break;
+    case "service-crown": {
+      const screenWidth = Math.min(10, building.width * 0.36);
+      const screenX = building.center.x - building.stairwell.side * building.width * 0.24;
+      architecture.push(architecturalWallAt(
+        building,
+        "service-crown",
+        screenX,
+        roofY + 2.4,
+        building.center.z + building.depth * 0.16,
+        screenWidth,
+        4.8,
+        0.52,
+        "roof-screen",
+      ));
+      break;
+    }
+    case "split-monitor": {
+      const screenWidth = Math.min(5.6, building.width * 0.2);
+      const screenX = building.center.x - building.stairwell.side * building.width * 0.28;
+      for (const side of [-1, 1] as const) {
+        architecture.push(architecturalWallAt(
+          building,
+          `split-monitor-${side < 0 ? "front" : "back"}`,
+          screenX,
+          roofY + 1.8,
+          building.center.z + side * building.depth * 0.2,
+          screenWidth,
+          3.6,
+          0.46,
+          "roof-screen",
+        ));
+      }
+      break;
+    }
+    case "stepped-parapet":
+      for (const side of [-1, 1] as const) {
+        addFacadePier(
+          `raised-front-pier-${side < 0 ? "west" : "east"}`,
+          building.center.x + side * (building.width / 2 - pierWidth / 2),
+          frontZ,
+          4.2,
+        );
+      }
+      break;
+  }
+  return architecture;
+}
+
+function roofEdgeHeights(
+  profile: BuildingArchitecturalProfile,
+): { front: number; back: number; left: number; right: number } {
+  switch (profile) {
+    case "corner-piers":
+      return { front: 0.78, back: 0.78, left: 0.78, right: 0.78 };
+    case "horizontal-bands":
+      return { front: 2.4, back: 1.35, left: 0.72, right: 0.72 };
+    case "vertical-bays":
+      return { front: 1.65, back: 0.72, left: 0.88, right: 0.88 };
+    case "service-crown":
+      return { front: 0.88, back: 1.65, left: 0.88, right: 0.88 };
+    case "split-monitor":
+      return { front: 0.72, back: 0.72, left: 1.4, right: 1.4 };
+    case "stepped-parapet":
+      return { front: 2.8, back: 0.78, left: 1.5, right: 1.05 };
+  }
+}
+
+function architecturalWallAt(
+  building: MapBuilding,
+  suffix: string,
+  x: number,
+  y: number,
+  z: number,
+  width: number,
+  height: number,
+  depth: number,
+  architecturalFeature: NonNullable<MapWallSegment["architecturalFeature"]>,
+): MapWallSegment {
+  return {
+    id: `${building.id}-wall-architecture-${suffix}`,
+    obstacleId: building.id,
+    role: "architectural",
+    architecturalFeature,
+    center: { x: round(x), y: round(y), z: round(z) },
+    width: round(width),
+    height: round(height),
+    depth: round(depth),
+    color: building.color,
+  };
 }
 
 function createFacadeGeometry(
@@ -2919,12 +3194,39 @@ function wallSegmentAt(
   return {
     id: `${obstacle.id}-wall-${suffix}`,
     obstacleId: obstacle.id,
+    role: "facade",
     center: { x: round(x), y: round(y), z: round(z) },
     width: round(width),
     height,
     depth: round(depth),
     color: obstacle.color,
   };
+}
+
+function selectArchitecturalProfile(
+  mapId: MapId,
+  seed: number,
+  buildingId: string,
+  townKind?: TownBuildingKind,
+): BuildingArchitecturalProfile {
+  let hash = (seed ^ 0x6a09e667) >>> 0;
+  const identity = `${mapId}:${buildingId}`;
+  for (let index = 0; index < identity.length; index += 1) {
+    hash = Math.imul(hash ^ identity.charCodeAt(index), 0x01000193) >>> 0;
+  }
+  if (townKind) {
+    const kindOffset = [
+      "factory",
+      "warehouse",
+      "rowhouse",
+      "commercial",
+      "corner",
+      "tower",
+    ].indexOf(townKind);
+    hash = (hash + Math.imul(kindOffset + 1, 0x9e3779b1)) >>> 0;
+  }
+  return BUILDING_ARCHITECTURAL_PROFILES[hash % BUILDING_ARCHITECTURAL_PROFILES.length] ??
+    "corner-piers";
 }
 
 function createLootSpawnPoints(

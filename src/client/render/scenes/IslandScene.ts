@@ -9,7 +9,7 @@ import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { MultiMaterial } from "@babylonjs/core/Materials/multiMaterial";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
-import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import { CreateCapsule } from "@babylonjs/core/Meshes/Builders/capsuleBuilder";
 import { CreateCylinder } from "@babylonjs/core/Meshes/Builders/cylinderBuilder";
@@ -18,6 +18,7 @@ import { CreatePlane } from "@babylonjs/core/Meshes/Builders/planeBuilder";
 import { CreateSphere } from "@babylonjs/core/Meshes/Builders/sphereBuilder";
 import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
 import "@babylonjs/core/Meshes/instancedMesh";
+import "@babylonjs/core/Meshes/thinInstanceMesh";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { SubMesh } from "@babylonjs/core/Meshes/subMesh";
 import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
@@ -36,8 +37,8 @@ import {
   HOSPITAL_WALL_COLOR,
   MAP_SIZE,
   TERRAIN_GRID_SUBDIVISIONS,
-  type MapBuilding,
   type MapLayout,
+  type MapWallSegment,
   type MapWallOpening,
 } from "../../../config/map";
 import { getActiveWeapon, type ActorState, type EntityId, type FlightState, type GroundLootState } from "../../../game/state/types";
@@ -699,7 +700,9 @@ function createIslandEnvironment(
   if (layout.mapId === "town") createTownPoiPaving(scene, materials, layout);
 
   const buildingMaterials = new Map<string, StandardMaterial>();
+  const architecturalMaterials = new Map<string, StandardMaterial>();
   const buildingWallMeshes = new Map<string, Mesh[]>();
+  const architecturalWalls = new Map<string, MapWallSegment[]>();
   const doorSillIds = new Set(
     layout.wallOpenings
       .filter((opening) => opening.kind === "door")
@@ -707,15 +710,29 @@ function createIslandEnvironment(
   );
   for (const wall of layout.wallSegments) {
     if (doorSillIds.has(wall.id)) continue;
-    let buildingMaterial = buildingMaterials.get(wall.color);
+    const architectural = wall.role === "architectural";
+    const materialCache = architectural ? architecturalMaterials : buildingMaterials;
+    let buildingMaterial = materialCache.get(wall.color);
     if (!buildingMaterial) {
       buildingMaterial = wall.color === AMMUNITION_DEPOT_WALL_COLOR
-        ? materials.ammunitionDepotSurface
-        : material(
-            scene,
-            `building-material-${buildingMaterials.size}`,
-            wall.color === HOSPITAL_WALL_COLOR ? HOSPITAL_SURFACE_COLOR : wall.color,
-          );
+        ? architectural
+          ? materials.ammunitionDepotSurface.clone("ammunition-depot-surface-material-architecture")
+          : materials.ammunitionDepotSurface
+        : wall.color === HOSPITAL_WALL_COLOR
+          ? architectural
+            ? materials.hospitalSurface.clone("hospital-surface-material-architecture")
+            : materials.hospitalSurface
+          : material(
+              scene,
+              architectural
+                ? `building-architecture-material-${architecturalMaterials.size}`
+                : `building-material-${buildingMaterials.size}`,
+              wall.color,
+            );
+      if (architectural) {
+        buildingMaterial.backFaceCulling = true;
+        buildingMaterial.twoSidedLighting = false;
+      }
       if (
         wall.color !== HOSPITAL_WALL_COLOR &&
         wall.color !== AMMUNITION_DEPOT_WALL_COLOR &&
@@ -726,9 +743,15 @@ function createIslandEnvironment(
           targetMaterial.diffuseTexture = materials.wallTexture;
         });
       }
-      buildingMaterials.set(wall.color, buildingMaterial);
+      materialCache.set(wall.color, buildingMaterial);
     }
 
+    if (architectural) {
+      const walls = architecturalWalls.get(wall.color);
+      if (walls) walls.push(wall);
+      else architecturalWalls.set(wall.color, [wall]);
+      continue;
+    }
     const wallMesh = CreateBox(
       wall.id,
       { width: wall.width, height: wall.height, depth: wall.depth },
@@ -748,6 +771,12 @@ function createIslandEnvironment(
     markEnvironment(merged, `building-walls-${color}`);
     merged.metadata = { ...merged.metadata, sourceCount: meshes.length };
   }
+  for (const [color, walls] of architecturalWalls) {
+    const mesh = createArchitecturalWallInstances(scene, color, walls);
+    mesh.material = architecturalMaterials.get(color) ?? null;
+    markEnvironment(mesh, `building-walls-${color}-architecture`);
+    mesh.metadata = { ...mesh.metadata, sourceCount: walls.length };
+  }
 
   createHospitalCross(scene, materials.hospitalCross, layout);
   createAmmunitionDepotSign(scene, assets, materials.ammunitionDepotSurface, layout);
@@ -755,7 +784,6 @@ function createIslandEnvironment(
   createBuildingDetails(scene, materials, layout);
   if (qualityLevel === "high") {
     createIslandHighQualityDetails(scene, materials, layout);
-    createTownBuildingSilhouettes(scene, materials, layout);
     createTownRoadDetails(scene, materials, layout);
     createTownFacadeDetail(scene, materials, layout);
     createTownStreetFurniture(scene, materials, layout);
@@ -789,11 +817,8 @@ function createIslandEnvironment(
     "ammunition-depot-surfaces-batch",
     (mesh) => mesh.metadata?.obstacleId === layout.ammunitionDepot.buildingId &&
       (
-        mesh.metadata?.decoration === "town-building-silhouette" ||
-        (
-          mesh.metadata?.decoration === "building-detail" &&
-          (mesh.metadata?.detailType === "floor" || mesh.metadata?.detailType === "roof")
-        )
+        mesh.metadata?.decoration === "building-detail" &&
+        (mesh.metadata?.detailType === "floor" || mesh.metadata?.detailType === "roof")
       ),
     {
       decoration: "building-detail",
@@ -806,11 +831,8 @@ function createIslandEnvironment(
     "hospital-surfaces-batch",
     (mesh) => mesh.metadata?.obstacleId === layout.hospital.buildingId &&
       (
-        mesh.metadata?.decoration === "town-building-silhouette" ||
-        (
-          mesh.metadata?.decoration === "building-detail" &&
-          (mesh.metadata?.detailType === "floor" || mesh.metadata?.detailType === "roof")
-        )
+        mesh.metadata?.decoration === "building-detail" &&
+        (mesh.metadata?.detailType === "floor" || mesh.metadata?.detailType === "roof")
       ),
     {
       decoration: "building-detail",
@@ -843,6 +865,30 @@ function createIslandEnvironment(
     (mesh) => mesh.metadata?.decoration === "cover-prop" && mesh.metadata?.coverKind === "hay",
     { decoration: "cover-prop", coverKind: "hay" },
   );
+}
+
+function createArchitecturalWallInstances(
+  scene: Scene,
+  color: string,
+  walls: readonly MapWallSegment[],
+): Mesh {
+  const mesh = CreateBox(
+    `building-walls-${color.replace("#", "")}-architecture`,
+    { size: 1 },
+    scene,
+  );
+  const matrices = new Float32Array(walls.length * 16);
+  const rotation = Quaternion.Identity();
+  for (const [index, wall] of walls.entries()) {
+    Matrix.Compose(
+      new Vector3(wall.width, wall.height, wall.depth),
+      rotation,
+      new Vector3(wall.center.x, wall.center.y, wall.center.z),
+    ).copyToArray(matrices, index * 16);
+  }
+  mesh.thinInstanceSetBuffer("matrix", matrices, 16, true);
+  mesh.thinInstanceRefreshBoundingInfo(true);
+  return mesh;
 }
 
 function createSkyDome(scene: Scene, assets: AssetCatalog, mapSeed: number): void {
@@ -1285,79 +1331,6 @@ function createBuildingDetails(scene: Scene, materials: IslandMaterials, layout:
   }
 
   layout.wallOpenings.forEach((opening, index) => createWallOpeningFrame(trimTemplate, opening, index));
-}
-
-function createTownBuildingSilhouettes(scene: Scene, materials: IslandMaterials, layout: MapLayout): void {
-  if (!hasTownPresentation(layout)) return;
-  const rooftopMaterial = material(scene, "town-industrial-rooftop-material", "#514b43");
-  for (const building of layout.obstacles) {
-    const kind = building.townKind;
-    if (!kind) continue;
-    const roofY = building.baseY + building.storyHeight * building.storyCount + BUILDING_ROOF_CAP_HEIGHT;
-    const addPiece = (
-      piece: string,
-      width: number,
-      height: number,
-      depth: number,
-      offsetX = 0,
-      offsetZ = 0,
-    ): void => {
-      const mesh = CreateBox(
-        `${building.id}-${kind}-${piece}`,
-        { width, height, depth },
-        scene,
-      );
-      mesh.position.set(building.center.x + offsetX, roofY + height / 2, building.center.z + offsetZ);
-      mesh.material = building.id === layout.hospital.buildingId
-        ? materials.hospitalSurface
-        : building.id === layout.ammunitionDepot.buildingId
-          ? materials.ammunitionDepotSurface
-          : rooftopMaterial;
-      markTownBuildingSilhouette(mesh, building, kind);
-    };
-
-    switch (kind) {
-      case "factory":
-        addPiece("stack-west", 1.8, 4.2, 1.8, -building.width * 0.2);
-        addPiece("stack-east", 1.5, 3.2, 1.5, building.width * 0.2);
-        break;
-      case "warehouse":
-        addPiece("roof-monitor", building.width * 0.62, 1.35, 4.8);
-        break;
-      case "rowhouse":
-        addPiece("utility-west", 4.2, 1.45, 3.8, -building.width * 0.2);
-        addPiece("utility-east", 4.2, 1.45, 3.8, building.width * 0.2);
-        break;
-      case "commercial":
-        addPiece("roof-sign", Math.min(14, building.width * 0.42), 2.6, 0.32, 0, -building.depth * 0.28);
-        break;
-      case "corner":
-        addPiece(
-          "corner-pavilion",
-          Math.min(7, building.width * 0.24),
-          2.2,
-          Math.min(7, building.depth * 0.24),
-          building.width * 0.27,
-          building.depth * 0.27,
-        );
-        break;
-      case "tower":
-        addPiece("crown", building.width * 0.46, 2.1, building.depth * 0.46);
-        addPiece("antenna", 0.55, 4.8, 0.55);
-        break;
-    }
-  }
-  for (const kind of ["factory", "warehouse", "rowhouse", "commercial", "corner", "tower"] as const) {
-    mergeStaticBatch(
-      scene,
-      `town-building-silhouettes-${kind}`,
-      (mesh) => mesh.metadata?.decoration === "town-building-silhouette" &&
-        mesh.metadata?.townKind === kind &&
-        mesh.metadata?.obstacleId !== layout.hospital.buildingId &&
-        mesh.metadata?.obstacleId !== layout.ammunitionDepot.buildingId,
-      { decoration: "town-building-silhouette", townKind: kind },
-    );
-  }
 }
 
 function createTownRoadDetails(
@@ -3176,21 +3149,6 @@ function markBuildingDetail(mesh: Mesh, obstacleId: string, detailType: string):
   mesh.checkCollisions = false;
   mesh.isPickable = false;
   mesh.metadata = { decoration: "building-detail", obstacleId, detailType };
-  mesh.freezeWorldMatrix();
-}
-
-function markTownBuildingSilhouette(
-  mesh: Mesh,
-  building: MapBuilding,
-  townKind: NonNullable<MapBuilding["townKind"]>,
-): void {
-  mesh.checkCollisions = false;
-  mesh.isPickable = false;
-  mesh.metadata = {
-    decoration: "town-building-silhouette",
-    obstacleId: building.id,
-    townKind,
-  };
   mesh.freezeWorldMatrix();
 }
 
