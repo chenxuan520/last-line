@@ -141,7 +141,96 @@ describe("asset manifest", () => {
       {
         id: "texture.industrial.metal",
         type: "image",
-        url: "./assets/textures/metal.webp",
+        url: "./assets/textures/roof.webp",
+        fallback: "fallback.ui",
+      },
+    ]));
+  });
+
+  it("declares the generated terrain and building textures", () => {
+    expect(productionManifest.assets).toEqual(expect.arrayContaining([
+      {
+        id: "texture.terrain.concrete-urban",
+        type: "image",
+        url: "./assets/textures/concrete-urban.webp",
+        fallback: "fallback.ui",
+      },
+      {
+        id: "texture.terrain.dry-soil",
+        type: "image",
+        url: "./assets/textures/dry-soil.webp",
+        fallback: "fallback.ui",
+      },
+      {
+        id: "texture.terrain.forest-humus",
+        type: "image",
+        url: "./assets/textures/forest-humus.webp",
+        fallback: "fallback.ui",
+      },
+      {
+        id: "texture.terrain.forest-moss-wet",
+        type: "image",
+        url: "./assets/textures/forest-moss-wet.webp",
+        fallback: "fallback.ui",
+      },
+      {
+        id: "texture.terrain.gravel",
+        type: "image",
+        url: "./assets/textures/ground-gravel.webp",
+        fallback: "fallback.ui",
+      },
+      {
+        id: "texture.terrain.mud-sparse-grass",
+        type: "image",
+        url: "./assets/textures/mud-sparse-grass.webp",
+        fallback: "fallback.ui",
+      },
+      {
+        id: "texture.road.asphalt-damaged",
+        type: "image",
+        url: "./assets/textures/asphalt-damaged.webp",
+        fallback: "fallback.ui",
+      },
+      {
+        id: "texture.building.brick-masonry",
+        type: "image",
+        url: "./assets/textures/brick-masonry.webp",
+        fallback: "fallback.ui",
+      },
+      {
+        id: "texture.building.concrete-wall-aged",
+        type: "image",
+        url: "./assets/textures/concrete-wall-aged.webp",
+        fallback: "fallback.ui",
+      },
+      {
+        id: "texture.building.flat-roof-membrane",
+        type: "image",
+        url: "./assets/textures/flat-roof-membrane.webp",
+        fallback: "fallback.ui",
+      },
+      {
+        id: "texture.building.roof-tile-gray",
+        type: "image",
+        url: "./assets/textures/roof-tile-gray.webp",
+        fallback: "fallback.ui",
+      },
+      {
+        id: "texture.building.roof-tile-red-brown",
+        type: "image",
+        url: "./assets/textures/roof-tile-red-brown.webp",
+        fallback: "fallback.ui",
+      },
+      {
+        id: "texture.building.wall-plaster-aged",
+        type: "image",
+        url: "./assets/textures/wall-plaster-aged.webp",
+        fallback: "fallback.ui",
+      },
+      {
+        id: "texture.industrial.metal-roof-rusted",
+        type: "image",
+        url: "./assets/textures/metal-roof-rusted.webp",
         fallback: "fallback.ui",
       },
     ]));

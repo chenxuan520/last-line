@@ -194,9 +194,9 @@ describe("IslandScene lifecycle", () => {
       expect(ground?.material).toBeInstanceOf(MultiMaterial);
       const groundMaterials = (ground?.material as MultiMaterial).subMaterials;
       expect(groundMaterials.map((surface) => (surface as StandardMaterial).diffuseTexture?.name)).toEqual([
-        "texture.terrain.grass",
-        "texture.terrain.mud",
-        "texture.road",
+        "texture.terrain.gravel",
+        "texture.terrain.dry-soil",
+        "texture.road.asphalt-damaged",
       ]);
       expect(new Set(ground?.subMeshes?.map((subMesh) => subMesh.materialIndex))).toEqual(new Set([0, 1, 2]));
       const positions = ground?.getVerticesData("position") ?? [];
@@ -326,16 +326,14 @@ describe("IslandScene lifecycle", () => {
         .toBe("#ffffff");
       expect((hospitalArchitectureBatch?.material as StandardMaterial).diffuseTexture).toBeNull();
       const wallMaterials = bundle.scene.materials.filter((sceneMaterial) =>
-        sceneMaterial.name.startsWith("building-material-")
+        sceneMaterial.name.startsWith("building-material-") ||
+        sceneMaterial.name.startsWith("building-architecture-material-")
       ) as StandardMaterial[];
-      expect(wallMaterials.filter((sceneMaterial) => sceneMaterial !== hospitalWallBatch?.material).every((sceneMaterial) =>
-        sceneMaterial.diffuseTexture?.name === "texture.building.wall"
-      )).toBe(true);
-      expect(new Set(
-        wallMaterials
-          .filter((sceneMaterial) => sceneMaterial !== hospitalWallBatch?.material)
-          .map((sceneMaterial) => sceneMaterial.diffuseTexture),
-      ).size).toBe(1);
+      expect(new Set(wallMaterials.map((sceneMaterial) => sceneMaterial.diffuseTexture?.name))).toEqual(new Set([
+        "texture.building.wall-plaster-aged",
+        "texture.building.brick-masonry",
+        "texture.building.concrete-wall-aged",
+      ]));
       expect(treeFoliage.every((mesh) =>
         mesh.getBoundingInfo().boundingBox.maximumWorld.y - getTerrainHeight(mesh.position.x, mesh.position.z, layout) > 15
       )).toBe(true);
@@ -403,9 +401,7 @@ describe("IslandScene lifecycle", () => {
       }
       expect(decorations.every((mesh) => !mesh.isPickable && !mesh.checkCollisions)).toBe(true);
       expect(collisionMeshes).toHaveLength(
-        new Set(layout.wallSegments.map((wall) =>
-          `${wall.color}:${wall.role === "architectural" ? "architecture" : "facade"}`
-        )).size + 1,
+        bundle.scene.meshes.filter((mesh) => mesh.name.startsWith("building-walls-")).length + 1,
       );
       expect(bundle.scene.meshes.length).toBeLessThan(4_000);
       const hospitalSurfaces = layout.floorSlabs.filter((slab) =>
@@ -429,7 +425,14 @@ describe("IslandScene lifecycle", () => {
       expect((floorBatch?.material as StandardMaterial).diffuseTexture).toBeNull();
       expect(roofBatch?.metadata?.sourceCount).toBe(regularRoofs.length);
       expect(roofBatch?.getTotalVertices()).toBe(regularRoofs.length * 24);
-      expect((roofBatch?.material as StandardMaterial).diffuseTexture?.name).toBe("texture.building.roof");
+      expect(roofBatch?.material).toBeInstanceOf(MultiMaterial);
+      expect(new Set((roofBatch?.material as MultiMaterial).subMaterials.map((entry) =>
+        (entry as StandardMaterial).diffuseTexture?.name
+      ))).toEqual(new Set([
+        "texture.building.flat-roof-membrane",
+        "texture.building.roof-tile-gray",
+        "texture.building.roof-tile-red-brown",
+      ]));
       expect(hospitalSurfaceBatch?.metadata?.sourceCount).toBe(hospitalSurfaces.length);
       expect(hospitalSurfaceBatch?.getTotalVertices()).toBe(hospitalSurfaces.length * 24);
       expect(hospitalSurfaceBatch?.material).toBeInstanceOf(StandardMaterial);
@@ -1067,9 +1070,9 @@ describe("IslandScene lifecycle", () => {
     const payload = new Uint8Array([0x52, 0x49, 0x46, 0x46]).buffer;
     const assets = createAssets();
     const payloads = new Map([
-      ["texture.terrain.grass", payload],
-      ["texture.terrain.mud", payload],
-      ["texture.road", payload],
+      ["texture.terrain.gravel", payload],
+      ["texture.terrain.dry-soil", payload],
+      ["texture.road.asphalt-damaged", payload],
     ]);
     vi.spyOn(assets, "getPayload").mockImplementation((id) => payloads.get(id));
     const fetchMock = vi.fn();
@@ -1098,9 +1101,9 @@ describe("IslandScene lifecycle", () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(textures.map((texture) => texture.name)).toEqual([
-      "texture.terrain.grass",
-      "texture.terrain.mud",
-      "texture.road",
+      "texture.terrain.gravel",
+      "texture.terrain.dry-soil",
+      "texture.road.asphalt-damaged",
     ]);
     expect(textures.every((texture) => texture.isBlocking === false)).toBe(true);
     expect(textures.every((texture) =>
@@ -1149,7 +1152,7 @@ describe("IslandScene lifecycle", () => {
   it("keeps the ground renderable when terrain payloads are unavailable", async () => {
     const assets = createAssets();
     vi.spyOn(assets, "resolve").mockImplementation((id, expectedType) => {
-      if (id.startsWith("texture.terrain.") || id === "texture.road") {
+      if (id.startsWith("texture.terrain.") || id.startsWith("texture.road.")) {
         return { id: "fallback.ui", type: "svg", url: "/fallback.svg" };
       }
       return AssetCatalog.prototype.resolve.call(assets, id, expectedType);
@@ -1409,6 +1412,19 @@ describe("IslandScene lifecycle", () => {
       obstacleId: layout.hospital.buildingId,
     });
     expect(renderedBuildingWallCount(low.scene)).toBe(expectedRenderedBuildingWallCount(layout));
+    const lowWallBatchSignature = low.scene.meshes
+      .filter((mesh) => mesh.name.startsWith("building-walls-"))
+      .map((mesh) => `${mesh.name}:${String(mesh.metadata?.sourceCount)}`)
+      .sort();
+    const lowGroundTextureSignature = ((low.scene.getMeshByName("island-ground")?.material as MultiMaterial)
+      .subMaterials as StandardMaterial[])
+      .map((entry) => entry.diffuseTexture?.name)
+      .sort();
+    const lowRoofTextureSignature = (
+      low.scene.getMeshByName("building-roof-slabs-batch")?.material as MultiMaterial
+    ).subMaterials
+      .map((entry) => (entry as StandardMaterial).diffuseTexture?.name)
+      .sort();
 
     low.scene.dispose();
 
@@ -1427,6 +1443,18 @@ describe("IslandScene lifecycle", () => {
       mesh.metadata?.decoration === "town-visual-detail"
     );
     expect(renderedBuildingWallCount(high.scene)).toBe(expectedRenderedBuildingWallCount(layout));
+    expect(high.scene.meshes
+      .filter((mesh) => mesh.name.startsWith("building-walls-"))
+      .map((mesh) => `${mesh.name}:${String(mesh.metadata?.sourceCount)}`)
+      .sort()).toEqual(lowWallBatchSignature);
+    expect(((high.scene.getMeshByName("island-ground")?.material as MultiMaterial)
+      .subMaterials as StandardMaterial[])
+      .map((entry) => entry.diffuseTexture?.name)
+      .sort()).toEqual(lowGroundTextureSignature);
+    expect((high.scene.getMeshByName("building-roof-slabs-batch")?.material as MultiMaterial)
+      .subMaterials
+      .map((entry) => (entry as StandardMaterial).diffuseTexture?.name)
+      .sort()).toEqual(lowRoofTextureSignature);
     expect(townVisualBatches.length).toBeGreaterThan(8);
     const townBuildingIds = new Set(layout.obstacles
       .filter((building) => Boolean(building.townKind))
@@ -1744,6 +1772,20 @@ function createAssets(): AssetCatalog {
     "texture.building.roof",
     "texture.building.wall",
     "texture.industrial.metal",
+    "texture.terrain.concrete-urban",
+    "texture.terrain.dry-soil",
+    "texture.terrain.forest-humus",
+    "texture.terrain.forest-moss-wet",
+    "texture.terrain.gravel",
+    "texture.terrain.mud-sparse-grass",
+    "texture.road.asphalt-damaged",
+    "texture.building.brick-masonry",
+    "texture.building.concrete-wall-aged",
+    "texture.building.flat-roof-membrane",
+    "texture.building.roof-tile-gray",
+    "texture.building.roof-tile-red-brown",
+    "texture.building.wall-plaster-aged",
+    "texture.industrial.metal-roof-rusted",
     "texture.sky.clearing",
     "texture.sky.overcast",
     "texture.sky.storm",

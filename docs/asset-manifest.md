@@ -40,6 +40,10 @@ URL-backed entries also require `url`. Replaceable entries should define a type-
 
 The catalog preloads URL-backed UI and image assets and caches bytes. Character GLBs are loaded and cached on demand when a medium/high-quality scene needs them; low quality keeps the procedural character fallback and does not download GLBs. First- and third-person held weapons always use the procedural models. The catalog validates manifest shape, duplicate IDs, fallback existence, fallback type, SVG structure, and browser image decoding.
 
+Terrain, road, facade, and roof entries are consumed only through their stable `texture.*` IDs. The renderer groups them into bounded semantic material families rather than creating one material per building. Seeded map and mixed-region facts select the family consistently at every quality level; the selection is presentation-only and is not persisted in checkpoints. If an image payload is unavailable or invalid, its semantic material keeps a readable procedural fallback color instead of applying the cross-type UI fallback as a world texture.
+
+The raw browser artifact budget includes these generated world textures. Its deterministic `dist/` ceiling is 4.70 MB; JavaScript, JavaScript chunk, CSS, Worker, and standalone-server ceilings remain separate and unchanged.
+
 Frag grenades use the stable `ui.item.grenade` WebP entry for backpack, HUD, and touch controls. Ground, held, in-flight, trajectory, and explosion meshes remain bounded procedural presentation. The repository also carries `ui.item.smoke-grenade` as an available image asset, but smoke grenades are not an authoritative item or gameplay rule.
 
 GLB loading additionally requires at least one renderable mesh. If `requiredNodes` is present, every comma-separated node must exist. A network, decode, mesh, or node failure logs the resource ID and keeps the procedural fallback.

@@ -10,7 +10,7 @@ const budgets = {
   browserJavaScript: 4_000_000,
   browserJavaScriptChunks: 270,
   browserCss: 50_000,
-  browserDist: 4_550_000,
+  browserDist: 4_700_000,
   worker: 615_000,
   standaloneServer: 630_000,
 };
