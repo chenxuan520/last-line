@@ -1,6 +1,6 @@
 # 弹药库特殊建筑与全内置楼梯实施计划
 
-## 背景
+## Context
 
 当前三张地图都拥有一个权威医院建筑。医院由 `MapLayout` 显式记录建筑 ID、地图位置和两份专属医疗物资索引；客户端、AI、单机和联机服务端都消费同一布局。用户要求新增与医院并列的特殊建筑“弹药库”：
 
@@ -17,7 +17,7 @@
 - 最终所有一层与多层建筑都必须使用建筑内部楼梯；一层建筑也要有从地面层到屋顶层的内部楼梯。
 - 删除所有外置坡道，不保留纯视觉外置楼梯，也不能让导航、碰撞或 LOS 继续消费隐藏的 exterior ramp。
 
-## 最终合同
+## Final Contract
 
 ### 权威地图
 
@@ -79,7 +79,7 @@
 - Worker、standalone 和单机都必须通过相同 `createMapLayout()` 获得弹药库及四份物资。
 - 现有 50 人、房间、地图选择、伤害、背包和弹药数值保持不变。
 
-## 计划变更
+## Planned Changes
 
 ### 1. 失败回归
 
@@ -182,7 +182,7 @@
 - 三平台和三画质必须消费相同布局和专属物资索引。
 - 所有建筑包含内部楼梯并且 exterior ramps 被禁止。
 
-## 验证
+## Validation
 
 ### 自动测试
 
@@ -200,7 +200,7 @@
 
 按用户此前明确要求，本任务不运行 coverage。最多使用 7 个 worker，至少保留 1 个 CPU 核心。
 
-### Chrome MCP 验证
+### Chrome MCP
 
 使用 production build、本机 Chrome/Edge、音量 `0`：
 
@@ -213,7 +213,7 @@
 
 ### 独立审查
 
-实现和验证完成后启动独立审查者，重点检查：
+实现和验证完成后启动独立 reviewer，重点检查：
 
 - 三地图唯一性与医院分离；
 - 250 + 4 数量边界；
@@ -228,10 +228,10 @@
 
 必须解决全部 blocker/high/medium 后才能提交。
 
-## 交付
+## Delivery
 
-1. 在本 plan 的 `## 构建` 记录实现与验证事实。
-2. 在 `## 审查` 记录审查轮次与审查发现处置。
+1. 在本 plan 的 `## Build` 记录实现与验证事实。
+2. 在 `## Review` 记录 reviewer rounds 与 finding disposition。
 3. 创建一个同时包含实现、测试、文档和 plan 的提交；禁止 plan-only commit。
 4. 普通 push `feat/ammunition-depot`。
 5. 创建以 `main` 为 base 的 GitHub PR。
@@ -240,7 +240,7 @@
 8. Codex 若提出有效问题，按新的实现/review/提交轮次处理，直到最新 SHA 明确无问题。
 9. 不擅自 merge。
 
-## 构建
+## Build
 
 - 2026-08-07：从最新 `main@feea36aba657d1fa2c62837dc18b0c735a48fbea` 创建 `feat/ammunition-depot`。确认 manifest 已有 `ui.item.ammo-depot`（256×256 WebP）与 `decal.poi.ammo-depot`（WebP），现有四类弹药为 `ammo.rifle / ammo.light / ammo.shell / ammo.sniper`，标准单堆数量为 `90 / 96 / 18 / 16`。
 - 2026-08-07：医院链路盘点完成。三地图都通过 `MapLayout.hospital` 显式记录特殊建筑与两个医疗 loot index；前 240 个区域物资加 10 个医疗物资形成现有 250 条记录。弹药库将沿用显式特殊建筑/索引模式，在这 250 条之后追加 4 条，不修改前 250 条随机流。
@@ -256,34 +256,34 @@
 - 2026-08-07：production Chrome DevTools MCP三地图独立验收通过，全程volume=0。苍岬岛low、灰炉城high、烬岚郡low均显示小地图`decal.poi.ammo-depot`、正面`ui.item.ammo-depot`标牌、`#35413d`深枪灰墙体和`texture.industrial.metal`、专属surface batch、254个loot marker以及250–253四种弹药；资源各仅一次HTTP preload，scene阶段使用内存payload。三图均无旧外置ramp mesh，ramp batch source分别为287/919/245。console仅本机SwiftShader warning，无应用错误。
 - 2026-08-07：每轮Chrome结束都立即导航`about:blank`、关闭isolated context并停止preview；最终MCP仅page1 `about:blank`、8798无监听、无本任务preview进程，临时截图已删除。
 
-## 审查
+## Review
 
 待实现、自动验证和 Chrome MCP 完成后追加。
 
-### 第 1 轮 — 2026-08-07
+### Round 1 — 2026-08-07
 
-- 审查基线：`main@feea36aba657d1fa2c62837dc18b0c735a48fbea`；审查范围为 `feat/ammunition-depot` 当前完整工作区 diff，并对照本计划的计划、构建记录、最终合同与仓库根 `AGENTS.md`。
+- 审查基线：`main@feea36aba657d1fa2c62837dc18b0c735a48fbea`；审查范围为 `feat/ammunition-depot` 当前完整工作区 diff，并对照本 plan 的 Plan、Build、Final Contract 与仓库根 `AGENTS.md`。
 - 结论：**不通过，阻止提交**。
-- 审查发现：blocker 0、high 1、medium 1、low 0。
+- Findings：blocker 0、high 1、medium 1、low 0。
 
 1. **High — 原地图与前 250 个全局物资没有保持，违反本 plan 的显式兼容合同。**
    - 位置：`src/config/map.ts:304`、`src/config/map.ts:306`、`src/config/map.ts:332`、`src/config/map.ts:1847`、`src/config/map.ts:1862`、`src/config/map.ts:1865`、`src/config/map.ts:1505`、`src/config/map.ts:2652`、`tests/unit/mapSelection.test.ts:47`。
    - 岛屿 `createSeededBuildings()` 删除了旧 exterior-ramp 的地图边界、地形和相邻建筑筛选，改用不同的 internal-ramp 条件；随后石头、掩体、医院选择和前 250 个物资都消费这批重排后的建筑/坡道。测试又直接替换了三条 island layout hash，而没有锁定 `main` 的既有建筑、医院与前 250 点位前缀。
-   - 审查者 做了未被外层证据覆盖的最小 `main` 对照：seed `0 / 42 / 2026` 的岛屿分别有 `125 / 145 / 221` 个前 250 点位变化，建筑数从 `226 / 221 / 223` 变成 `237 / 227 / 230`，变化建筑为 `188 / 107 / 151`，三例医院建筑 ID 也全部改变。town 每例有 2 个前缀点变化，mixed 有 2–4 个前缀点变化；它们来自 stairwell 冲突后重新选点及医院专属点重排。
-   - 影响：这不是“250 条记录仍存在”，而是改变了既有地图、医院、自然物、落地搜集位置以及权威布局；直接违背最终合同中“不扰动医院选择、地形、道路、建筑、树、石、草垛”和“保留前 250 点位顺序/位置，仅追加四项”的要求，也让升级前后同 seed 的非目标内容产生大面积无关变化。
-   - 实现方 必须恢复原建筑/医院/自然物与前 250 点位前缀，仅为既有建筑附加 internal stairwell/floor opening，并在索引 `250–253` 追加弹药库物资。若个别旧点与新 stairwell 冲突，应通过合法的 stairwell 侧向/布局选择解决，而不是静默移动既有点。需要增加能对照旧基线前缀的回归；不能再次通过改写 snapshot hash 接受无关布局漂移。
+   - reviewer 做了未被外层证据覆盖的最小 `main` 对照：seed `0 / 42 / 2026` 的岛屿分别有 `125 / 145 / 221` 个前 250 点位变化，建筑数从 `226 / 221 / 223` 变成 `237 / 227 / 230`，变化建筑为 `188 / 107 / 151`，三例医院建筑 ID 也全部改变。town 每例有 2 个前缀点变化，mixed 有 2–4 个前缀点变化；它们来自 stairwell 冲突后重新选点及医院专属点重排。
+   - 影响：这不是“250 条记录仍存在”，而是改变了既有地图、医院、自然物、落地搜集位置以及权威布局；直接违背 Final Contract 中“不扰动医院选择、地形、道路、建筑、树、石、草垛”和“保留前 250 点位顺序/位置，仅追加四项”的要求，也让升级前后同 seed 的非目标内容产生大面积无关变化。
+   - builder 必须恢复原建筑/医院/自然物与前 250 点位前缀，仅为既有建筑附加 internal stairwell/floor opening，并在索引 `250–253` 追加弹药库物资。若个别旧点与新 stairwell 冲突，应通过合法的 stairwell 侧向/布局选择解决，而不是静默移动既有点。需要增加能对照旧基线前缀的回归；不能再次通过改写 snapshot hash 接受无关布局漂移。
 
 2. **Medium — 架构文档仍把当前联机协议写成 7。**
    - 位置：`docs/architecture.md:73`。
    - 实现、部署文档和 plan 已切到 protocol 8，但架构说明仍写“Multiplayer protocol version 7”。协议升级必须做 Worker/Pages 配套维护发布，保留旧当前版本描述会误导后续发布与故障判断；应改为当前 protocol 8，并说明 8 覆盖本次楼梯/初始 loot roster 合同。
 
 - 已参考外层记录的失败回归、三图各 40 seeds、unit 46/463、standalone 3/25、三端 typecheck、四类 build、budgets 与三地图 production Chrome 证据；未重复完整 tests、build、browser 或 coverage。
-- 为核对具体未覆盖风险，审查者 仅运行两项只读定向检查：
+- 为核对具体未覆盖风险，reviewer 仅运行两项只读定向检查：
   - 三地图各 160 seeds 扫描：未发现 depot 离开 mixed 固定城区或任一 loot 落入 stairwell footprint。
-  - 当前分支与 `main` 的 `0 / 42 / 2026` 三图布局/前 250 点位 JSON 对照：确认上述 High 审查发现。
-- 除上述审查发现外，静态审查未发现弹药库显式索引 `250–253`、四种固定弹药数量、普通 `GroundLootState` 路径、全 internal ramp 类型、协议 8/checkpoint 7 拒绝旧状态、ready-only 标牌纹理或特殊 surface batch 的额外明确问题。完成修复与定向回归后必须重新请求独立审查。
+  - 当前分支与 `main` 的 `0 / 42 / 2026` 三图布局/前 250 点位 JSON 对照：确认上述 High finding。
+- 除上述 findings 外，静态审查未发现弹药库显式索引 `250–253`、四种固定弹药数量、普通 `GroundLootState` 路径、全 internal ramp 类型、协议 8/checkpoint 7 拒绝旧状态、ready-only 标牌纹理或特殊 surface batch 的额外明确问题。完成修复与定向回归后必须重新请求独立 review。
 
-### 第 1 轮审查发现处置
+### Round 1 finding disposition
 
 1. **High（原地图与前250漂移）— 已解决。**
    - island 恢复旧 exterior-ramp footprint 仅作为生成期 `RampFootprint` 净空包络，以完全复刻旧建筑、石/树/cover和前250点候选接受顺序；该结构没有 `kind`、ID或level，绝不进入 `MapLayout`，Movement/LOS/GridNavigator/渲染仍只消费最终 internal `RoofRamp`。
@@ -295,32 +295,32 @@
 2. **Medium（architecture仍写protocol 7）— 已解决。**
    - `docs/architecture.md` 当前明确写protocol 8，并说明其覆盖新权威楼梯与弹药库loot roster；deployment文档同步为protocol 8 / checkpoint 7维护发布。
 
-- 2026-08-07：审查发现修复后的行为回归补充通过：Bot 从高地医院内部经正门离开进圈、从正门追逐一层屋顶目标、逐层爬上三层屋顶均通过；所有 seed-zero 内部楼梯的 GridNavigator 双向路径与 Movement 物理双向遍历通过。地面导航现按每个障碍物所在地的权威地形高度判断建筑/石/cover/树的垂直重叠，修复高地建筑外壳被错误忽略、门外路径直穿整栋楼的问题。
-- 2026-08-07：第 1 轮 High最终修复后，严格main对照和三图各160 seeds扫描均exit 0；稳定hash回归锁定island seeds `0/42/2026`非stair几何与前250点，不再用更新全量目标hash掩盖漂移。内部stairwell对旧点零移动，通过side、前后offset与坡向有限搜索适配既有建筑；island历史外置坡道只作为无ID/kind/level的生成期`RampFootprint`净空包络，绝不进入最终MapLayout或权威系统。
-- 2026-08-07：审查者修复后最终完整unit 46 files / 463 tests、standalone 3 / 25、三端typecheck全部通过；browser/Worker dry-run/server/standalone builds与`git diff --check`通过。预算最终browser entry `1,104,047 / 1,200,000`、all JS `3,800,702 / 4,000,000`、252/270 chunks、CSS `44,643 / 50,000`、dist `4,400,363 / 4,550,000`、Worker `529,038 / 615,000`、server `544,075 / 630,000`，全部PASS。
-- 2026-08-07：审查者修复后production Chrome同一isolated context依次reload三图复验通过，全程volume=0。苍岬岛/灰炉城/烬岚郡均显示弹药库sign与minimap marker、254 loot、250–253四种弹药、internal ramp batch且无外置ramp mesh；console三轮仅Babylon启动与本机SwiftShader warning。结束后导航about:blank、关闭context、停止preview，MCP仅page1 about:blank、8798关闭、无preview进程。
+- 2026-08-07：finding修复后的行为回归补充通过：Bot从高地医院内部经正门离开进圈、从正门追逐一层屋顶目标、逐层爬上三层屋顶均通过；所有seed-zero内部楼梯的GridNavigator双向路径与Movement物理双向遍历通过。地面导航现按每个障碍物所在地的权威地形高度判断建筑/石/cover/树的垂直重叠，修复高地建筑外壳被错误忽略、门外路径直穿整栋楼的问题。
+- 2026-08-07：Round 1 High最终修复后，严格main对照和三图各160 seeds扫描均exit 0；稳定hash回归锁定island seeds `0/42/2026`非stair几何与前250点，不再用更新全量目标hash掩盖漂移。内部stairwell对旧点零移动，通过side、前后offset与坡向有限搜索适配既有建筑；island历史外置坡道只作为无ID/kind/level的生成期`RampFootprint`净空包络，绝不进入最终MapLayout或权威系统。
+- 2026-08-07：reviewer修复后最终完整unit 46 files / 463 tests、standalone 3 / 25、三端typecheck全部通过；browser/Worker dry-run/server/standalone builds与`git diff --check`通过。预算最终browser entry `1,104,047 / 1,200,000`、all JS `3,800,702 / 4,000,000`、252/270 chunks、CSS `44,643 / 50,000`、dist `4,400,363 / 4,550,000`、Worker `529,038 / 615,000`、server `544,075 / 630,000`，全部PASS。
+- 2026-08-07：reviewer修复后production Chrome同一isolated context依次reload三图复验通过，全程volume=0。苍岬岛/灰炉城/烬岚郡均显示弹药库sign与minimap marker、254 loot、250–253四种弹药、internal ramp batch且无外置ramp mesh；console三轮仅Babylon启动与本机SwiftShader warning。结束后导航about:blank、关闭context、停止preview，MCP仅page1 about:blank、8798关闭、无preview进程。
 
-### 第 2 轮 — 2026-08-07
+### Round 2 — 2026-08-07
 
-- 审查基线：`main@feea36aba657d1fa2c62837dc18b0c735a48fbea`；重读本计划最新构建记录、第 1 轮审查发现与处置后，静态审查 `feat/ammunition-depot` 当前完整工作区 diff。
+- 审查基线：`main@feea36aba657d1fa2c62837dc18b0c735a48fbea`；重读本 plan 最新 Build、Round 1 findings 与 disposition 后，静态审查 `feat/ammunition-depot` 当前完整工作区 diff。
 - 结论：**通过，本次审查未发现明确问题。**
-- 审查发现：blocker 0、high 0、medium 0、low 0。
+- Findings：blocker 0、high 0、medium 0、low 0。
 
-1. **第 1 轮 High 已关闭。**
+1. **Round 1 High 已关闭。**
    - `RampFootprint` 是 `src/config/map.ts` 内部生成期结构，仅含坡面包络坐标和高度；最终权威 `RoofRamp` 额外要求 `id / obstacleId / kind: "interior" / fromLevel / toLevel`。旧岛屿外置坡道算法只通过 `createLegacyRampClearance()` 复刻建筑、自然物和旧 loot 的候选净空顺序，没有进入 `MapLayout.roofRamps`、Movement、LOS、GridNavigator 或渲染。
    - island 恢复旧建筑候选、旧坡道净空、医院选择、自然物和前 250 点生成顺序；town/mixed 恢复旧多层 ramp、旧墙体和医院点参与前 250 点生成。`assignStairwellsAvoidingLoot()` 只在前 250 点已经固定后，对 side、前后 offset 和 ramp direction 做有限确定性搜索；候选必须留在建筑内、不覆盖旧室内 loot、且清地形，失败会显式抛错，没有移动旧点的分支。
-   - 审查者 重新创建 `main@feea36a` 临时基线并逐字段对照 island/town/mixed × seeds `0/42/2026`：map points、landing zones、terrain、排除 stairwell 的建筑事实、医院、rocks、trees、covers、前 250 loot、zone counts、roads、urban roads、skybridges全部相同，9/9 `SAME`、exit 0。
+   - reviewer 重新创建 `main@feea36a` 临时基线并逐字段对照 island/town/mixed × seeds `0/42/2026`：map points、landing zones、terrain、排除 stairwell 的建筑事实、医院、rocks、trees、covers、前 250 loot、zone counts、roads、urban roads、skybridges全部相同，9/9 `SAME`、exit 0。
    - 补充对照把唯一允许变化的弹药库建筑/墙体颜色归一后，三图九个布局的完整建筑记录、wall segments 和 wall openings 也全部相同。说明没有借 stable hash 遗漏门窗或非目标墙体漂移。
-   - `tests/unit/mapSelection.test.ts` 的三个 island stable hash 与 审查者 从 `main` 按相同裁剪口径实时计算的值逐一一致；测试明确锁定旧非楼梯几何和前 250 点，弹药库颜色、显式索引和全 internal stair geometry 则由独立合同测试覆盖，不再通过更新全量目标 hash 接受无关变化。
+   - `tests/unit/mapSelection.test.ts` 的三个 island stable hash 与 reviewer 从 `main` 按相同裁剪口径实时计算的值逐一一致；测试明确锁定旧非楼梯几何和前 250 点，弹药库颜色、显式索引和全 internal stair geometry 则由独立合同测试覆盖，不再通过更新全量目标 hash 接受无关变化。
    - 外层三地图各 160 seeds 扫描覆盖 254 点、全 internal ramp、ramp 数量、stairwell/loot 净空；该证据与当前有限搜索实现一致，可信。
 
-2. **第 1 轮 Medium 已关闭。**
+2. **Round 1 Medium 已关闭。**
    - `src/network/protocol.ts`、`docs/architecture.md` 和 `docs/deployment.md` 现一致为 protocol 8；架构文档明确说明版本 8 覆盖新权威楼梯和弹药库初始 loot roster。checkpoint 仍一致为 current version 7。
 
 3. **高地建筑地面导航修复未发现新回归。**
    - 三地图统一使用 building-envelope ground navigation；同栋跨层使用内部组合路径，跨栋/室外路径通过底层 door transition。
    - `obstacleOverlapsLocation()` 在 ground surface 上按每个障碍物自身位置的权威地形高度判断垂直重叠，避免高地建筑、石头、cover、树因远端起点高度而被错误忽略；非 ground 楼层仍使用当前楼层 support，保持楼层隔离。
-   - 审查者 对 island seed 99 高地医院做最小只读路径检查：医院 `baseY=4.152`，中心到远端路径包含连续的门内/门外 waypoint，离开门外后不再穿回建筑 envelope，检查 exit 0。外层 Bot 高地医院出门进圈、一层/三层屋顶追踪、GridNavigator 与 Movement 双向楼梯证据足以覆盖行为链路。
+   - reviewer 对 island seed 99 高地医院做最小只读路径检查：医院 `baseY=4.152`，中心到远端路径包含连续的门内/门外 waypoint，离开门外后不再穿回建筑 envelope，检查 exit 0。外层 Bot 高地医院出门进圈、一层/三层屋顶追踪、GridNavigator 与 Movement 双向楼梯证据足以覆盖行为链路。
 
 - 已参考外层最终证据：unit 46/463、standalone 3/25、三端 typecheck、browser/Worker/server/standalone builds、budgets、三图 Chrome 复验及立即清理；按要求未重复完整 tests、build、browser 或 coverage。
-- 审查者 仅运行上述两个具体风险的只读定向核验，并已删除 `/tmp` 下本轮临时 baseline、脚本和比较文件。
+- reviewer 仅运行上述两个具体风险的只读定向核验，并已删除 `/tmp` 下本轮临时 baseline、脚本和比较文件。

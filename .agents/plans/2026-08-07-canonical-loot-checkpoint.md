@@ -1,30 +1,38 @@
-# 标准物资 Checkpoint 防护
+# Canonical Loot Checkpoint Guard
 
-## 背景
+## Context
 
-Codex 审查 PR #4 的提交 `dae6572f290f9358e93879bdcc64511acf0de2b1` 时发现有效 P2：checkpoint 版本 7 只校验已经存在的 `groundLoot`，却不要求权威初始 `loot-0` 到 `loot-253` roster。空或截断记录可能在缺少弹药库物资的情况下恢复。
+Codex reviewed commit `dae6572f290f9358e93879bdcc64511acf0de2b1` in PR #4 and identified a valid P2: checkpoint version 7 validates every present `groundLoot` entry but does not require the authoritative initial `loot-0` through `loot-253` roster. An empty or truncated record could therefore restore without the ammunition-depot stacks.
 
-## 计划
+This is a new follow-up implementation cycle. The committed ammunition-depot plan is read-only.
 
-- 每个 checkpoint 必须包含标准 key `loot-0` 到 `loot-253`。
-- 每条地面物资 record key 必须等于稳定 `loot.id`。
-- 继续允许合法额外动态 drop/death 记录。
-- Unit 覆盖空物资、缺 `loot-250`、key/ID 不一致和合法额外记录。
-- Standalone SQLite 与 Worker Durable Object 真实恢复路径覆盖缺 `loot-250` 时删除房间/checkpoint。
-- 运行 Node 24 unit/standalone/typecheck、Worker dry-run、构建、预算和 `git diff --check`；不运行覆盖率。
-- Follow-up 提交前独立静态审查，推送 PR #4 并重新请求 Codex。
+## Plan
 
-## 构建
+- Require every checkpoint to contain canonical keys `loot-0` through `loot-253`.
+- Require every ground-loot record key to equal its stable `loot.id`.
+- Continue allowing additional valid dynamic drop/death records.
+- Cover empty loot, missing `loot-250`, key/ID mismatch, and valid extra records in unit tests.
+- Cover missing `loot-250` deletion through real standalone SQLite and Worker Durable Object restore paths.
+- Run Node 24 unit/standalone/typecheck, Worker dry-run, build/budget, and `git diff --check`; do not run coverage.
+- Run an independent static reviewer before the follow-up commit.
+- Push the follow-up commit to PR #4 and request a new Codex review.
 
-- 红测复现 `groundLoot: {}` 被 `isMatchCheckpointCompatible()` 错误接受。
-- 新增共享标准 roster 防护，要求 `loot-0..loot-253`、全部标准/动态记录 key 与 `loot.id` 一致，同时允许合法额外记录。
-- 新增真实 standalone SQLite 和 Worker Durable Object 截断物资恢复回归。
-- 定向 unit/standalone 通过；`isRecoverableLoot()` 收紧为 `GroundLootState` 类型谓词，不改变运行时语义。
-- 最终定向 roster/SQLite、standalone 3 文件 26 测试、Node 24 三项目 typecheck、Worker dry-run、服务端构建、预算和 diff check 通过。完整 unit 唯一失败是既有城镇细节 5 秒超时，单 worker 原断言通过。该恢复校验任务不需要 Chrome 或覆盖率。
+## Build
 
-## 审查
+- 2026-08-07: Unit red test reproduced the P2: `groundLoot: {}` was accepted by `isMatchCheckpointCompatible()`.
+- 2026-08-07: Added a shared canonical roster guard requiring `loot-0..loot-253`, key/ID identity for every canonical and dynamic record, while permitting valid additional records.
+- 2026-08-07: Added real standalone SQLite and Worker Durable Object truncated-loot restore regressions.
+- 2026-08-07: Targeted unit and standalone tests passed. Typecheck initially exposed an imprecise boolean helper; `isRecoverableLoot()` was tightened to a `GroundLootState` type predicate without changing runtime behavior.
+- 2026-08-07: Final validation passed: targeted canonical-roster unit and SQLite restore tests, full standalone 3 files / 26 tests, Node 24 three-target typecheck, Worker dry-run, server build, budgets, and `git diff --check`. The full unit run passed 462/463 with one pre-existing 5-second town natural-detail timeout under load; that exact test passed unchanged with one worker. Coverage and Chrome were not run because this follow-up changes only checkpoint restore validation.
 
-- 独立 follow-up 审查基于 `dae6572`，覆盖 `MatchRuntime`、unit/standalone/Worker 回归和本 plan。
-- `TOTAL_LOOT_POINTS = 254`，兼容性要求自有属性 `loot-0..loot-253`；所有现有标准/额外记录先做形状校验并要求 key 等于 `loot.id`，不限制额外记录数量或白名单。
-- 两条持久化测试都从合法 checkpoint 开始，仅删除 `loot-250`，并在真实 standalone 重启或 Worker DO 淘汰/重建后验证删除。
-- 结论：通过；blocker/high/medium/low 均为 0。
+## Review
+
+Pending validation and independent review.
+
+### 2026-08-07 Independent Follow-up Review
+
+- Scope: static review of the uncommitted follow-up diff on committed baseline `dae6572`, covering `src/server/MatchRuntime.ts`, the unit/standalone/Worker regressions, and this plan. The committed branch delta against `origin/main` was used only as context; no unrelated follow-up changes were found.
+- Contract: `TOTAL_LOOT_POINTS` is 254, and compatibility now requires own properties `loot-0` through `loot-253`. Every present canonical or additional record is shape-checked first and must have a record key equal to `loot.id`; valid additional dynamic drop/death records remain allowed because the guard imposes neither an exact record count nor an extra-key whitelist.
+- Persistence coverage: both new restore tests start from a current valid `MatchRuntime.checkpoint()`, retain valid two-player member mappings, remove only `loot-250`, persist both room and checkpoint records, and verify deletion after a real standalone SQLite restart or Worker Durable Object eviction/reconstruction. No earlier version, actor, member, map, or state-shape guard explains those deletions.
+- Evidence considered without repetition: red reproduction for accepted empty `groundLoot`; passing targeted unit/SQLite tests, standalone 3 files / 26 tests, Node 24 typecheck, Worker dry-run, server build, budgets, and diff check. The full unit run passed 462/463 with one pre-existing five-second town-detail timeout whose unchanged test passed alone; coverage and Chrome were appropriately omitted for this restore-validation-only follow-up.
+- Conclusion: **passed**. Findings: blocker 0, high 0, medium 0, low 0. No unresolved issue blocks the follow-up commit.

@@ -1,34 +1,35 @@
-# Checkpoint 背包堆叠校验
+# Checkpoint Backpack Stack Validation
 
-## 目标
+## Goal
 
-拒绝背包含未知物品或堆叠数量超过配置上限的持久化比赛 checkpoint。
+Reject persisted match checkpoints whose backpack contains an unknown item or a stack quantity above that item's configured limit.
 
-## 验收
+## Acceptance
 
-- 共享 checkpoint 校验要求每个背包 `itemId` 存在于 `ITEMS`。
-- 数量必须是正整数且不超过 `ITEMS[itemId].maxStack`。
-- Unit 拒绝未知 item ID 和超过上限的 `grenade.frag`。
-- Worker/standalone 持久化覆盖超大手雷栈恢复时删除房间和 checkpoint。
-- 所需验证与独立审查完成，未解决 blocker/high/medium 为 0。
-- 实现推送到 PR #3，最新 head 的 CI 和 Codex 无有效审查发现。
+- Shared checkpoint validation requires every backpack `itemId` to exist in `ITEMS`.
+- Every backpack quantity remains a positive integer and does not exceed `ITEMS[itemId].maxStack`.
+- Unit coverage rejects both unknown item IDs and `grenade.frag` stacks above the configured limit.
+- Worker and standalone persistence coverage verifies that an oversized grenade stack deletes both room and checkpoint records during restoration.
+- Required validation and independent review complete with no unresolved blocker, high, or medium findings.
+- The implementation is pushed to PR #3 and the latest head passes CI and Codex review with no actionable findings.
 
-## 实现
+## Implementation
 
-- `MatchRuntime` checkpoint 校验复用权威 `ITEMS`，不复制堆叠上限。
-- 扩展 unit、Worker、standalone 现有损坏 checkpoint 表。
+- Reuse the authoritative `ITEMS` catalog in `MatchRuntime` checkpoint validation rather than duplicating stack limits.
+- Extend existing corrupt-checkpoint tables in unit, Worker, and standalone tests.
 
-## 构建
+## Build
 
-- 原校验器会接受未知背包物品和 `grenade.frag ×4`；新增两条 unit 在修复前失败、修复后通过。
-- Node.js 24.18.1 三项目 typecheck 通过。
-- 聚焦 `matchRuntime` 30/30、standalone runtime 18/18 通过。
-- 完整 unit 48 文件 513 测试，standalone 3 文件 32 测试通过。
-- 本机 glibc 2.28 无法启动要求 GLIBC 2.29–2.35 的 `workerd`；Worker TypeScript 与 fixture typecheck 通过，真实 Worker 由 GitHub CI 门禁。
-- 浏览器、Worker dry-run、服务端和 standalone 构建及预算通过。
-- 分支已经包含 `origin/main@feea36a`，无需额外集成。
+- The original validator accepted both an unknown backpack item and `grenade.frag ×4`; the two new unit cases failed before the implementation change and passed afterward.
+- Node.js 24.18.1 `npm run typecheck` passes for application, Worker/tests, and standalone projects.
+- Focused Node.js 24 validation passes: `tests/unit/matchRuntime.test.ts` 30/30 and `tests/standalone/localDurableObjectRuntime.test.ts` 18/18.
+- Full unit validation passes 48 files and 513 tests. Full standalone validation passes 3 files and 32 tests.
+- The local Worker runtime cannot start because the host's glibc 2.28 does not satisfy the checked-in `workerd` binary's GLIBC_2.29–2.35 requirements; Worker test TypeScript compilation and the Worker test fixture pass typecheck, and the real Worker suite remains a required GitHub CI gate.
+- Node.js 24 browser, Worker dry-run, server, and standalone builds pass.
+- `npm run check:budgets` passes: browser entry `1,120,629 / 1,200,000`, largest non-entry `613,551 / 700,000`, all browser JavaScript `3,817,284 / 4,000,000`, chunks `252 / 270`, CSS `45,161 / 50,000`, entire dist `4,417,463 / 4,550,000`, Worker `553,651 / 615,000`, and standalone server `567,515 / 630,000`.
+- `origin/main` remains `feea36a`; the branch already contains that base and requires no additional integration before this commit.
 
-## 审查
+## Review
 
-- 独立静态审查检查最终 diff、共享恢复合同、unit、SQLite 重启、DO 淘汰、fixture 隔离、类型收窄和文档。
-- 审查者 报告 blocker/high/medium/low 均为 0，并批准提交。
+- Round 1 independent static review inspected the final diff, shared restoration contract, unit coverage, SQLite restart path, Durable Object eviction path, fixture isolation, type narrowing, and documentation.
+- The reviewer reported 0 blocker, 0 high, 0 medium, and 0 low findings and explicitly approved the change for commit.

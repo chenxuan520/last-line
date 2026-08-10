@@ -1,39 +1,41 @@
-# 单机调试模式
+# Single-Player Debug Mode
 
-## 目标
+## Goal
 
-添加显式启用的本地调试模式，方便检查单机玩法，同时不改变联机行为或协议。
+Add an explicitly enabled local debug mode that makes single-player gameplay easier to inspect without changing multiplayer behavior or protocol.
 
-## 验收
+## Acceptance
 
-- `npm run dev -- --debug=true` 启用；普通开发和 production build 保持关闭。
-- 主菜单明确显示单机调试已启用。
-- 只有本地单机会话获得调试行为；联机会话、共享协议、Worker 和 standalone 权威逻辑不变。
-- 调试模式下本地玩家免疫枪火、手雷和圈伤。
-- 对局内面板显示阶段、部署、位置、生命、护甲、击杀、武器和背包。
-- 面板支持立即落地、设置生命/护甲/击杀、完整测试套装、清背包和按合法 stack 发放任意 `ITEMS`。
-- Unit 覆盖参数解析、默认关闭、免伤、所有物品类型、合法拆栈、立即落地和联机隔离。
-- 提交前完成 typecheck、unit/Worker/standalone、构建、预算、静音浏览器截图和独立审查。
+- `npm run dev -- --debug=true` enables the mode; ordinary development and production builds keep it disabled.
+- The main menu visibly identifies that single-player debug mode is active.
+- Only the local single-player session receives debug behavior. Multiplayer sessions, shared protocol, Worker, and standalone authority remain unchanged.
+- The local player is immune to gunfire, grenade, and safe-zone damage while debug mode is enabled.
+- An in-match debug panel shows current phase, deployment, position, health, armor, kills, weapon, and backpack state.
+- The panel can land the player immediately, refill or set health/armor/kills, equip a complete test loadout, clear inventory, and grant any configured `ITEMS` entry in a chosen quantity without creating oversized backpack stacks.
+- Unit tests cover command-line flag parsing, default-off behavior, damage immunity, all item kinds, legal stack splitting, immediate landing, and multiplayer isolation.
+- Typecheck, unit/Worker/standalone tests, builds, budgets, muted browser verification, screenshots, and independent review complete before commit and push.
 
-## 实现
+## Implementation
 
-- 小型 Vite 启动器在启动前剥离应用专用 `--debug=true`，并导出 `VITE_SINGLE_PLAYER_DEBUG=true`。
-- 状态修改放在无 DOM 单机调试系统；面板只发动作，不拥有权威状态。
-- 向单机战斗、投掷物和大逃杀模式注入同一个调试感知 `DamageSystem`。
-- 只有 `BattleRoyaleSession` 创建面板和调试系统，标志不传给 `MultiplayerSession`。
+- Add a tiny Vite launcher that strips the application-specific `--debug=true` flag before starting Vite and exports `VITE_SINGLE_PLAYER_DEBUG=true`.
+- Keep debug state mutation in a DOM-free single-player debug system. The panel emits actions and does not own authoritative state.
+- Inject one debug-aware `DamageSystem` into the single-player combat, throwable, and battle-royale mode paths.
+- Instantiate the panel and debug system only from `BattleRoyaleSession`; do not pass the flag to `MultiplayerSession`.
 
-## 构建
+## Build
 
-- Node.js 24.18.1 三项目 typecheck 通过。
-- 聚焦调试/共享伤害 5 文件 70 测试，完整 unit 49 文件 524 测试，standalone 3 文件 32 测试通过。
-- 本机 glibc 2.28 无法启动 `workerd`；Worker TypeScript 通过，真实 Worker 由 GitHub CI 门禁。
-- 浏览器、Worker dry-run、服务端、standalone 构建和预算通过。
-- 普通 production 不含调试文本、样式或 chunk；调试构建单独产生 `SinglePlayerDebugPanel` chunk 并动态加载样式。
-- 音量 `0` 的 Chrome 验证确认菜单徽章、F10 释放 pointer lock、面板真实点击、立即落地、测试套装、修改击杀、合法拆栈发手雷、选择/消耗手雷和爆炸后生命/护甲；默认开发不显示面板。Console 只有软件 WebGL 警告。
-- 每轮截图后返回 `about:blank`、关闭隔离页并停止 8797 端口。
+- Node.js 24.18.1 `npm run typecheck` passes for application, Worker/tests, and standalone projects.
+- Focused debug and shared-damage validation passes 5 files and 70 tests after the final simultaneous-lethality fix.
+- Full unit validation passes 49 files and 524 tests. Full standalone validation passes 3 files and 32 tests.
+- The local Worker runtime cannot start because the host's glibc 2.28 does not satisfy the checked-in `workerd` binary's GLIBC_2.29–2.35 requirements; Worker test TypeScript compilation passes and GitHub CI remains the required real Worker gate.
+- Browser, Worker dry-run, server, and standalone builds pass. Final budgets pass: browser entry `1,121,498 / 1,200,000`, largest non-entry `613,551 / 700,000`, all browser JavaScript `3,818,153 / 4,000,000`, chunks `252 / 270`, CSS `45,161 / 50,000`, entire dist `4,418,332 / 4,550,000`, Worker `553,839 / 615,000`, and standalone server `567,703 / 630,000`.
+- Ordinary production builds contain no `LOCAL DEBUG`, `单机调试面板`, `debug-panel`, or `SinglePlayerDebug` payload. A debug build produces a separate `SinglePlayerDebugPanel` chunk and dynamically loads its stylesheet.
+- Chrome verification used `npm run dev -- --debug=true --port 8797 --strictPort` with volume `0`. It confirmed the menu badge, F10 pointer-lock release, real panel clicks, immediate landing, test loadout, editable kills, arbitrary grenade grants split into legal three-item stacks, grenade selection and consumption from 11 to 10, and 100 health/armor after the nearby explosion. Default `npm run dev` showed no badge or panel. Final console output contained no application error or form issue; only the environment's software-WebGL warning remained.
+- Screenshots were captured at `/tmp/last-line-debug-menu.png`, `/tmp/last-line-debug-panel-loadout.png`, `/tmp/last-line-debug-arbitrary-grant.png`, `/tmp/last-line-debug-grenade-selected.png`, `/tmp/last-line-debug-post-grenade.png`, and `/tmp/last-line-debug-final-panel.png`.
+- Every browser verification page was returned to `about:blank`, its isolated page was closed, and port 8797 was stopped immediately after the round.
 
-## 审查
+## Review
 
-- 第 1 轮发现 1 个 medium 旧测试合同和 1 个 low 文档措辞，均修复。
-- 第 2 轮发现同时致死预测可能给 Bot 1 HP，尽管调试玩家免伤；`DamageSystem.wouldBeLethal()` 统一处理免伤感知预测，并增加 3 条系统回归。
-- 第 3 轮独立复审通过，blocker/high/medium/low 均为 0。
+- Round 1 static review found one medium stale test-contract assertion and one low documentation wording mismatch. The test now checks the actual compile-time constant and gated dynamic imports, and architecture documentation distinguishes `GameApp` presentation from `BattleRoyaleSession` debug authority.
+- Round 2 found one medium simultaneous-lethality issue: the old pre-damage all-dead calculations could give a Bot the deterministic 1 HP fallback even though the debug player was immune. `DamageSystem.wouldBeLethal()` now owns the immunity-aware prediction used by gunfire, grenades, and safe-zone damage, with three direct system regressions.
+- Round 3 independent static re-review reported 0 blocker, 0 high, 0 medium, and 0 low findings and explicitly approved the change for commit.

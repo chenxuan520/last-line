@@ -1,29 +1,29 @@
-# 调试能力生产构建防护
+# Debug Production Build Guard
 
-## 目标
+## Goal
 
-确保旧 shell 或 CI 环境变量绝不能把单机调试能力编译进 production 产物。
+Ensure stale shell or CI environment variables can never compile single-player debug capabilities into a production artifact.
 
-## 验收
+## Acceptance
 
-- `VITE_SINGLE_PLAYER_DEBUG=true` 只在 Vite 开发服务命令中启用调试。
-- 所有 Vite build 命令无论继承什么环境都强制 `__SINGLE_PLAYER_DEBUG__ = false`。
-- Unit 直接覆盖 serve/build 行为。
-- 显式执行 `VITE_SINGLE_PLAYER_DEBUG=true npm run build` 后，产物不含调试面板文本、样式或 chunk。
-- 独立审查、最新 CI 和 Codex 无未解决 blocker/high/medium。
+- `VITE_SINGLE_PLAYER_DEBUG=true` enables debug only for Vite's development server command.
+- Every Vite build command forces `__SINGLE_PLAYER_DEBUG__` to `false`, regardless of inherited environment.
+- Unit coverage checks serve/build behavior directly.
+- An explicit `VITE_SINGLE_PLAYER_DEBUG=true npm run build` produces no debug panel strings, styles, or chunks.
+- Independent review, latest CI, and Codex review complete without unresolved blocker, high, or medium findings.
 
-## 实现
+## Implementation
 
-- 编译期常量同时由 Vite `command` 与显式环境值决定。
-- 命令决策放在 Vite 配置与 unit 共用的纯 helper 中。
+- Derive the compile-time constant from both Vite's `command` and the explicit environment value.
+- Keep the command decision in a pure helper shared by Vite configuration and unit tests.
 
-## 构建
+## Build
 
-- Node.js 24 聚焦验证 5 文件 71 测试通过，覆盖 `serve/build × true/false` 四种组合。
-- 应用、Worker/test、standalone typecheck 通过。
-- 污染环境构建通过，`dist/` 不含 `LOCAL DEBUG`、`单机调试面板`、`debug-menu-badge`、`debug-panel` 或 `SinglePlayerDebug`。
+- Node.js 24 focused validation passes 5 files and 71 tests, including all four `serve/build × true/false` combinations.
+- Node.js 24 application, Worker/test, and standalone typechecks pass.
+- The explicit polluted-environment command `VITE_SINGLE_PLAYER_DEBUG=true npm run build` passes and the resulting `dist/` contains no `LOCAL DEBUG`, `单机调试面板`, `debug-menu-badge`, `debug-panel`, or `SinglePlayerDebug` payload.
 
-## 审查
+## Review
 
-- 独立静态审查检查 Vite 命令语义、纯防护函数、unit、污染环境产物和 preview。
-- 审查者 报告 blocker/high/medium/low 均为 0，并批准提交。
+- Independent static review inspected the Vite command semantics, pure guard, unit coverage, polluted-environment artifact, and preview behavior.
+- The reviewer reported 0 blocker, 0 high, 0 medium, and 0 low findings and explicitly approved the guard for commit.
