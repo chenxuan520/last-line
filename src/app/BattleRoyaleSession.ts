@@ -22,6 +22,7 @@ import {
   FRAG_GRENADE_ITEM_ID,
 } from "../config/throwables";
 import { BotController } from "../controllers/BotController";
+import { GridNavigator } from "../ai/navigation/GridNavigator";
 import { HumanController } from "../controllers/HumanController";
 import { requestDesktopPointerLockSafely } from "../controllers/pointerLock";
 import type { ActorCommand } from "../game/commands/ActorCommand";
@@ -144,9 +145,13 @@ export class BattleRoyaleSession {
     this.effects = new CombatEffects(this.scene);
     this.grenadePresentation = new GrenadePresentation(this.scene);
     this.combatWorld = new SimulationCombatWorld(state, true, layout);
+    const botNavigator = new GridNavigator(layout);
     Object.values(state.actors).forEach((actor, index) => {
       if (actor.kind === "bot") {
-        this.botControllers.set(actor.id, new BotController(index, Math.random, settings.disableAiSnipers, layout));
+        this.botControllers.set(
+          actor.id,
+          new BotController(index, Math.random, settings.disableAiSnipers, layout, botNavigator),
+        );
       }
     });
   }

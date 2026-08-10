@@ -140,9 +140,10 @@ export class BotController {
     private readonly random: () => number = Math.random,
     private readonly disableSnipers = false,
     initialLayout: MapLayout = createMapLayout(0),
+    initialNavigator: GridNavigator = new GridNavigator(initialLayout),
   ) {
     this.layout = initialLayout;
-    this.navigator = new GridNavigator(initialLayout);
+    this.navigator = initialNavigator;
     this.navigatorMapId = initialLayout.mapId;
     this.navigatorSeed = initialLayout.seed;
     this.dropProgressJitter = randomBetween(this.random, -0.045, 0.045);
