@@ -1,8 +1,10 @@
 import {
   BUILDING_ROOF_CAP_HEIGHT,
   createMapLayout,
+  getBuildingRoofNavigationPoint,
   getRampHeight,
   getTerrainHeight,
+  isBuildingRoofNavigationPoint,
   MAP_COVER_OBSTACLES,
   MAP_HALF_SIZE,
   MAP_ROCK_OBSTACLES,
@@ -13,8 +15,15 @@ import {
   type MapLayout,
   type MapObstacle,
   type RoofRamp,
+  wallOpeningOutwardDirection,
 } from "../../config/map";
 import { ACTOR_EYE_HEIGHT, ACTOR_HEIGHT } from "../../game/rules/actorGeometry";
+import {
+  obstacleBounds2D,
+  obstacleWorldPoint,
+  pointInsideObstacle2D,
+  segmentObstacleEntryProgress2D,
+} from "../../game/rules/obstacleGeometry";
 import type { Vector3State } from "../../game/state/types";
 import { StaticGridIndex } from "../../game/spatial/StaticGridIndex";
 
@@ -72,9 +81,11 @@ export class GridNavigator {
 
   public findPath(start: Vector3State, target: Vector3State): Vector3State[] {
     const startLocation = this.findLocation(start);
-    const targetLocation = this.findLocation(target);
+    const requestedTargetLocation = this.findLocation(target);
+    const reachableTarget = this.reachableRoofTarget(target, requestedTargetLocation);
+    const targetLocation = this.findLocation(reachableTarget);
     const normalizedStart = this.normalizePoint(start, startLocation);
-    const normalizedTarget = this.normalizePoint(target, targetLocation);
+    const normalizedTarget = this.normalizePoint(reachableTarget, targetLocation);
     if (sameLocation(startLocation, targetLocation)) {
       if (startLocation.ramp && targetLocation.ramp?.id === startLocation.ramp.id) {
         return [{ ...normalizedStart }, { ...normalizedTarget }];
@@ -128,6 +139,17 @@ export class GridNavigator {
     }
 
     return this.findPathViaGround(normalizedStart, startLocation, normalizedTarget, targetLocation);
+  }
+
+  private reachableRoofTarget(target: Vector3State, location: SurfaceLocation): Vector3State {
+    if (
+      !this.layout ||
+      !location.building ||
+      location.ramp ||
+      location.level !== location.building.storyCount ||
+      isBuildingRoofNavigationPoint(this.layout, location.building, target.x, target.z)
+    ) return target;
+    return getBuildingRoofNavigationPoint(this.layout, location.building) ?? target;
   }
 
   private findPathWithinBuilding(
@@ -508,17 +530,16 @@ export class GridNavigator {
       candidate.kind === "door"
     );
     if (!opening) return null;
-    const direction = opening.side === "front" || opening.side === "left" ? -1 : 1;
-    const horizontalAlongX = opening.side === "front" || opening.side === "back";
+    const outward = wallOpeningOutwardDirection(opening);
     const outsidePoint = {
-      x: opening.center.x + (horizontalAlongX ? 0 : direction * 1.1),
+      x: opening.center.x + outward.x * 1.1,
       y: 0,
-      z: opening.center.z + (horizontalAlongX ? direction * 1.1 : 0),
+      z: opening.center.z + outward.z * 1.1,
     };
     const insidePoint = {
-      x: opening.center.x - (horizontalAlongX ? 0 : direction * 1.1),
+      x: opening.center.x - outward.x * 1.1,
       y: 0,
-      z: opening.center.z - (horizontalAlongX ? direction * 1.1 : 0),
+      z: opening.center.z - outward.z * 1.1,
     };
     const outsideLocation = this.groundLocation(outsidePoint);
     const insideLocation = {
@@ -682,12 +703,27 @@ function rampPoint(ramp: RoofRamp, top: boolean): Vector3State {
 
 function skybridgeDoorPoints(
   building: MapBuilding,
-  side: "left" | "right",
+  side: "front" | "back" | "left" | "right",
   bridge: MapLayout["skybridges"][number],
 ): { inside: Vector3State; outside: Vector3State } {
-  const direction = side === "right" ? 1 : -1;
   const insideY = building.baseY + building.storyHeight + BUILDING_ROOF_CAP_HEIGHT + ACTOR_EYE_HEIGHT;
   const outsideY = bridge.floorY + ACTOR_EYE_HEIGHT;
+  if (side === "front" || side === "back") {
+    const direction = side === "back" ? 1 : -1;
+    return {
+      inside: {
+        x: bridge.center.x,
+        y: insideY,
+        z: building.center.z + direction * (building.depth / 2 - 1.1),
+      },
+      outside: {
+        x: bridge.center.x,
+        y: outsideY,
+        z: building.center.z + direction * (building.depth / 2 + 1.1),
+      },
+    };
+  }
+  const direction = side === "right" ? 1 : -1;
   return {
     inside: {
       x: building.center.x + direction * (building.width / 2 - 1.1),
@@ -752,11 +788,10 @@ function obstacleCorners(obstacle: MapObstacle, y: number, cornerOffset: number)
   const halfWidth = obstacle.width / 2 + cornerOffset;
   const halfDepth = obstacle.depth / 2 + cornerOffset;
   return [-1, 1].flatMap((xDirection) =>
-    [-1, 1].map((zDirection) => ({
-      x: obstacle.center.x + xDirection * halfWidth,
-      y,
-      z: obstacle.center.z + zDirection * halfDepth,
-    })),
+    [-1, 1].map((zDirection) => {
+      const point = obstacleWorldPoint(obstacle, xDirection * halfWidth, zDirection * halfDepth);
+      return { x: point.x, y, z: point.z };
+    }),
   );
 }
 
@@ -765,12 +800,7 @@ function pointKey(point: Vector3State): string {
 }
 
 function pointInsideObstacle(point: Vector3State, obstacle: MapObstacle, clearance: number): boolean {
-  return (
-    point.x >= obstacle.center.x - obstacle.width / 2 - clearance &&
-    point.x <= obstacle.center.x + obstacle.width / 2 + clearance &&
-    point.z >= obstacle.center.z - obstacle.depth / 2 - clearance &&
-    point.z <= obstacle.center.z + obstacle.depth / 2 + clearance
-  );
+  return pointInsideObstacle2D(obstacle, point.x, point.z, clearance);
 }
 
 function segmentIntersectsObstacle(
@@ -788,35 +818,14 @@ function segmentObstacleEntryProgress(
   obstacle: MapObstacle,
   clearance: number,
 ): number | null {
-  const minimumX = obstacle.center.x - obstacle.width / 2 - clearance;
-  const maximumX = obstacle.center.x + obstacle.width / 2 + clearance;
-  const minimumZ = obstacle.center.z - obstacle.depth / 2 - clearance;
-  const maximumZ = obstacle.center.z + obstacle.depth / 2 + clearance;
-  let minimumTime = 0;
-  let maximumTime = 1;
-
-  const deltaX = target.x - start.x;
-  if (deltaX === 0) {
-    if (start.x < minimumX || start.x > maximumX) return null;
-  } else {
-    const firstTime = (minimumX - start.x) / deltaX;
-    const secondTime = (maximumX - start.x) / deltaX;
-    minimumTime = Math.max(minimumTime, Math.min(firstTime, secondTime));
-    maximumTime = Math.min(maximumTime, Math.max(firstTime, secondTime));
-    if (minimumTime > maximumTime) return null;
-  }
-
-  const deltaZ = target.z - start.z;
-  if (deltaZ === 0) {
-    if (start.z < minimumZ || start.z > maximumZ) return null;
-  } else {
-    const firstTime = (minimumZ - start.z) / deltaZ;
-    const secondTime = (maximumZ - start.z) / deltaZ;
-    minimumTime = Math.max(minimumTime, Math.min(firstTime, secondTime));
-    maximumTime = Math.min(maximumTime, Math.max(firstTime, secondTime));
-    if (minimumTime > maximumTime) return null;
-  }
-  return maximumTime > 1e-6 ? minimumTime : null;
+  return segmentObstacleEntryProgress2D(
+    obstacle,
+    start.x,
+    start.z,
+    target.x,
+    target.z,
+    clearance,
+  );
 }
 
 function insertBlockingObstacle(
@@ -865,12 +874,9 @@ function createBlockerIndex(
   obstacles: readonly MapObstacle[],
   clearance: number,
 ): StaticGridIndex<MapObstacle> {
-  return new StaticGridIndex(obstacles, NAVIGATION_GRID_CELL_SIZE, (obstacle) => ({
-    minimumX: obstacle.center.x - obstacle.width / 2 - clearance,
-    maximumX: obstacle.center.x + obstacle.width / 2 + clearance,
-    minimumZ: obstacle.center.z - obstacle.depth / 2 - clearance,
-    maximumZ: obstacle.center.z + obstacle.depth / 2 + clearance,
-  }));
+  return new StaticGridIndex(obstacles, NAVIGATION_GRID_CELL_SIZE, (obstacle) =>
+    obstacleBounds2D(obstacle, clearance)
+  );
 }
 
 function horizontalDistance(start: Vector3State, target: Vector3State): number {

@@ -6,6 +6,7 @@ import {
   getTerrainHeight,
   LOOT_SPAWN_POINTS,
   MAP_WALL_SEGMENTS,
+  wallOpeningOutwardDirection,
 } from "../../src/config/map";
 import type { MapId } from "../../src/config/maps";
 import { WEAPONS } from "../../src/config/weapons";
@@ -13,6 +14,9 @@ import { BotController } from "../../src/controllers/BotController";
 import { createIdleCommand, type ActorCommand } from "../../src/game/commands/ActorCommand";
 import { GameSimulation } from "../../src/game/GameSimulation";
 import { BattleRoyaleMode, createBattleRoyaleState } from "../../src/game/modes/BattleRoyaleMode";
+import { ACTOR_EYE_HEIGHT, ACTOR_HEIGHT } from "../../src/game/rules/actorGeometry";
+import { GROUND_LOOT_POSITION_HEIGHT } from "../../src/game/rules/loot";
+import { pointInsideObstacle2D } from "../../src/game/rules/obstacleGeometry";
 import { getActiveWeapon, type EntityId } from "../../src/game/state/types";
 import type { CombatWorld } from "../../src/game/systems/CombatSystem";
 import { InventorySystem } from "../../src/game/systems/InventorySystem";
@@ -41,12 +45,16 @@ describe("AI loot reachability", () => {
 
     expect(LOOT_SPAWN_POINTS).toHaveLength(createMapLayout(0).lootSpawnPoints.length);
     LOOT_SPAWN_POINTS.forEach((point, index) => {
+      const actorFeetY = point.y - GROUND_LOOT_POSITION_HEIGHT;
+      const actorTopY = actorFeetY + ACTOR_HEIGHT;
       const insideExpandedWall = MAP_WALL_SEGMENTS.some(
-        (wall) =>
-          point.x >= wall.center.x - wall.width / 2 - 0.5 &&
-          point.x <= wall.center.x + wall.width / 2 + 0.5 &&
-          point.z >= wall.center.z - wall.depth / 2 - 0.5 &&
-          point.z <= wall.center.z + wall.depth / 2 + 0.5,
+        (wall) => {
+          const wallBottomY = wall.center.y - wall.height / 2;
+          const wallTopY = wall.center.y + wall.height / 2;
+          return wallBottomY < actorTopY &&
+            wallTopY > actorFeetY &&
+            pointInsideObstacle2D(wall, point.x, point.z, 0.5);
+        },
       );
       expect(insideExpandedWall, `loot point ${index} overlaps an expanded wall`).toBe(false);
       expect(navigator.findPath(point, point), `loot point ${index} is not standable`).not.toHaveLength(0);
@@ -186,8 +194,7 @@ describe("AI loot reachability", () => {
 
     for (const [index, point] of layout.lootSpawnPoints.entries()) {
       const building = layout.obstacles.find((candidate) =>
-        Math.abs(point.x - candidate.center.x) <= candidate.width / 2 &&
-        Math.abs(point.z - candidate.center.z) <= candidate.depth / 2
+        pointInsideObstacle2D(candidate, point.x, point.z)
       );
       if (!building) throw new Error(`Town loot ${index} is not inside a building`);
       const door = layout.wallOpenings.find((opening) =>
@@ -196,10 +203,13 @@ describe("AI loot reachability", () => {
         opening.kind === "door"
       );
       if (!door) throw new Error(`Town loot ${index} building has no ground door`);
+      const outward = wallOpeningOutwardDirection(door);
+      const outsideX = door.center.x + outward.x * 1.1;
+      const outsideZ = door.center.z + outward.z * 1.1;
       const outside = {
-        x: door.center.x,
-        y: getTerrainHeight(door.center.x, door.center.z - 1.1, layout) + 1.76,
-        z: door.center.z - 1.1,
+        x: outsideX,
+        y: getTerrainHeight(outsideX, outsideZ, layout) + ACTOR_EYE_HEIGHT,
+        z: outsideZ,
       };
       const target = {
         x: point.x,

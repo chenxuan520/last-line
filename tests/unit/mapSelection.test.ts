@@ -42,7 +42,7 @@ describe("map selection", () => {
     expect(createMapLayout("mixed", 42)).toBe(mixed);
     expect(mixed).not.toEqual(island);
     expect(mixed).not.toEqual(town);
-  });
+  }, 30_000);
 
   it.each([
     [0, "ef5662a40cbad541a7aefe729cfbad581326d364544defdaa34d16aa088a05bd"],

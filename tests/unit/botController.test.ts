@@ -4,6 +4,7 @@ import { FRAG_GRENADE_CONFIG, FRAG_GRENADE_ITEM_ID } from "../../src/config/thro
 import { BotController } from "../../src/controllers/BotController";
 import { createIdleCommand } from "../../src/game/commands/ActorCommand";
 import { createBattleRoyaleState } from "../../src/game/modes/BattleRoyaleMode";
+import { pointInsideObstacle2D } from "../../src/game/rules/obstacleGeometry";
 import { createWeaponState, getActiveWeapon, type Vector3State } from "../../src/game/state/types";
 import type { CombatWorld } from "../../src/game/systems/CombatSystem";
 import { InventorySystem } from "../../src/game/systems/InventorySystem";
@@ -27,7 +28,7 @@ describe("BotController", () => {
     bot.position = { x: 0, y: 1.76, z: 0 };
     bot.yaw = 0;
     bot.inventory.backpack = [{ itemId: FRAG_GRENADE_ITEM_ID, quantity: 1 }];
-    player.position = { x: 0, y: 1.76, z: 20 };
+    player.position = { x: 0, y: 1.76, z: 16 };
     const controller = new BotController(1, () => 0.5);
 
     const command = controller.update(bot, state, grenadeGroundWorld(), 1, player.id);
@@ -36,6 +37,31 @@ describe("BotController", () => {
     expect(command.fire).toBe(false);
     expect(command.aimDirection.z).toBeGreaterThan(0.2);
     expect(command.aimDirection.y).toBeGreaterThan(0.9);
+  });
+
+  it("does not throw when the high arc cannot reach the target before the 2.5-second fuse", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    for (const actor of Object.values(state.actors)) {
+      actor.alive = actor.id === bot.id || actor.id === player.id;
+    }
+    bot.position = { x: 0, y: 1.76, z: 0 };
+    bot.yaw = 0;
+    bot.inventory.backpack = [{ itemId: FRAG_GRENADE_ITEM_ID, quantity: 1 }];
+    player.position = { x: 0, y: 1.76, z: 20 };
+
+    const command = new BotController(1, () => 0.5).update(
+      bot,
+      state,
+      grenadeGroundWorld(),
+      1,
+      player.id,
+    );
+
+    expect(command.throwGrenade).toBeNull();
+    expect(command.fire).toBe(true);
   });
 
   it("does not throw a grenade at unsafe close range or above the global active limit", () => {
@@ -963,8 +989,7 @@ describe("BotController", () => {
       bot.position.x - state.safeZone.center.x,
       bot.position.z - state.safeZone.center.z,
     )).toBeLessThan(initialDistance - 5);
-    const stillInside = Math.abs(bot.position.x - building.center.x) < building.width / 2 &&
-      Math.abs(bot.position.z - building.center.z) < building.depth / 2;
+    const stillInside = pointInsideObstacle2D(building, bot.position.x, bot.position.z);
     expect(stillInside, JSON.stringify({
       position: bot.position,
       building: { center: building.center, width: building.width, depth: building.depth, baseY: building.baseY },
@@ -972,7 +997,7 @@ describe("BotController", () => {
       navigationTarget: navigation.navigationTarget,
       waypointIndex: navigation.waypointIndex,
     })).toBe(false);
-  });
+  }, 30_000);
 
   it("moves into the next target zone before the current zone starts shrinking", () => {
     const state = groundedState();

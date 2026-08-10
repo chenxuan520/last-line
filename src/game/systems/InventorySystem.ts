@@ -29,6 +29,10 @@ import {
   LOOT_INTERACTION_DISTANCE,
   LOOT_INTERACTION_DISTANCE_SQUARED,
 } from "../rules/loot";
+import {
+  closestPointOnObstacle2D,
+  obstacleBounds2D,
+} from "../rules/obstacleGeometry";
 import { getSupportHeight } from "./MovementSystem";
 
 const TIMER_EPSILON_SECONDS = 1e-9;
@@ -692,9 +696,8 @@ function blocksDrop(
 }
 
 function pointNearWall(x: number, z: number, wall: MapObstacle): boolean {
-  const closestX = clamp(x, wall.center.x - wall.width / 2, wall.center.x + wall.width / 2);
-  const closestZ = clamp(z, wall.center.z - wall.depth / 2, wall.center.z + wall.depth / 2);
-  return Math.hypot(x - closestX, z - closestZ) < DROP_WALL_CLEARANCE;
+  const closest = closestPointOnObstacle2D(wall, x, z);
+  return Math.hypot(x - closest.x, z - closest.z) < DROP_WALL_CLEARANCE;
 }
 
 function weaponItemId(weaponId: string): string | null {
@@ -761,12 +764,9 @@ function getDropObstacleIndex(layout: MapLayout): StaticGridIndex<DropObstacleEn
     ...layout.coverObstacles.map((obstacle) => ({ obstacle, topPadding: 0 })),
     ...layout.treeTrunks.map((obstacle) => ({ obstacle, topPadding: 0 })),
   ];
-  index = new StaticGridIndex(entries, DROP_OBSTACLE_CELL_SIZE, ({ obstacle }) => ({
-    minimumX: obstacle.center.x - obstacle.width / 2 - DROP_WALL_CLEARANCE,
-    maximumX: obstacle.center.x + obstacle.width / 2 + DROP_WALL_CLEARANCE,
-    minimumZ: obstacle.center.z - obstacle.depth / 2 - DROP_WALL_CLEARANCE,
-    maximumZ: obstacle.center.z + obstacle.depth / 2 + DROP_WALL_CLEARANCE,
-  }));
+  index = new StaticGridIndex(entries, DROP_OBSTACLE_CELL_SIZE, ({ obstacle }) =>
+    obstacleBounds2D(obstacle, DROP_WALL_CLEARANCE)
+  );
   dropObstacleIndexes.set(layout, index);
   return index;
 }
@@ -785,8 +785,4 @@ function dropLootGridKeyFromCells(cellX: number, cellZ: number): number {
 
 function vectorDistance(left: ActorState["position"], right: ActorState["position"]): number {
   return Math.hypot(left.x - right.x, left.y - right.y, left.z - right.z);
-}
-
-function clamp(value: number, minimum: number, maximum: number): number {
-  return Math.max(minimum, Math.min(maximum, value));
 }

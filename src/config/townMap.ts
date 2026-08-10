@@ -42,6 +42,11 @@ export interface TownMapBlueprint {
   hospitalBuildingId: string;
 }
 
+type TownSkybridgePairFilter = (
+  from: Readonly<TownBuildingSpec>,
+  to: Readonly<TownBuildingSpec>,
+) => boolean;
+
 interface TownParcel {
   minimumX: number;
   maximumX: number;
@@ -90,7 +95,7 @@ const PERIMETER_BUILDING_COUNT = 64;
 const TOTAL_BUILDING_COUNT = CORE_BUILDING_COUNT + PERIMETER_BUILDING_COUNT;
 const HIGH_STORY_BUILDING_COUNT = 54;
 const MULTI_STORY_BUILDING_COUNT = 233;
-const SKYBRIDGE_COUNT = 32;
+const SKYBRIDGE_COUNT = 56;
 const STORY_HEIGHT = 4.6;
 const TOWN_COLORS = ["#59605f", "#6a6259", "#545b55", "#756958", "#4f595c", "#66584f"] as const;
 const BUILDING_KINDS = [
@@ -152,7 +157,10 @@ const BLOCK_BUILDING_KINDS: readonly (readonly TownBuildingKind[])[] = [
   BUILDING_KINDS,
 ];
 
-export function createTownMapBlueprint(seed: number): TownMapBlueprint {
+export function createTownMapBlueprint(
+  seed: number,
+  skybridgePairFilter?: TownSkybridgePairFilter,
+): TownMapBlueprint {
   const random = createSeededRandom(seed ^ 0x4f1bbcdc);
   const streetGrid = createStreetGrid(createSeededRandom(seed ^ 0x2f6e2b1d));
   const buildings = createBuildingSpecs(streetGrid, random);
@@ -180,7 +188,16 @@ export function createTownMapBlueprint(seed: number): TownMapBlueprint {
   const bridgeBlocks = shuffledIndexes(
     CORE_BLOCK_COUNT * CORE_BLOCK_COUNT,
     createSeededRandom(seed ^ 0x7f4a7c15),
-  ).slice(0, SKYBRIDGE_COUNT);
+  ).filter((blockIndex) => {
+    if (!skybridgePairFilter) return true;
+    const from = buildings.find((building) => building.id === coreBuildingId(blockIndex, 0));
+    const to = buildings.find((building) => building.id === coreBuildingId(blockIndex, 1));
+    if (!from || !to) throw new Error(`Town skybridge endpoint building missing for block ${blockIndex}`);
+    return skybridgePairFilter(from, to);
+  }).slice(0, SKYBRIDGE_COUNT);
+  if (bridgeBlocks.length !== SKYBRIDGE_COUNT) {
+    throw new Error(`Town requires ${SKYBRIDGE_COUNT} walkable skybridges`);
+  }
   const bridgeBuildingIds = new Set<string>();
   for (const blockIndex of bridgeBlocks) {
     const from = buildings.find((building) => building.id === coreBuildingId(blockIndex, 0));

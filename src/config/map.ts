@@ -1,6 +1,19 @@
 import type { Vector3State } from "../game/state/types";
-import { ACTOR_EYE_HEIGHT } from "../game/rules/actorGeometry";
+import {
+  ACTOR_EYE_HEIGHT,
+  ACTOR_HEIGHT,
+  ACTOR_RADIUS,
+  MAX_WALKABLE_STEP_HEIGHT,
+} from "../game/rules/actorGeometry";
 import { GROUND_LOOT_POSITION_HEIGHT } from "../game/rules/loot";
+import {
+  closestPointInsideConvexPolygon2D,
+  obstacleFootprintVertices,
+  obstacleLocalPoint,
+  obstacleWorldPoint,
+  pointInsideConvexPolygon2D,
+  pointInsideObstacle2D,
+} from "../game/rules/obstacleGeometry";
 import { DEFAULT_MAP_ID, mapDisplayName, type MapId } from "./maps";
 import {
   createMixedMapBlueprint,
@@ -25,8 +38,11 @@ export interface MapObstacle {
   width: number;
   height: number;
   depth: number;
+  rotationY?: number;
   color: string;
 }
+
+export type BuildingFootprint = "rectangle" | "hexagon" | "round";
 
 export interface BuildingStairwell {
   centerX: number;
@@ -37,16 +53,28 @@ export interface BuildingStairwell {
   direction: -1 | 1;
 }
 
+export type BuildingArchitecturalProfile =
+  | "corner-piers"
+  | "horizontal-bands"
+  | "vertical-bays"
+  | "service-crown"
+  | "split-monitor"
+  | "stepped-crown";
+
 export interface MapBuilding extends MapObstacle {
   baseY: number;
   storyCount: 1 | 2 | 3 | 4 | 5;
   storyHeight: number;
   stairwell: BuildingStairwell;
+  footprint?: BuildingFootprint;
+  architecturalProfile: BuildingArchitecturalProfile;
   townKind?: TownBuildingKind;
 }
 
 export interface MapWallSegment extends MapObstacle {
   obstacleId: string;
+  role?: "facade" | "architectural" | "skybridge-rail";
+  architecturalFeature?: "facade-pier" | "cornice" | "roof-volume";
 }
 
 export interface MapRockObstacle extends MapObstacle {}
@@ -63,6 +91,7 @@ export interface MapFloorSlab extends MapObstacle {
   obstacleId: string;
   level: number;
   kind: "floor" | "roof";
+  footprintVertices?: readonly { x: number; z: number }[];
 }
 
 export interface MapWallOpening {
@@ -74,6 +103,27 @@ export interface MapWallOpening {
   center: Vector3State;
   width: number;
   height: number;
+  rotationY?: number;
+  sillWallId?: string;
+}
+
+export function wallOpeningOutwardDirection(opening: MapWallOpening): { x: number; z: number } {
+  if (opening.rotationY !== undefined) {
+    return {
+      x: -Math.sin(opening.rotationY),
+      z: -Math.cos(opening.rotationY),
+    };
+  }
+  switch (opening.side) {
+    case "front":
+      return { x: 0, z: -1 };
+    case "back":
+      return { x: 0, z: 1 };
+    case "left":
+      return { x: -1, z: 0 };
+    case "right":
+      return { x: 1, z: 0 };
+  }
 }
 
 export interface MapPoint {
@@ -125,8 +175,8 @@ export interface MapSkybridge {
   id: string;
   fromBuildingId: string;
   toBuildingId: string;
-  fromSide: "left" | "right";
-  toSide: "left" | "right";
+  fromSide: "front" | "back" | "left" | "right";
+  toSide: "front" | "back" | "left" | "right";
   center: Vector3State;
   width: number;
   height: number;
@@ -169,6 +219,8 @@ export const HOSPITAL_WALL_COLOR = "#eef2ef";
 export const AMMUNITION_DEPOT_WALL_COLOR = "#35413d";
 export const DEFAULT_MAP_SEED = 0;
 export const MIXED_NATURAL_OBSTACLE_MAX_TERRAIN_DELTA = 0.798;
+const NAVIGATION_TARGET_ARRIVAL_RADIUS = 0.5;
+const ROOF_NAVIGATION_CLEARANCE = ACTOR_RADIUS + 0.22;
 
 export const MAP_POINT_COUNT = 8;
 export const LANDING_ZONE_COUNT = 16;
@@ -189,6 +241,171 @@ const HOSPITAL_MEDICAL_LOOT_POINTS = 2;
 const RANDOM_MEDICAL_LOOT_POINTS = ADDITIONAL_MEDICAL_LOOT_POINTS - HOSPITAL_MEDICAL_LOOT_POINTS;
 const POI_NAMES = ["北港", "灰脊镇", "旧仓区", "高地站", "南岸村", "雷达哨", "西风农场", "东岭营地"] as const;
 const WILDERNESS_NAMES = ["林间屋", "路边村", "山脚农舍", "旧哨所", "河谷牧场", "废弃院落", "边境仓房", "丘间小屋"] as const;
+
+export function isBuildingRoofNavigationPoint(
+  layout: MapLayout,
+  building: MapBuilding,
+  x: number,
+  z: number,
+  clearance = ROOF_NAVIGATION_CLEARANCE,
+): boolean {
+  const roofY = building.baseY + building.storyHeight * building.storyCount + BUILDING_ROOF_CAP_HEIGHT;
+  const polygonFootprint = buildingRoofPolygon(building);
+  if (
+    polygonFootprint &&
+    !pointInsideConvexPolygon2D(x, z, polygonFootprint, clearance)
+  ) return false;
+  const supported = layout.floorSlabs.some((slab) => {
+    if (
+      slab.obstacleId !== building.id ||
+      slab.kind !== "roof" ||
+      slab.level !== building.storyCount
+    ) return false;
+    if (slab.footprintVertices) {
+      return pointInsideConvexPolygon2D(x, z, slab.footprintVertices);
+    }
+    const local = obstacleLocalPoint(slab, x, z);
+    return (
+      Math.abs(local.x) <= slab.width / 2 - (polygonFootprint ? 0 : clearance) &&
+      Math.abs(local.z) <= slab.depth / 2 - (polygonFootprint ? 0 : clearance)
+    );
+  });
+  if (!supported) return false;
+  if (
+    Math.abs(x - building.stairwell.centerX) <=
+      building.stairwell.width / 2 + clearance + NAVIGATION_TARGET_ARRIVAL_RADIUS &&
+    Math.abs(z - building.stairwell.centerZ) <=
+      building.stairwell.depth / 2 + clearance + NAVIGATION_TARGET_ARRIVAL_RADIUS
+  ) return false;
+  return !layout.wallSegments.some((wall) => {
+    if (wall.obstacleId !== building.id) return false;
+    const minimumY = wall.center.y - wall.height / 2;
+    const maximumY = wall.center.y + wall.height / 2;
+    if (minimumY >= roofY + ACTOR_HEIGHT || maximumY <= roofY + 0.01) return false;
+    return pointInsideObstacle2D(wall, x, z, clearance);
+  });
+}
+
+export function getBuildingRoofNavigationPoint(
+  layout: MapLayout,
+  building: MapBuilding,
+): Vector3State | null {
+  const roofY = building.baseY + building.storyHeight * building.storyCount + BUILDING_ROOF_CAP_HEIGHT;
+  const roofSlabs = layout.floorSlabs.filter((slab) =>
+    slab.obstacleId === building.id &&
+    slab.kind === "roof" &&
+    slab.level === building.storyCount
+  );
+  const topRamp = layout.roofRamps.find((ramp) =>
+    ramp.obstacleId === building.id &&
+    ramp.fromLevel === building.storyCount - 1
+  );
+  const preferredPoints = [
+    { x: building.center.x, z: building.center.z },
+    ...(topRamp
+      ? [{
+          x: building.stairwell.centerX - building.stairwell.side * (
+            building.stairwell.width / 2 +
+            ROOF_NAVIGATION_CLEARANCE +
+            NAVIGATION_TARGET_ARRIVAL_RADIUS +
+            0.25
+          ),
+          z: topRamp.endZ,
+        }]
+      : []),
+  ];
+  const anchor = preferredPoints[1] ?? preferredPoints[0] as { x: number; z: number };
+  const candidates: Array<{ x: number; z: number }> = [];
+  const polygonFootprint = buildingRoofPolygon(building);
+  const addCandidate = (candidate: { x: number; z: number }): void => {
+    if (!polygonFootprint) {
+      candidates.push(candidate);
+      return;
+    }
+    const clamped = closestPointInsideConvexPolygon2D(
+      candidate.x,
+      candidate.z,
+      polygonFootprint,
+      ROOF_NAVIGATION_CLEARANCE + 0.01,
+    );
+    if (clamped) candidates.push(clamped);
+  };
+  for (const preferred of preferredPoints) {
+    addCandidate(preferred);
+    for (const slab of roofSlabs) {
+      if (slab.footprintVertices) {
+        addCandidate({
+          x: slab.footprintVertices.reduce((total, vertex) => total + vertex.x, 0) /
+            slab.footprintVertices.length,
+          z: slab.footprintVertices.reduce((total, vertex) => total + vertex.z, 0) /
+            slab.footprintVertices.length,
+        });
+        continue;
+      }
+      const local = obstacleLocalPoint(slab, preferred.x, preferred.z);
+      const halfWidth = slab.width / 2 - ROOF_NAVIGATION_CLEARANCE;
+      const halfDepth = slab.depth / 2 - ROOF_NAVIGATION_CLEARANCE;
+      if (halfWidth <= 0 || halfDepth <= 0) continue;
+      addCandidate(obstacleWorldPoint(
+        slab,
+        Math.max(-halfWidth, Math.min(halfWidth, local.x)),
+        Math.max(-halfDepth, Math.min(halfDepth, local.z)),
+      ));
+    }
+  }
+  for (const slab of roofSlabs) {
+    if (slab.footprintVertices) {
+      const center = {
+        x: slab.footprintVertices.reduce((total, vertex) => total + vertex.x, 0) /
+          slab.footprintVertices.length,
+        z: slab.footprintVertices.reduce((total, vertex) => total + vertex.z, 0) /
+          slab.footprintVertices.length,
+      };
+      addCandidate(center);
+      for (const vertex of slab.footprintVertices) {
+        addCandidate({
+          x: center.x + (vertex.x - center.x) * 0.45,
+          z: center.z + (vertex.z - center.z) * 0.45,
+        });
+      }
+      continue;
+    }
+    const halfWidth = slab.width / 2 - ROOF_NAVIGATION_CLEARANCE;
+    const halfDepth = slab.depth / 2 - ROOF_NAVIGATION_CLEARANCE;
+    if (halfWidth <= 0 || halfDepth <= 0) continue;
+    for (const xScale of [0, -0.55, 0.55]) {
+      for (const zScale of [0, -0.55, 0.55]) {
+        addCandidate(obstacleWorldPoint(slab, halfWidth * xScale, halfDepth * zScale));
+      }
+    }
+  }
+  candidates.sort((left, right) =>
+    Math.hypot(left.x - anchor.x, left.z - anchor.z) -
+      Math.hypot(right.x - anchor.x, right.z - anchor.z) ||
+    left.x - right.x ||
+    left.z - right.z
+  );
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    const key = `${candidate.x.toFixed(3)}:${candidate.z.toFixed(3)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (!isBuildingRoofNavigationPoint(layout, building, candidate.x, candidate.z)) continue;
+    return {
+      x: round(candidate.x),
+      y: round(roofY + ACTOR_EYE_HEIGHT),
+      z: round(candidate.z),
+    };
+  }
+  return null;
+}
+
+function buildingRoofPolygon(building: MapBuilding): readonly { x: number; z: number }[] | null {
+  const footprint = building.footprint ?? "rectangle";
+  if (footprint === "rectangle") return null;
+  return obstacleFootprintVertices(footprint, building.width, building.depth)
+    .map((vertex) => obstacleWorldPoint(building, vertex.x, vertex.z));
+}
 
 interface BuildingArea extends MapPoint {
   minimumBuildings: number;
@@ -246,6 +463,14 @@ const STAIRWELL_WIDTH = 4.8;
 const STAIRWELL_LANDING_DEPTH = 1.2;
 const STAIRWELL_FLOOR_BORDER = 0.3;
 const MAP_LAYOUT_CACHE_LIMIT = 8;
+const BUILDING_ARCHITECTURAL_PROFILES = [
+  "corner-piers",
+  "horizontal-bands",
+  "vertical-bays",
+  "service-crown",
+  "split-monitor",
+  "stepped-crown",
+] as const satisfies readonly BuildingArchitecturalProfile[];
 const mapLayoutCache = new Map<string, MapLayout>();
 const terrainGridCache = new WeakMap<readonly TerrainHill[], Float32Array>();
 
@@ -312,8 +537,13 @@ export function createMapLayout(mapIdOrSeed: MapId | number, explicitSeed?: numb
   );
   const buildingAreas = createBuildingAreas(mapPoints, wildernessPoints, coveragePoints);
   const obstacleRandom = createSeededRandom(normalizedSeed ^ 0x85ebca6b);
-  const baseObstacles = createSeededBuildings(terrainHills, buildingAreas, obstacleRandom);
-  const baseWallGeometry = createWallSegments(baseObstacles, terrainHills);
+  const baseObstacles = createSeededBuildings(
+    terrainHills,
+    buildingAreas,
+    obstacleRandom,
+    normalizedSeed,
+  );
+  const baseWallGeometry = createWallSegments(baseObstacles, terrainHills, false);
   const basePlacementRamps = baseObstacles.map((obstacle) => {
     const pointIndex = Number(obstacle.id.split("-")[1]);
     const poi = buildingAreas[pointIndex] ?? buildingAreas[0];
@@ -341,7 +571,9 @@ export function createMapLayout(mapIdOrSeed: MapId | number, explicitSeed?: numb
     createSeededRandom(normalizedSeed ^ 0x4cf5ad43),
   );
   const storyObstacles = baseObstacles.map((building) =>
-    building.id === hospitalSelection.buildingId ? { ...building, color: HOSPITAL_WALL_COLOR } : building
+    building.id === hospitalSelection.buildingId
+      ? { ...building, footprint: "rectangle" as const, color: HOSPITAL_WALL_COLOR }
+      : building
   );
 
   const { points: baseLootSpawnPoints, counts: lootZoneCounts } = createLootSpawnPoints(
@@ -367,16 +599,30 @@ export function createMapLayout(mapIdOrSeed: MapId | number, explicitSeed?: numb
     (building) => building.id.startsWith(`building-${POI_NAMES.indexOf("旧仓区")}-`),
     mapPoints[POI_NAMES.indexOf("旧仓区")]?.position,
   );
-  const coloredObstacles = assignedObstacles.map((building) =>
-    building.id === depotSelection.buildingId
-      ? { ...building, color: AMMUNITION_DEPOT_WALL_COLOR }
-      : building
-  );
-  const legacyFinalRamps = coloredObstacles.flatMap((building) => {
+  const treePlacementRamps = assignedObstacles.flatMap((building) => {
     if (building.storyCount > 1) return createInternalRamps(building, terrainHills);
     const pointIndex = Number(building.id.split("-")[1]);
     const poi = buildingAreas[pointIndex] ?? buildingAreas[0];
     return [createLegacyRampClearance(building, poi as MapPoint, terrainHills)];
+  });
+  const coloredObstacles = assignedObstacles.map((building) => {
+    const footprint = selectBuildingFootprint(
+      "island",
+      normalizedSeed,
+      building.id,
+      building.id !== hospitalSelection.buildingId && building.id !== depotSelection.buildingId,
+    );
+    const shapedBuilding = {
+      ...building,
+      footprint,
+      ...(building.id === depotSelection.buildingId
+        ? { color: AMMUNITION_DEPOT_WALL_COLOR }
+        : {}),
+    };
+    return {
+      ...shapedBuilding,
+      stairwell: createBuildingStairwell(shapedBuilding, building.stairwell.side),
+    };
   });
   const hospitalBuildingBeforeStairwell = coloredObstacles.find(
     (building) => building.id === hospitalSelection.buildingId,
@@ -385,7 +631,7 @@ export function createMapLayout(mapIdOrSeed: MapId | number, explicitSeed?: numb
   const hospitalMedicalPoints = createHospitalMedicalPoints(
     hospitalBuildingBeforeStairwell,
     terrainHills,
-    createWallSegments(coloredObstacles, terrainHills).wallSegments.filter(
+    createWallSegments(coloredObstacles, terrainHills, false).wallSegments.filter(
       (wall) => wall.obstacleId === hospitalBuildingBeforeStairwell.id,
     ),
     createInternalRamps(hospitalBuildingBeforeStairwell, terrainHills),
@@ -414,7 +660,9 @@ export function createMapLayout(mapIdOrSeed: MapId | number, explicitSeed?: numb
   const depotLootPoints = createBuildingInteriorLootPoints(
     depotBuilding,
     terrainHills,
-    wallSegments.filter((wall) => wall.obstacleId === depotBuilding.id),
+    wallSegments.filter((wall) =>
+      wall.obstacleId === depotBuilding.id && wall.role !== "architectural"
+    ),
     roofRamps.filter((ramp) => ramp.obstacleId === depotBuilding.id),
     globalLootSpawnPoints,
   );
@@ -423,7 +671,7 @@ export function createMapLayout(mapIdOrSeed: MapId | number, explicitSeed?: numb
   const treeTrunks = createTreeTrunks(
     terrainHills,
     obstacles,
-    legacyFinalRamps,
+    treePlacementRamps,
     rockObstacles,
     coverObstacles,
     landingZones,
@@ -433,7 +681,7 @@ export function createMapLayout(mapIdOrSeed: MapId | number, explicitSeed?: numb
   const grenadeLootSpawnPoints = createGrenadeLootSpawnPoints(
     landingZones,
     terrainHills,
-    wallSegments,
+    wallSegments.filter((wall) => wall.role !== "architectural"),
     roofRamps,
     [...obstacles, ...rockObstacles, ...coverObstacles, ...treeTrunks],
     preGrenadeLootSpawnPoints,
@@ -469,8 +717,16 @@ export function createMapLayout(mapIdOrSeed: MapId | number, explicitSeed?: numb
 }
 
 function createTownMapLayout(seed: number): MapLayout {
-  const blueprint = createTownMapBlueprint(seed);
   const terrainHills = createTownTerrainHills(seed);
+  const blueprint = createTownMapBlueprint(seed, (from, to) =>
+    Math.abs(
+      round(terrainHeightFromHills(from.x, from.z, terrainHills) - BUILDING_GROUND_EMBED) -
+        round(terrainHeightFromHills(to.x, to.z, terrainHills) - BUILDING_GROUND_EMBED)
+    ) <= MAX_WALKABLE_STEP_HEIGHT
+  );
+  const skybridgeBuildingIds = new Set(
+    blueprint.skybridges.flatMap((bridge) => [bridge.fromBuildingId, bridge.toBuildingId]),
+  );
   const baseObstacles = blueprint.buildings.map<MapBuilding>((building) => {
     const baseY = round(terrainHeightFromHills(building.x, building.z, terrainHills) - BUILDING_GROUND_EMBED);
     const height = round(building.storyHeight * building.storyCount);
@@ -484,6 +740,7 @@ function createTownMapLayout(seed: number): MapLayout {
       baseY,
       storyCount: building.storyCount,
       storyHeight: building.storyHeight,
+      architecturalProfile: selectArchitecturalProfile("town", seed, building.id, building.kind),
       townKind: building.kind,
     };
     return { ...geometry, stairwell: createBuildingStairwell(geometry, building.stairwellSide) };
@@ -494,7 +751,11 @@ function createTownMapLayout(seed: number): MapLayout {
     ? promoteBuilding(hospitalBase, 2, 1)
     : { ...hospitalBase, color: HOSPITAL_WALL_COLOR };
   const hospitalIndex = baseObstacles.findIndex((building) => building.id === hospitalBuilding.id);
-  baseObstacles[hospitalIndex] = { ...hospitalBuilding, color: HOSPITAL_WALL_COLOR };
+  baseObstacles[hospitalIndex] = {
+    ...hospitalBuilding,
+    footprint: "rectangle",
+    color: HOSPITAL_WALL_COLOR,
+  };
   const depotSelection = selectAmmunitionDepotBuilding(
     baseObstacles,
     hospitalBuilding.id,
@@ -504,12 +765,34 @@ function createTownMapLayout(seed: number): MapLayout {
   const depotIndex = baseObstacles.findIndex((building) => building.id === depotSelection.buildingId);
   const depotBase = baseObstacles[depotIndex];
   if (!depotBase) throw new Error("Town ammunition depot building missing");
-  baseObstacles[depotIndex] = { ...depotBase, color: AMMUNITION_DEPOT_WALL_COLOR };
+  for (let index = 0; index < baseObstacles.length; index += 1) {
+    const building = baseObstacles[index];
+    if (!building) continue;
+    const footprint = selectBuildingFootprint(
+      "town",
+      seed,
+      building.id,
+      building.id !== hospitalBuilding.id &&
+        building.id !== depotSelection.buildingId &&
+        !skybridgeBuildingIds.has(building.id),
+    );
+    const shapedBuilding = {
+      ...building,
+      footprint,
+      ...(building.id === depotSelection.buildingId
+        ? { color: AMMUNITION_DEPOT_WALL_COLOR }
+        : {}),
+    };
+    baseObstacles[index] = {
+      ...shapedBuilding,
+      stairwell: createBuildingStairwell(shapedBuilding, building.stairwell.side),
+    };
+  }
   const legacyRamps = baseObstacles.flatMap((building) =>
     building.storyCount > 1 ? createInternalRamps(building, terrainHills) : []
   );
   const skybridges = createTownSkybridges(blueprint.skybridges, baseObstacles);
-  const baseWallGeometry = createWallSegments(baseObstacles, terrainHills);
+  const baseWallGeometry = createWallSegments(baseObstacles, terrainHills, false);
   const bridgeWallGeometry = createTownSkybridgeWallGeometry(
     skybridges,
     baseObstacles,
@@ -595,7 +878,9 @@ function createTownMapLayout(seed: number): MapLayout {
   const depotLootPoints = createBuildingInteriorLootPoints(
     depotBuilding,
     terrainHills,
-    wallSegments.filter((wall) => wall.obstacleId === depotBuilding.id),
+    wallSegments.filter((wall) =>
+      wall.obstacleId === depotBuilding.id && wall.role !== "architectural"
+    ),
     roofRamps.filter((ramp) => ramp.obstacleId === depotBuilding.id),
     existingLootSpawnPoints,
   );
@@ -689,6 +974,7 @@ function createMixedMapLayout(seed: number): MapLayout {
       baseY,
       storyCount,
       storyHeight: building.storyHeight,
+      architecturalProfile: selectArchitecturalProfile("mixed", seed, building.id, building.townKind),
       ...(building.townKind ? { townKind: building.townKind } : {}),
     };
     return {
@@ -704,15 +990,43 @@ function createMixedMapLayout(seed: number): MapLayout {
       (building.townKind === "warehouse" || building.townKind === "factory"),
     { x: fixedTown.centerX, y: 0, z: fixedTown.centerZ },
   );
-  const coloredObstacles = generatedObstacles.map((building) =>
-    building.id === depotSelection.buildingId
-      ? { ...building, color: AMMUNITION_DEPOT_WALL_COLOR }
-      : building
+  const skybridges = createMixedSkybridges(generatedObstacles, 8);
+  const skybridgeBuildingIds = new Set(
+    skybridges.flatMap((bridge) => [bridge.fromBuildingId, bridge.toBuildingId]),
   );
+  const coloredObstacles = generatedObstacles.map((building) => {
+    const elevatedBuilding = skybridgeBuildingIds.has(building.id) && building.storyCount < 2
+      ? promoteBuilding(building, 2, building.stairwell.side)
+      : building;
+    const footprint = selectBuildingFootprint(
+      "mixed",
+      seed,
+      elevatedBuilding.id,
+      elevatedBuilding.id !== blueprint.hospitalBuildingId &&
+        elevatedBuilding.id !== depotSelection.buildingId &&
+        !skybridgeBuildingIds.has(elevatedBuilding.id),
+    );
+    const shapedBuilding = {
+      ...elevatedBuilding,
+      footprint,
+      ...(elevatedBuilding.id === depotSelection.buildingId
+        ? { color: AMMUNITION_DEPOT_WALL_COLOR }
+        : {}),
+    };
+    return {
+      ...shapedBuilding,
+      stairwell: createBuildingStairwell(shapedBuilding, elevatedBuilding.stairwell.side),
+    };
+  });
   const legacyRamps = coloredObstacles.flatMap((building) =>
     building.storyCount > 1 ? createInternalRamps(building, terrainHills) : []
   );
-  const legacyWallGeometry = createWallSegments(coloredObstacles, terrainHills);
+  const legacyWallGeometry = createTownSkybridgeWallGeometry(
+    skybridges,
+    coloredObstacles,
+    terrainHills,
+    createWallSegments(coloredObstacles, terrainHills, false),
+  );
   const landingZones = blueprint.landingZones.map<MapPoint>((point) => ({
     name: point.name,
     position: {
@@ -785,8 +1099,22 @@ function createMixedMapLayout(seed: number): MapLayout {
   ];
   const obstacles = assignStairwellsAvoidingLoot(coloredObstacles, existingLootSpawnPoints, terrainHills);
   const roofRamps = obstacles.flatMap((building) => createInternalRamps(building, terrainHills));
-  const { wallSegments, wallOpenings } = createWallSegments(obstacles, terrainHills);
-  const floorSlabs = obstacles.flatMap(createBuildingFloorSlabs);
+  const baseWallGeometry = createWallSegments(obstacles, terrainHills);
+  const bridgeWallGeometry = createTownSkybridgeWallGeometry(
+    skybridges,
+    obstacles,
+    terrainHills,
+    baseWallGeometry,
+  );
+  const wallSegments = [
+    ...bridgeWallGeometry.wallSegments,
+    ...createTownSkybridgeRails(skybridges),
+  ];
+  const wallOpenings = bridgeWallGeometry.wallOpenings;
+  const floorSlabs = [
+    ...obstacles.flatMap(createBuildingFloorSlabs),
+    ...createTownSkybridgeFloorSlabs(skybridges),
+  ];
   const hospitalBuilding = obstacles.find((building) => building.id === blueprint.hospitalBuildingId);
   if (!hospitalBuilding) throw new Error("Mixed map final hospital building missing");
   const hospital: HospitalPoi = {
@@ -805,7 +1133,9 @@ function createMixedMapLayout(seed: number): MapLayout {
   const depotLootPoints = createBuildingInteriorLootPoints(
     depotBuilding,
     terrainHills,
-    wallSegments.filter((wall) => wall.obstacleId === depotBuilding.id),
+    wallSegments.filter((wall) =>
+      wall.obstacleId === depotBuilding.id && wall.role !== "architectural"
+    ),
     roofRamps.filter((ramp) => ramp.obstacleId === depotBuilding.id),
     existingLootSpawnPoints,
   );
@@ -815,7 +1145,7 @@ function createMixedMapLayout(seed: number): MapLayout {
     blueprint,
     terrainHills,
     obstacles,
-    wallSegments,
+    wallSegments.filter((wall) => wall.role !== "architectural"),
     roofRamps,
     rockObstacles,
     coverObstacles,
@@ -842,7 +1172,7 @@ function createMixedMapLayout(seed: number): MapLayout {
     roofRamps,
     roadSegments: blueprint.roadSegments,
     urbanRoadSegments: blueprint.urbanRoadSegments,
-    skybridges: [],
+    skybridges,
     hospital,
     ammunitionDepot,
     lootSpawnPoints,
@@ -1443,6 +1773,171 @@ function createTownSkybridges(
   });
 }
 
+function createMixedSkybridges(
+  buildings: readonly MapBuilding[],
+  maximumCount: number,
+): MapSkybridge[] {
+  const candidates = buildings
+    .filter((building) =>
+      Boolean(building.townKind) &&
+      (building.footprint ?? "rectangle") === "rectangle"
+    )
+    .flatMap((from, fromIndex, eligible) =>
+      eligible.slice(fromIndex + 1).flatMap((to) => {
+        if (from.regionId !== to.regionId) return [];
+        const left = from.center.x <= to.center.x ? from : to;
+        const right = left === from ? to : from;
+        const horizontalGap = right.center.x - right.width / 2 - (left.center.x + left.width / 2);
+        const horizontalOverlapMinimum = Math.max(
+          left.center.z - left.depth / 2 + 4,
+          right.center.z - right.depth / 2 + 4,
+        );
+        const horizontalOverlapMaximum = Math.min(
+          left.center.z + left.depth / 2 - 4,
+          right.center.z + right.depth / 2 - 4,
+        );
+        const horizontalOverlap = horizontalOverlapMaximum - horizontalOverlapMinimum;
+        const front = from.center.z <= to.center.z ? from : to;
+        const back = front === from ? to : from;
+        const verticalGap = back.center.z - back.depth / 2 - (front.center.z + front.depth / 2);
+        const verticalOverlapMinimum = Math.max(
+          front.center.x - front.width / 2 + 4,
+          back.center.x - back.width / 2 + 4,
+        );
+        const verticalOverlapMaximum = Math.min(
+          front.center.x + front.width / 2 - 4,
+          back.center.x + back.width / 2 - 4,
+        );
+        const verticalOverlap = verticalOverlapMaximum - verticalOverlapMinimum;
+        return [
+          ...(horizontalGap >= 2 && horizontalGap <= 36 && horizontalOverlap >= 8
+            ? [{
+                from: left,
+                to: right,
+                gap: horizontalGap,
+                overlap: horizontalOverlap,
+                center: { x: 0, z: (horizontalOverlapMinimum + horizontalOverlapMaximum) / 2 },
+                fromSide: "right" as const,
+                toSide: "left" as const,
+                orientation: "x" as const,
+              }]
+            : []),
+          ...(verticalGap >= 2 && verticalGap <= 36 && verticalOverlap >= 8
+            ? [{
+                from: front,
+                to: back,
+                gap: verticalGap,
+                overlap: verticalOverlap,
+                center: { x: (verticalOverlapMinimum + verticalOverlapMaximum) / 2, z: 0 },
+                fromSide: "back" as const,
+                toSide: "front" as const,
+                orientation: "z" as const,
+              }]
+            : []),
+        ];
+      })
+    )
+    .sort((first, second) =>
+      first.gap - second.gap ||
+      second.overlap - first.overlap ||
+      first.from.id.localeCompare(second.from.id) ||
+      first.to.id.localeCompare(second.to.id)
+    );
+  const useCounts = new Map<string, number>();
+  const usedEndpoints = new Set<string>();
+  const selected: MapSkybridge[] = [];
+  const canSelect = (candidate: typeof candidates[number]): boolean => {
+    const fromEndpoint = `${candidate.from.id}:${candidate.fromSide}`;
+    const toEndpoint = `${candidate.to.id}:${candidate.toSide}`;
+    return !usedEndpoints.has(fromEndpoint) &&
+      !usedEndpoints.has(toEndpoint) &&
+      (useCounts.get(candidate.from.id) ?? 0) < 2 &&
+      (useCounts.get(candidate.to.id) ?? 0) < 2;
+  };
+  const selectCandidate = (candidate: typeof candidates[number]): void => {
+    const fromEndpoint = `${candidate.from.id}:${candidate.fromSide}`;
+    const toEndpoint = `${candidate.to.id}:${candidate.toSide}`;
+    usedEndpoints.add(fromEndpoint);
+    usedEndpoints.add(toEndpoint);
+    useCounts.set(candidate.from.id, (useCounts.get(candidate.from.id) ?? 0) + 1);
+    useCounts.set(candidate.to.id, (useCounts.get(candidate.to.id) ?? 0) + 1);
+    selected.push(createMixedSkybridge(candidate, selected.length));
+  };
+  let orientationPair: readonly [typeof candidates[number], typeof candidates[number]] | null = null;
+  for (const xCandidate of candidates.filter((candidate) => candidate.orientation === "x")) {
+    for (const zCandidate of candidates.filter((candidate) => candidate.orientation === "z")) {
+      const endpointKeys = new Set([
+        `${xCandidate.from.id}:${xCandidate.fromSide}`,
+        `${xCandidate.to.id}:${xCandidate.toSide}`,
+        `${zCandidate.from.id}:${zCandidate.fromSide}`,
+        `${zCandidate.to.id}:${zCandidate.toSide}`,
+      ]);
+      const buildingCounts = new Map<string, number>();
+      for (const building of [xCandidate.from, xCandidate.to, zCandidate.from, zCandidate.to]) {
+        buildingCounts.set(building.id, (buildingCounts.get(building.id) ?? 0) + 1);
+      }
+      if (endpointKeys.size === 4 && [...buildingCounts.values()].every((count) => count <= 2)) {
+        orientationPair = [xCandidate, zCandidate];
+        break;
+      }
+    }
+    if (orientationPair) break;
+  }
+  if (!orientationPair) throw new Error("Mixed map requires both X and Z skybridges");
+  for (const candidate of orientationPair) selectCandidate(candidate);
+  for (const candidate of candidates) {
+    if (selected.length >= maximumCount) break;
+    if (!canSelect(candidate)) continue;
+    selectCandidate(candidate);
+  }
+  if (selected.length !== maximumCount) throw new Error(`Mixed map requires ${maximumCount} skybridges`);
+  return selected;
+}
+
+function createMixedSkybridge(
+  candidate: {
+    from: MapBuilding;
+    to: MapBuilding;
+    center: { x: number; z: number };
+    fromSide: MapSkybridge["fromSide"];
+    toSide: MapSkybridge["toSide"];
+    orientation: MapSkybridge["orientation"];
+  },
+  index: number,
+): MapSkybridge {
+  const floorY = round(Math.max(
+    candidate.from.baseY + candidate.from.storyHeight + BUILDING_ROOF_CAP_HEIGHT,
+    candidate.to.baseY + candidate.to.storyHeight + BUILDING_ROOF_CAP_HEIGHT,
+  ));
+  const fromCoordinate = candidate.orientation === "x"
+    ? candidate.from.center.x + candidate.from.width / 2
+    : candidate.from.center.z + candidate.from.depth / 2;
+  const toCoordinate = candidate.orientation === "x"
+    ? candidate.to.center.x - candidate.to.width / 2
+    : candidate.to.center.z - candidate.to.depth / 2;
+  return {
+    id: `mixed-skybridge-${index}`,
+    fromBuildingId: candidate.from.id,
+    toBuildingId: candidate.to.id,
+    fromSide: candidate.fromSide,
+    toSide: candidate.toSide,
+    center: {
+      x: round(candidate.orientation === "x"
+        ? (fromCoordinate + toCoordinate) / 2
+        : candidate.center.x),
+      y: round(floorY + 1.2),
+      z: round(candidate.orientation === "x"
+        ? candidate.center.z
+        : (fromCoordinate + toCoordinate) / 2),
+    },
+    width: round(candidate.orientation === "x" ? toCoordinate - fromCoordinate : 5.2),
+    height: 2.4,
+    depth: round(candidate.orientation === "x" ? 5.2 : toCoordinate - fromCoordinate),
+    orientation: candidate.orientation,
+    floorY,
+  };
+}
+
 function createTownSkybridgeWallGeometry(
   skybridges: readonly MapSkybridge[],
   buildings: readonly MapBuilding[],
@@ -1452,10 +1947,12 @@ function createTownSkybridgeWallGeometry(
   const byId = new Map(buildings.map((building) => [building.id, building]));
   const replacements = skybridges.flatMap((bridge) => [
     {
+      bridge,
       building: byId.get(bridge.fromBuildingId),
       side: bridge.fromSide,
     },
     {
+      bridge,
       building: byId.get(bridge.toBuildingId),
       side: bridge.toSide,
     },
@@ -1471,14 +1968,16 @@ function createTownSkybridgeWallGeometry(
   const wallOpenings = baseGeometry.wallOpenings.filter(
     (opening) => !replacementKeys.has(`${opening.obstacleId}:${opening.side}:${opening.storyIndex}`),
   );
-  for (const { building, side } of replacements) {
+  for (const { bridge, building, side } of replacements) {
     if (!building) throw new Error("Town skybridge opening building missing");
-    const bridge = skybridges.find((candidate) =>
-      (candidate.fromBuildingId === building.id && candidate.fromSide === side) ||
-      (candidate.toBuildingId === building.id && candidate.toSide === side)
+    const geometry = createFacadeGeometry(
+      building,
+      1,
+      side,
+      "door",
+      terrainHills,
+      side === "front" || side === "back" ? bridge.center.x : bridge.center.z,
     );
-    if (!bridge) throw new Error("Town skybridge opening record missing");
-    const geometry = createFacadeGeometry(building, 1, side, "door", terrainHills, bridge.center.z);
     wallSegments.push(...geometry.wallSegments);
     wallOpenings.push(geometry.opening);
   }
@@ -1505,16 +2004,21 @@ function createTownSkybridgeFloorSlabs(skybridges: readonly MapSkybridge[]): Map
 
 function createTownSkybridgeRails(skybridges: readonly MapSkybridge[]): MapWallSegment[] {
   return skybridges.flatMap((bridge) => [-1, 1].map((side) => ({
-    id: `${bridge.id}-rail-${side < 0 ? "north" : "south"}`,
+    id: `${bridge.id}-rail-${bridge.orientation}-${side < 0 ? "negative" : "positive"}`,
     obstacleId: bridge.id,
+    role: "skybridge-rail",
     center: {
-      x: bridge.center.x,
+      x: round(bridge.center.x + (bridge.orientation === "z"
+        ? side * (bridge.width / 2 - BUILDING_WALL_THICKNESS / 2)
+        : 0)),
       y: round(bridge.floorY + bridge.height / 2),
-      z: round(bridge.center.z + side * (bridge.depth / 2 - BUILDING_WALL_THICKNESS / 2)),
+      z: round(bridge.center.z + (bridge.orientation === "x"
+        ? side * (bridge.depth / 2 - BUILDING_WALL_THICKNESS / 2)
+        : 0)),
     },
-    width: bridge.width,
+    width: bridge.orientation === "x" ? bridge.width : BUILDING_WALL_THICKNESS,
     height: bridge.height,
-    depth: BUILDING_WALL_THICKNESS,
+    depth: bridge.orientation === "x" ? BUILDING_WALL_THICKNESS : bridge.depth,
     color: "#4b5154",
   })));
 }
@@ -1650,8 +2154,9 @@ function createTownLootSpawnPoints(
         z,
       };
       if (opening && slot % 4 === 0) {
-        candidate.x = round(opening.center.x + (opening.side === "left" ? 1.2 : opening.side === "right" ? -1.2 : 0));
-        candidate.z = round(opening.center.z + (opening.side === "front" ? 1.2 : opening.side === "back" ? -1.2 : 0));
+        const outward = wallOpeningOutwardDirection(opening);
+        candidate.x = round(opening.center.x - outward.x * 1.2);
+        candidate.z = round(opening.center.z - outward.z * 1.2);
         candidate.y = round(terrainHeightFromHills(candidate.x, candidate.z, terrainHills) + GROUND_LOOT_POSITION_HEIGHT);
       }
       selected.push(candidate);
@@ -2097,6 +2602,7 @@ function createSeededBuildings(
   terrainHills: readonly TerrainHill[],
   buildingAreas: readonly BuildingArea[],
   random: () => number,
+  seed: number,
 ): MapBuilding[] {
   const allSelected: MapBuilding[] = [];
   return buildingAreas.flatMap((point, pointIndex) => {
@@ -2126,6 +2632,11 @@ function createSeededBuildings(
         baseY: round(baseY),
         storyCount: 1,
         storyHeight: height,
+        architecturalProfile: selectArchitecturalProfile(
+          "island",
+          seed,
+          `building-${pointIndex}-${selected.length}`,
+        ),
       };
       const candidate: MapBuilding = {
         ...geometry,
@@ -2210,7 +2721,11 @@ function selectHospitalBuilding(
     if (!building) continue;
     if (!hospitalEntranceClear(building, entranceBlockers)) continue;
     for (const side of [firstSide, secondSide]) {
-      const candidate = promoteBuilding({ ...building, color: HOSPITAL_WALL_COLOR }, 2, side);
+      const candidate = promoteBuilding({
+        ...building,
+        footprint: "rectangle",
+        color: HOSPITAL_WALL_COLOR,
+      }, 2, side);
       if (createInternalRamps(candidate, terrainHills).every((ramp) => rampClearsTerrain(ramp, terrainHills))) {
         return { buildingId: building.id, stairwellSide: side };
       }
@@ -2343,21 +2858,29 @@ function promoteBuilding(
 }
 
 function createBuildingStairwell(
-  building: Pick<MapBuilding, "center" | "width" | "depth" | "storyHeight">,
+  building: Pick<MapBuilding, "center" | "width" | "depth" | "storyHeight" | "footprint">,
   side: -1 | 1,
 ): BuildingStairwell {
-  const width = Math.min(STAIRWELL_WIDTH, building.width - BUILDING_WALL_THICKNESS * 2 - 2);
+  const specialFootprint = (building.footprint ?? "rectangle") !== "rectangle";
+  const width = Math.min(
+    specialFootprint ? 3.8 : STAIRWELL_WIDTH,
+    building.width - BUILDING_WALL_THICKNESS * 2 - 2,
+  );
   const runLength = Math.min(
-    Math.max(8, building.storyHeight * 2.8),
-    building.depth - BUILDING_WALL_THICKNESS * 2 - STAIRWELL_LANDING_DEPTH * 2 - STAIRWELL_FLOOR_BORDER * 2,
+    Math.max(specialFootprint ? 6.4 : 8, building.storyHeight * (specialFootprint ? 2.2 : 2.8)),
+    building.depth * (specialFootprint ? 0.62 : 1) -
+      BUILDING_WALL_THICKNESS * 2 -
+      STAIRWELL_LANDING_DEPTH * 2 -
+      STAIRWELL_FLOOR_BORDER * 2,
   );
   const depth = runLength + STAIRWELL_LANDING_DEPTH * 2;
   const xOffset = Math.max(
     0,
     building.width / 2 - BUILDING_WALL_THICKNESS - width / 2 - 0.8,
   );
+  const footprintScale = specialFootprint ? 0.68 : 1;
   return {
-    centerX: round(building.center.x + side * xOffset),
+    centerX: round(building.center.x + side * xOffset * footprintScale),
     centerZ: building.center.z,
     width: round(width),
     depth: round(depth),
@@ -2402,6 +2925,9 @@ function createInternalRamps(building: MapBuilding, terrainHills: readonly Terra
 }
 
 function createBuildingFloorSlabs(building: MapBuilding): MapFloorSlab[] {
+  if ((building.footprint ?? "rectangle") !== "rectangle") {
+    return createPolygonBuildingFloorSlabs(building);
+  }
   const minimumX = building.center.x - building.width / 2;
   const maximumX = building.center.x + building.width / 2;
   const minimumZ = building.center.z - building.depth / 2;
@@ -2439,6 +2965,155 @@ function createBuildingFloorSlabs(building: MapBuilding): MapFloorSlab[] {
   });
 }
 
+function createPolygonBuildingFloorSlabs(building: MapBuilding): MapFloorSlab[] {
+  const footprint = building.footprint ?? "rectangle";
+  const stripCount = building.footprint === "round" ? 10 : 6;
+  const openingMinimumX = building.stairwell.centerX - building.center.x - building.stairwell.width / 2;
+  const openingMaximumX = building.stairwell.centerX - building.center.x + building.stairwell.width / 2;
+  return Array.from({ length: building.storyCount }, (_, index) => index + 1).flatMap((level) => {
+    const kind = level === building.storyCount ? "roof" : "floor";
+    const wallInset = kind === "floor" ? BUILDING_WALL_THICKNESS : 0;
+    const vertices = obstacleFootprintVertices(
+      footprint,
+      building.width - wallInset * 2,
+      building.depth - wallInset * 2,
+    );
+    const footprintMinimumX = Math.min(...vertices.map((vertex) => vertex.x));
+    const footprintMaximumX = Math.max(...vertices.map((vertex) => vertex.x));
+    const xCuts = Array.from({ length: stripCount + 1 }, (_, cutIndex) =>
+      footprintMinimumX + (footprintMaximumX - footprintMinimumX) * cutIndex / stripCount
+    );
+    xCuts.push(
+      Math.max(footprintMinimumX, openingMinimumX),
+      Math.min(footprintMaximumX, openingMaximumX),
+    );
+    xCuts.sort((left, right) => left - right);
+    const uniqueXCuts = xCuts.filter((value, cutIndex) =>
+      cutIndex === 0 || Math.abs(value - (xCuts[cutIndex - 1] ?? value)) > 0.01
+    );
+    const landingDirection = building.stairwell.direction * ((level - 1) % 2 === 0 ? 1 : -1);
+    const rampRunLength = building.stairwell.depth - STAIRWELL_LANDING_DEPTH * 2;
+    const landingZ = building.stairwell.centerZ + landingDirection * rampRunLength / 2;
+    const slabs: MapFloorSlab[] = [];
+    for (let stripIndex = 0; stripIndex < uniqueXCuts.length - 1; stripIndex += 1) {
+      const minimumX = uniqueXCuts[stripIndex];
+      const maximumX = uniqueXCuts[stripIndex + 1];
+      if (minimumX === undefined || maximumX === undefined) continue;
+      const stripWidth = maximumX - minimumX;
+      if (stripWidth <= 0.1) continue;
+      const stripPolygon = clipPolygonToRange(vertices, "x", minimumX, maximumX);
+      if (stripPolygon.length < 3) continue;
+      const overlapsOpening =
+        maximumX > openingMinimumX + 0.01 &&
+        minimumX < openingMaximumX - 0.01;
+      if (!overlapsOpening) {
+        slabs.push(polygonFloorSlab(building, level, kind, `polygon-${stripIndex}`, stripPolygon));
+        continue;
+      }
+      const openingMinimumZ = building.stairwell.centerZ - building.center.z - building.stairwell.depth / 2;
+      const openingMaximumZ = building.stairwell.centerZ - building.center.z + building.stairwell.depth / 2;
+      const frontPolygon = clipPolygonToHalfPlane(stripPolygon, "z", openingMinimumZ, false);
+      if (frontPolygon.length >= 3) {
+        slabs.push(polygonFloorSlab(
+          building,
+          level,
+          kind,
+          `polygon-${stripIndex}-front`,
+          frontPolygon,
+        ));
+      }
+      const backPolygon = clipPolygonToHalfPlane(stripPolygon, "z", openingMaximumZ, true);
+      if (backPolygon.length >= 3) {
+        slabs.push(polygonFloorSlab(
+          building,
+          level,
+          kind,
+          `polygon-${stripIndex}-back`,
+          backPolygon,
+        ));
+      }
+    }
+    slabs.push(floorSlab(
+      building,
+      level,
+      kind,
+      "stair-landing",
+      building.stairwell.centerX,
+      landingZ,
+      building.stairwell.width,
+      STAIRWELL_LANDING_DEPTH * 2,
+    ));
+    return slabs;
+  });
+}
+
+function clipPolygonToRange(
+  vertices: readonly { x: number; z: number }[],
+  axis: "x" | "z",
+  minimum: number,
+  maximum: number,
+): { x: number; z: number }[] {
+  return clipPolygonToHalfPlane(
+    clipPolygonToHalfPlane(vertices, axis, minimum, true),
+    axis,
+    maximum,
+    false,
+  );
+}
+
+function clipPolygonToHalfPlane(
+  vertices: readonly { x: number; z: number }[],
+  axis: "x" | "z",
+  boundary: number,
+  keepGreater: boolean,
+): { x: number; z: number }[] {
+  const result: { x: number; z: number }[] = [];
+  const inside = (point: { x: number; z: number }) =>
+    keepGreater ? point[axis] >= boundary - 1e-9 : point[axis] <= boundary + 1e-9;
+  for (let index = 0; index < vertices.length; index += 1) {
+    const current = vertices[index];
+    const next = vertices[(index + 1) % vertices.length];
+    if (!current || !next) continue;
+    const currentInside = inside(current);
+    const nextInside = inside(next);
+    if (currentInside) result.push(current);
+    if (currentInside === nextInside) continue;
+    const delta = next[axis] - current[axis];
+    if (Math.abs(delta) <= 1e-9) continue;
+    const progress = (boundary - current[axis]) / delta;
+    result.push({
+      x: current.x + (next.x - current.x) * progress,
+      z: current.z + (next.z - current.z) * progress,
+    });
+  }
+  return result;
+}
+
+function polygonFloorSlab(
+  building: MapBuilding,
+  level: number,
+  kind: "floor" | "roof",
+  piece: string,
+  localVertices: readonly { x: number; z: number }[],
+): MapFloorSlab {
+  const worldVertices = localVertices.map((vertex) => obstacleWorldPoint(building, vertex.x, vertex.z));
+  const minimumX = Math.min(...worldVertices.map((vertex) => vertex.x));
+  const maximumX = Math.max(...worldVertices.map((vertex) => vertex.x));
+  const minimumZ = Math.min(...worldVertices.map((vertex) => vertex.z));
+  const maximumZ = Math.max(...worldVertices.map((vertex) => vertex.z));
+  return floorSlab(
+    building,
+    level,
+    kind,
+    piece,
+    (minimumX + maximumX) / 2,
+    (minimumZ + maximumZ) / 2,
+    maximumX - minimumX,
+    maximumZ - minimumZ,
+    worldVertices,
+  );
+}
+
 function floorSlab(
   building: MapBuilding,
   level: number,
@@ -2448,6 +3123,7 @@ function floorSlab(
   z: number,
   width: number,
   depth: number,
+  footprintVertices?: readonly { x: number; z: number }[],
 ): MapFloorSlab {
   const bottomY = building.baseY + level * building.storyHeight;
   return {
@@ -2459,6 +3135,15 @@ function floorSlab(
     width: round(width),
     height: BUILDING_ROOF_CAP_HEIGHT,
     depth: round(depth),
+    ...(building.rotationY ? { rotationY: building.rotationY } : {}),
+    ...(footprintVertices
+      ? {
+          footprintVertices: footprintVertices.map((vertex) => ({
+            x: round(vertex.x),
+            z: round(vertex.z),
+          })),
+        }
+      : {}),
     color: building.color,
   };
 }
@@ -2764,23 +3449,205 @@ function terrainSampleCoordinates(minimum: number, maximum: number): number[] {
   return coordinates;
 }
 
-function createWallSegments(obstacles: readonly MapBuilding[], terrainHills: readonly TerrainHill[]): {
+function createWallSegments(
+  obstacles: readonly MapBuilding[],
+  terrainHills: readonly TerrainHill[],
+  includeArchitecture = true,
+): {
   wallSegments: MapWallSegment[];
   wallOpenings: MapWallOpening[];
 } {
   const wallSegments: MapWallSegment[] = [];
   const wallOpenings: MapWallOpening[] = [];
   for (const obstacle of obstacles) {
-    for (let storyIndex = 0; storyIndex < obstacle.storyCount; storyIndex += 1) {
-      for (const side of ["front", "back", "left", "right"] as const) {
-        const kind = storyIndex === 0 && side === "front" ? "door" : "window";
-        const geometry = createFacadeGeometry(obstacle, storyIndex, side, kind, terrainHills);
+    if ((obstacle.footprint ?? "rectangle") === "rectangle") {
+      for (let storyIndex = 0; storyIndex < obstacle.storyCount; storyIndex += 1) {
+        for (const side of ["front", "back", "left", "right"] as const) {
+          const kind = storyIndex === 0 && side === "front" ? "door" : "window";
+          const geometry = createFacadeGeometry(obstacle, storyIndex, side, kind, terrainHills);
+          wallSegments.push(...geometry.wallSegments);
+          wallOpenings.push(geometry.opening);
+        }
+      }
+    } else {
+      for (let storyIndex = 0; storyIndex < obstacle.storyCount; storyIndex += 1) {
+        const geometry = createPolygonFacadeGeometry(obstacle, storyIndex, terrainHills);
         wallSegments.push(...geometry.wallSegments);
-        wallOpenings.push(geometry.opening);
+        wallOpenings.push(...geometry.wallOpenings);
       }
     }
+    if (includeArchitecture) wallSegments.push(...createBuildingArchitecture(obstacle));
   }
   return { wallSegments, wallOpenings };
+}
+
+function createBuildingArchitecture(building: MapBuilding): MapWallSegment[] {
+  const roofY = building.baseY + building.storyHeight * building.storyCount + BUILDING_ROOF_CAP_HEIGHT;
+  if ((building.footprint ?? "rectangle") !== "rectangle") {
+    const width = Math.max(3.2, building.width * 0.24);
+    const depth = Math.max(3.2, building.depth * 0.24);
+    return [architecturalWallAt(
+      building,
+      "polygon-roof-house",
+      building.center.x - building.stairwell.side * building.width * 0.18,
+      roofY + 1.5,
+      building.center.z + building.depth * 0.12,
+      width,
+      3,
+      depth,
+      "roof-volume",
+    )];
+  }
+  const architecture: MapWallSegment[] = [];
+  const facadeHeight = building.storyHeight * building.storyCount;
+  const facadeCenterY = building.baseY + facadeHeight / 2;
+  const pierWidth = Math.min(0.72, Math.max(0.48, Math.min(building.width, building.depth) * 0.025));
+  const frontZ = building.center.z - building.depth / 2 + pierWidth / 2;
+  const addFacadePier = (
+    suffix: string,
+    x: number,
+    z: number,
+    extension: number,
+    width = pierWidth,
+    depth = pierWidth,
+  ): void => {
+    architecture.push(architecturalWallAt(
+      building,
+      suffix,
+      x,
+      facadeCenterY + extension / 2,
+      z,
+      width,
+      facadeHeight + extension,
+      depth,
+      "facade-pier",
+    ));
+  };
+  const addRoofVolume = (
+    suffix: string,
+    widthFraction: number,
+    depthFraction: number,
+    height: number,
+    zFraction = 0.12,
+    xFraction = 0.24,
+  ): void => {
+    const width = Math.min(building.width - 3, Math.max(3.2, building.width * widthFraction));
+    const depth = Math.min(building.depth - 3, Math.max(3.2, building.depth * depthFraction));
+    const x = building.center.x - building.stairwell.side * building.width * xFraction;
+    const z = building.center.z + building.depth * zFraction;
+    architecture.push(architecturalWallAt(
+      building,
+      suffix,
+      x,
+      roofY + height / 2,
+      z,
+      width,
+      height,
+      depth,
+      "roof-volume",
+    ));
+  };
+
+  switch (building.architecturalProfile) {
+    case "corner-piers":
+      for (const [xSide, zSide] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+        addFacadePier(
+          `corner-pier-${xSide < 0 ? "west" : "east"}-${zSide < 0 ? "north" : "south"}`,
+          building.center.x + xSide * (building.width / 2 - pierWidth / 2),
+          building.center.z + zSide * (building.depth / 2 - pierWidth / 2),
+          0,
+        );
+      }
+      addRoofVolume("corner-utility-room", 0.22, 0.24, 2.8, 0.08, 0.2);
+      break;
+    case "horizontal-bands": {
+      const bandHeight = 0.26;
+      const bandY = building.baseY + building.storyHeight + bandHeight / 2;
+      architecture.push(
+        architecturalWallAt(
+          building,
+          "cornice-front",
+          building.center.x,
+          bandY,
+          building.center.z - building.depth / 2 + 0.09,
+          building.width,
+          bandHeight,
+          0.18,
+          "cornice",
+        ),
+        architecturalWallAt(
+          building,
+          "cornice-back",
+          building.center.x,
+          bandY,
+          building.center.z + building.depth / 2 - 0.09,
+          building.width,
+          bandHeight,
+          0.18,
+          "cornice",
+        ),
+      );
+      addRoofVolume("banded-roof-house", 0.3, 0.26, 2.2, 0.14, 0.22);
+      break;
+    }
+    case "vertical-bays":
+      for (const side of [-1, 1] as const) {
+        addFacadePier(
+          `facade-bay-${side < 0 ? "west" : "east"}`,
+          building.center.x + side * building.width * 0.31,
+          frontZ,
+          0,
+        );
+      }
+      addRoofVolume("vertical-bay-plant", 0.2, 0.3, 3, 0.1, 0.26);
+      break;
+    case "service-crown": {
+      addRoofVolume("service-room", 0.36, 0.3, 4.8, 0.14, 0.24);
+      break;
+    }
+    case "split-monitor": {
+      for (const side of [-1, 1] as const) {
+        addRoofVolume(
+          `split-monitor-${side < 0 ? "front" : "back"}`,
+          0.18,
+          0.18,
+          3.2,
+          side * 0.2,
+          0.28,
+        );
+      }
+      break;
+    }
+    case "stepped-crown":
+      addRoofVolume("stepped-crown-low", 0.34, 0.32, 2.2, 0.16, 0.2);
+      addRoofVolume("stepped-crown-high", 0.2, 0.2, 4.2, 0.12, 0.28);
+      break;
+  }
+  return architecture;
+}
+
+function architecturalWallAt(
+  building: MapBuilding,
+  suffix: string,
+  x: number,
+  y: number,
+  z: number,
+  width: number,
+  height: number,
+  depth: number,
+  architecturalFeature: NonNullable<MapWallSegment["architecturalFeature"]>,
+): MapWallSegment {
+  return {
+    id: `${building.id}-wall-architecture-${suffix}`,
+    obstacleId: building.id,
+    role: "architectural",
+    architecturalFeature,
+    center: { x: round(x), y: round(y), z: round(z) },
+    width: round(width),
+    height: round(height),
+    depth: round(depth),
+    color: building.color,
+  };
 }
 
 function createFacadeGeometry(
@@ -2835,6 +3702,7 @@ function createFacadeGeometry(
     },
     width: round(openingWidth),
     height: round(openingHeight),
+    sillWallId: `${building.id}-wall-${side}-${storyIndex}-sill`,
   };
   const segments: MapWallSegment[] = [];
   const addHorizontalPiece = (suffix: string, offset: number, width: number, centerY: number, height: number): void => {
@@ -2893,6 +3761,87 @@ function createFacadeGeometry(
   return { wallSegments: segments, opening };
 }
 
+function createPolygonFacadeGeometry(
+  building: MapBuilding,
+  storyIndex: number,
+  terrainHills: readonly TerrainHill[],
+): { wallSegments: MapWallSegment[]; wallOpenings: MapWallOpening[] } {
+  const footprint = building.footprint ?? "rectangle";
+  const vertices = obstacleFootprintVertices(footprint, building.width, building.depth);
+  const storyBottom = building.baseY + storyIndex * building.storyHeight;
+  const storyTop = storyBottom + building.storyHeight;
+  const wallSegments: MapWallSegment[] = [];
+  const wallOpenings: MapWallOpening[] = [];
+  for (let edgeIndex = 0; edgeIndex < vertices.length; edgeIndex += 1) {
+    const startLocal = vertices[edgeIndex];
+    const endLocal = vertices[(edgeIndex + 1) % vertices.length];
+    if (!startLocal || !endLocal) continue;
+    const start = obstacleWorldPoint(building, startLocal.x, startLocal.z);
+    const end = obstacleWorldPoint(building, endLocal.x, endLocal.z);
+    const centerX = (start.x + end.x) / 2;
+    const centerZ = (start.z + end.z) / 2;
+    const deltaX = end.x - start.x;
+    const deltaZ = end.z - start.z;
+    const span = Math.hypot(deltaX, deltaZ);
+    const rotationY = Math.atan2(-deltaZ, deltaX);
+    const kind: MapWallOpening["kind"] = edgeIndex === 0 && storyIndex === 0 ? "door" : "window";
+    const openingWidth = kind === "door" ? Math.min(3.2, span * 0.38) : Math.min(2.8, span * 0.34);
+    const localSupport = storyIndex === 0
+      ? Math.max(storyBottom, terrainHeightFromHills(centerX, centerZ, terrainHills))
+      : storyBottom + BUILDING_ROOF_CAP_HEIGHT;
+    const openingBottom = kind === "door" ? localSupport : localSupport + BUILDING_WINDOW_SILL_HEIGHT;
+    const openingTop = kind === "door"
+      ? Math.min(storyTop - 0.08, openingBottom + 3)
+      : storyTop - 0.08;
+    const openingHeight = openingTop - openingBottom;
+    const opening: MapWallOpening = {
+      id: `${building.id}-opening-polygon-${edgeIndex}-${storyIndex}`,
+      obstacleId: building.id,
+      storyIndex,
+      side: edgeIndex === 0 ? "front" : edgeIndex < vertices.length / 2 ? "right" : "left",
+      kind,
+      center: { x: round(centerX), y: round((openingBottom + openingTop) / 2), z: round(centerZ) },
+      width: round(openingWidth),
+      height: round(openingHeight),
+      rotationY,
+      sillWallId: `${building.id}-wall-polygon-${edgeIndex}-${storyIndex}-sill`,
+    };
+    wallOpenings.push(opening);
+    const sideSpan = (span - openingWidth) / 2;
+    const tangentX = deltaX / span;
+    const tangentZ = deltaZ / span;
+    const addPiece = (
+      suffix: string,
+      offset: number,
+      width: number,
+      centerY: number,
+      height: number,
+    ): void => {
+      if (width <= 0.05 || height <= 0.05) return;
+      wallSegments.push({
+        id: `${building.id}-wall-polygon-${edgeIndex}-${storyIndex}-${suffix}`,
+        obstacleId: building.id,
+        role: "facade",
+        center: {
+          x: round(centerX + tangentX * offset),
+          y: round(centerY),
+          z: round(centerZ + tangentZ * offset),
+        },
+        width: round(width),
+        height: round(height),
+        depth: BUILDING_WALL_THICKNESS,
+        rotationY,
+        color: building.color,
+      });
+    };
+    addPiece("left", -(openingWidth + sideSpan) / 2, sideSpan, storyBottom + building.storyHeight / 2, building.storyHeight);
+    addPiece("right", (openingWidth + sideSpan) / 2, sideSpan, storyBottom + building.storyHeight / 2, building.storyHeight);
+    addPiece("sill", 0, openingWidth, (storyBottom + openingBottom) / 2, openingBottom - storyBottom);
+    addPiece("lintel", 0, openingWidth, (openingTop + storyTop) / 2, storyTop - openingTop);
+  }
+  return { wallSegments, wallOpenings };
+}
+
 function facadePosition(building: MapBuilding, side: MapWallOpening["side"]): { x: number; z: number } {
   if (side === "front") {
     return { x: building.center.x, z: round(building.center.z - building.depth / 2 + BUILDING_WALL_THICKNESS / 2) };
@@ -2919,12 +3868,55 @@ function wallSegmentAt(
   return {
     id: `${obstacle.id}-wall-${suffix}`,
     obstacleId: obstacle.id,
+    role: "facade",
     center: { x: round(x), y: round(y), z: round(z) },
     width: round(width),
     height,
     depth: round(depth),
     color: obstacle.color,
   };
+}
+
+function selectBuildingFootprint(
+  mapId: MapId,
+  seed: number,
+  buildingId: string,
+  eligible = true,
+): BuildingFootprint {
+  if (!eligible) return "rectangle";
+  let hash = (seed ^ 0x243f6a88) >>> 0;
+  const identity = `${mapId}:${buildingId}:footprint`;
+  for (let index = 0; index < identity.length; index += 1) {
+    hash = Math.imul(hash ^ identity.charCodeAt(index), 0x01000193) >>> 0;
+  }
+  const percentile = hash % 100;
+  return percentile < 82 ? "rectangle" : percentile < 94 ? "hexagon" : "round";
+}
+
+function selectArchitecturalProfile(
+  mapId: MapId,
+  seed: number,
+  buildingId: string,
+  townKind?: TownBuildingKind,
+): BuildingArchitecturalProfile {
+  let hash = (seed ^ 0x6a09e667) >>> 0;
+  const identity = `${mapId}:${buildingId}`;
+  for (let index = 0; index < identity.length; index += 1) {
+    hash = Math.imul(hash ^ identity.charCodeAt(index), 0x01000193) >>> 0;
+  }
+  if (townKind) {
+    const kindOffset = [
+      "factory",
+      "warehouse",
+      "rowhouse",
+      "commercial",
+      "corner",
+      "tower",
+    ].indexOf(townKind);
+    hash = (hash + Math.imul(kindOffset + 1, 0x9e3779b1)) >>> 0;
+  }
+  return BUILDING_ARCHITECTURAL_PROFILES[hash % BUILDING_ARCHITECTURAL_PROFILES.length] ??
+    "corner-piers";
 }
 
 function createLootSpawnPoints(
@@ -3233,12 +4225,7 @@ function smoothTerrainHeightFromHills(x: number, z: number, hills: readonly Terr
 }
 
 function pointInsideObstacle(point: Vector3State, obstacle: MapObstacle, clearance: number): boolean {
-  return (
-    point.x >= obstacle.center.x - obstacle.width / 2 - clearance &&
-    point.x <= obstacle.center.x + obstacle.width / 2 + clearance &&
-    point.z >= obstacle.center.z - obstacle.depth / 2 - clearance &&
-    point.z <= obstacle.center.z + obstacle.depth / 2 + clearance
-  );
+  return pointInsideObstacle2D(obstacle, point.x, point.z, clearance);
 }
 
 function pointInsideRamp(point: Vector3State, ramp: RampFootprint, clearance: number): boolean {

@@ -40,8 +40,8 @@ describe("MultiplayerConnection lifecycle", () => {
     expect(sockets[0]?.closeCalls).toBe(1);
   });
 
-  it("accepts only the mixed-map, ammunition-depot, and grenade protocol version", async () => {
-    expect(MULTIPLAYER_PROTOCOL_VERSION).toBe(9);
+  it("accepts only the minimum-town, building-geometry, and grenade protocol version", async () => {
+    expect(MULTIPLAYER_PROTOCOL_VERSION).toBe(12);
     const sockets: FakeWebSocket[] = [];
     const connection = new MultiplayerConnection(
       "https://example.test",

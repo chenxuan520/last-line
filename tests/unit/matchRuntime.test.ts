@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { BATTLE_ROYALE_CONFIG } from "../../src/config/battleRoyale";
 import { createMapLayout, getTerrainHeight } from "../../src/config/map";
+import { FRAG_GRENADE_CONFIG } from "../../src/config/throwables";
 import { createIdleCommand } from "../../src/game/commands/ActorCommand";
 import { SIMULATION_TICK_RATE } from "../../src/game/simulationTiming";
 import { createWeaponState } from "../../src/game/state/types";
@@ -94,10 +95,10 @@ describe("MatchRuntime", () => {
     expect(restored.state).toEqual(checkpoint.state);
   });
 
-  it("accepts only complete version 8 checkpoints for explicit map identities", () => {
+  it("accepts only complete version 11 checkpoints for explicit map identities", () => {
     const runtime = new MatchRuntime({
       humanActorIds: ["human-1", "human-2"],
-      seed: 0,
+      seed: 1,
       mapId: "mixed",
       startWithBandage: false,
       disableAiSnipers: true,
@@ -105,7 +106,7 @@ describe("MatchRuntime", () => {
     const checkpoint = runtime.checkpoint();
     const checkpointLayout = createMapLayout(checkpoint.state.mapId, checkpoint.state.mapSeed);
 
-    expect(MATCH_CHECKPOINT_VERSION).toBe(8);
+    expect(MATCH_CHECKPOINT_VERSION).toBe(11);
     expect(checkpointLayout.ammunitionDepot.levels).toHaveLength(3);
     expect(isMatchCheckpointCompatible(checkpoint)).toBe(true);
     expect(isMatchCheckpointCompatible({
@@ -302,7 +303,7 @@ describe("MatchRuntime", () => {
     )).toBe(false);
   });
 
-  it("requires complete serializable grenade and closed-zone state in v7 checkpoints", () => {
+  it("requires complete serializable grenade and closed-zone state in current checkpoints", () => {
     const runtime = new MatchRuntime({
       humanActorIds: ["human-1", "human-2"],
       seed: 43,
@@ -504,7 +505,7 @@ describe("MatchRuntime", () => {
         activeGrenades: {
           "grenade-1": {
             ...checkpoint.state.activeGrenades["grenade-1"],
-            fuseSeconds: 3.500_001,
+            fuseSeconds: FRAG_GRENADE_CONFIG.fuseSeconds + 0.000_001,
           },
         },
       },

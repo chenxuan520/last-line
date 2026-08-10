@@ -546,7 +546,7 @@ describe("admin control plane", () => {
       if (!room) throw new Error("corrupt loot room state missing");
       const runtime = new MatchRuntime({
         humanActorIds: ["human-1", "human-2"],
-        seed: 0,
+        seed: 1,
         mapId: "mixed",
         startWithBandage: true,
         disableAiSnipers: true,

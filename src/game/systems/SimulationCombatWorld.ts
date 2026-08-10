@@ -3,11 +3,18 @@ import {
   getTerrainHeight,
   getRampHeight,
   MAP_HALF_SIZE,
+  type MapFloorSlab,
   type MapLayout,
   type MapObstacle,
   type RoofRamp,
 } from "../../config/map";
 import { ACTOR_EYE_HEIGHT, ACTOR_HEIGHT, ACTOR_RADIUS } from "../rules/actorGeometry";
+import {
+  obstacleBounds2D,
+  obstacleLocalDirection,
+  obstacleLocalPoint,
+  obstacleWorldDirection,
+} from "../rules/obstacleGeometry";
 import type { ActorState, EntityId, MatchState, Vector3State } from "../state/types";
 import { StaticGridIndex } from "../spatial/StaticGridIndex";
 import type {
@@ -233,12 +240,7 @@ export class SimulationCombatWorld implements CombatWorld {
 }
 
 function createObstacleIndex(obstacles: readonly MapObstacle[]): StaticGridIndex<MapObstacle> {
-  return new StaticGridIndex(obstacles, COMBAT_GRID_CELL_SIZE, (obstacle) => ({
-    minimumX: obstacle.center.x - obstacle.width / 2,
-    maximumX: obstacle.center.x + obstacle.width / 2,
-    minimumZ: obstacle.center.z - obstacle.depth / 2,
-    maximumZ: obstacle.center.z + obstacle.depth / 2,
-  }));
+  return new StaticGridIndex(obstacles, COMBAT_GRID_CELL_SIZE, (obstacle) => obstacleBounds2D(obstacle));
 }
 
 function createRampIndex(ramps: readonly RoofRamp[]): StaticGridIndex<RoofRamp> {
@@ -385,17 +387,23 @@ function intersectObstacle(
   range: number,
   obstacle: MapObstacle,
 ): SurfaceHit | null {
-  return intersectBoxBounds(
-    origin,
-    direction,
+  if (isPolygonFloorSlab(obstacle)) {
+    return intersectPolygonFloorSlab(origin, direction, range, obstacle, 0);
+  }
+  const localOrigin = obstacleLocalPoint(obstacle, origin.x, origin.z);
+  const localDirection = obstacleLocalDirection(obstacle, direction.x, direction.z);
+  const hit = intersectBoxBounds(
+    { x: localOrigin.x, y: origin.y, z: localOrigin.z },
+    { x: localDirection.x, y: direction.y, z: localDirection.z },
     range,
-    obstacle.center.x - obstacle.width / 2,
-    obstacle.center.x + obstacle.width / 2,
+    -obstacle.width / 2,
+    obstacle.width / 2,
     obstacle.center.y - obstacle.height / 2,
     obstacle.center.y + obstacle.height / 2,
-    obstacle.center.z - obstacle.depth / 2,
-    obstacle.center.z + obstacle.depth / 2,
+    -obstacle.depth / 2,
+    obstacle.depth / 2,
   );
+  return hit ? rotateObstacleNormal(obstacle, hit) : null;
 }
 
 function intersectExpandedObstacle(
@@ -405,17 +413,98 @@ function intersectExpandedObstacle(
   obstacle: MapObstacle,
   radius: number,
 ): SurfaceHit | null {
-  return intersectBoxBounds(
-    origin,
-    direction,
+  if (isPolygonFloorSlab(obstacle)) {
+    return intersectPolygonFloorSlab(origin, direction, range, obstacle, radius);
+  }
+  const localOrigin = obstacleLocalPoint(obstacle, origin.x, origin.z);
+  const localDirection = obstacleLocalDirection(obstacle, direction.x, direction.z);
+  const hit = intersectBoxBounds(
+    { x: localOrigin.x, y: origin.y, z: localOrigin.z },
+    { x: localDirection.x, y: direction.y, z: localDirection.z },
     range,
-    obstacle.center.x - obstacle.width / 2 - radius,
-    obstacle.center.x + obstacle.width / 2 + radius,
+    -obstacle.width / 2 - radius,
+    obstacle.width / 2 + radius,
     obstacle.center.y - obstacle.height / 2 - radius,
     obstacle.center.y + obstacle.height / 2 + radius,
-    obstacle.center.z - obstacle.depth / 2 - radius,
-    obstacle.center.z + obstacle.depth / 2 + radius,
+    -obstacle.depth / 2 - radius,
+    obstacle.depth / 2 + radius,
   );
+  return hit ? rotateObstacleNormal(obstacle, hit) : null;
+}
+
+function isPolygonFloorSlab(obstacle: MapObstacle): obstacle is MapFloorSlab & {
+  footprintVertices: readonly { x: number; z: number }[];
+} {
+  return "footprintVertices" in obstacle &&
+    Array.isArray(obstacle.footprintVertices) &&
+    obstacle.footprintVertices.length >= 3;
+}
+
+function intersectPolygonFloorSlab(
+  origin: Vector3State,
+  direction: Vector3State,
+  range: number,
+  slab: MapFloorSlab & { footprintVertices: readonly { x: number; z: number }[] },
+  padding: number,
+): SurfaceHit | null {
+  let near = 0;
+  let far = range;
+  let nearNormal: Vector3State = { x: 0, y: 0, z: 0 };
+  const clipLower = (
+    value: number,
+    velocity: number,
+    minimum: number,
+    normal: Vector3State,
+  ): boolean => {
+    if (Math.abs(velocity) <= GEOMETRY_EPSILON) return value >= minimum;
+    const distance = (minimum - value) / velocity;
+    if (velocity > 0) {
+      if (distance > near) {
+        near = distance;
+        nearNormal = normal;
+      }
+    } else {
+      far = Math.min(far, distance);
+    }
+    return near <= far;
+  };
+  const minimumY = slab.center.y - slab.height / 2 - padding;
+  const maximumY = slab.center.y + slab.height / 2 + padding;
+  if (!clipLower(origin.y, direction.y, minimumY, { x: 0, y: -1, z: 0 })) return null;
+  if (!clipLower(-origin.y, -direction.y, -maximumY, { x: 0, y: 1, z: 0 })) return null;
+
+  const vertices = slab.footprintVertices;
+  const signedArea = vertices.reduce((total, vertex, index) => {
+    const next = vertices[(index + 1) % vertices.length];
+    return next ? total + vertex.x * next.z - next.x * vertex.z : total;
+  }, 0);
+  const orientation = signedArea >= 0 ? 1 : -1;
+  for (let index = 0; index < vertices.length; index += 1) {
+    const first = vertices[index];
+    const second = vertices[(index + 1) % vertices.length];
+    if (!first || !second) continue;
+    const edgeX = second.x - first.x;
+    const edgeZ = second.z - first.z;
+    const edgeLength = Math.hypot(edgeX, edgeZ);
+    if (edgeLength <= GEOMETRY_EPSILON) continue;
+    const value = orientation * (
+      edgeX * (origin.z - first.z) -
+      edgeZ * (origin.x - first.x)
+    );
+    const velocity = orientation * (edgeX * direction.z - edgeZ * direction.x);
+    const outward = {
+      x: orientation * edgeZ / edgeLength,
+      y: 0,
+      z: -orientation * edgeX / edgeLength,
+    };
+    if (!clipLower(value, velocity, -padding * edgeLength, outward)) return null;
+  }
+  return near >= 0 && near <= range ? { distance: near, normal: nearNormal } : null;
+}
+
+function rotateObstacleNormal(obstacle: MapObstacle, hit: SurfaceHit): SurfaceHit {
+  const normal = obstacleWorldDirection(obstacle, hit.normal.x, hit.normal.z);
+  return { ...hit, normal: { x: normal.x, y: hit.normal.y, z: normal.z } };
 }
 
 function intersectBoxBounds(

@@ -17,7 +17,7 @@ describe("GrenadePresentation", () => {
         aiControlled: false,
         position: { x: index, y: 2, z: 0 },
         velocity: { x: 1, y: 2, z: 3 },
-        fuseSeconds: 3,
+        fuseSeconds: 2,
       };
       return [grenade.id, grenade];
     }));
