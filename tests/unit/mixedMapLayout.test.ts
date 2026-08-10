@@ -198,7 +198,7 @@ describe("mixed map layout", () => {
   }, 30_000);
 
   it("keeps each region structurally distinct and all authoritative footprints clear", () => {
-    for (const seed of [0, 1, 2, 3, 11, 16, 38, 42, 256, 423, 2026]) {
+    for (const seed of [0, 1, 2, 3, 11, 16, 38, 42, 256, 395, 423, 2026]) {
       const blueprint = createMixedMapBlueprint(seed);
       const layout = createMapLayout("mixed", seed);
 
@@ -234,6 +234,17 @@ describe("mixed map layout", () => {
         );
 
         expect(buildings).toHaveLength(region.kind === "town" ? 36 : region.kind === "rural" ? 9 : 2);
+        for (let buildingIndex = 0; buildingIndex < buildings.length; buildingIndex += 1) {
+          const building = buildings[buildingIndex];
+          if (!building) throw new Error(`building fixture missing: ${seed}:${region.id}:${buildingIndex}`);
+          for (const other of buildings.slice(buildingIndex + 1)) {
+            expect(
+              Math.abs(building.center.x - other.center.x) >= (building.width + other.width) / 2 ||
+              Math.abs(building.center.z - other.center.z) >= (building.depth + other.depth) / 2,
+              `${seed}:${building.id}:${other.id}:overlap`,
+            ).toBe(true);
+          }
+        }
         if (region.kind === "town") {
           const coverage = mixedRegionBuildingCoverage(
             blueprint.regions,

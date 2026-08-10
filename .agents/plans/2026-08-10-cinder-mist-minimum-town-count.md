@@ -38,6 +38,12 @@
 - 2026-08-10：production Chrome MCP 在音量 `0` 下使用真实 `createIslandScene` 检查原本只有 1 个城镇的 mixed seed `38`。无遮挡俯视截图中，`赤钟城区` 和新增的 `白塔旧城` 分别形成独立密集建筑/道路群；`风穗乡` 与 `沉杉岭/乌松岭/雾鹿峰` 仍保留，6 个区域标签无重叠，未见城镇建筑、森林或道路穿模。页面运行事实为 6 个区域、2 个城镇、1,483 个 scene mesh；console 仅 Babylon 启动日志与 SwiftShader 警告。每轮结束后立即回到 `about:blank`，停止 4173 并删除全部 `/tmp/last-line-min-town*` 临时文件。
 - 2026-08-10：提交 `0453344` 后，push 与 PR 两条 Node 24 CI 都在 Worker `admin.test.ts` 的同一 canonical-loot fixture 失败。应用 `583/583` 与其余 Worker `51/52` 已通过；唯一失败是该 Worker fixture 仍用旧 mixed runtime seed `0` 并硬断言三层弹药库，而本轮新地图事实使该派生 seed 合法变为两层。Standalone 与 unit 的同类 fixture 已在提交前切换到新布局下稳定产生三层弹药库的 runtime seed `1`，Worker fixture 被遗漏。
 - 2026-08-10：Worker follow-up 仅把该 fixture 的 `MatchRuntime` seed 从 `0` 改为 `1`，继续断言三层弹药库、删除最后一条 canonical loot 后房间与 checkpoint 必须被清除；没有删除断言、改成动态层数或放宽 canonical roster 合同。Node 24 `typecheck:worker` 通过；真实 `MatchRuntime` 复现得到派生 `mapSeed=2693262067`、三层弹药库、272 条 canonical loot。本机 Worker runtime 仍在任何测试前被 glibc 2.28 阻止，因此修复后的真实 Worker 用例必须由新 push 的 Node 24 CI 验证。
+- 2026-08-10：Codex 在 follow-up CI 全绿后发现 seed `395` 的第二城镇 `白塔旧城` 只能生成 `35/36` 栋建筑。根因是提升后的随机城镇仍使用原有 5m 建筑额外间距；道路、降落区、最近区域归属和地形净空共同筛选后，最后一栋合法候选被额外间距拒绝。
+- 2026-08-10：城镇生成改为两阶段消费同一批确定性候选：首轮继续使用原 5m 额外间距；只有不足 36 栋时才以 2m 额外间距重新检查未采用候选。道路肩、降落区、区域归属、地形净空和建筑实体 AABB 不重叠条件完全不变；农村和森林仍只执行原 5m 规则。
+- 2026-08-10：seed `395` 已加入完整 mixed 结构回归，并逐区域逐对断言建筑实体 AABB 不重叠。Node 24 `typecheck:app` 与定向 mixed `1 file / 13 tests` 通过；额外扫描 seed `0–999` 的完整 blueprint，全部区域均达到 `36/9/2` 建筑配额且无实体重叠，用时约 51.6 秒。曾尝试的 20,000 个完整 blueprint 扫描因单核成本过高主动停止，没有把压力扫描写入测试。
+- 2026-08-10：本轮最终 Node 24 三目标 typecheck、应用单元 `51 files / 583 tests`、standalone `3 files / 33 tests`、browser/Worker dry-run/server/same-origin standalone build 与普通 production rebuild 均通过。本机 Worker runtime 仍在执行任何测试前被 glibc 2.28 阻止；新 push 的 Node 24 CI 必须补充 Worker `52/52`。
+- 2026-08-10：最终预算全部通过：browser entry `1,165,007 / 1,200,000`、最大非入口 JavaScript `599,667 / 700,000`、全部 browser JavaScript `3,847,778 / 4,000,000`、chunk `252 / 270`、CSS `45,225 / 50,000`、整个 `dist` `4,670,943 / 5,000,000`、Worker `614,433 / 615,000`、standalone `625,366 / 630,000`。
+- 2026-08-10：production Chrome MCP 在音量 `0`、高画质下通过真实游戏入口固定进入 mixed seed `395`。俯视画面显示两个独立密集城镇；小地图明确显示 `赤钟城区`、`白塔旧城`、其余四区、`医院` 和 `弹药库`，标签无重叠。控制台只有本机 SwiftShader 警告。验收后立即回到 `about:blank`，停止 4173 并删除临时截图。
 
 ## Review
 
@@ -59,3 +65,18 @@
 - 结论：**通过，可提交并普通推送 follow-up。** Blocker、high、medium、low 均为 0。
 - Reviewer 确认 seed `1` 仍明确生成三层弹药库；测试继续使用完整 `layout.lootSpawnPoints.length`，删除最后一条 canonical loot，并要求 `room-v1` 与 `checkpoint-v1` 都被清除，没有放宽恢复合同。
 - 其余 Worker mixed fixtures 使用 seed `42` 或 `52`，不依赖三层弹药库或硬编码 canonical 数量，不需要同步。新 push 后 Node 24 Worker `52/52` 仍是最终门禁。
+
+### 2026-08-10 Codex Seed 395 Finding
+
+- Codex Finding：mixed seed `395` 中，被最小城镇约束提升为城镇的 `白塔旧城` 仅生成 `35/36` 栋建筑并抛错，说明区域类型合同虽然满足，但并非每个允许 seed 都能完成对应城镇几何。
+- Disposition：保留原候选顺序和首轮 5m 额外间距；仅在城镇不足时使用 2m 额外间距补齐，同时继续严格禁止实体 AABB 重叠并保留全部道路、落点、区域归属和地形净空约束。seed `395` 回归和 seed `0–999` 完整 blueprint 扫描均通过。提交前必须完成独立 Re-review；新 push 后 Node 24 CI 和 Codex thread 必须再次全绿。
+
+### 2026-08-10 Codex Seed 395 Re-review
+
+- Reviewer 以 `origin/main` 理解整体任务背景，并重点静态审查 `6ece61f` 到当前工作区的实际增量；增量仅包含本 Plan、`src/config/mixedMap.ts` 和 `tests/unit/mixedMapLayout.test.ts`，未发现无关改动。未重复外层已记录的 typecheck、test、build、budget、browser 或 coverage 命令。
+- 结论：**通过，可提交并普通推送 follow-up。** Blocker、high、medium、low 均为 0。
+- 两轮使用同一个已生成的确定性候选数组。第二轮重新遇到首轮已选候选时，会被针对全局 `buildings` 的碰撞检查拒绝，不会重复添加；第二轮也不重新生成候选或额外消耗候选随机流，只有真正补入建筑时才按原规则确定楼层。
+- 第二轮仍对全部既有区域建筑检查 2m 额外间距；后续区域继续按原 5m 规则检查已补入建筑。候选写入时的毫米取整误差远小于保留的 2m 间距，因此最终 `layout.obstacles` 不会因取整产生实体 AABB 重叠。道路肩、全部降落区、最近区域归属和地形坡差检查均位于共享 `tryCandidate` 中，两轮没有分叉或绕过。
+- 2m fallback 仅在 `region.kind === "town"` 且原 5m 首轮不足 36 栋时运行；原本成功的城镇、全部农村和全部森林仍在首轮完成并保持原行为。自然障碍和物资继续以最终建筑集合为输入执行既有净空检查。
+- seed `395` 已进入完整 `createMapLayout("mixed", seed)` 结构回归。新增断言检查最终权威 `layout.obstacles` 的实际中心和尺寸，而非只检查 blueprint 候选；既有同一测试继续覆盖建筑配额、道路净空、区域归属、地形安全和物资间距。外层记录的 seed `0–999` 完整 blueprint 扫描补充了更广的生成可行性证据。
+- 本机 glibc 限制使 Worker runtime 仍须由 push 后 Node 24 CI 的 Worker `52/52` 补齐；这属于已明确的交付门禁，不构成本轮静态 Finding。Codex seed `395` thread 仍须在新 push 审查通过后关闭。

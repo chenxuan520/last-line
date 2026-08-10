@@ -711,17 +711,22 @@ function createMixedBuildings(
       ? createTownBuildingCandidates(region, random)
       : createScatteredBuildingCandidates(region, random);
     const targetCount = region.kind === "town" ? 36 : region.kind === "rural" ? 9 : 2;
-    for (const candidate of candidates) {
-      if (buildings.filter((building) => building.regionId === region.id).length >= targetCount) break;
-      if (!pointOwnedByMixedRegion(regions, region, candidate.x, candidate.z)) continue;
-      if (!mixedFootprintClearsRoads(roads, candidate.x, candidate.z, candidate.width, candidate.depth, 1.5)) continue;
+    const regionBuildings = (): MixedBuildingSpec[] =>
+      buildings.filter((building) => building.regionId === region.id);
+    const tryCandidate = (
+      candidate: { x: number; z: number; width: number; depth: number },
+      buildingClearance: number,
+    ): void => {
+      if (regionBuildings().length >= targetCount) return;
+      if (!pointOwnedByMixedRegion(regions, region, candidate.x, candidate.z)) return;
+      if (!mixedFootprintClearsRoads(roads, candidate.x, candidate.z, candidate.width, candidate.depth, 1.5)) return;
       if (landingZones.some((point) =>
         Math.abs(point.x - candidate.x) < candidate.width / 2 + 12 &&
         Math.abs(point.z - candidate.z) < candidate.depth / 2 + 12
-      )) continue;
-      if (buildings.some((building) => buildingsOverlap(building, candidate, 5))) continue;
-      if (!buildingFootprintClearsTerrain(candidate, terrainHills)) continue;
-      const localIndex = buildings.filter((building) => building.regionId === region.id).length;
+      )) return;
+      if (buildings.some((building) => buildingsOverlap(building, candidate, buildingClearance))) return;
+      if (!buildingFootprintClearsTerrain(candidate, terrainHills)) return;
+      const localIndex = regionBuildings().length;
       buildings.push({
         id: `mixed-building-${regionIndex}-${localIndex}`,
         regionId: region.id,
@@ -735,8 +740,18 @@ function createMixedBuildings(
         stairwellSide: localIndex % 2 === 0 ? -1 : 1,
         ...(region.kind === "town" ? { townKind: TOWN_KINDS[localIndex % TOWN_KINDS.length] } : {}),
       });
+    };
+    for (const candidate of candidates) {
+      if (regionBuildings().length >= targetCount) break;
+      tryCandidate(candidate, 5);
     }
-    const actualCount = buildings.filter((building) => building.regionId === region.id).length;
+    if (region.kind === "town" && regionBuildings().length < targetCount) {
+      for (const candidate of candidates) {
+        if (regionBuildings().length >= targetCount) break;
+        tryCandidate(candidate, 2);
+      }
+    }
+    const actualCount = regionBuildings().length;
     if (actualCount !== targetCount) {
       throw new Error(`Mixed map ${region.kind} building generation failed: ${region.name} ${actualCount}/${targetCount}`);
     }
