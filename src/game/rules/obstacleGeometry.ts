@@ -141,6 +141,69 @@ export function pointInsidePolygon2D(x: number, z: number, vertices: readonly Po
   return inside;
 }
 
+export function pointInsideConvexPolygon2D(
+  x: number,
+  z: number,
+  vertices: readonly Point2D[],
+  clearance = 0,
+): boolean {
+  if (vertices.length < 3) return false;
+  const orientation = polygonOrientation(vertices);
+  let validEdges = 0;
+  for (let index = 0; index < vertices.length; index += 1) {
+    const first = vertices[index];
+    const second = vertices[(index + 1) % vertices.length];
+    if (!first || !second) continue;
+    const edgeX = second.x - first.x;
+    const edgeZ = second.z - first.z;
+    const edgeLength = Math.hypot(edgeX, edgeZ);
+    if (edgeLength <= 1e-9) continue;
+    validEdges += 1;
+    const distance = orientation * (
+      edgeX * (z - first.z) -
+      edgeZ * (x - first.x)
+    ) / edgeLength;
+    if (distance < clearance - 1e-7) return false;
+  }
+  return validEdges >= 3;
+}
+
+export function closestPointInsideConvexPolygon2D(
+  x: number,
+  z: number,
+  vertices: readonly Point2D[],
+  clearance = 0,
+): Point2D | null {
+  const insetVertices = insetConvexPolygon(vertices, clearance);
+  if (insetVertices.length < 3) return null;
+  if (pointInsidePolygon2D(x, z, insetVertices)) return { x, z };
+  let closest: Point2D | null = null;
+  let closestDistanceSquared = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < insetVertices.length; index += 1) {
+    const first = insetVertices[index];
+    const second = insetVertices[(index + 1) % insetVertices.length];
+    if (!first || !second) continue;
+    const edgeX = second.x - first.x;
+    const edgeZ = second.z - first.z;
+    const lengthSquared = edgeX * edgeX + edgeZ * edgeZ;
+    if (lengthSquared <= 1e-12) continue;
+    const progress = Math.max(0, Math.min(1, (
+      (x - first.x) * edgeX +
+      (z - first.z) * edgeZ
+    ) / lengthSquared));
+    const candidate = {
+      x: first.x + edgeX * progress,
+      z: first.z + edgeZ * progress,
+    };
+    const distanceSquared = (candidate.x - x) ** 2 + (candidate.z - z) ** 2;
+    if (distanceSquared < closestDistanceSquared) {
+      closest = candidate;
+      closestDistanceSquared = distanceSquared;
+    }
+  }
+  return closest;
+}
+
 export function obstacleBounds2D(
   obstacle: OrientedObstacle,
   padding = 0,
@@ -228,4 +291,59 @@ function segmentIntersectionProgress(
   return progress >= 0 && progress <= 1 && edgeProgress >= 0 && edgeProgress <= 1
     ? progress
     : null;
+}
+
+function insetConvexPolygon(
+  vertices: readonly Point2D[],
+  clearance: number,
+): Point2D[] {
+  if (vertices.length < 3) return [];
+  const orientation = polygonOrientation(vertices);
+  let result = [...vertices];
+  for (let edgeIndex = 0; edgeIndex < vertices.length; edgeIndex += 1) {
+    const edgeStart = vertices[edgeIndex];
+    const edgeEnd = vertices[(edgeIndex + 1) % vertices.length];
+    if (!edgeStart || !edgeEnd) continue;
+    const edgeX = edgeEnd.x - edgeStart.x;
+    const edgeZ = edgeEnd.z - edgeStart.z;
+    const edgeLength = Math.hypot(edgeX, edgeZ);
+    if (edgeLength <= 1e-9) continue;
+    const signedDistance = (point: Point2D) => orientation * (
+      edgeX * (point.z - edgeStart.z) -
+      edgeZ * (point.x - edgeStart.x)
+    ) / edgeLength - clearance;
+    const clipped: Point2D[] = [];
+    for (let index = 0; index < result.length; index += 1) {
+      const current = result[index];
+      const next = result[(index + 1) % result.length];
+      if (!current || !next) continue;
+      const currentDistance = signedDistance(current);
+      const nextDistance = signedDistance(next);
+      const currentInside = currentDistance >= -1e-9;
+      const nextInside = nextDistance >= -1e-9;
+      if (currentInside) clipped.push(current);
+      if (currentInside === nextInside) continue;
+      const denominator = currentDistance - nextDistance;
+      if (Math.abs(denominator) <= 1e-12) continue;
+      const progress = currentDistance / denominator;
+      clipped.push({
+        x: current.x + (next.x - current.x) * progress,
+        z: current.z + (next.z - current.z) * progress,
+      });
+    }
+    result = clipped;
+    if (result.length < 3) return [];
+  }
+  return result;
+}
+
+function polygonOrientation(vertices: readonly Point2D[]): 1 | -1 {
+  let area = 0;
+  for (let index = 0; index < vertices.length; index += 1) {
+    const current = vertices[index];
+    const next = vertices[(index + 1) % vertices.length];
+    if (!current || !next) continue;
+    area += current.x * next.z - next.x * current.z;
+  }
+  return area < 0 ? -1 : 1;
 }

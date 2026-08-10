@@ -7,9 +7,11 @@ import {
 } from "../game/rules/actorGeometry";
 import { GROUND_LOOT_POSITION_HEIGHT } from "../game/rules/loot";
 import {
+  closestPointInsideConvexPolygon2D,
   obstacleFootprintVertices,
   obstacleLocalPoint,
   obstacleWorldPoint,
+  pointInsideConvexPolygon2D,
   pointInsideObstacle2D,
 } from "../game/rules/obstacleGeometry";
 import { DEFAULT_MAP_ID, mapDisplayName, type MapId } from "./maps";
@@ -248,16 +250,24 @@ export function isBuildingRoofNavigationPoint(
   clearance = ROOF_NAVIGATION_CLEARANCE,
 ): boolean {
   const roofY = building.baseY + building.storyHeight * building.storyCount + BUILDING_ROOF_CAP_HEIGHT;
+  const polygonFootprint = buildingRoofPolygon(building);
+  if (
+    polygonFootprint &&
+    !pointInsideConvexPolygon2D(x, z, polygonFootprint, clearance)
+  ) return false;
   const supported = layout.floorSlabs.some((slab) => {
     if (
       slab.obstacleId !== building.id ||
       slab.kind !== "roof" ||
       slab.level !== building.storyCount
     ) return false;
+    if (slab.footprintVertices) {
+      return pointInsideConvexPolygon2D(x, z, slab.footprintVertices);
+    }
     const local = obstacleLocalPoint(slab, x, z);
     return (
-      Math.abs(local.x) <= slab.width / 2 - clearance &&
-      Math.abs(local.z) <= slab.depth / 2 - clearance
+      Math.abs(local.x) <= slab.width / 2 - (polygonFootprint ? 0 : clearance) &&
+      Math.abs(local.z) <= slab.depth / 2 - (polygonFootprint ? 0 : clearance)
     );
   });
   if (!supported) return false;
@@ -306,14 +316,37 @@ export function getBuildingRoofNavigationPoint(
   ];
   const anchor = preferredPoints[1] ?? preferredPoints[0] as { x: number; z: number };
   const candidates: Array<{ x: number; z: number }> = [];
+  const polygonFootprint = buildingRoofPolygon(building);
+  const addCandidate = (candidate: { x: number; z: number }): void => {
+    if (!polygonFootprint) {
+      candidates.push(candidate);
+      return;
+    }
+    const clamped = closestPointInsideConvexPolygon2D(
+      candidate.x,
+      candidate.z,
+      polygonFootprint,
+      ROOF_NAVIGATION_CLEARANCE + 0.01,
+    );
+    if (clamped) candidates.push(clamped);
+  };
   for (const preferred of preferredPoints) {
-    candidates.push(preferred);
+    addCandidate(preferred);
     for (const slab of roofSlabs) {
+      if (slab.footprintVertices) {
+        addCandidate({
+          x: slab.footprintVertices.reduce((total, vertex) => total + vertex.x, 0) /
+            slab.footprintVertices.length,
+          z: slab.footprintVertices.reduce((total, vertex) => total + vertex.z, 0) /
+            slab.footprintVertices.length,
+        });
+        continue;
+      }
       const local = obstacleLocalPoint(slab, preferred.x, preferred.z);
       const halfWidth = slab.width / 2 - ROOF_NAVIGATION_CLEARANCE;
       const halfDepth = slab.depth / 2 - ROOF_NAVIGATION_CLEARANCE;
       if (halfWidth <= 0 || halfDepth <= 0) continue;
-      candidates.push(obstacleWorldPoint(
+      addCandidate(obstacleWorldPoint(
         slab,
         Math.max(-halfWidth, Math.min(halfWidth, local.x)),
         Math.max(-halfDepth, Math.min(halfDepth, local.z)),
@@ -321,12 +354,28 @@ export function getBuildingRoofNavigationPoint(
     }
   }
   for (const slab of roofSlabs) {
+    if (slab.footprintVertices) {
+      const center = {
+        x: slab.footprintVertices.reduce((total, vertex) => total + vertex.x, 0) /
+          slab.footprintVertices.length,
+        z: slab.footprintVertices.reduce((total, vertex) => total + vertex.z, 0) /
+          slab.footprintVertices.length,
+      };
+      addCandidate(center);
+      for (const vertex of slab.footprintVertices) {
+        addCandidate({
+          x: center.x + (vertex.x - center.x) * 0.45,
+          z: center.z + (vertex.z - center.z) * 0.45,
+        });
+      }
+      continue;
+    }
     const halfWidth = slab.width / 2 - ROOF_NAVIGATION_CLEARANCE;
     const halfDepth = slab.depth / 2 - ROOF_NAVIGATION_CLEARANCE;
     if (halfWidth <= 0 || halfDepth <= 0) continue;
     for (const xScale of [0, -0.55, 0.55]) {
       for (const zScale of [0, -0.55, 0.55]) {
-        candidates.push(obstacleWorldPoint(slab, halfWidth * xScale, halfDepth * zScale));
+        addCandidate(obstacleWorldPoint(slab, halfWidth * xScale, halfDepth * zScale));
       }
     }
   }
@@ -349,6 +398,13 @@ export function getBuildingRoofNavigationPoint(
     };
   }
   return null;
+}
+
+function buildingRoofPolygon(building: MapBuilding): readonly { x: number; z: number }[] | null {
+  const footprint = building.footprint ?? "rectangle";
+  if (footprint === "rectangle") return null;
+  return obstacleFootprintVertices(footprint, building.width, building.depth)
+    .map((vertex) => obstacleWorldPoint(building, vertex.x, vertex.z));
 }
 
 interface BuildingArea extends MapPoint {

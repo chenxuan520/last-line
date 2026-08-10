@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { GridNavigator } from "../../src/ai/navigation/GridNavigator";
-import { BUILDING_ROOF_CAP_HEIGHT, createMapLayout, getTerrainHeight, type MapLayout } from "../../src/config/map";
+import {
+  BUILDING_ROOF_CAP_HEIGHT,
+  createMapLayout,
+  getBuildingRoofNavigationPoint,
+  getTerrainHeight,
+  isBuildingRoofNavigationPoint,
+  type MapLayout,
+} from "../../src/config/map";
 
 describe("GridNavigator spatial index", () => {
   it("routes grounded actors around authoritative tree trunks", () => {
@@ -127,6 +134,54 @@ describe("GridNavigator spatial index", () => {
       expect(navigator.findPath(start, roof), `${ramp.id}:roof`).not.toHaveLength(0);
     }
   });
+
+  it("redirects polygon roof targets that lack clearance from a slanted edge", () => {
+    const layout = createMapLayout(0);
+    const building = layout.obstacles.find((candidate) => candidate.id === "building-0-0");
+    if (!building || building.footprint === "rectangle") {
+      throw new Error("polygon roof navigation fixture missing");
+    }
+    const unsafeTarget = {
+      x: 574.13868,
+      y: building.baseY + building.storyHeight * building.storyCount + BUILDING_ROOF_CAP_HEIGHT + 1.76,
+      z: 112.24312,
+    };
+    const safeStart = getBuildingRoofNavigationPoint(layout, building);
+    if (!safeStart) throw new Error("safe polygon roof point missing");
+
+    expect(isBuildingRoofNavigationPoint(layout, building, unsafeTarget.x, unsafeTarget.z)).toBe(false);
+    const path = new GridNavigator(layout).findPath(safeStart, unsafeTarget);
+    const redirectedTarget = path.at(-1);
+    if (!redirectedTarget) throw new Error("redirected polygon roof path missing");
+    expect(redirectedTarget).not.toEqual(unsafeTarget);
+    expect(isBuildingRoofNavigationPoint(
+      layout,
+      building,
+      redirectedTarget.x,
+      redirectedTarget.z,
+    )).toBe(true);
+  });
+
+  it("generates clear navigation points for polygon roofs across every map", () => {
+    for (const mapId of ["island", "town", "mixed"] as const) {
+      for (const seed of [0, 7, 42]) {
+        const layout = createMapLayout(mapId, seed);
+        const polygonBuildings = layout.obstacles.filter((building) =>
+          building.footprint !== undefined && building.footprint !== "rectangle"
+        );
+        expect(polygonBuildings.length, `${mapId}:${seed}:fixtures`).toBeGreaterThan(0);
+        for (const building of polygonBuildings) {
+          const point = getBuildingRoofNavigationPoint(layout, building);
+          expect(point, `${mapId}:${seed}:${building.id}:point`).not.toBeNull();
+          if (!point) continue;
+          expect(
+            isBuildingRoofNavigationPoint(layout, building, point.x, point.z),
+            `${mapId}:${seed}:${building.id}:clearance`,
+          ).toBe(true);
+        }
+      }
+    }
+  }, 30_000);
 });
 
 function completeScanNavigator(layout: MapLayout): GridNavigator {
