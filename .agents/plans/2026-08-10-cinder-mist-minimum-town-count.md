@@ -36,6 +36,8 @@
 - 2026-08-10：受影响地图/移动/战斗完整套件 `5 files / 112 tests` 通过；协议/checkpoint/地图选择 `4 files / 51 tests` 通过；seed 38 城镇道路场景回归 `1/1` 通过。完整生产 browser、Worker dry-run、server、same-origin standalone build 与最终 browser rebuild 均通过。
 - 2026-08-10：加入 2.5 秒手雷引信组合增量后，最终确定性预算全部通过：browser entry `1,164,941 / 1,200,000`、最大非入口 JavaScript `599,667 / 700,000`、全部 browser JavaScript `3,847,712 / 4,000,000`、chunk `252 / 270`、CSS `45,225 / 50,000`、整个 `dist` `4,670,877 / 5,000,000`、Worker `613,992 / 615,000`、standalone `625,008 / 630,000`。
 - 2026-08-10：production Chrome MCP 在音量 `0` 下使用真实 `createIslandScene` 检查原本只有 1 个城镇的 mixed seed `38`。无遮挡俯视截图中，`赤钟城区` 和新增的 `白塔旧城` 分别形成独立密集建筑/道路群；`风穗乡` 与 `沉杉岭/乌松岭/雾鹿峰` 仍保留，6 个区域标签无重叠，未见城镇建筑、森林或道路穿模。页面运行事实为 6 个区域、2 个城镇、1,483 个 scene mesh；console 仅 Babylon 启动日志与 SwiftShader 警告。每轮结束后立即回到 `about:blank`，停止 4173 并删除全部 `/tmp/last-line-min-town*` 临时文件。
+- 2026-08-10：提交 `0453344` 后，push 与 PR 两条 Node 24 CI 都在 Worker `admin.test.ts` 的同一 canonical-loot fixture 失败。应用 `583/583` 与其余 Worker `51/52` 已通过；唯一失败是该 Worker fixture 仍用旧 mixed runtime seed `0` 并硬断言三层弹药库，而本轮新地图事实使该派生 seed 合法变为两层。Standalone 与 unit 的同类 fixture 已在提交前切换到新布局下稳定产生三层弹药库的 runtime seed `1`，Worker fixture 被遗漏。
+- 2026-08-10：Worker follow-up 仅把该 fixture 的 `MatchRuntime` seed 从 `0` 改为 `1`，继续断言三层弹药库、删除最后一条 canonical loot 后房间与 checkpoint 必须被清除；没有删除断言、改成动态层数或放宽 canonical roster 合同。Node 24 `typecheck:worker` 通过；真实 `MatchRuntime` 复现得到派生 `mapSeed=2693262067`、三层弹药库、272 条 canonical loot。本机 Worker runtime 仍在任何测试前被 glibc 2.28 阻止，因此修复后的真实 Worker 用例必须由新 push 的 Node 24 CI 验证。
 
 ## Review
 
@@ -46,3 +48,14 @@
 - mixed 随机三区保持原 3 次类型抽取，仅在完全没有 `town` 时使用同一随机流替换 1 个槽位；固定三区、位置随机流、名称池与后续几何随机流未被扰乱。20,000 seed 覆盖全部 19 种允许组合，城镇总数结构性保持 2–4，农村与森林组合仍存在。
 - 协议 12、checkpoint 11 同时隔离至少两个城镇与 2.5 秒手雷引信的权威变化；Worker/standalone 共享 runtime 对旧房执行不兼容清理。场景道路、checkpoint fixture 和文档未放宽原合同。
 - 本机 Worker runtime 的 glibc 限制必须由 push 后 Node 24 CI 的 Worker 套件补齐，但不构成静态 Finding。
+
+### 2026-08-10 Worker CI Finding
+
+- CI Finding：`tests/worker/admin.test.ts` 的 canonical-loot fixture 漏同步新 mixed seed，期望三层但实际为两层；push/PR 两条 run 均以同一断言失败，不属于随机超时。
+- Disposition：改用与 unit/standalone 已验证一致的 runtime seed `1`，保留三层边界和截断最后 canonical loot 的完整拒绝断言。修复后必须进行独立 Re-review，并由新 Node 24 CI 实际执行 Worker `52/52`。
+
+### 2026-08-10 Worker CI Re-review
+
+- 结论：**通过，可提交并普通推送 follow-up。** Blocker、high、medium、low 均为 0。
+- Reviewer 确认 seed `1` 仍明确生成三层弹药库；测试继续使用完整 `layout.lootSpawnPoints.length`，删除最后一条 canonical loot，并要求 `room-v1` 与 `checkpoint-v1` 都被清除，没有放宽恢复合同。
+- 其余 Worker mixed fixtures 使用 seed `42` 或 `52`，不依赖三层弹药库或硬编码 canonical 数量，不需要同步。新 push 后 Node 24 Worker `52/52` 仍是最终门禁。
