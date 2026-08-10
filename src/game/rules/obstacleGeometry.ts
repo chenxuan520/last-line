@@ -81,7 +81,7 @@ export function pointInsideObstacle2D(
 ): boolean {
   const local = obstacleLocalPoint(obstacle, x, z);
   if (obstacle.footprint && obstacle.footprint !== "rectangle") {
-    return pointInsidePolygon(
+    return pointInsidePolygon2D(
       local.x,
       local.z,
       obstacleFootprintVertices(obstacle.footprint, obstacle.width + padding * 2, obstacle.depth + padding * 2),
@@ -117,12 +117,21 @@ export function obstacleFootprintVertices(
   });
 }
 
-function pointInsidePolygon(x: number, z: number, vertices: readonly Point2D[]): boolean {
+export function pointInsidePolygon2D(x: number, z: number, vertices: readonly Point2D[]): boolean {
   let inside = false;
   for (let index = 0, previous = vertices.length - 1; index < vertices.length; previous = index, index += 1) {
     const currentVertex = vertices[index];
     const previousVertex = vertices[previous];
     if (!currentVertex || !previousVertex) continue;
+    const edgeX = currentVertex.x - previousVertex.x;
+    const edgeZ = currentVertex.z - previousVertex.z;
+    const pointX = x - previousVertex.x;
+    const pointZ = z - previousVertex.z;
+    const cross = edgeX * pointZ - edgeZ * pointX;
+    const dot = pointX * edgeX + pointZ * edgeZ;
+    const lengthSquared = edgeX * edgeX + edgeZ * edgeZ;
+    if (lengthSquared <= 1e-12) continue;
+    if (Math.abs(cross) <= 1e-7 && dot >= -1e-7 && dot <= lengthSquared + 1e-7) return true;
     const intersects =
       (currentVertex.z > z) !== (previousVertex.z > z) &&
       x < (previousVertex.x - currentVertex.x) * (z - currentVertex.z) /

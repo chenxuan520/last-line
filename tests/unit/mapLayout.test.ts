@@ -20,6 +20,7 @@ import {
   TREE_TRUNK_COUNT,
 } from "../../src/config/map";
 import type { MapId } from "../../src/config/maps";
+import { getSupportHeight } from "../../src/game/systems/MovementSystem";
 
 describe("map layouts", () => {
   it("caches deterministic serializable layouts", () => {
@@ -286,6 +287,30 @@ describe("map layouts", () => {
     expect(totals.round / total).toBeGreaterThan(0.025);
     expect(totals.round / total).toBeLessThan(0.09);
   }, 120_000);
+
+  it("covers the complete polygon footprint with authoritative slabs on every level", () => {
+    const layout = createMapLayout("town", 7);
+    const building = layout.obstacles.find((candidate) => candidate.id === "town-building-51-5");
+    if (!building) throw new Error("Polygon floor fixture missing");
+    expect(building.footprint).toBe("hexagon");
+    expect(building.storyCount).toBe(5);
+    const point = { x: -163.562, z: 506.272 };
+    for (let level = 1; level <= building.storyCount; level += 1) {
+      const expectedSupport = building.baseY + level * building.storyHeight + BUILDING_ROOF_CAP_HEIGHT;
+      expect(getSupportHeight(point.x, point.z, expectedSupport + 0.01, layout))
+        .toBeCloseTo(expectedSupport, 3);
+    }
+    const outsidePoint = {
+      x: building.center.x - building.width / 2 + 0.1,
+      z: building.center.z - building.depth / 2 + 0.1,
+    };
+    expect(getSupportHeight(
+      outsidePoint.x,
+      outsidePoint.z,
+      building.baseY + building.storyHeight + BUILDING_ROOF_CAP_HEIGHT + 0.01,
+      layout,
+    )).toBeCloseTo(getTerrainHeight(outsidePoint.x, outsidePoint.z, layout), 3);
+  });
 
   it("adds only short authoritative skybridges inside mixed town regions", () => {
     for (const seed of [0, 1, 7, 42, 2026]) {

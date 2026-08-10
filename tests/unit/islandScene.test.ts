@@ -22,6 +22,7 @@ import {
   createLoadingBayLayout,
   createNaturalDetailPlacements,
   createIslandScene,
+  createPolygonFloorSlabMesh,
   createTownWindowDetailLayout,
   getSkyAssetId,
   selectRooftopRailing,
@@ -423,11 +424,13 @@ describe("IslandScene lifecycle", () => {
       const floorBatch = bundle.scene.getMeshByName("building-floor-slabs-batch");
       const roofBatch = bundle.scene.getMeshByName("building-roof-slabs-batch");
       const hospitalSurfaceBatch = bundle.scene.getMeshByName("hospital-surfaces-batch");
+      const renderedSlabVertexCount = (slabs: typeof layout.floorSlabs) =>
+        slabs.reduce((total, slab) => total + (slab.footprintVertices?.length ?? 12) * 2, 0);
       expect(floorBatch?.metadata?.sourceCount).toBe(regularFloors.length);
-      expect(floorBatch?.getTotalVertices()).toBe(regularFloors.length * 24);
+      expect(floorBatch?.getTotalVertices()).toBe(renderedSlabVertexCount(regularFloors));
       expect((floorBatch?.material as StandardMaterial).diffuseTexture).toBeNull();
       expect(roofBatch?.metadata?.sourceCount).toBe(regularRoofs.length);
-      expect(roofBatch?.getTotalVertices()).toBe(regularRoofs.length * 24);
+      expect(roofBatch?.getTotalVertices()).toBe(renderedSlabVertexCount(regularRoofs));
       expect(roofBatch?.material).toBeInstanceOf(MultiMaterial);
       expect(new Set((roofBatch?.material as MultiMaterial).subMaterials.map((entry) =>
         (entry as StandardMaterial).diffuseTexture?.name
@@ -1584,6 +1587,34 @@ describe("IslandScene lifecycle", () => {
     expect(light.depth).toBe(0.07);
     expect(light.outward.x).toBeCloseTo(glass.outward.x, 8);
     expect(light.outward.z).toBeCloseTo(glass.outward.z, 8);
+  });
+
+  it("renders polygon floor slabs from their exact authoritative vertices", () => {
+    const engine = new NullEngine();
+    const scene = new Scene(engine);
+    const layout = createMapLayout("town", 7);
+    const slab = layout.floorSlabs.find((candidate) =>
+      candidate.obstacleId === "town-building-51-5" &&
+      candidate.kind === "roof" &&
+      candidate.footprintVertices
+    );
+    if (!slab?.footprintVertices) throw new Error("Polygon render slab fixture missing");
+    const mesh = createPolygonFloorSlabMesh(scene, slab);
+    const positions = mesh.getVerticesData(VertexBuffer.PositionKind);
+    if (!positions) throw new Error("Polygon render slab positions missing");
+    const renderedVertices = new Set<string>();
+    for (let index = 0; index < slab.footprintVertices.length; index += 1) {
+      renderedVertices.add(
+        `${((positions[index * 3] ?? 0) + slab.center.x).toFixed(3)}:` +
+        `${((positions[index * 3 + 2] ?? 0) + slab.center.z).toFixed(3)}`,
+      );
+    }
+    expect(renderedVertices).toEqual(new Set(slab.footprintVertices.map((vertex) =>
+      `${vertex.x.toFixed(3)}:${vertex.z.toFixed(3)}`
+    )));
+    mesh.dispose();
+    scene.dispose();
+    engine.dispose();
   });
 
   it("enables dense realistic town presentation only on high quality", async () => {

@@ -21,6 +21,7 @@ import {
   closestPointOnObstacle2D,
   obstacleBounds2D,
   obstacleRecoveryPoints,
+  pointInsidePolygon2D,
 } from "../rules/obstacleGeometry";
 import type { ActorState, EntityId, MatchState, Vector3State } from "../state/types";
 
@@ -357,8 +358,7 @@ export function getSupportHeight(
     const roofY = slab.center.y + slab.height / 2;
     if (
       roofY <= maximumY + SURFACE_EPSILON &&
-      Math.abs(x - slab.center.x) <= slab.width / 2 &&
-      Math.abs(z - slab.center.z) <= slab.depth / 2
+      pointInsideFloorSlab(slab, x, z)
     ) {
       support = Math.max(support, roofY);
     }
@@ -390,8 +390,7 @@ function getCeilingBottom(
     if (
       bottomY >= previousTopY - SURFACE_EPSILON &&
       bottomY <= nextTopY + SURFACE_EPSILON &&
-      Math.abs(x - slab.center.x) <= slab.width / 2 &&
-      Math.abs(z - slab.center.z) <= slab.depth / 2
+      pointInsideFloorSlab(slab, x, z)
     ) {
       nearest = Math.min(nearest, bottomY);
     }
@@ -415,14 +414,15 @@ function getNearbySupports(x: number, z: number, layout: MapLayout): SupportCell
       );
     }
     for (const slab of layout.floorSlabs) {
+      const bounds = floorSlabBounds(slab);
       addSupportToIndex(
         index,
         "slabs",
         slab,
-        slab.center.x - slab.width / 2,
-        slab.center.x + slab.width / 2,
-        slab.center.z - slab.depth / 2,
-        slab.center.z + slab.depth / 2,
+        bounds.minimumX,
+        bounds.maximumX,
+        bounds.minimumZ,
+        bounds.maximumZ,
       );
     }
     for (const rock of layout.rockObstacles) {
@@ -439,6 +439,35 @@ function getNearbySupports(x: number, z: number, layout: MapLayout): SupportCell
     supportIndexes.set(layout, index);
   }
   return index.get(spatialGridKey(wallCell(x), wallCell(z))) ?? EMPTY_SUPPORTS;
+}
+
+function pointInsideFloorSlab(slab: MapFloorSlab, x: number, z: number): boolean {
+  return slab.footprintVertices
+    ? pointInsidePolygon2D(x, z, slab.footprintVertices)
+    : Math.abs(x - slab.center.x) <= slab.width / 2 &&
+      Math.abs(z - slab.center.z) <= slab.depth / 2;
+}
+
+function floorSlabBounds(slab: MapFloorSlab): {
+  minimumX: number;
+  maximumX: number;
+  minimumZ: number;
+  maximumZ: number;
+} {
+  if (!slab.footprintVertices) {
+    return {
+      minimumX: slab.center.x - slab.width / 2,
+      maximumX: slab.center.x + slab.width / 2,
+      minimumZ: slab.center.z - slab.depth / 2,
+      maximumZ: slab.center.z + slab.depth / 2,
+    };
+  }
+  return {
+    minimumX: Math.min(...slab.footprintVertices.map((vertex) => vertex.x)),
+    maximumX: Math.max(...slab.footprintVertices.map((vertex) => vertex.x)),
+    minimumZ: Math.min(...slab.footprintVertices.map((vertex) => vertex.z)),
+    maximumZ: Math.max(...slab.footprintVertices.map((vertex) => vertex.z)),
+  };
 }
 
 function addSupportToIndex(

@@ -89,6 +89,7 @@ export interface MapFloorSlab extends MapObstacle {
   obstacleId: string;
   level: number;
   kind: "floor" | "roof";
+  footprintVertices?: readonly { x: number; z: number }[];
 }
 
 export interface MapWallOpening {
@@ -2909,27 +2910,31 @@ function createBuildingFloorSlabs(building: MapBuilding): MapFloorSlab[] {
 }
 
 function createPolygonBuildingFloorSlabs(building: MapBuilding): MapFloorSlab[] {
-  const vertices = obstacleFootprintVertices(
-    building.footprint ?? "rectangle",
-    building.width,
-    building.depth,
-  );
+  const footprint = building.footprint ?? "rectangle";
   const stripCount = building.footprint === "round" ? 10 : 6;
   const openingMinimumX = building.stairwell.centerX - building.center.x - building.stairwell.width / 2;
   const openingMaximumX = building.stairwell.centerX - building.center.x + building.stairwell.width / 2;
-  const xCuts = Array.from({ length: stripCount + 1 }, (_, index) =>
-    -building.width / 2 + building.width * index / stripCount
-  );
-  xCuts.push(
-    Math.max(-building.width / 2, openingMinimumX),
-    Math.min(building.width / 2, openingMaximumX),
-  );
-  xCuts.sort((left, right) => left - right);
-  const uniqueXCuts = xCuts.filter((value, index) =>
-    index === 0 || Math.abs(value - (xCuts[index - 1] ?? value)) > 0.01
-  );
   return Array.from({ length: building.storyCount }, (_, index) => index + 1).flatMap((level) => {
     const kind = level === building.storyCount ? "roof" : "floor";
+    const wallInset = kind === "floor" ? BUILDING_WALL_THICKNESS : 0;
+    const vertices = obstacleFootprintVertices(
+      footprint,
+      building.width - wallInset * 2,
+      building.depth - wallInset * 2,
+    );
+    const footprintMinimumX = Math.min(...vertices.map((vertex) => vertex.x));
+    const footprintMaximumX = Math.max(...vertices.map((vertex) => vertex.x));
+    const xCuts = Array.from({ length: stripCount + 1 }, (_, cutIndex) =>
+      footprintMinimumX + (footprintMaximumX - footprintMinimumX) * cutIndex / stripCount
+    );
+    xCuts.push(
+      Math.max(footprintMinimumX, openingMinimumX),
+      Math.min(footprintMaximumX, openingMaximumX),
+    );
+    xCuts.sort((left, right) => left - right);
+    const uniqueXCuts = xCuts.filter((value, cutIndex) =>
+      cutIndex === 0 || Math.abs(value - (xCuts[cutIndex - 1] ?? value)) > 0.01
+    );
     const landingDirection = building.stairwell.direction * ((level - 1) % 2 === 0 ? 1 : -1);
     const rampRunLength = building.stairwell.depth - STAIRWELL_LANDING_DEPTH * 2;
     const landingZ = building.stairwell.centerZ + landingDirection * rampRunLength / 2;
@@ -2940,58 +2945,35 @@ function createPolygonBuildingFloorSlabs(building: MapBuilding): MapFloorSlab[] 
       if (minimumX === undefined || maximumX === undefined) continue;
       const stripWidth = maximumX - minimumX;
       if (stripWidth <= 0.1) continue;
-      const centerX = (minimumX + maximumX) / 2;
-      const halfDepth = Math.min(
-        polygonHalfDepthAtX(vertices, minimumX + 0.02),
-        polygonHalfDepthAtX(vertices, centerX),
-        polygonHalfDepthAtX(vertices, maximumX - 0.02),
-      );
-      if (!Number.isFinite(halfDepth) || halfDepth <= 0.1) continue;
-      const worldCenter = obstacleWorldPoint(building, centerX, 0);
+      const stripPolygon = clipPolygonToRange(vertices, "x", minimumX, maximumX);
+      if (stripPolygon.length < 3) continue;
       const overlapsOpening =
         maximumX > openingMinimumX + 0.01 &&
         minimumX < openingMaximumX - 0.01;
       if (!overlapsOpening) {
-        slabs.push(floorSlab(
-          building,
-          level,
-          kind,
-          `polygon-${stripIndex}`,
-          worldCenter.x,
-          worldCenter.z,
-          stripWidth,
-          halfDepth * 2,
-        ));
+        slabs.push(polygonFloorSlab(building, level, kind, `polygon-${stripIndex}`, stripPolygon));
         continue;
       }
       const openingMinimumZ = building.stairwell.centerZ - building.center.z - building.stairwell.depth / 2;
       const openingMaximumZ = building.stairwell.centerZ - building.center.z + building.stairwell.depth / 2;
-      const frontDepth = openingMinimumZ + halfDepth;
-      const backDepth = halfDepth - openingMaximumZ;
-      if (frontDepth > 0.1) {
-        const frontCenter = obstacleWorldPoint(building, centerX, -halfDepth + frontDepth / 2);
-        slabs.push(floorSlab(
+      const frontPolygon = clipPolygonToHalfPlane(stripPolygon, "z", openingMinimumZ, false);
+      if (frontPolygon.length >= 3) {
+        slabs.push(polygonFloorSlab(
           building,
           level,
           kind,
           `polygon-${stripIndex}-front`,
-          frontCenter.x,
-          frontCenter.z,
-          stripWidth,
-          frontDepth,
+          frontPolygon,
         ));
       }
-      if (backDepth > 0.1) {
-        const backCenter = obstacleWorldPoint(building, centerX, openingMaximumZ + backDepth / 2);
-        slabs.push(floorSlab(
+      const backPolygon = clipPolygonToHalfPlane(stripPolygon, "z", openingMaximumZ, true);
+      if (backPolygon.length >= 3) {
+        slabs.push(polygonFloorSlab(
           building,
           level,
           kind,
           `polygon-${stripIndex}-back`,
-          backCenter.x,
-          backCenter.z,
-          stripWidth,
-          backDepth,
+          backPolygon,
         ));
       }
     }
@@ -3009,17 +2991,71 @@ function createPolygonBuildingFloorSlabs(building: MapBuilding): MapFloorSlab[] 
   });
 }
 
-function polygonHalfDepthAtX(vertices: readonly { x: number; z: number }[], x: number): number {
-  const intersections: number[] = [];
+function clipPolygonToRange(
+  vertices: readonly { x: number; z: number }[],
+  axis: "x" | "z",
+  minimum: number,
+  maximum: number,
+): { x: number; z: number }[] {
+  return clipPolygonToHalfPlane(
+    clipPolygonToHalfPlane(vertices, axis, minimum, true),
+    axis,
+    maximum,
+    false,
+  );
+}
+
+function clipPolygonToHalfPlane(
+  vertices: readonly { x: number; z: number }[],
+  axis: "x" | "z",
+  boundary: number,
+  keepGreater: boolean,
+): { x: number; z: number }[] {
+  const result: { x: number; z: number }[] = [];
+  const inside = (point: { x: number; z: number }) =>
+    keepGreater ? point[axis] >= boundary - 1e-9 : point[axis] <= boundary + 1e-9;
   for (let index = 0; index < vertices.length; index += 1) {
-    const first = vertices[index];
-    const second = vertices[(index + 1) % vertices.length];
-    if (!first || !second || (first.x > x) === (second.x > x) || first.x === second.x) continue;
-    const progress = (x - first.x) / (second.x - first.x);
-    intersections.push(first.z + (second.z - first.z) * progress);
+    const current = vertices[index];
+    const next = vertices[(index + 1) % vertices.length];
+    if (!current || !next) continue;
+    const currentInside = inside(current);
+    const nextInside = inside(next);
+    if (currentInside) result.push(current);
+    if (currentInside === nextInside) continue;
+    const delta = next[axis] - current[axis];
+    if (Math.abs(delta) <= 1e-9) continue;
+    const progress = (boundary - current[axis]) / delta;
+    result.push({
+      x: current.x + (next.x - current.x) * progress,
+      z: current.z + (next.z - current.z) * progress,
+    });
   }
-  if (intersections.length < 2) return 0;
-  return Math.min(Math.abs(Math.min(...intersections)), Math.abs(Math.max(...intersections)));
+  return result;
+}
+
+function polygonFloorSlab(
+  building: MapBuilding,
+  level: number,
+  kind: "floor" | "roof",
+  piece: string,
+  localVertices: readonly { x: number; z: number }[],
+): MapFloorSlab {
+  const worldVertices = localVertices.map((vertex) => obstacleWorldPoint(building, vertex.x, vertex.z));
+  const minimumX = Math.min(...worldVertices.map((vertex) => vertex.x));
+  const maximumX = Math.max(...worldVertices.map((vertex) => vertex.x));
+  const minimumZ = Math.min(...worldVertices.map((vertex) => vertex.z));
+  const maximumZ = Math.max(...worldVertices.map((vertex) => vertex.z));
+  return floorSlab(
+    building,
+    level,
+    kind,
+    piece,
+    (minimumX + maximumX) / 2,
+    (minimumZ + maximumZ) / 2,
+    maximumX - minimumX,
+    maximumZ - minimumZ,
+    worldVertices,
+  );
 }
 
 function floorSlab(
@@ -3031,6 +3067,7 @@ function floorSlab(
   z: number,
   width: number,
   depth: number,
+  footprintVertices?: readonly { x: number; z: number }[],
 ): MapFloorSlab {
   const bottomY = building.baseY + level * building.storyHeight;
   return {
@@ -3043,6 +3080,14 @@ function floorSlab(
     height: BUILDING_ROOF_CAP_HEIGHT,
     depth: round(depth),
     ...(building.rotationY ? { rotationY: building.rotationY } : {}),
+    ...(footprintVertices
+      ? {
+          footprintVertices: footprintVertices.map((vertex) => ({
+            x: round(vertex.x),
+            z: round(vertex.z),
+          })),
+        }
+      : {}),
     color: building.color,
   };
 }

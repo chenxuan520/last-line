@@ -351,6 +351,36 @@ describe("SimulationCombatWorld", () => {
     expect(hit.normal).toEqual({ x: 0, y: 1, z: 0 });
   });
 
+  it("hits polygon floor slabs only inside their exact footprint", () => {
+    const layout = createMapLayout("town", 7);
+    const building = layout.obstacles.find((candidate) => candidate.id === "town-building-51-5");
+    if (!building) throw new Error("Polygon combat fixture missing");
+    const roofY = building.baseY + building.storyHeight * building.storyCount + 0.18;
+    const inside = { x: -163.562, y: roofY + 5, z: 506.272 };
+    const insideShooter = createActorState("shooter", "player", inside);
+    const insideState = createState(insideShooter);
+    insideState.mapId = "town";
+    insideState.mapSeed = 7;
+    const insideHit = new SimulationCombatWorld(insideState, true, layout).traceShotDetailed(
+      trace(inside, { x: 0, y: -1, z: 0 }),
+    );
+    expect(insideHit.point.y).toBeCloseTo(roofY, 5);
+
+    const outside = {
+      x: building.center.x - building.width / 2 + 0.1,
+      y: roofY + 5,
+      z: building.center.z - building.depth / 2 + 0.1,
+    };
+    const outsideShooter = createActorState("shooter", "player", outside);
+    const outsideState = createState(outsideShooter);
+    outsideState.mapId = "town";
+    outsideState.mapSeed = 7;
+    const outsideHit = new SimulationCombatWorld(outsideState, true, layout).traceShotDetailed(
+      trace(outside, { x: 0, y: -1, z: 0 }),
+    );
+    expect(outsideHit.point.y).toBeLessThan(roofY - 1);
+  });
+
   it("returns authoritative ground impact positions and normals", () => {
     const shooter = createActorState("shooter", "player", { x: 0, y: 1.76, z: 0 });
     const state = createState(shooter);

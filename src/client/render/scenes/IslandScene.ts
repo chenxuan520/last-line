@@ -37,6 +37,7 @@ import {
   HOSPITAL_WALL_COLOR,
   MAP_SIZE,
   TERRAIN_GRID_SUBDIVISIONS,
+  type MapFloorSlab,
   type MapLayout,
   type MapWallSegment,
   type MapWallOpening,
@@ -1662,12 +1663,16 @@ function createBuildingDetails(
   trimTemplate.isPickable = false;
 
   for (const slab of layout.floorSlabs) {
-    const mesh = roofTemplate.clone(slab.id);
+    const mesh = slab.footprintVertices
+      ? createPolygonFloorSlabMesh(scene, slab)
+      : roofTemplate.clone(slab.id);
     if (!mesh) continue;
     const roofAssetId = textureAssignments.roofs.get(slab.obstacleId);
-    mesh.position.set(slab.center.x, slab.center.y, slab.center.z);
-    mesh.scaling.set(slab.width, slab.height, slab.depth);
-    mesh.rotation.y = slab.rotationY ?? 0;
+    if (!slab.footprintVertices) {
+      mesh.position.set(slab.center.x, slab.center.y, slab.center.z);
+      mesh.scaling.set(slab.width, slab.height, slab.depth);
+      mesh.rotation.y = slab.rotationY ?? 0;
+    }
     mesh.material = slab.obstacleId === layout.hospital.buildingId
       ? materials.hospitalSurface
       : slab.obstacleId === layout.ammunitionDepot.buildingId
@@ -1682,6 +1687,52 @@ function createBuildingDetails(
   }
 
   layout.wallOpenings.forEach((opening, index) => createWallOpeningFrame(trimTemplate, opening, index));
+}
+
+export function createPolygonFloorSlabMesh(scene: Scene, slab: MapFloorSlab): Mesh {
+  const vertices = slab.footprintVertices;
+  if (!vertices || vertices.length < 3) throw new Error(`Polygon floor slab vertices missing: ${slab.id}`);
+  const mesh = new Mesh(slab.id, scene);
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+  for (const y of [-slab.height / 2, slab.height / 2]) {
+    for (const vertex of vertices) {
+      positions.push(vertex.x - slab.center.x, y, vertex.z - slab.center.z);
+      uvs.push(
+        slab.width > 0 ? (vertex.x - slab.center.x) / slab.width + 0.5 : 0.5,
+        slab.depth > 0 ? (vertex.z - slab.center.z) / slab.depth + 0.5 : 0.5,
+      );
+    }
+  }
+  const topOffset = vertices.length;
+  const signedArea = vertices.reduce((total, vertex, index) => {
+    const next = vertices[(index + 1) % vertices.length];
+    return next ? total + vertex.x * next.z - next.x * vertex.z : total;
+  }, 0);
+  for (let index = 1; index < vertices.length - 1; index += 1) {
+    if (signedArea >= 0) {
+      indices.push(0, index + 1, index);
+      indices.push(topOffset, topOffset + index, topOffset + index + 1);
+    } else {
+      indices.push(0, index, index + 1);
+      indices.push(topOffset, topOffset + index + 1, topOffset + index);
+    }
+  }
+  for (let index = 0; index < vertices.length; index += 1) {
+    const next = (index + 1) % vertices.length;
+    indices.push(index, next, topOffset + next, index, topOffset + next, topOffset + index);
+  }
+  const normals = new Array<number>(positions.length).fill(0);
+  VertexData.ComputeNormals(positions, indices, normals);
+  const vertexData = new VertexData();
+  vertexData.positions = positions;
+  vertexData.indices = indices;
+  vertexData.normals = normals;
+  vertexData.uvs = uvs;
+  vertexData.applyToMesh(mesh);
+  mesh.position.set(slab.center.x, slab.center.y, slab.center.z);
+  return mesh;
 }
 
 function createRooftopRailings(
