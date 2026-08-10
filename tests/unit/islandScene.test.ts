@@ -22,6 +22,7 @@ import {
   createLoadingBayLayout,
   createNaturalDetailPlacements,
   createIslandScene,
+  createTownWindowDetailLayout,
   getSkyAssetId,
   selectRooftopRailing,
   selectTownPresentationRoads,
@@ -1564,6 +1565,27 @@ describe("IslandScene lifecycle", () => {
     expect(selectTownPresentationRoads(createMapLayout("mixed", 16))).toHaveLength(16);
   });
 
+  it("rotates polygon window lights with the same wall-aligned layout as their glass", () => {
+    const layout = createMapLayout("town", 7);
+    const opening = layout.wallOpenings.find((candidate, index) =>
+      candidate.kind === "window" &&
+      candidate.rotationY !== undefined &&
+      index % 5 === 0
+    );
+    if (!opening?.rotationY) throw new Error("Rotated window light fixture missing");
+    const glass = createTownWindowDetailLayout(opening, 0.72, 0.055);
+    const light = createTownWindowDetailLayout(opening, 0.6, 0.07);
+
+    expect(glass.rotationY).toBe(opening.rotationY);
+    expect(light.rotationY).toBe(opening.rotationY);
+    expect(glass.width).toBeCloseTo(opening.width * 0.72, 8);
+    expect(glass.depth).toBe(0.055);
+    expect(light.width).toBeCloseTo(opening.width * 0.6, 8);
+    expect(light.depth).toBe(0.07);
+    expect(light.outward.x).toBeCloseTo(glass.outward.x, 8);
+    expect(light.outward.z).toBeCloseTo(glass.outward.z, 8);
+  });
+
   it("enables dense realistic town presentation only on high quality", async () => {
     const engine = new NullEngine();
     const assets = createAssets();
@@ -1750,6 +1772,7 @@ describe("IslandScene lifecycle", () => {
         ), `${seed}:${quality}:${placement.name}:road`).toBe(true);
       }
     },
+    60_000,
   );
 
   it("keeps the clearing sky poles stable while lifting the sun into the upper hemisphere", async () => {

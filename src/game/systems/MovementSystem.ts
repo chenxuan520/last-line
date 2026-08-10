@@ -11,7 +11,12 @@ import {
   type RoofRamp,
 } from "../../config/map";
 import type { ActorCommand } from "../commands/ActorCommand";
-import { ACTOR_EYE_HEIGHT, ACTOR_HEIGHT, ACTOR_RADIUS } from "../rules/actorGeometry";
+import {
+  ACTOR_EYE_HEIGHT,
+  ACTOR_HEIGHT,
+  ACTOR_RADIUS,
+  MAX_WALKABLE_STEP_HEIGHT,
+} from "../rules/actorGeometry";
 import {
   closestPointOnObstacle2D,
   obstacleBounds2D,
@@ -31,7 +36,6 @@ const JUMP_APEX_HEIGHT = 1.7;
 const JUMP_SPEED = Math.sqrt(2 * GRAVITY * JUMP_APEX_HEIGHT);
 const ACTOR_HEAD_ABOVE_EYE = ACTOR_HEIGHT - ACTOR_EYE_HEIGHT;
 const MAX_COLLISION_STEP = ACTOR_RADIUS / 2;
-const MAX_STEP_UP = 0.35;
 const SURFACE_EPSILON = 0.08;
 const WALL_COLLISION_CELL_SIZE = 64;
 const SPATIAL_GRID_KEY_STRIDE = 256;
@@ -145,14 +149,14 @@ export class MovementSystem {
       const support = getSupportHeight(
         actor.position.x,
         actor.position.z,
-        feetY + MAX_STEP_UP,
+        feetY + MAX_WALKABLE_STEP_HEIGHT,
         layout,
       );
       const supportDelta = support - feetY;
       if (
         actor.velocity.y <= 0 &&
         supportDelta >= -SURFACE_EPSILON &&
-        supportDelta <= MAX_STEP_UP &&
+        supportDelta <= MAX_WALKABLE_STEP_HEIGHT &&
         (wasSupported || supportDelta >= 0)
       ) {
         actor.position.y = support + ACTOR_EYE_HEIGHT;
@@ -252,7 +256,7 @@ function moveAxis(
 
 function collides(x: number, z: number, eyeY: number, layout: MapLayout): boolean {
   const feetY = eyeY - ACTOR_EYE_HEIGHT;
-  const candidateSupport = getSupportHeight(x, z, feetY + MAX_STEP_UP, layout);
+  const candidateSupport = getSupportHeight(x, z, feetY + MAX_WALKABLE_STEP_HEIGHT, layout);
   const effectiveFeetY = Math.max(feetY, candidateSupport);
   for (const obstacle of getNearbyWalls(x, z, layout)) {
     if (collidesWithBlocker(x, z, effectiveFeetY, obstacle)) return true;

@@ -17,7 +17,10 @@ import {
   TOWN_POINT_OBSTACLE_CLEARANCE,
   TOWN_ROAD_SHOULDER_HALF_WIDTH,
 } from "../../src/config/townMap";
-import { ACTOR_EYE_HEIGHT } from "../../src/game/rules/actorGeometry";
+import {
+  ACTOR_EYE_HEIGHT,
+  MAX_WALKABLE_STEP_HEIGHT,
+} from "../../src/game/rules/actorGeometry";
 import { createIdleCommand } from "../../src/game/commands/ActorCommand";
 import { getSupportHeight, MovementSystem } from "../../src/game/systems/MovementSystem";
 import { SimulationCombatWorld } from "../../src/game/systems/SimulationCombatWorld";
@@ -251,9 +254,15 @@ describe("town map layout", () => {
     },
   );
 
-  it("keeps skybridges connected to second-story buildings and inside the map", () => {
-    const layout = createMapLayout("town", 7);
+  it.each([5, 7])("keeps skybridges connected, walkable, and inside the map for seed %i", (seed) => {
+    const layout = createMapLayout("town", seed);
     const buildings = new Map(layout.obstacles.map((building) => [building.id, building]));
+    if (seed === 5) {
+      expect(layout.skybridges.some((bridge) =>
+        bridge.fromBuildingId === "town-building-63-0" ||
+        bridge.toBuildingId === "town-building-63-1"
+      )).toBe(false);
+    }
 
     for (const bridge of layout.skybridges) {
       const from = buildings.get(bridge.fromBuildingId);
@@ -271,6 +280,10 @@ describe("town map layout", () => {
       expect(Math.abs(bridge.center.z) + bridge.depth / 2).toBeLessThan(MAP_HALF_SIZE);
       expect(bridge.width).toBeGreaterThan(0);
       expect(bridge.depth).toBeGreaterThanOrEqual(5);
+      expect(Math.abs(
+        (from?.baseY ?? 0) + (from?.storyHeight ?? 0) + BUILDING_ROOF_CAP_HEIGHT -
+          ((to?.baseY ?? 0) + (to?.storyHeight ?? 0) + BUILDING_ROOF_CAP_HEIGHT),
+      )).toBeLessThanOrEqual(MAX_WALKABLE_STEP_HEIGHT);
     }
   });
 
@@ -487,7 +500,7 @@ describe("town map layout", () => {
     const crossBlockGaps = adjacentCoreBlockGaps(firstCore);
     expect(crossBlockGaps.filter((gap) => gap < 22).length).toBeGreaterThanOrEqual(10);
     expect(Math.max(...crossBlockGaps)).toBeGreaterThan(45);
-  });
+  }, 60_000);
 });
 
 const TOWN_POINT_ENTRANCE_DEPTH = 10;

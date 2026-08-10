@@ -1880,47 +1880,42 @@ function createTownFacadeDetail(
     if (!layout.obstacles.some((building) =>
       building.id === opening.obstacleId && Boolean(building.townKind)
     )) return;
-    const horizontalAlongX = opening.side === "front" || opening.side === "back";
-    const outward = opening.rotationY === undefined
-      ? facadeOutward(opening.side)
-      : { x: -Math.sin(opening.rotationY), z: -Math.cos(opening.rotationY) };
+    const paneLayout = createTownWindowDetailLayout(opening, 0.72, 0.055);
     const pane = CreateBox(
       `town-window-glass-${index}`,
       {
-        width: opening.rotationY !== undefined
-          ? opening.width * 0.72
-          : horizontalAlongX ? opening.width * 0.72 : 0.055,
+        width: paneLayout.width,
         height: Math.max(0.35, opening.height * 0.56),
-        depth: opening.rotationY !== undefined
-          ? 0.055
-          : horizontalAlongX ? 0.055 : opening.width * 0.72,
+        depth: paneLayout.depth,
       },
       scene,
     );
     pane.position.set(
-      opening.center.x + outward.x * 0.22,
+      opening.center.x + paneLayout.outward.x * 0.22,
       opening.center.y + opening.height * 0.02,
-      opening.center.z + outward.z * 0.22,
+      opening.center.z + paneLayout.outward.z * 0.22,
     );
-    if (opening.rotationY !== undefined) pane.rotation.y = opening.rotationY;
+    pane.rotation.y = paneLayout.rotationY;
     pane.material = materials.townWindow;
     markTownVisualDetail(pane, "window-glass");
 
     if (index % 5 !== 0) return;
+    const lightLayout = createTownWindowDetailLayout(opening, 0.6, 0.07);
     const light = CreateBox(
       `town-window-light-${index}`,
       {
-        width: horizontalAlongX ? opening.width * 0.6 : 0.07,
+        width: lightLayout.width,
         height: 0.16,
-        depth: horizontalAlongX ? 0.07 : opening.width * 0.6,
+        depth: lightLayout.depth,
       },
       scene,
     );
     light.position.set(
-      opening.center.x + outward.x * 0.3,
+      opening.center.x + lightLayout.outward.x * 0.3,
       opening.center.y + opening.height * 0.43,
-      opening.center.z + outward.z * 0.3,
+      opening.center.z + lightLayout.outward.z * 0.3,
     );
+    light.rotation.y = lightLayout.rotationY;
     light.material = materials.industrialLight;
     markTownVisualDetail(light, "industrial-light");
   });
@@ -2705,6 +2700,36 @@ function createPois(scene: Scene, materials: IslandMaterials, layout: MapLayout)
       markPoiDecoration(beacon, point.name, poiType);
     }
   });
+}
+
+export function createTownWindowDetailLayout(
+  opening: Pick<MapWallOpening, "side" | "width" | "rotationY">,
+  widthScale: number,
+  thickness: number,
+): {
+  width: number;
+  depth: number;
+  rotationY: number;
+  outward: { x: number; z: number };
+} {
+  if (opening.rotationY !== undefined) {
+    return {
+      width: opening.width * widthScale,
+      depth: thickness,
+      rotationY: opening.rotationY,
+      outward: {
+        x: -Math.sin(opening.rotationY),
+        z: -Math.cos(opening.rotationY),
+      },
+    };
+  }
+  const horizontalAlongX = opening.side === "front" || opening.side === "back";
+  return {
+    width: horizontalAlongX ? opening.width * widthScale : thickness,
+    depth: horizontalAlongX ? thickness : opening.width * widthScale,
+    rotationY: 0,
+    outward: facadeOutward(opening.side),
+  };
 }
 
 function createBrandSigns(scene: Scene, assets: AssetCatalog, layout: MapLayout): void {

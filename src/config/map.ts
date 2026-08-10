@@ -1,5 +1,10 @@
 import type { Vector3State } from "../game/state/types";
-import { ACTOR_EYE_HEIGHT, ACTOR_HEIGHT, ACTOR_RADIUS } from "../game/rules/actorGeometry";
+import {
+  ACTOR_EYE_HEIGHT,
+  ACTOR_HEIGHT,
+  ACTOR_RADIUS,
+  MAX_WALKABLE_STEP_HEIGHT,
+} from "../game/rules/actorGeometry";
 import { GROUND_LOOT_POSITION_HEIGHT } from "../game/rules/loot";
 import {
   obstacleFootprintVertices,
@@ -655,8 +660,13 @@ export function createMapLayout(mapIdOrSeed: MapId | number, explicitSeed?: numb
 }
 
 function createTownMapLayout(seed: number): MapLayout {
-  const blueprint = createTownMapBlueprint(seed);
   const terrainHills = createTownTerrainHills(seed);
+  const blueprint = createTownMapBlueprint(seed, (from, to) =>
+    Math.abs(
+      round(terrainHeightFromHills(from.x, from.z, terrainHills) - BUILDING_GROUND_EMBED) -
+        round(terrainHeightFromHills(to.x, to.z, terrainHills) - BUILDING_GROUND_EMBED)
+    ) <= MAX_WALKABLE_STEP_HEIGHT
+  );
   const skybridgeBuildingIds = new Set(
     blueprint.skybridges.flatMap((bridge) => [bridge.fromBuildingId, bridge.toBuildingId]),
   );

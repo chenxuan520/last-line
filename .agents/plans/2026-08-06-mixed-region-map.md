@@ -1031,7 +1031,7 @@ Codex 对已推送提交 `fa4c857dc17e7517dc20c88f7009fc6b51a1329c` 指出：阶
 
 #### 计划
 
-PR #2 合并到 `main` 的提交 `2a08beb7ec46421adf9ddac3a0f6deccda336f1f` 将联机协议从 6 升到 7。Cloudflare Workers 构建s 在 2026-08-07 17:17:37 创建并部署新 Worker 版本 `326652c8-27d3-4e51-959c-d8de39baea55`，但部署命令返回约 6 秒后立即运行的 production smoke 仍从自定义域名收到旧协议 6 welcome，因此 deploy command 失败。随后同一生产地址已稳定返回协议 7，手工运行完整 HTTP/WebSocket smoke 通过，证明 Worker 代码与持久化迁移已成功，失败来自部署完成与边缘入口切换之间的短暂传播窗口。
+PR #2 合并到 `main` 的提交 `2a08beb7ec46421adf9ddac3a0f6deccda336f1f` 将联机协议从 6 升到 7。Cloudflare Workers Builds 在 2026-08-07 17:17:37 创建并部署新 Worker 版本 `326652c8-27d3-4e51-959c-d8de39baea55`，但部署命令返回约 6 秒后立即运行的 production smoke 仍从自定义域名收到旧协议 6 welcome，因此 deploy command 失败。随后同一生产地址已稳定返回协议 7，手工运行完整 HTTP/WebSocket smoke 通过，证明 Worker 代码与持久化迁移已成功，失败来自部署完成与边缘入口切换之间的短暂传播窗口。
 
 最终合同：
 
@@ -1050,17 +1050,17 @@ PR #2 合并到 `main` 的提交 `2a08beb7ec46421adf9ddac3a0f6deccda336f1f` 将�
 5. `AGENTS.md`、`docs/deployment.md`：记录部署传播等待只能围绕无副作用协议 marker，不能重试房间业务。
 6. 运行定向 unit/Worker、三端 typecheck、完整 test、Worker/browser/server build与预算；不运行 coverage。本阶段无 presentation 改动，不打开 Chrome。
 7. 独立审查者 静态审查 retry 边界、超时、失败分类、无副作用和共享协议合同；解决全部 blocker/high/medium 后，在 `main` 创建包含实现与 plan 的单一提交并直接 push。
-8. 监控 GitHub CI、Cloudflare Pages、Workers 构建s；确认新 Worker version、自动 production smoke 和一次独立 production smoke 均通过。提交后不再修改仓库。
+8. 监控 GitHub CI、Cloudflare Pages、Cloudflare Workers Builds；确认新 Worker version、自动 production smoke 和一次独立 production smoke 均通过。提交后不再修改仓库。
 
 #### 构建
 
-- 2026-08-07 17:21：失败根因确认。Workers 构建s 日志为 `Production protocol 6 does not match client protocol 7`；新版本 `326652c8-27d3-4e51-959c-d8de39baea55` 已于 17:17:37 创建，失败 welcome 出现在 17:17:43。随后对同一 `https://lastlinep2p.011203.xyz` 运行现有完整 production smoke 返回 `Production multiplayer smoke passed (protocol 7)`。Pages 已成功，GitHub main build仍在运行；问题是部署后边缘传播竞态，不是 Worker build、协议实现或地图权威逻辑失败。
+- 2026-08-07 17:21：失败根因确认。Cloudflare Workers Builds 日志为 `Production protocol 6 does not match client protocol 7`；新版本 `326652c8-27d3-4e51-959c-d8de39baea55` 已于 17:17:37 创建，失败 welcome 出现在 17:17:43。随后对同一 `https://lastlinep2p.011203.xyz` 运行现有完整 production smoke 返回 `Production multiplayer smoke passed (protocol 7)`。Pages 已成功，GitHub main build仍在运行；问题是部署后边缘传播竞态，不是 Worker build、协议实现或地图权威逻辑失败。
 - 2026-08-07 17:25：新增 readiness 回归先因模块不存在准确红灯。最终1 file / 9 tests通过：旧 artifact缺marker、旧协议后切到当前协议会等待；短暂transport error与502/503/504会在同一总窗口等待；持续旧协议或网关错误到期失败；4xx、非法health JSON/body/Header和未来协议均只请求一次并立即失败。测试注入时钟，不使用真实sleep。
 - 2026-08-07 17:27：Worker `/health` JSON body保持 `{ ok: true, service: "lastlinep2p" }`，新增 `Cache-Control: no-store` 与共享 `X-Last-Line-Protocol: 7` Header。production smoke 在任何 guest/room副作用前最多120秒轮询 marker；单次请求也受剩余总预算约束，marker匹配后原有 guest/private-room/WebSocket welcome/lobby/leave只执行一次。
 - 2026-08-07 17:28：三端 typecheck通过；Worker dry-run bundle通过，产物 `516,593 / 615,000B`。本机定向 Worker Vitest未启动任何测试，因为当前 workerd要求 glibc 2.29–2.35而主机Debian 10不满足；未降级依赖或绕过测试。该 runtime合同由 push后的Node 24 GitHub CI强制验证。
 - 2026-08-07 17:37：完整 unit在最多7 workers下46 files / 453 tests通过，未修改测试、seed、断言、worker数或timeout；高外部load下耗时554秒。完整 standalone 3 files / 25 tests通过。按用户既有要求未运行coverage。
 - 2026-08-07 17:38：browser、Worker dry-run和standalone server build全部通过；预算最终browser entry `1,098,042 / 1,200,000`、all JS `3,794,697 / 4,000,000`、252 / 270 chunks、CSS `44,643 / 50,000`、dist `4,369,105 / 4,550,000`、Worker `516,593 / 615,000`、server `531,974 / 630,000`，全部PASS；`git diff --check`通过。本阶段无presentation变化，不需要Chrome，MCP保持仅`about:blank`。
-- 2026-08-07 17:38：合并提交 `2a08beb` 的GitHub main CI最终完整成功，证明原PR的typecheck/test/build/Docker smoke无持续代码失败；外部Workers 构建s红灯仍准确对应其部署后过早smoke。本修复尚未提交，当前生产Worker没有新protocol Header，因此不提前运行修改后的production smoke；必须与本修复Worker部署一起验证。
+- 2026-08-07 17:38：合并提交 `2a08beb` 的 GitHub main CI 最终完整成功，证明原 PR 的 typecheck/test/build/Docker smoke 无持续代码失败；外部 Cloudflare Workers Builds 红灯仍准确对应其部署后过早 smoke。本修复尚未提交，当前生产 Worker 没有新 protocol Header，因此不提前运行修改后的 production smoke；必须与本修复 Worker 部署一起验证。
 - 2026-08-07 17:42：使用仓库要求的本机Node `v24.18.1` 复跑readiness 9/9、三端typecheck和Worker dry-run bundle均通过；默认Node 22结果不作为最终语言/runtime证据。主机glibc仍为2.28，无法启动当前workerd；push后GitHub Node 24 runner必须执行真实Worker suite并成为提交门禁。
 - 2026-08-07 17:48：提交前远端`main`新增`1f99374 feat: add ammunition depot assets`，仅修改asset manifest、两张图片和`assetCatalog.test.ts`，与阶段 9十个改动路径零重叠。本地安全fast-forward后，Node 24定向readiness + AssetCatalog 2 files / 21 tests及三端typecheck通过；独立审查者的阶段 9结论不受该正交基线更新影响。
 
