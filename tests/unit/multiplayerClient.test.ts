@@ -41,7 +41,7 @@ describe("MultiplayerConnection lifecycle", () => {
   });
 
   it("accepts only the minimum-town, building-geometry, and grenade protocol version", async () => {
-    expect(MULTIPLAYER_PROTOCOL_VERSION).toBe(12);
+    expect(MULTIPLAYER_PROTOCOL_VERSION).toBe(13);
     const sockets: FakeWebSocket[] = [];
     const connection = new MultiplayerConnection(
       "https://example.test",

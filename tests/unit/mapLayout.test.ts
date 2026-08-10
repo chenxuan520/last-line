@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { GridNavigator } from "../../src/ai/navigation/GridNavigator";
 import {
   ADDITIONAL_GRENADE_LOOT_POINTS,
-  AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL,
+  AMMUNITION_DEPOT_LOOT_POINTS,
   AMMUNITION_DEPOT_WALL_COLOR,
   BUILDING_ROOF_CAP_HEIGHT,
   BASE_LOOT_POINTS,
@@ -58,7 +58,7 @@ describe("map layouts", () => {
 
       expect(layout.lootSpawnPoints).toHaveLength(
         GLOBAL_LOOT_POINTS +
-        layout.ammunitionDepot.levels.length * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL +
+        AMMUNITION_DEPOT_LOOT_POINTS +
         ADDITIONAL_GRENADE_LOOT_POINTS,
       );
       expect(hospital.storyCount).toBe(2);
@@ -67,7 +67,7 @@ describe("map layouts", () => {
       expect(layout.hospital.medkitLootIndex).toBe(GLOBAL_LOOT_POINTS - 1);
       expect(layout.grenadeLootStartIndex).toBe(
         PRE_GRENADE_LOOT_POINTS +
-        layout.ammunitionDepot.levels.length * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL,
+        AMMUNITION_DEPOT_LOOT_POINTS,
       );
       expect(layout.lootSpawnPoints.slice(layout.grenadeLootStartIndex)).toHaveLength(10);
       for (const point of [bandagePoint, medkitPoint]) {
@@ -113,17 +113,17 @@ describe("map layouts", () => {
     expect(depot.color).toBe(AMMUNITION_DEPOT_WALL_COLOR);
     expect(layout.lootSpawnPoints).toHaveLength(
       GLOBAL_LOOT_POINTS +
-      depot.storyCount * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL +
+      AMMUNITION_DEPOT_LOOT_POINTS +
       ADDITIONAL_GRENADE_LOOT_POINTS,
     );
     expect(depotLootIndices).toEqual(
       Array.from(
-        { length: depot.storyCount * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL },
+        { length: AMMUNITION_DEPOT_LOOT_POINTS },
         (_, index) => GLOBAL_LOOT_POINTS + index,
       ),
     );
     expect(new Set(depotLootIndices).size).toBe(
-      depot.storyCount * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL,
+      AMMUNITION_DEPOT_LOOT_POINTS,
     );
     for (const point of depotPoints) {
       if (!point) continue;
@@ -159,7 +159,7 @@ describe("map layouts", () => {
     ["mixed", 0, 3],
     ["mixed", 5, 4],
   ] as const)(
-    "fills every interior ammunition-depot floor on %s seed %i",
+    "keeps ammunition only on the ground floor of the %s depot for seed %i",
     (mapId, seed, expectedStories) => {
       const layout = createMapLayout(mapId, seed);
       const depot = layout.obstacles.find((building) => building.id === layout.ammunitionDepot.buildingId);
@@ -176,36 +176,26 @@ describe("map layouts", () => {
       };
 
       expect(depot.storyCount).toBe(expectedStories);
-      expect(layout.ammunitionDepot.levels).toHaveLength(expectedStories);
+      expect(layout.ammunitionDepot.levels).toEqual([{
+        level: 0,
+        lootIndices: Array.from(
+          { length: AMMUNITION_DEPOT_LOOT_POINTS },
+          (_, offset) => GLOBAL_LOOT_POINTS + offset,
+        ),
+      }]);
       expect(layout.lootSpawnPoints).toHaveLength(
         GLOBAL_LOOT_POINTS +
-        expectedStories * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL +
+        AMMUNITION_DEPOT_LOOT_POINTS +
         ADDITIONAL_GRENADE_LOOT_POINTS,
       );
-      for (const [level, record] of layout.ammunitionDepot.levels.entries()) {
-        expect(record.level).toBe(level);
-        expect(record.lootIndices).toEqual(
-          Array.from(
-            { length: AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL },
-            (_, offset) => GLOBAL_LOOT_POINTS +
-              level * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL +
-              offset,
-          ),
-        );
-        const supportY = level === 0
-          ? undefined
-          : depot.baseY + level * depot.storyHeight + BUILDING_ROOF_CAP_HEIGHT;
+      for (const record of layout.ammunitionDepot.levels) {
         for (const index of record.lootIndices) {
           const point = layout.lootSpawnPoints[index];
-          if (!point) throw new Error(`depot point missing: ${mapId}:${seed}:${level}:${index}`);
+          if (!point) throw new Error(`depot point missing: ${mapId}:${seed}:${index}`);
           expect(Math.abs(point.x - depot.center.x)).toBeLessThan(depot.width / 2);
           expect(Math.abs(point.z - depot.center.z)).toBeLessThan(depot.depth / 2);
-          if (supportY === undefined) {
-            expect(point.y).toBeCloseTo(getTerrainHeight(point.x, point.z, layout) + 0.45, 2);
-          } else {
-            expect(point.y).toBeCloseTo(supportY + 0.45, 3);
-          }
-          expect(navigator.findPath(outside, point), `${mapId}:${seed}:level-${level}:loot-${index}`)
+          expect(point.y).toBeCloseTo(getTerrainHeight(point.x, point.z, layout) + 0.45, 2);
+          expect(navigator.findPath(outside, point), `${mapId}:${seed}:ground:loot-${index}`)
             .not.toHaveLength(0);
         }
       }
@@ -676,7 +666,7 @@ describe("map layouts", () => {
 
     expect(layout.lootSpawnPoints).toHaveLength(
       GLOBAL_LOOT_POINTS +
-      layout.ammunitionDepot.levels.length * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL +
+      AMMUNITION_DEPOT_LOOT_POINTS +
       ADDITIONAL_GRENADE_LOOT_POINTS,
     );
     expect(layout.lootZoneCounts).toHaveLength(LANDING_ZONE_COUNT);
@@ -761,7 +751,7 @@ describe("map layouts", () => {
 
       expect(layout.grenadeLootStartIndex).toBe(
         PRE_GRENADE_LOOT_POINTS +
-        layout.ammunitionDepot.levels.length * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL,
+        AMMUNITION_DEPOT_LOOT_POINTS,
       );
       expect(grenadePoints).toHaveLength(10);
       expect(layout.hospital.bandageLootIndex).toBeLessThan(layout.grenadeLootStartIndex);

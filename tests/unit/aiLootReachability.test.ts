@@ -2,10 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GridNavigator } from "../../src/ai/navigation/GridNavigator";
 import type { BattleRoyaleConfig } from "../../src/config/battleRoyale";
 import {
+  BUILDING_ROOF_CAP_HEIGHT,
   createMapLayout,
   getTerrainHeight,
   LOOT_SPAWN_POINTS,
   MAP_WALL_SEGMENTS,
+  PRE_GRENADE_LOOT_POINTS,
   wallOpeningOutwardDirection,
 } from "../../src/config/map";
 import type { MapId } from "../../src/config/maps";
@@ -275,11 +277,11 @@ describe("AI loot reachability", () => {
     }
   }, 120_000);
 
-  it("keeps the fourth ammunition-depot floor navigable and interactable", () => {
+  it("keeps four-story ammunition depots stocked only on the ground floor", () => {
     const layout = createMapLayout("mixed", 5);
-    const finalLevel = layout.ammunitionDepot.levels.at(-1);
+    const groundLevel = layout.ammunitionDepot.levels[0];
     const depot = layout.obstacles.find((building) => building.id === layout.ammunitionDepot.buildingId);
-    if (!finalLevel || !depot) throw new Error("Four-story ammunition depot missing");
+    if (!groundLevel || !depot) throw new Error("Four-story ammunition depot missing");
     const navigator = new GridNavigator(layout);
     const inventory = new InventorySystem(layout);
     const state = createBattleRoyaleState("player", TEST_CONFIG, mapSeedRandom(5), { mapId: "mixed" });
@@ -287,10 +289,13 @@ describe("AI loot reachability", () => {
     if (!player) throw new Error("Four-story depot test player missing");
     const start = outsideBuildingDoor(layout, depot.id);
 
-    expect(layout.ammunitionDepot.levels).toHaveLength(4);
-    for (const index of finalLevel.lootIndices) {
+    expect(depot.storyCount).toBe(4);
+    expect(layout.ammunitionDepot.levels).toEqual([groundLevel]);
+    expect(groundLevel.level).toBe(0);
+    for (const index of groundLevel.lootIndices) {
       const point = layout.lootSpawnPoints[index];
-      if (!point) throw new Error(`Four-story depot loot missing: ${index}`);
+      if (!point) throw new Error(`Ground-floor depot loot missing: ${index}`);
+      expect(point.y).toBeLessThan(depot.baseY + depot.storyHeight);
       const target = { x: point.x, y: point.y + 1.31, z: point.z };
       expect(navigator.findPath(start, target), `mixed:5:${index}:path`).not.toHaveLength(0);
 
@@ -309,6 +314,13 @@ describe("AI loot reachability", () => {
       inventory.processCommand(state, player.id, { ...createIdleCommand(), interact: true }, []);
       expect(state.groundLoot.loot?.available, `mixed:5:${index}:pickup`).toBe(false);
     }
+    const upperFloorMinimumY = depot.baseY + depot.storyHeight;
+    const upperFloorMaximumY = depot.baseY + depot.storyHeight * depot.storyCount + BUILDING_ROOF_CAP_HEIGHT;
+    const upperFloorDepotLoot = layout.lootSpawnPoints.slice(
+      PRE_GRENADE_LOOT_POINTS,
+      layout.grenadeLootStartIndex,
+    ).filter((point) => point.y >= upperFloorMinimumY && point.y <= upperFloorMaximumY);
+    expect(upperFloorDepotLoot).toHaveLength(0);
   });
 
   it.each([

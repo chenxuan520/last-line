@@ -289,12 +289,15 @@ Caddy 和 Nginx 的标准反代配置会自动代理 WebSocket upgrade。`SERVER
 ```bash
 npm run typecheck:server
 npm run test:server
+npm run test:performance
 npm run build
 npm run build:worker
 npm run build:server
 npm run check:budgets
 curl https://game.example.com/health
 ```
+
+每个 PR/MR 额外运行独立 `performance` job：在同一 Node.js 24 / Chrome runner 中分别构建 `origin/main` 与 PR HEAD，双方先预热，再交替采样 3 轮并取中位数。门禁监控三张地图的场景启动、heap、Mesh 创建/移除、最终 Mesh/material/geometry/vertex/index，以及灰炉城高画质 production Chrome 的进场延迟、稳定 FPS、P95/P99 帧时间和长帧数量；任一运行时指标相对 `main` 劣化超过 15% 即失败。报告写入 Actions summary 并作为 artifact 上传。压缩大小不参与该运行时门禁，原始产物大小继续由 `check:budgets` 约束。
 
 Standalone 集成套件验证静态服务、原生 SQLite 账号/管理员持久化、数据目录进程锁、crash-safe alarm 所有权、有界房间实例淘汰、早期 WebSocket close 清理、真实双客户端比赛、优雅 checkpoint、重启和重连。共享 Worker 测试额外覆盖确认前重连 token 宽限。浏览器验收还必须通过真实 HTTPS 代理覆盖注册/登录 cookie 恢复和管理终端。
 
@@ -322,7 +325,7 @@ Standalone 集成套件验证静态服务、原生 SQLite 账号/管理员持久
 - 所有地表纹理使用低饱和偏灰 tint，城市、道路、农村和森林不得出现鲜艳黄橙或过艳绿色。Babylon 上传失败时必须保留程序化顶点色，不得变白。
 - 粗指针移动设备直接开始/部署点击必须申请全屏并尝试横屏；拒绝后保留竖屏旋转流程，退出全屏后显示横屏重试，不支持浏览器不显示死按钮。验证双开火、释放一个 pointer 不停止另一个、右开火可拖动视角、灵敏度端点明显不同、中/高画质高于 CSS 像素分辨率且 DPR 最多 2 倍。禁止从无用户手势 `orientationchange` 申请全屏。
 - 权威地图/协议升级后同时刷新浏览器产物并重启活动房。协议不匹配迫使旧客户端重连，不兼容 checkpoint 房间自动关闭删除。
-- Checkpoint 版本 11 要求完整 island/town/mixed 状态、由 `mapId + mapSeed` 派生的每条标准初始物资记录（不变的 250 条全局、每层 4 条弹药库、10 条手雷）、不超过 2.5 秒剩余引信的合法活动手雷、合法背包 stack 和可达安全区时间线；合法后续 drop/death 可额外保留。版本 10 及更早在 Worker/standalone 恢复时删除，因为它们早于烬岚郡至少两个城镇、2.5 秒手雷引信、圆形/六边形建筑、删除实体屋顶护栏和新连桥权威碰撞。
-- 权威地图/协议发布使用维护顺序：禁用新联机入口、排空/关闭房间、部署并 smoke 协议 12 Worker、部署匹配 Pages、重新启用入口，再分别 smoke 三图房间。
+- Checkpoint 版本 12 要求完整 island/town/mixed 状态、由 `mapId + mapSeed` 派生的每条标准初始物资记录（不变的 250 条全局、仅底层 4 条弹药库、10 条手雷）、不超过 2.5 秒剩余引信的合法活动手雷、合法背包 stack 和可达安全区时间线；合法后续 drop/death 可额外保留。版本 11 及更早在 Worker/standalone 恢复时删除，因为它们仍可能包含逐层弹药库旧事实，或早于烬岚郡至少两个城镇、2.5 秒手雷引信、圆形/六边形建筑、删除实体屋顶护栏和新连桥权威碰撞。
+- 权威地图/协议发布使用维护顺序：禁用新联机入口、排空/关闭房间、部署并 smoke 协议 13 Worker、部署匹配 Pages、重新启用入口，再分别 smoke 三图房间。
 - 验证两种入场设置：访客模式保持原流程；要求账号时阻止匿名访客创建，允许注册/登录，刷新后恢复 HttpOnly refresh session，并拒绝禁用/撤销账号。
 - 禁止安装 Playwright 或下载 CI 浏览器。

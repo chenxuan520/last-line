@@ -133,9 +133,9 @@ describe("BattleRoyaleMode", () => {
   });
 
   it.each([
-    ["island", 4, 3],
-    ["mixed", 5, 4],
-  ] as const)("initializes fixed ammunition through the final depot floor on %s", (mapId, mapSeed, stories) => {
+    ["island", 4],
+    ["mixed", 5],
+  ] as const)("initializes exactly four ground-floor ammunition piles in the %s depot", (mapId, mapSeed) => {
     const state = createBattleRoyaleState(
       "player",
       FAST_BATTLE_ROYALE_CONFIG,
@@ -143,15 +143,16 @@ describe("BattleRoyaleMode", () => {
       { mapId },
     );
     const layout = createMapLayout(mapId, mapSeed);
-    const finalLevel = layout.ammunitionDepot.levels.at(-1);
-    if (!finalLevel) throw new Error(`ammunition depot level missing: ${mapId}:${mapSeed}`);
+    const groundLevel = layout.ammunitionDepot.levels[0];
+    if (!groundLevel) throw new Error(`ammunition depot level missing: ${mapId}:${mapSeed}`);
 
     expect(state.mapSeed).toBe(mapSeed);
-    expect(layout.ammunitionDepot.levels).toHaveLength(stories);
+    expect(layout.ammunitionDepot.levels).toHaveLength(1);
+    expect(groundLevel.level).toBe(0);
     expect(Object.values(state.groundLoot)).toHaveLength(layout.lootSpawnPoints.length);
     for (const [offset, ammo] of AMMUNITION_DEPOT_AMMO.entries()) {
-      const lootIndex = finalLevel.lootIndices[offset];
-      if (lootIndex === undefined) throw new Error(`final ammunition index missing: ${mapId}:${mapSeed}:${offset}`);
+      const lootIndex = groundLevel.lootIndices[offset];
+      if (lootIndex === undefined) throw new Error(`ground ammunition index missing: ${mapId}:${mapSeed}:${offset}`);
       expect(state.groundLoot[`loot-${lootIndex}`]).toEqual({
         id: `loot-${lootIndex}`,
         generation: 0,
@@ -165,7 +166,7 @@ describe("BattleRoyaleMode", () => {
   });
 
   it.each(["island", "town", "mixed"] as const)(
-    "keeps %s loot partitioned as 240 base, 10 medical, per-floor depot ammo, and 10 grenade records",
+    "keeps %s loot partitioned as 240 base, 10 medical, 4 ground-floor depot ammo, and 10 grenade records",
     (mapId) => {
       const state = createBattleRoyaleState(
         "player",
@@ -178,7 +179,7 @@ describe("BattleRoyaleMode", () => {
 
       expect(layout.lootZoneCounts.reduce((total, count) => total + count, 0)).toBe(BASE_LOOT_POINTS);
       expect(layout.grenadeLootStartIndex).toBe(
-        PRE_GRENADE_LOOT_POINTS + layout.ammunitionDepot.levels.length * AMMUNITION_DEPOT_AMMO.length,
+        PRE_GRENADE_LOOT_POINTS + AMMUNITION_DEPOT_AMMO.length,
       );
       expect(loot).toHaveLength(layout.lootSpawnPoints.length);
       const medical = loot.slice(BASE_LOOT_POINTS, PRE_GRENADE_LOOT_POINTS);
@@ -187,9 +188,7 @@ describe("BattleRoyaleMode", () => {
       expect(medical.filter((entry) => entry.itemId === "medkit")).toHaveLength(5);
       const depotAmmunition = loot.slice(PRE_GRENADE_LOOT_POINTS, layout.grenadeLootStartIndex);
       expect(depotAmmunition.map((entry) => [entry.itemId, entry.quantity])).toEqual(
-        layout.ammunitionDepot.levels.flatMap(() =>
-          AMMUNITION_DEPOT_AMMO.map((entry) => [entry.itemId, entry.quantity])
-        ),
+        AMMUNITION_DEPOT_AMMO.map((entry) => [entry.itemId, entry.quantity]),
       );
       const grenades = loot.slice(layout.grenadeLootStartIndex);
       expect(grenades).toHaveLength(10);
@@ -256,9 +255,7 @@ describe("BattleRoyaleMode", () => {
     expect(additionalMedical.filter((entry) => entry.itemId === "bandage")).toHaveLength(5);
     expect(additionalMedical.filter((entry) => entry.itemId === "medkit")).toHaveLength(5);
     expect(loot.slice(GLOBAL_LOOT_POINTS, layout.grenadeLootStartIndex).map((entry) => [entry.itemId, entry.quantity])).toEqual(
-      layout.ammunitionDepot.levels.flatMap(() =>
-        AMMUNITION_DEPOT_AMMO.map((entry) => [entry.itemId, entry.quantity])
-      ),
+      AMMUNITION_DEPOT_AMMO.map((entry) => [entry.itemId, entry.quantity]),
     );
     const additionalGrenades = loot.slice(layout.grenadeLootStartIndex);
     expect(additionalGrenades).toHaveLength(10);

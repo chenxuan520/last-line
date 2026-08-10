@@ -389,7 +389,7 @@ describe("LocalDurableObjectRuntime", () => {
       });
       const checkpoint = runtime.checkpoint();
       const layout = createMapLayout(checkpoint.state.mapId, checkpoint.state.mapSeed);
-      expect(layout.ammunitionDepot.levels).toHaveLength(3);
+      expect(layout.ammunitionDepot.levels).toHaveLength(1);
       const canonicalLootCount = layout.lootSpawnPoints.length;
       const groundLoot = structuredClone(checkpoint.state.groundLoot);
       delete groundLoot[`loot-${canonicalLootCount - 1}`];
@@ -486,8 +486,8 @@ describe("LocalDurableObjectRuntime", () => {
     }
   });
 
-  it("keeps a current version 11 town checkpoint recoverable across a SQLite restart", async () => {
-    const directory = await mkdtemp(resolve(tmpdir(), "last-line-checkpoint-town-v11-"));
+  it("keeps a current version 12 town checkpoint recoverable across a SQLite restart", async () => {
+    const directory = await mkdtemp(resolve(tmpdir(), "last-line-checkpoint-town-v12-"));
     const databasePath = resolve(directory, "rooms.sqlite");
     const roomId = "room-00000000-0000-4000-8000-000000000003";
     let environment = await createStandaloneEnvironment({ databasePath });

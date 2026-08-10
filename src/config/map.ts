@@ -227,7 +227,7 @@ export const LANDING_ZONE_COUNT = 16;
 export const BASE_LOOT_POINTS = 240;
 export const ADDITIONAL_MEDICAL_LOOT_POINTS = 10;
 export const GLOBAL_LOOT_POINTS = BASE_LOOT_POINTS + ADDITIONAL_MEDICAL_LOOT_POINTS;
-export const AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL = 4;
+export const AMMUNITION_DEPOT_LOOT_POINTS = 4;
 export const AMMUNITION_DEPOT_AMMO = [
   { itemId: "ammo.rifle", quantity: 90 },
   { itemId: "ammo.light", quantity: 96 },
@@ -2821,15 +2821,15 @@ function createAmmunitionDepotPoi(
       y: round(terrainHeightFromHills(building.center.x, building.center.z, terrainHills)),
       z: building.center.z,
     },
-    levels: Array.from({ length: building.storyCount }, (_, level) => ({
-      level,
+    levels: [{
+      level: 0,
       lootIndices: [
-        firstLootIndex + level * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL,
-        firstLootIndex + level * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL + 1,
-        firstLootIndex + level * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL + 2,
-        firstLootIndex + level * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL + 3,
+        firstLootIndex,
+        firstLootIndex + 1,
+        firstLootIndex + 2,
+        firstLootIndex + 3,
       ],
-    })),
+    }],
   };
 }
 
@@ -4063,34 +4063,31 @@ function createBuildingInteriorLootPoints(
 ): Vector3State[] {
   const xFractions = [-0.32, 0, 0.32];
   const zFractions = [-0.3, -0.12, 0.12, 0.3];
-  return Array.from({ length: building.storyCount }, (_, level) => {
-    const candidates = xFractions.flatMap((xFraction) => zFractions.map((zFraction) => {
-      const x = round(building.center.x + building.width * xFraction);
-      const z = round(building.center.z + building.depth * zFraction);
-      const supportY = level === 0
-        ? terrainHeightFromHills(x, z, terrainHills)
-        : building.baseY + level * building.storyHeight + BUILDING_ROOF_CAP_HEIGHT;
-      return {
-        x,
-        y: round(supportY + GROUND_LOOT_POSITION_HEIGHT),
-        z,
-      };
-    })).filter((candidate) =>
-      !pointInsideStairwell(candidate, building, LOOT_OBSTACLE_CLEARANCE) &&
-      isClearLootPoint(candidate, wallSegments, roofRamps, existingLoot, [], 2.5)
-    );
-    const selected: Vector3State[] = [];
-    for (const candidate of candidates) {
-      if (selected.every((point) => Math.hypot(point.x - candidate.x, point.z - candidate.z) >= 4)) {
-        selected.push(candidate);
-      }
-      if (selected.length === AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL) return selected;
+  const level = 0;
+  const candidates = xFractions.flatMap((xFraction) => zFractions.map((zFraction) => {
+    const x = round(building.center.x + building.width * xFraction);
+    const z = round(building.center.z + building.depth * zFraction);
+    const supportY = terrainHeightFromHills(x, z, terrainHills);
+    return {
+      x,
+      y: round(supportY + GROUND_LOOT_POSITION_HEIGHT),
+      z,
+    };
+  })).filter((candidate) =>
+    !pointInsideStairwell(candidate, building, LOOT_OBSTACLE_CLEARANCE) &&
+    isClearLootPoint(candidate, wallSegments, roofRamps, existingLoot, [], 2.5)
+  );
+  const selected: Vector3State[] = [];
+  for (const candidate of candidates) {
+    if (selected.every((point) => Math.hypot(point.x - candidate.x, point.z - candidate.z) >= 4)) {
+      selected.push(candidate);
     }
-    throw new Error(
-      `${building.id} has no clear level-${level} special loot layout ` +
-      `(${selected.length}/${AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL})`,
-    );
-  }).flat();
+    if (selected.length === AMMUNITION_DEPOT_LOOT_POINTS) return selected;
+  }
+  throw new Error(
+    `${building.id} has no clear level-${level} special loot layout ` +
+    `(${selected.length}/${AMMUNITION_DEPOT_LOOT_POINTS})`,
+  );
 }
 
 function createGrenadeLootSpawnPoints(

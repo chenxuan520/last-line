@@ -553,7 +553,7 @@ describe("admin control plane", () => {
       });
       const checkpoint = runtime.checkpoint();
       const layout = createMapLayout(checkpoint.state.mapId, checkpoint.state.mapSeed);
-      expect(layout.ammunitionDepot.levels).toHaveLength(3);
+      expect(layout.ammunitionDepot.levels).toHaveLength(1);
       const canonicalLootCount = layout.lootSpawnPoints.length;
       const groundLoot = structuredClone(checkpoint.state.groundLoot);
       delete groundLoot[`loot-${canonicalLootCount - 1}`];

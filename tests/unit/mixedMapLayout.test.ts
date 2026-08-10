@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { GridNavigator } from "../../src/ai/navigation/GridNavigator";
 import {
-  AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL,
+  AMMUNITION_DEPOT_LOOT_POINTS,
   BUILDING_ROOF_CAP_HEIGHT,
   createMapLayout,
   GLOBAL_LOOT_POINTS,
@@ -204,12 +204,12 @@ describe("mixed map layout", () => {
 
       expect(layout.lootSpawnPoints).toHaveLength(
         GLOBAL_LOOT_POINTS +
-        layout.ammunitionDepot.levels.length * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL +
+        AMMUNITION_DEPOT_LOOT_POINTS +
         10,
       );
       expect(layout.grenadeLootStartIndex).toBe(
         PRE_GRENADE_LOOT_POINTS +
-        layout.ammunitionDepot.levels.length * AMMUNITION_DEPOT_LOOT_POINTS_PER_LEVEL,
+        AMMUNITION_DEPOT_LOOT_POINTS,
       );
       expect(layout.lootSpawnPoints.slice(layout.grenadeLootStartIndex)).toHaveLength(10);
       expect(layout.lootZoneCounts).toHaveLength(16);

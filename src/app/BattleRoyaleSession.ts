@@ -14,7 +14,7 @@ import {
 import { GameHud } from "../client/ui/GameHud";
 import type { MobileFullscreenController } from "../client/ui/MobileFullscreenController";
 import type { GameSettings } from "../config/settings";
-import { createMapLayout } from "../config/map";
+import { createMapLayout, type MapLayout } from "../config/map";
 import { ITEMS } from "../config/items";
 import { WEAPONS } from "../config/weapons";
 import {
@@ -47,6 +47,27 @@ import { sampleGrenadeTrajectory } from "../game/systems/ThrowableSystem";
 
 const PLAYER_ID = "player";
 const LANDING_VISUAL_SECONDS = 0.24;
+
+type BotNavigatorFactory = (layout: MapLayout) => GridNavigator;
+
+export function createSinglePlayerBotControllers(
+  actors: Readonly<Record<EntityId, ActorState>>,
+  layout: MapLayout,
+  disableSnipers: boolean,
+  random: () => number = Math.random,
+  createNavigator: BotNavigatorFactory = (currentLayout) => new GridNavigator(currentLayout),
+): Map<EntityId, BotController> {
+  const controllers = new Map<EntityId, BotController>();
+  const navigator = createNavigator(layout);
+  Object.values(actors).forEach((actor, index) => {
+    if (actor.kind !== "bot") return;
+    controllers.set(
+      actor.id,
+      new BotController(index, random, disableSnipers, layout, navigator),
+    );
+  });
+  return controllers;
+}
 
 export interface JumpVisualState {
   wasAirborne: boolean;
@@ -145,15 +166,11 @@ export class BattleRoyaleSession {
     this.effects = new CombatEffects(this.scene);
     this.grenadePresentation = new GrenadePresentation(this.scene);
     this.combatWorld = new SimulationCombatWorld(state, true, layout);
-    const botNavigator = new GridNavigator(layout);
-    Object.values(state.actors).forEach((actor, index) => {
-      if (actor.kind === "bot") {
-        this.botControllers.set(
-          actor.id,
-          new BotController(index, Math.random, settings.disableAiSnipers, layout, botNavigator),
-        );
-      }
-    });
+    this.botControllers = createSinglePlayerBotControllers(
+      state.actors,
+      layout,
+      settings.disableAiSnipers,
+    );
   }
 
   public static async create(
