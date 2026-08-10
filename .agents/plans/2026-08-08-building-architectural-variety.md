@@ -1,82 +1,90 @@
-# Building Architectural Variety
+# 建筑轮廓多样化
 
-## Context
+## 背景
 
-The three maps currently vary building dimensions, colors, stories, and a small set of high-quality rooftop decorations, but the dominant massing remains a repeated rectangular box with a flat, unbounded roof. The user identified this repetition, together with repetitive terrain surfaces, as a primary realism gap. Terrain textures will be supplied and handled in a later task; this cycle addresses building silhouettes first.
+三张地图原本只在建筑尺寸、颜色、层数和少量高画质装饰上变化，主体仍是重复矩形盒子。用户指出建筑与屋顶轮廓过于一致是缺乏真实感的重要原因。本轮在 `feat/building-architectural-variety` 分支上处理建筑体量，不把生成器细节写入 README。
 
-This implementation starts from `main@3edf890` on branch `feat/building-architectural-variety`.
+## 合同
 
-## Contract
+- 保留每个种子化建筑占地、层数、楼梯间、门、窗、楼板、连桥、物资点、医院、弹药库、道路避让和地图区域身份。
+- 为苍岬岛、灰炉城和烬岚郡建筑添加由 `mapId + mapSeed + buildingId` 决定的稳定轮廓，使相邻建筑不再重复相同体量。
+- 用户没有要求屋顶周边护栏或女儿墙。禁止沿屋顶边缘生成连续矮墙；建筑差异必须通过立面柱、檐口和内缩、有明显宽度与深度的屋顶机房/设备体块表达。
+- 大型实体轮廓必须加入权威 `MapLayout.wallSegments`，由 Movement、`SimulationCombatWorld`、投掷物碰撞、GridNavigator、服务端权威逻辑和 Babylon 共同使用。禁止纯表现掩体或第二套碰撞表示。
+- 屋顶保持平坦且可通过现有内置楼梯到达。禁止添加视觉坡度与权威可行走表面不一致的坡屋顶。
+- 新增体块必须避开楼梯屋顶开口和连桥孔洞，不得阻挡门、窗、连桥、内部楼梯路线或屋顶到达点。
+- 同一地图和种子的轮廓选择必须稳定，在代表性种子间有实际变化，并与画质无关。
+- 轮廓几何按材质/角色批处理，场景资源保持有界。
+- 权威碰撞变化必须提升严格联机协议和 checkpoint 兼容版本。删除误加护栏后，协议提升到 11，checkpoint 提升到 10。
+- 所有可见结果必须在本机 Chrome/Edge MCP 的 production build 中检查，音量设为 `0`。实现 Agent 必须亲自查看三张地图截图，确认屋顶护栏彻底消失，体量、裁剪、重叠、开口和画质一致性正确。
 
-- Preserve every seeded building footprint, story count, stairwell, door, window, floor slab, skybridge, loot point, hospital, ammunition depot, road clearance, and map-region identity.
-- Add deterministic architectural profiles across island, Greyfurnace, and Cinder Mist County buildings so adjacent structures do not repeatedly present the same roof edge and facade outline.
-- Use several restrained profile families appropriate to building purpose, including varied roof-edge/cornice treatment, corner or facade piers, industrial roof monitors, vents or stacks, and stepped tower crowns.
-- Roof-edge elements and other visually substantial solid silhouettes must join the existing authoritative wall geometry consumed by Movement, `SimulationCombatWorld`, throwable collision, GridNavigator, server authority, and Babylon rendering. Do not create presentation-only cover or a second collision representation.
-- Keep roofs flat and reachable through the existing internal stairwell in this cycle. Do not add pitched roofs whose visible slope disagrees with the authoritative walkable surface.
-- Keep every added element clear of the stairwell roof opening and existing skybridge apertures. Architectural profiles must not block a door, window, bridge connection, interior stair route, or roof arrival.
-- Seed/profile selection must be stable for the same `mapId + mapSeed`, materially varied across representative seeds, and independent of quality settings. Quality may add existing small visual-only weathering/equipment, but the building's primary silhouette cannot disappear on low or medium quality.
-- Do not add or replace texture assets in this cycle. Do not change terrain rendering, gameplay values, loot, protocol message shapes, checkpoint state shape, or README product copy.
-- Because the same `mapId + mapSeed` now derives different authoritative collision and occlusion, increment the strict multiplayer protocol and checkpoint compatibility versions. Old rooms must not resume or accept clients against the new geometry.
-- Preserve bounded rendering resources by batching profile geometry by material/profile role.
-- Every visible result must be checked from a production build in local Chrome/Edge MCP at volume `0`. The implementation agent must capture and personally open screenshots for island, Greyfurnace, and Cinder Mist County, checking ground-level and elevated silhouette readability, clipping, overlap, blocked openings, repeated adjacent profiles, and consistency across quality levels.
+## 计划
 
-## Plan
+1. 用会失败的地图布局测试锁定轮廓多样性、权威墙体接入、楼梯/门窗/连桥避让和多种子覆盖。
+2. 在不改变基础建筑位置的前提下，从稳定建筑事实派生轮廓。
+3. 删除重复或误导的高画质纯表现轮廓盒。
+4. 在所有画质中渲染并批处理共享权威轮廓。
+5. 添加 NullEngine 场景测试，覆盖三图可见性、画质独立、批次上限、材质隔离和资源预算。
+6. 更新 `AGENTS.md`、架构文档和当前 plan。
+7. 运行聚焦测试、完整 typecheck/test/build/budget 和 `git diff --check`；不运行覆盖率，最多使用 7 个 worker。
+8. 在音量 `0` 下完成三张地图 production MCP 截图检查并立即清理。
+9. 独立审查者通过后提交、推送并请求 Codex，后续审查发现直接进入修复轮次。
 
-1. Add focused failing map-layout tests for deterministic profile diversity, authoritative wall integration, stairwell/door/window/skybridge clearance, and representative multi-seed coverage across all three maps.
-2. Extend generated wall geometry with deterministic architectural profiles derived from stable building facts without changing base building placement or persisted match state.
-3. Replace the old high-quality-only town silhouette boxes where they duplicate the new shared authoritative profiles; retain only genuinely small visual-only detail.
-4. Render and batch the shared architectural wall records with restrained existing materials on every quality level.
-5. Add NullEngine scene tests for all-map visibility, quality independence, bounded batching, material isolation, environmental mesh identity, and deterministic resource budgets.
-6. Update `AGENTS.md` and `docs/architecture.md` with the shared architectural-profile contract; keep README free of generator implementation detail.
-7. Run focused tests first, then `npm run typecheck`, `npm run test`, `npm run build`, `npm run build:worker`, `npm run build:server`, `npm run build:standalone`, `npm run check:budgets`, and `git diff --check`. Do not run coverage. Use no more than seven workers and leave one CPU core free.
-8. Run production MCP visual acceptance for all three maps at volume `0`; personally inspect screenshots, check console output, then immediately close every opened page/context, stop preview servers, and confirm only `about:blank` remains.
-9. Launch one independent reviewer using the repository reviewer prompt. Resolve every blocker/high/medium finding and request re-review before commit.
-10. Finalize this plan's Build and Review records before the implementation commit, then commit, push, create a GitHub pull request, request `@codex review`, and monitor CI and review feedback without modifying the repository after commit.
+## 构建
 
-## Build
+- 2026-08-08：确认 `wallSegments` 已共同驱动移动、hitscan/视线、投掷物 sweep、导航、服务端权威逻辑和 Babylon 渲染，`floorSlabs` 与 `roofRamps` 提供屋顶支撑和内部通行。
+- 2026-08-08：添加 6 类确定性轮廓。初始实现错误地让每栋建筑生成 5 段屋顶周边 `roof-edge` 矮墙，并把它们当作轮廓差异。
+- 2026-08-08：权威轮廓使用完整 Babylon 盒体和 thin-instance 矩阵，尺寸/中心与权威记录一致；修复了零厚度平面和建筑材质发黑问题。
+- 2026-08-08：Movement 只对基础立面添加旧屋顶厚度补偿，权威建筑体块使用显式高度，与战斗、投掷物、导航和渲染一致。
+- 2026-08-08：初始权威几何变更把协议从 9 提升到 10、checkpoint 从 8 提升到 9。Node 24 应用测试、standalone、三项目 typecheck、各构建、预算和三图 MCP 当时均通过。
+- 2026-08-09：用户明确指出屋顶护栏不是需求。后续修复从生成器中彻底删除 `roof-edge` 和薄片式 `roof-screen`，保留立面柱/檐口，并用内缩屋顶机房、设备房和监视顶表达建筑体量。
+- 2026-08-09：删除护栏改变相同地图种子的权威碰撞；严格联机协议提升到 11，checkpoint 兼容版本提升到 10，旧客户端和旧房间必须拒绝或删除。
+- 2026-08-09：新增权威六边形/近圆形外墙后，中画质 50 角色生产场景实测总顶点 `645,939`、总索引 `1,587,390`、唯一几何顶点 `472,489`、唯一几何索引 `1,044,006`。增长来自真实多边形外墙、开口和楼板，不是重复场景对象或纯表现护栏。根据用户允许相应放宽资源限制的决定，确定性门槛分别从 `590,000 / 1,550,000 / 420,000 / 960,000` 调整为 `660,000 / 1,620,000 / 485,000 / 1,070,000`；mesh、transform node、材质和 geometry 数量门槛保持不变。该门槛调整必须由本轮独立审查者 作为明确架构/资源审查项复核。
+- 2026-08-09：完整 `IslandScene` 文件连续创建多张高密场景时，Vitest fork worker 达到 Node 默认约 4GB heap 上限并 OOM；机器仍有 232GB 可用内存，单独资源用例在 8GB 临时上限下 13 秒完成。单元测试配置为 worker 设置 6GB V8 heap 上限，让标准 `npm run test:unit` 无需人工环境变量即可执行既有高密场景套件；worker 数量和业务测试内容不变。该可执行测试配置变更同样纳入本轮独立审查者。
+- 2026-08-09：特殊轮廓楼板改为按楼梯井精确切分，避免粗条带误删远大于开口的屋面；共享屋顶安全点同时避开楼梯井、权威屋顶体块和 0.5m 导航到达容差。地图导航与真实 `MovementSystem` 均覆盖矩形、六边形和近圆形建筑的双向上下楼。
+- 2026-08-09：移动、战斗/视线、手雷 sweep、掉落、GridNavigator 和 BotController 均切换到共享旋转/多边形几何。斜门内外方向与门内物资位置使用同一 `wallOpeningOutwardDirection`；岛屿旧稳定 payload 对比确认地图点、地形、建筑、医院、石头、树、掩体、前 250 物资和道路 `0` 个字段漂移。
+- 2026-08-09：灰炉城连桥先由 32 条提高到 48 条，随后按用户反馈进一步提高到 56 条；56 条桥从 64 个核心街区中按种子确定性选择，仍保留 8 个无桥街区。烬岚郡城镇区域先稳定生成 6 条短连桥，随后提高到 8 条，并继续同时覆盖 X/Z 方向、端点侧唯一且每栋建筑最多参与两座桥。20 个代表种子统计：岛屿矩形/六边形/近圆形约 `81.79% / 11.64% / 6.57%`；灰炉城与烬岚郡因医院、弹药库和桥端强制矩形，整体矩形约 `85.7%`，特殊建筑仍保持少数。
+- 2026-08-09：受影响移动/战斗/掉落/导航 `77/77`、地图与城镇高种子回归 `68/68`、完整 `IslandScene` `27/27`、BotController `58/58`、standalone 真实集成 `33/33` 通过。完整源码单元最终轮次另行记录在完成前验证中；未运行覆盖率。
+- 2026-08-09：三目标 typecheck、浏览器 production build、Worker dry-run、服务端 bundle、同源 standalone build 和预算通过。最终产物：浏览器入口 `1,159,319 / 1,200,000`，最大非入口 `599,667 / 700,000`，全部浏览器 JavaScript `3,842,090 / 4,000,000`，chunk `252 / 270`，CSS `45,225 / 50,000`，整个 `dist` `4,665,255 / 4,700,000`，Worker `599,873 / 615,000`，standalone `611,863 / 630,000`。
+- 2026-08-09：最终冷灰地表修复后，完整源码单元 `50 files / 570 tests` 再次通过；浏览器入口变为 `1,159,137 / 1,200,000`，全部浏览器 JavaScript `3,841,908 / 4,000,000`，整个 `dist` `4,665,073 / 4,700,000`，Worker `599,637 / 615,000`，standalone `611,627 / 630,000`。本机 `npm run test:worker` 在任何测试执行前因 Debian glibc 2.28 无法加载要求 GLIBC 2.29–2.35 的 `workerd` 而失败；Worker TypeScript 编译和 dry-run bundle 已通过，最新分支 CI 的 Node 24 Worker 套件仍是交付门禁。
 
-- 2026-08-08: Fast-forwarded local `main` to `origin/main@3edf890` and created `feat/building-architectural-variety`.
-- 2026-08-08: Audited the current geometry chain. Generated `wallSegments` already drive movement collision, hitscan/LOS, throwable sweeps, GridNavigator interior blockers, server authority, and Babylon wall rendering. `floorSlabs` and `roofRamps` separately provide roof support and internal access. This permits substantial vertical roof-edge/facade profiles to share one authoritative wall representation while preserving the existing flat walkable roof.
-- 2026-08-08: Confirmed the present realism limitation: every roof slab uses one flat box/material, `MapBuilding` contains no architectural profile, and six town kinds only add high-quality presentation boxes. Natural/rural buildings receive none of those town silhouettes, while ground rendering remains a separate three-material texture task intentionally deferred from this cycle.
-- 2026-08-08: Added six deterministic architecture profiles keyed by `mapId + mapSeed + buildingId`: corner piers, horizontal bands, vertical bays, a service crown, split monitors, and a stepped parapet. Every building now contributes five varied roof-edge wall records plus profile-specific piers, cornices, or roof screens. Each profile rises at least 2.2m above the roof, retains a measured east-side escape gap of at least 5m, clears the stairwell roof opening, and remains inside the existing building footprint so GridNavigator's envelope and physical collision stay aligned.
-- 2026-08-08: Architectural records are ordinary `MapLayout.wallSegments`. Movement, hitscan/LOS, grenade sweeps, GridNavigator, Worker/standalone authority, and Babylon therefore consume the same IDs and dimensions. Existing roofs remain flat `floorSlabs`, existing internal stairs still reach them, and the historical east-edge roof drop remains possible.
-- 2026-08-08: Removed the former high-quality-only `town-building-silhouette` boxes so the primary building shape no longer changes with quality and no solid-looking rooftop object is presentation-only. The replacement architecture renders on low, medium, and high quality from the authoritative wall records.
-- 2026-08-08: Kept the new rendering bounded without raising a checked-in scene-resource gate. Architectural walls use one closed unit box per color plus thin-instance matrices that reproduce every authoritative wall's exact width, height, depth, and center; ordinary facade batches retain their original material and back-face behavior. A production screenshot exposed an initial shared-material black-wall regression; architecture materials were isolated before the final full-volume representation. NullEngine tests now require facade/architecture material separation, per-wall thin-instance matrix parity, aggregate world-bounds parity, and the unchanged 50-actor scene resource thresholds.
-- 2026-08-08: Static loot generation explicitly ignores high roof-profile walls while retaining base facade, building, ramp, and natural-obstacle clearance. A detached `origin/main@3edf890` comparison across island/town/mixed seeds `0, 1, 7, 42, 2026` proved byte-identical map points, landing zones, terrain, building footprints/stories/stairwells, base walls/openings, slabs, rocks, trees, covers, ramps, roads, skybridges, hospital, ammunition depot, loot, zone counts, and grenade start indexes after omitting only the new profile field and architectural walls.
-- 2026-08-08: A Node 24 multi-seed audit scanned 4,631 buildings and 33,154 architectural wall records across all three maps and seeds `0, 1, 7, 42, 2026, 0xffffffff`. Every layout contained all six profiles; every roof screen cleared its stairwell, every architecture record stayed inside its building footprint, and the minimum measured east escape gap was 5.039m.
-- 2026-08-08: Raised `MULTIPLAYER_PROTOCOL_VERSION` from 9 to 10 and `MATCH_CHECKPOINT_VERSION` from 8 to 9. Protocol 9 clients/servers derive different collision from the same seed, and version-8 rooms must be discarded rather than resumed. Architecture and deployment documentation now record the required maintenance rollout; message and checkpoint state shapes are otherwise unchanged.
-- 2026-08-08: Test-first evidence includes the initial three-map profile test failing because no profile existed, then passing after implementation. Focused Movement and `SimulationCombatWorld` regressions prove the same roof edge blocks actors, shots, and grenade spheres while the existing roof jump/drop test remains valid. A full Greyfurnace door/stair/high-floor/skybridge/cross-building route regression exposed facade piers protruding beyond the navigation envelope; the piers and cornices were moved fully inside the footprint, the route passed, and the footprint invariant is now tested on every representative building.
-- 2026-08-08: Final Node 24 application evidence covers all `49 files / 556 tests`. The broad seven-worker run passed `47 files / 522 tests`; eight Greyfurnace cases exceeded their unchanged 5s timeout only under concurrent long map scans, and `townMapLayout.test.ts` then passed `24/24` with one worker. `islandScene.test.ts` passed `26/26` with one worker, including unchanged deterministic mesh/vertex/index budgets. The final directly affected map/movement/combat files passed `5 files / 121 tests`. Coverage was not run.
-- 2026-08-08: Final standalone evidence passed `3 files / 33 tests`, including checkpoint persistence/restart and real HTTP/WebSocket behavior. The local Worker suite executed no tests because the installed `workerd` cannot load on this host's glibc 2.28 (`GLIBC_2.29` through `GLIBC_2.35` missing); Worker typecheck and dry-run build passed, and feature-branch GitHub Node 24 CI is a mandatory delivery gate for the runtime suite.
-- 2026-08-08: Final three-target `npm run typecheck`, browser build, Worker dry-run, server build, same-origin standalone build, and `git diff --check` passed. Artifact budgets passed without threshold changes after the full-volume thin-instance fix: browser entry `1,145,675 / 1,200,000`, largest non-entry JS `599,667 / 700,000`, all browser JS `3,828,446 / 4,000,000`, chunks `252 / 270`, CSS `45,225 / 50,000`, dist `4,428,689 / 4,550,000`, Worker `576,139 / 615,000`, and standalone server `589,411 / 630,000`.
-- 2026-08-08: The implementation agent performed production Chrome MCP checks at high quality and volume `0` for all three maps, captured screenshots, and personally opened them. Cinder Mist County screenshots `/tmp/last-line-building-mixed-final-mid.png` and `/tmp/last-line-building-mixed-final-5.png` showed the fixed town's varied roof edges/screens alongside untouched rural/forest presentation. Greyfurnace screenshots `/tmp/last-line-building-town-final.png` and `/tmp/last-line-building-town-mid.png` showed dense 1–5 story massing, varied parapets, extended piers, roof screens, stacks, and equipment without clipping or blocked openings. Island screenshots `/tmp/last-line-building-island-final.png` and `/tmp/last-line-building-island-depot.png` showed readable hospital/depot surfaces, varied sparse-building crowns, clear doors/windows, and natural surroundings.
-- 2026-08-08: The first browser round correctly failed visual acceptance after revealing shared-material black walls and insufficiently readable silhouette height; both defects were fixed before final screenshots. Final browser console output contained only the local SwiftShader deprecation warning and all requested assets loaded. Each verification round immediately returned the page to `about:blank` and stopped preview; final cleanup confirmed one `about:blank` page, no preview/Vitest process, and no task listener on port 8798.
+## 审查
 
-## Review
+### 2026-08-08 独立审查第 1 轮
 
-Pending implementation, validation, and independent review.
+- 结论：不通过，发现 1 个 high 和 1 个 medium。
+- High：Babylon 把权威建筑体块压成零厚度平面，导致视觉表面与权威碰撞不一致。
+- Medium：Movement 给建筑轮廓额外增加 0.18m 高度，而战斗、投掷物、导航和渲染使用显式高度。
 
-### 2026-08-08 Independent Review Round 1
+### 2026-08-08 审查发现处理与复审
 
-- Scope: complete uncommitted `feat/building-architectural-variety` diff against confirmed `origin/main@3edf890`, checked against this plan, root `AGENTS.md`, `README.md`, architecture/deployment documentation, and every affected implementation/test file.
-- Result: **not approved**. One high and one medium finding block commit and require implementation fixes plus independent re-review.
-- **High — Babylon collapses every authoritative architectural volume to a zero-thickness plane** (`src/client/render/scenes/IslandScene.ts:866`). `MapWallSegment` records describe boxes with meaningful `width`, `depth`, and `height`, including 0.48–0.72m square facade piers and 0.42–0.52m roof edges/screens, but `createArchitecturalWallMesh` discards the minor horizontal dimension and emits only one quad through the record center. The visible face is therefore offset from both authoritative collision faces by half the discarded thickness, side/top faces do not exist, and square piers become flat signs that disappear edge-on. This violates the plan's substantial-solid-silhouette and single shared geometry contract and can make Movement/Combat/Throwable collisions occur before the rendered surface. The scene tests encode the mismatch by requiring exactly four vertices per architectural wall (`tests/unit/islandScene.test.ts:77`) instead of proving rendered bounds/faces match each authoritative record. Builder must retain bounded batching while rendering a low-vertex closed volume (or otherwise make the authoritative representation genuinely planar) and add geometry-parity assertions.
-- **Medium — Movement gives architectural walls an extra collision height that Combat, throwables, navigation, and rendering do not share** (`src/game/systems/MovementSystem.ts:266`). `collidesWithBlocker` adds `BUILDING_ROOF_CAP_HEIGHT` to every obstacle carrying `obstacleId` except IDs ending in `-sill`; all new architectural walls satisfy that broad condition. Movement therefore treats each parapet, pier, cornice, and roof screen as 0.18m taller than its authoritative `MapWallSegment`, while `SimulationCombatWorld` intersects the exact record (`src/game/systems/SimulationCombatWorld.ts:253`) and Babylon renders only the exact height. An actor can be blocked by an invisible 0.18m band through which shots and grenades pass, contrary to the shared Movement/Combat/Throwable semantics required by the plan. The added movement regression samples the middle of one edge (`tests/unit/movementSystem.test.ts:368`) and does not cover the top boundary. Builder must restrict the legacy cap adjustment to the geometry that actually needs it or encode the intended full height in the shared record, then add a boundary regression comparing consumers.
-- Existing validation evidence accepted without rerun: plan records 556 application tests, 33 standalone tests, three-target typecheck, browser/Worker/server/standalone builds, unchanged budgets, multi-seed layout audit, and implementation-agent production MCP screenshot inspection for all three maps. The local Worker runtime gap on glibc 2.28 remains a delivery/CI residual risk, not a new static finding.
-- No unrelated implementation changes were identified. Protocol 10/checkpoint 9 bumps and the documented maintenance rollout are appropriate for changed deterministic collision geometry, but they do not mitigate the two geometry-parity findings above.
+- 零厚度问题通过完整单位盒和 exact thin-instance 矩阵解决；NullEngine 验证每个记录的尺寸、中心和聚合边界。
+- Movement 额外高度只保留给基础立面；建筑轮廓与其他系统使用同一显式高度。
+- 修复后三项目 typecheck、场景 `26/26`、受影响地图/移动/战斗 `5 files / 122 tests`、standalone `3 files / 33 tests`、各构建、预算和三图 MCP 均通过。
+- 第 2 轮独立复审通过，当时没有剩余 blocker、high、medium。
 
-### Round 1 Finding Disposition
+### 2026-08-09 用户纠正轮次
 
-- **High — zero-thickness Babylon architecture — resolved.** Replaced every architectural plane with one complete Babylon unit box per color and `thinInstance` transforms for all corresponding authoritative records. Every instance matrix uses the record's exact `width / height / depth` and `center`, so all six faces, visible surface positions, and aggregate bounds match the authoritative box instead of collapsing its minor dimension. Eight architecture batches carry 3,219 Greyfurnace records, 14 carry 714 mixed-map records, and sparse island buildings retain the same full-volume representation. Focused NullEngine assertions verify every hospital profile matrix and the aggregate batch min/max bounds against source records to 0.1mm Float32 precision. Complete `islandScene.test.ts` passed `26/26`, including unchanged 50-actor scene-resource thresholds.
-- **Medium — Movement-only 0.18m cap — resolved.** `MovementSystem` now applies `BUILDING_ROOF_CAP_HEIGHT` only to legacy/base facade wall records; architectural records and skybridge rails use their explicit shared heights exactly, matching `SimulationCombatWorld`, throwable sweeps, navigation, and Babylon. The new top-boundary regressions place actor feet, a shot, and a grenade sphere 0.09m above one architectural edge: all three now pass over it, while the middle-height actor/shot/grenade tests still collide with the same record. The focused finding suite passed `3/3`.
-- Post-fix validation accepted for re-review: three-target typecheck; complete scene `26/26`; affected map/movement/combat `5 files / 122 tests`; standalone `3 files / 33 tests`; browser, Worker dry-run, server, and same-origin standalone builds; unchanged artifact budgets; and `git diff --check`.
-- Post-fix production Chrome MCP at high quality and volume `0` was repeated rather than reusing pre-fix screenshots. `/tmp/last-line-building-island-thin-final.png`, `/tmp/last-line-building-town-thin-final.png`, and `/tmp/last-line-building-mixed-thin-final.png` were personally opened by the implementation agent and show complete profile front/side/top faces from oblique angles without edge-on disappearance, black faces, clipping, or blocked openings. Each round ended at the sole `about:blank` page with its preview stopped; console output remained limited to the local SwiftShader warning.
+- 用户指出此前所谓“建筑轮廓”主要变成了屋顶护栏，偏离需求。
+- 本轮必须验证所有 `roof-edge` 记录为 0，屋顶机房/设备体块有真实宽度和深度、内缩于建筑占地、避开楼梯开口。
+- 必须重新进行三张地图 production MCP，亲自确认屋顶周边没有连续护栏，并完成独立审查者 与 Codex 闭环。
 
-### 2026-08-08 Independent Review Round 2
+### 2026-08-09 独立审查第 1 轮
 
-- Scope: static re-review of the Round 1 incremental fixes and their compatibility with the complete uncommitted branch diff against confirmed `origin/main@3edf890`, using this plan's finding dispositions and recorded post-fix validation evidence without rerunning tests, builds, budgets, or browser checks.
-- Result: **approved for the implementation commit**. No blocker, high, or medium finding remains, and no new blocker/high/medium regression was identified.
-- **Round 1 high closed.** `createArchitecturalWallInstances` now creates one complete six-face unit box per architecture color and composes one exact scale/translation matrix from every authoritative wall's `width`, `height`, `depth`, and center. The matrix buffer count is the source-record count, `thinInstanceRefreshBoundingInfo(true)` recomputes aggregate bounds before the static environment mesh is frozen, and Babylon's thin-instance render path draws the matrix-buffer instances rather than an additional source box at the origin. Facade and architecture materials remain separate; closed volumes restore normal back-face culling and one-sided lighting, ordinary wall/depot/hospital texture isolation is preserved, and architecture remains bounded to one geometry/draw batch per color. The NullEngine regression verifies every hospital architecture matrix, aggregate world min/max bounds, source counts, closed-box vertices, material isolation, all-map wall presence across quality levels, and the unchanged scene-resource gates.
-- **Round 1 medium closed.** Movement's legacy `BUILDING_ROOF_CAP_HEIGHT` extension is now restricted to records with no role or `role: "facade"` and therefore excludes both `role: "architectural"` and `role: "skybridge-rail"`. Architectural Movement, hitscan, throwable, navigation, and Babylon consumers now use the explicit shared record height. The regressions retain middle-height actor/shot/grenade blocking and prove an actor, shot, and finite-radius grenade pass above the same edge's explicit top boundary.
-- The fixes remain compatible with the complete feature diff: deterministic profile selection and wall generation are unchanged, stair/roof escape and skybridge contracts remain intact, static loot stays byte-stable by using pre-profile geometry, and protocol 10/checkpoint 9 still correctly reject older deterministic collision semantics.
-- Accepted evidence: post-fix three-target typecheck; scene `26/26`; affected map/movement/combat `5 files / 122 tests`; standalone `3 files / 33 tests`; browser, Worker dry-run, server, and standalone builds; unchanged artifact budgets; clean `git diff --check`; and implementation-agent production MCP inspection of all three maps at volume `0`. The host's glibc 2.28 still prevents local `workerd` execution, so the recorded feature-branch Node 24 CI Worker suite remains the delivery gate after push.
+- 结论：不通过，发现 4 个 medium；未发现 blocker 或 high。审查接受确定性场景预算调整与 Vitest worker 6GB heap，认为二者有实测依据且没有删测试、增加 worker 或放宽对象数量门槛。
+- 中风险 1：混合地图原 6 条桥未在算法上保证 X/Z 双方向，且相同 `buildingId + side` 可能重复使用，开口生成又通过 `find()` 错绑第一座桥。修复后候选按端点侧去重，先确定性选择兼容的 X/Z 各 1 条再填满；墙体开口直接携带具体桥引用。一层城镇建筑可以成为短桥候选，被选中后确定性提升到两层并生成完整内楼梯/楼板，桥间隙仍不超过 36m。用户随后要求增加连桥，最终数量提高到 8 条；100 个 mixed seed 扫描和聚焦测试验证 8 条、双方向、端点唯一、桥端至少两层且门洞与桥中心对齐。
+- 中风险 2：`town-poi-paving` 的一半仍使用棕橙 `poiAccent` 覆盖大面积城市地面。修复后铺地只使用 `poi-dark-material` 与灰色 `road-shoulder-material`；`poiAccent` 仅保留给小面积锈迹/工业道具。场景回归明确禁止 POI 铺地使用 `poi-accent-material`。
+- 中风险 3：架构文档仍写灰炉城 32 条桥，纹理计划又声称所有场景预算不变。架构文档先更新为 48 条，并在用户追加连桥需求后同步为最终 56 条；纹理计划明确自身只放宽原始 `dist`，多边形建筑场景预算调整属于建筑计划的独立审查决策。
+- 中风险 4：部分历史计划仍有英文自然语言标签。全部改为中文；代码标识、命令、路径和第三方专名继续按规则保留。
+- 审查额外指出 Bot 撤退掩体仍按世界轴矩形估算是低风险残余；导航会拒绝非法落点，本轮不扩大到该非阻塞优化。
+- 修复后验证：三目标 typecheck 通过；首轮 100 个 mixed seed 扫描全部满足 6 条桥、X/Z 双方向、端点侧唯一和桥端至少两层；受影响逻辑 `5 files / 161 tests`、完整 `IslandScene` `27/27` 通过。用户追加连桥需求后，100 个 mixed seed 重新验证最终 8 条桥、X/Z 双方向和端点侧唯一，100 个 town seed 验证最终 56 条桥且所有桥端至少两层。灰炉城与烬岚郡 production Chrome 复拍均使用音量 `0`，确认大面积 POI 铺地为灰色、桥端提升后无穿模/异常拉高，控制台仅 SwiftShader 警告；每轮都立即回到 `about:blank`、停止 preview、删除截图并释放 4173。
+- 修复后最终产物与预算：浏览器入口 `1,159,804 / 1,200,000`，最大非入口 `599,667 / 700,000`，全部浏览器 JavaScript `3,842,575 / 4,000,000`，chunk `252 / 270`，CSS `45,225 / 50,000`，整个 `dist` `4,665,740 / 4,700,000`，Worker `601,614 / 615,000`，standalone `613,470 / 630,000`。
+- 2026-08-09 用户追加连桥后的最终门禁：Node 24.18.1 三目标 typecheck 通过；完整源码单元 `50 files / 570 tests`、standalone `3 files / 33 tests` 通过；浏览器 production、Worker dry-run、服务端 bundle、同源 standalone build 和预算均通过，最终产物与上一条记录一致。Worker runtime 套件仍在测试执行前被本机 glibc 2.28 阻止，`workerd` 明确缺少 GLIBC 2.29–2.35；Worker typecheck/dry-run 已通过，分支 CI 必须补充运行时证据。
+- 2026-08-09 连桥 production Chrome 复验使用音量 `0` 和真实 `createIslandScene` production bundle，通过临时独立验收页把相机放在权威桥记录旁，不修改仓库、权威状态或桥几何。实现 Agent 亲自检查灰炉城 `town-skybridge-0`、烬岚郡 X 向 `mixed-skybridge-0` 与 Z 向 `mixed-skybridge-1`：桥面、两侧栏杆、二层门洞和两端建筑连续，未见悬空、穿墙、异常拉高或农村/森林误生成桥。控制台仅 SwiftShader 警告；每轮即时回到 `about:blank`，最终删除全部 `/tmp/last-line-*` 临时页/产物、停止 4173，并确认无 preview/Vitest 进程。
+- 2026-08-09 历史计划中文化收口：反引号感知扫描确认 `.agents/plans/*.md` 的 `Task/Phase/Finding/Findings/disposition/Independent/Final` 自然语言标签残留为 0；`第 1 轮0`、`计划ned`、`构建er` 和误译的 `code-审查者/code-实现 Agent` 残留为 0。稳定 `code-reviewer`、`code-writer` 与 `/home/lingchen.judy/ai-workspace/subagents/code-reviewer.md` 等真实标识/路径保持原文，`git diff --check` 通过。
+
+### 2026-08-09 独立审查第 3 轮
+
+- 结论：**通过，可进入实现提交。** Blocker、high、medium、low 均为 0。
+- 第 2 轮唯一剩余的历史计划中文化 medium 已关闭。独立审查确认英文自然语言标签和机械替换损坏均已清零，`code-reviewer`、`code-writer` 及其真实提示词路径等稳定标识保持原文。
+- 用户追加的连桥增量通过静态合同复核：灰炉城从 64 个核心街区中按种子选择 56 个生成桥，仍保留 8 个无桥街区；烬岚郡生成 8 条短桥，继续保证 X/Z 双方向、端点侧唯一、每栋最多两桥、桥端至少两层和门洞绑定具体桥。
+- `AGENTS.md`、架构文档、部署文档、测试和本计划均使用最终 56/8 数量。审查接受外层已记录的种子扫描、Node 24 自动门禁、预算和 production Chrome 证据；本机 `workerd` 的 glibc 缺口仍是环境限制，不构成本轮审查发现。

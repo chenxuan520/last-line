@@ -96,24 +96,24 @@ describe("SimulationCombatWorld", () => {
     expect(wallHit?.normal.z).toBeLessThan(-0.9);
   });
 
-  it("uses the same architectural roof edge for shots and grenade sweeps", () => {
+  it("uses the same architectural rooftop volume for shots and grenade sweeps", () => {
     const layout = createMapLayout(0);
-    const edge = layout.wallSegments.find((wall) =>
+    const volume = layout.wallSegments.find((wall) =>
       wall.role === "architectural" &&
-      wall.architecturalFeature === "roof-edge" &&
+      wall.architecturalFeature === "roof-volume" &&
       wall.width > wall.depth
     );
-    if (!edge) throw new Error("architectural roof edge missing");
+    if (!volume) throw new Error("architectural rooftop volume missing");
     const shooter = createActorState("shooter", "player", {
-      x: edge.center.x,
-      y: edge.center.y,
-      z: edge.center.z - edge.depth / 2 - 3,
+      x: volume.center.x,
+      y: volume.center.y,
+      z: volume.center.z - volume.depth / 2 - 3,
     });
     const state = createState(shooter);
     shooter.position = {
-      x: edge.center.x,
-      y: edge.center.y,
-      z: edge.center.z - edge.depth / 2 - 3,
+      x: volume.center.x,
+      y: volume.center.y,
+      z: volume.center.z - volume.depth / 2 - 3,
     };
     const world = new SimulationCombatWorld(state);
 
@@ -121,19 +121,63 @@ describe("SimulationCombatWorld", () => {
     const grenade = world.traceThrowable(shooter.position, { x: 0, y: 0, z: 6 }, 0.18);
 
     expect(shot).toMatchObject({ hitType: "environment", targetId: null });
-    expect(shot.point.z).toBeCloseTo(edge.center.z - edge.depth / 2, 5);
+    expect(shot.point.z).toBeCloseTo(volume.center.z - volume.depth / 2, 5);
     expect(shot.normal.z).toBeLessThan(-0.9);
-    expect(grenade?.point.z).toBeCloseTo(edge.center.z - edge.depth / 2 - 0.181, 2);
+    expect(grenade?.point.z).toBeCloseTo(volume.center.z - volume.depth / 2 - 0.181, 2);
     expect(grenade?.normal.z).toBeLessThan(-0.9);
 
-    const wallTop = edge.center.y + edge.height / 2;
+    const wallTop = volume.center.y + volume.height / 2;
     const aboveOrigin = {
-      x: edge.center.x,
+      x: volume.center.x,
       y: wallTop + 0.09,
-      z: edge.center.z - edge.depth / 2 - 2,
+      z: volume.center.z - volume.depth / 2 - 2,
     };
     expect(world.traceShotDetailed(trace(aboveOrigin, { x: 0, y: 0, z: 1 }, 4)).hitType).toBe("miss");
     expect(world.traceThrowable(aboveOrigin, { x: 0, y: 0, z: 4 }, 0.05)).toBeNull();
+  });
+
+  it("uses rotated polygon walls for shots and grenade sweeps", () => {
+    const layout = createMapLayout("town", 0);
+    const wall = layout.wallSegments.find((candidate) =>
+      candidate.id === "town-building-0-2-wall-polygon-0-0-left"
+    );
+    if (!wall) throw new Error("rotated polygon wall missing");
+    const yaw = wall.rotationY ?? 0;
+    const normalX = -Math.sin(yaw);
+    const normalZ = -Math.cos(yaw);
+    const origin = {
+      x: wall.center.x + normalX * (wall.depth / 2 + 3),
+      y: wall.center.y,
+      z: wall.center.z + normalZ * (wall.depth / 2 + 3),
+    };
+    const direction = { x: -normalX, y: 0, z: -normalZ };
+    const shooter = createActorState("shooter", "player", origin);
+    const state = createState(shooter);
+    state.mapId = layout.mapId;
+    state.mapSeed = layout.seed;
+    shooter.position = origin;
+    const world = new SimulationCombatWorld(state, true, layout);
+    const completeScan = new SimulationCombatWorld(state, false, layout);
+
+    const shot = world.traceShotDetailed(trace(origin, direction, 8));
+    const grenade = world.traceThrowable(origin, {
+      x: direction.x * 8,
+      y: 0,
+      z: direction.z * 8,
+    }, 0.18);
+    const completeShot = completeScan.traceShotDetailed(trace(origin, direction, 8));
+    const completeGrenade = completeScan.traceThrowable(origin, {
+      x: direction.x * 8,
+      y: 0,
+      z: direction.z * 8,
+    }, 0.18);
+
+    expect(shot).toMatchObject({ hitType: "environment", targetId: null });
+    expect(shot).toEqual(completeShot);
+    expect(grenade).toEqual(completeGrenade);
+    expect(Math.abs(shot.normal.x * normalX + shot.normal.z * normalZ)).toBeGreaterThan(0.95);
+    expect(Math.abs((grenade?.normal.x ?? 0) * normalX + (grenade?.normal.z ?? 0) * normalZ))
+      .toBeGreaterThan(0.95);
   });
 
   it("sweeps grenade spheres against ramp faces, sides, and ends consistently", () => {

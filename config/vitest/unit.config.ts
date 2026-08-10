@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["tests/unit/**/*.test.ts"],
+    execArgv: ["--max-old-space-size=6144"],
     coverage: {
       provider: "v8",
       include: ["src/**/*.ts"],

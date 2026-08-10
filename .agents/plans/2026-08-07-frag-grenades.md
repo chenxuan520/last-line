@@ -1,54 +1,54 @@
-# Authoritative Frag Grenades
+# 权威破片手雷
 
-## Goal
+## 目标
 
-Add one supported throwable type, the fragmentation grenade, across single-player and authoritative multiplayer without changing the existing weapon, ammunition, equipment, or medical loot distribution.
+在不改变现有武器、弹药、装备和医疗物资分布的前提下，为单机和权威联机模式加入一种受支持的投掷物：破片手雷。
 
-## Acceptance
+## 验收标准
 
-- Both maps deterministically add exactly 10 supplemental grenade loot points after the existing 240 base and 10 supplemental medical points; every grenade point contains exactly 2 frag grenades.
-- Existing base loot and supplemental medical positions, item categories, quantities, ordering, and seeded distribution remain unchanged.
-- Frag grenades occupy backpack stacks rather than either weapon slot. Picking up, dropping, death drops, throwing, and stack limits use the existing authoritative inventory path.
-- Desktop players select grenades with `3`, hold primary fire to preview/aim, release to throw, use secondary fire to toggle high/low throw, and cancel by selecting a weapon. Touch players use a dedicated grenade action and the existing right-side drag-to-aim interaction.
-- Throw preparation is presentation/input state only. A grenade is consumed only after the authoritative simulation accepts a one-shot throw command.
-- Active grenades are JSON-serializable authoritative match state with stable IDs. Fixed-step flight, terrain/authoritative-geometry collision, bounce, fuse, explosion, radial falloff damage, and obstruction checks do not depend on Babylon meshes.
-- Simultaneous grenade damage remains independent of command insertion order and actor kind. Self-damage is allowed; armor/helmet behavior follows the reviewed grenade damage contract.
-- Multiplayer clients may preview the local trajectory, but grenade creation, inventory consumption, flight, explosion, damage, death, and resulting loot remain server-authoritative. Worker and standalone share the same protocol and match runtime.
-- Bots use the same inventory and throw command as humans. They consider grenades only on staggered tactical updates, use visible or bounded remembered target positions, test a bounded number of trajectories, preserve human-like error, and avoid obviously unsafe throws.
-- Grenade meshes, trajectory markers, explosion effects, and sounds are bounded/reused presentation resources. Automated and browser verification keeps volume at `0`.
-- The user-provided grenade image is consumed through a stable asset ID after it appears on the updated main branch; no generated substitute asset is introduced.
-- README, architecture, asset documentation, controls help, and repository agent guidance are updated where the long-term contract changes.
-- Required focused tests, full validation, local production-build browser verification, independent reviewer/re-review, implementation commit, GitHub pull request, and `@codex` review loop complete with no unresolved blocker, high, or medium findings.
+- 两类地图在现有 240 个基础物资点和 10 个补充医疗点之后，确定性追加恰好 10 个手雷物资点；每个点包含恰好 2 枚破片手雷。
+- 现有基础物资与补充医疗点的位置、物品分类、数量、顺序和种子化分布保持不变。
+- 破片手雷占用背包堆叠，不占两个武器槽。拾取、丢弃、死亡掉落、投掷和堆叠上限都使用现有权威背包路径。
+- 桌面端按 `3` 选择手雷，按住主射击预览和瞄准，松开后投掷，使用副射击切换高抛/低抛，选择武器可取消。触屏端使用专用手雷操作和现有右侧拖动瞄准交互。
+- 投掷准备只属于表现和输入状态。只有权威模拟接受一次性投掷命令后才消耗手雷。
+- 活跃手雷属于带稳定 ID、可 JSON 序列化的权威比赛状态。固定步长飞行、地形/权威几何碰撞、反弹、引信、爆炸、径向衰减伤害和遮挡检查都不依赖 Babylon 网格。
+- 同时发生的手雷伤害与命令插入顺序及角色类型无关。允许自伤；护甲和头盔行为遵循已经审查的手雷伤害合同。
+- 联机客户端可以预览本地轨迹，但手雷创建、背包消耗、飞行、爆炸、伤害、死亡和后续掉落都保持服务端权威。Worker 与 standalone 共用相同协议和比赛运行时。
+- Bot 使用与人类相同的背包和投掷命令。它们只在错开的战术更新中考虑手雷，使用可见或有界记忆的目标位置，检查有界数量的轨迹，保留接近人类的误差，并避免明显不安全的投掷。
+- 手雷网格、轨迹标记、爆炸效果和声音都是有界复用的表现资源。自动化与浏览器验证期间音量保持 `0`。
+- 用户提供的手雷图片进入更新后的主分支后，通过稳定资源 ID 使用；不得引入生成式替代图片。
+- 长期合同发生变化时，同步更新 README、架构文档、资源文档、操作帮助和仓库 Agent 指南。
+- 完成必要聚焦测试、完整验证、本地 production build 浏览器验证、独立审查者/复审、实现提交、GitHub PR 和 `@codex` 审查闭环，不得遗留 blocker、high 或 medium 审查发现。
 
-## Implementation
+## 实现
 
-- Re-fetch and rebase onto `origin/main` before implementation integration and again immediately before the implementation commit. Confirm the supplied grenade image and wire it through the existing asset manifest/catalog.
-- Extend map layout generation with a separate deterministic supplemental grenade-point set. Preserve all pre-existing random streams and append-only loot ordering so prior seeded layouts remain stable.
-- Add throwable item/config/state/event types and a dedicated authoritative throwable system. Keep `GameMode` generic and keep all physics/collision/damage rules under `src/game/`.
-- Extend `SimulationCombatWorld` with explicit throwable sweep and explosion-occlusion queries rather than treating presentation meshes as collision or overloading hitscan behavior.
-- Extend `ActorCommand`, protocol sanitization, command inbox one-shot handling, checkpoint validation, snapshots, visibility filtering, and multiplayer presentation for authoritative grenades.
-- Add desktop/touch selection, hold/release/cancel semantics, trajectory preview, inventory/HUD counts, stable asset rendering, pooled active-grenade presentation, and bounded explosion effects.
-- Add bounded bot grenade selection and aiming through `BotController`; controllers produce commands only and never mutate state.
-- Add deterministic unit tests for supplemental point invariants, inventory semantics, trajectory/collision/fuse/explosion/occlusion, simultaneous ordering, command sanitization/inbox behavior, bot safety/knowledge bounds, multiplayer snapshot/checkpoint persistence, scene lifecycle, and resource bounds.
+- 实现集成前以及实现提交前再次抓取并 rebase 到 `origin/main`。确认用户提供的手雷图片，并通过现有资源清单/目录接入。
+- 为地图布局生成增加独立、确定性的补充手雷点集合。保留所有既有随机流和只追加的物资顺序，使旧种子布局保持稳定。
+- 增加投掷物物品、配置、状态和事件类型，以及专用权威投掷物系统。保持 `GameMode` 通用，全部物理、碰撞和伤害规则放在 `src/game/`。
+- 为 `SimulationCombatWorld` 增加显式投掷物 sweep 和爆炸遮挡查询，不把表现网格当碰撞，也不滥用 hitscan 行为。
+- 为权威手雷扩展 `ActorCommand`、协议清洗、命令收件箱一次性处理、checkpoint 校验、快照、可见性过滤和联机表现。
+- 加入桌面/触屏选择、按住/松开/取消语义、轨迹预览、背包/HUD 数量、稳定资源渲染、活跃手雷表现池和有界爆炸效果。
+- 通过 `BotController` 加入有界的 Bot 手雷选择与瞄准；控制器只产生命令，绝不直接修改状态。
+- 增加确定性单元测试，覆盖补充点不变量、背包语义、轨迹/碰撞/引信/爆炸/遮挡、同时行动顺序、命令清洗/收件箱行为、Bot 安全与认知边界、联机快照/checkpoint 持久化、场景生命周期和资源上限。
 
-## Build
+## 构建
 
-- Rebased the implementation worktree onto `origin/main@a17dffa`, which contains the user-supplied `public/assets/ui/item-grenade.webp`; the implementation consumes the existing `ui.item.grenade` stable asset ID and does not add a substitute image.
-- Both map families preserve the pre-existing 240 base and 10 supplemental medical points, then append 10 deterministic grenade points with `grenade.frag ×2`. Legacy island payload hashes remain unchanged when the append-only grenade fields are excluded, and Greyfurnace grenade points use distinct reachable ground-floor buildings.
-- Added authoritative JSON state, one-shot commands, fixed 30Hz-substep flight, finite sphere sweeps, bounce damping, a 3.5s fuse, 8m obstructed radial falloff, self-damage, blast-origin feedback, deterministic sub-tick phases, death drops, protocol v7 snapshots, checkpoint v6 restoration, and shared Worker/standalone room validation.
-- Added desktop `3` selection, high/low throw switching, hold-preview/release-throw, weapon cancellation, touch grenade count and drag-to-aim, cancellation-safe pointer handling, a procedural first-person grenade, bounded 20-grenade/24-trajectory presentation pools, four explosion meshes, bounded explosion voices, and the supplied HUD/backpack image.
-- Bots use visible targets only, human-like landing error, a bounded high-arc solve, self-distance/error checks, staggered evaluation, 12–20s cooldowns, and one authoritative six-active-AI-grenade budget shared by regular Bots and disconnected-human takeovers. AI provenance is persisted on active grenades so reconnects cannot bypass the cap.
-- Full Node.js 24 `npm run typecheck` passes, including application, Worker/test, and standalone projects.
-- Reviewer-focused unit validation passes 147/147 after the final restoration, takeover-AI, cancellation, ramp-sweep, and mixed damage-phase fixes. Earlier focused suites also passed authoritative grenade rules, map append invariants, Greyfurnace reachability, input, protocol/inbox, checkpoint, scene lifecycle, asset decode, and bounded presentation checks.
-- `npm run test:server` passes 25/25 real standalone integration tests, including HTTP/WebSocket flow, restart/persistence, process locking, room eviction, alarm generations, graceful shutdown, and same-version corrupt-checkpoint/member deletion.
-- Full unit runs reached 432/434 functional assertions; the only two failures were pre-existing map wall-clock timeouts under host-wide 64-core saturation. A read-only `origin/main` benchmark exceeded the same 5s threshold on this host, while the affected map assertions pass individually/with bounded command-level timeouts. Repository timeout gates were not weakened.
-- Worker runtime tests could not start because the host is Debian glibc 2.28 while the checked-in `workerd` binary requires GLIBC 2.29–2.35. Worker test TypeScript compilation passes, Worker same-version corruption tests are checked in, and `npm run build:worker` produces a successful Wrangler dry-run bundle. Docker/Podman is unavailable on the host, so no newer-glibc container fallback was possible.
-- `npm run build`, `npm run build:server`, `npm run build:worker`, and final `npm run build:standalone` complete. Final `npm run check:budgets` passes: browser entry `1,095,394 / 1,100,000`, largest non-entry `613,551 / 650,000`, all browser JS `3,792,049 / 3,900,000`, chunks `252 / 260`, CSS `45,161 / 46,000`, entire dist `4,366,975 / 4,450,000`, Worker `493,051 / 500,000`, standalone `510,265 / 515,000`.
-- With the user's explicit allowance for at most 20% budget growth, only the four exceeded raw-artifact thresholds changed: browser entry `1,075,000 → 1,100,000` (+2.3%), CSS `45,000 → 46,000` (+2.2%), Worker `460,000 → 500,000` (+8.7%), and standalone `480,000 → 515,000` (+7.3%). Aggregate JS, chunk count, largest non-entry, and entire-dist budgets remain unchanged.
-- Local Chrome production-build verification ran with volume `0`: the grenade WebP decoded at 256×256, ABOUT and in-match controls exposed desktop/mobile grenade instructions, the single-player HUD loaded, and no application console errors occurred. Only expected software-WebGL warnings were present. The verification page/context and preview server were closed immediately; only `about:blank` remained and port 8797 was clear.
+- 实现 worktree 已 rebase 到包含用户资源 `public/assets/ui/item-grenade.webp` 的 `origin/main@a17dffa`；实现使用既有稳定资源 ID `ui.item.grenade`，没有增加替代图片。
+- 两类地图保留既有 240 个基础点和 10 个补充医疗点，再追加 10 个确定性 `grenade.frag ×2` 手雷点。排除只追加的手雷字段后，旧岛屿 payload 哈希不变；灰炉城手雷点使用彼此不同且可达的一层建筑。
+- 新增权威 JSON 状态、一次性命令、固定 30Hz 子步飞行、有限球体 sweep、反弹阻尼、3.5 秒引信、8m 有遮挡径向衰减、自伤、爆炸来源反馈、确定性子 tick 阶段、死亡掉落、协议 v7 快照、checkpoint v6 恢复，以及 Worker/standalone 共用的房间校验。
+- 新增桌面端 `3` 选择、高抛/低抛切换、按住预览/松开投掷、武器取消、触屏手雷数量和拖动瞄准、取消安全的指针处理、程序化第一人称手雷、有界的 20 手雷/24 轨迹表现池、4 个爆炸网格、有界爆炸声源和用户提供的 HUD/背包图片。
+- Bot 只使用可见目标，保留接近人类的落点误差，使用有界高抛求解、自身距离/误差检查、错开评估和 12–20 秒冷却；普通 Bot 与断线人类接管 AI 共用权威的 6 枚活跃 AI 手雷上限。活跃手雷持久化 AI 来源，重连不能绕过上限。
+- 完整 Node.js 24 `npm run typecheck` 通过，覆盖应用、Worker/测试和 standalone 项目。
+- 最终恢复、接管 AI、取消、坡道 sweep 和混合伤害阶段修复后，审查者 聚焦单元验证 `147/147` 通过。此前聚焦套件也覆盖并通过权威手雷规则、地图只追加不变量、灰炉城可达性、输入、协议/收件箱、checkpoint、场景生命周期、资源解码和有界表现。
+- `npm run test:server` 的 `25/25` 个真实 standalone 集成测试通过，覆盖 HTTP/WebSocket 流程、重启/持久化、进程锁、房间驱逐、alarm generation、优雅关闭和同版本损坏 checkpoint/成员删除。
+- 完整单元测试达到 `432/434` 个功能断言；仅有两个失败是主机 64 核全负载下既有地图 wall-clock 超时。只读 `origin/main` 基准在同一主机也超过相同 5 秒门槛，而受影响地图断言单独运行或使用有界命令级超时均通过。仓库超时门禁未被削弱。
+- Worker runtime 测试因主机 Debian glibc 2.28 无法启动；仓库内 `workerd` 需要 GLIBC 2.29–2.35。Worker 测试 TypeScript 编译通过，已提交 Worker 同版本损坏数据测试，`npm run build:worker` 成功生成 Wrangler dry-run bundle。主机没有 Docker/Podman，因此无法使用新版 glibc 容器兜底。
+- `npm run build`、`npm run build:server`、`npm run build:worker` 和最终 `npm run build:standalone` 完成。最终 `npm run check:budgets` 通过：浏览器入口 `1,095,394 / 1,100,000`，最大非入口 chunk `613,551 / 650,000`，浏览器全部 JavaScript `3,792,049 / 3,900,000`，chunk `252 / 260`，CSS `45,161 / 46,000`，整个 `dist/` `4,366,975 / 4,450,000`，Worker `493,051 / 500,000`，standalone `510,265 / 515,000`。
+- 根据用户明确允许最多增长 20% 的决定，只调整了 4 个超限原始产物门槛：浏览器入口 `1,075,000 → 1,100,000`（+2.3%）、CSS `45,000 → 46,000`（+2.2%）、Worker `460,000 → 500,000`（+8.7%）和 standalone `480,000 → 515,000`（+7.3%）。总 JavaScript、chunk 数、最大非入口 chunk 和整个 `dist/` 预算保持不变。
+- 本地 Chrome production build 验证在音量 `0` 下完成：手雷 WebP 以 256×256 解码，ABOUT 与对局操作帮助显示桌面/移动端手雷说明，单机 HUD 正常加载，没有应用控制台错误。只有预期的软件 WebGL 警告。验证页面/context 与 preview 服务立即关闭；最终只剩 `about:blank`，8797 端口空闲。
 
-## Review
+## 审查
 
-- Round 1 independent static review found one high and four medium issues: incomplete v6 checkpoint/room restoration validation, implicit mixed damage-phase ordering, a racy controller-only Bot grenade limit, touch cancellation throwing grenades, and point-ray ramp collision. All were verified and resolved through complete checkpoint/member validation plus Worker/standalone deletion coverage, an explicit shots → grenades → zone contract with mixed-phase tests, a deterministic authoritative AI grenade cap, separate touch cancel semantics, and finite-rectangle sphere sweep with indexed/full-scan parity.
-- Round 2 independent static re-review confirmed the round-1 high and three medium fixes, then found two remaining medium issues: impossible `ready`/safe-zone-stage checkpoints could still restore, and player-kind takeover AI could bypass the cap. Restoration now accepts only recoverable flight/combat/consistent-finished states with a production-range safe-zone stage; AI command provenance is passed into the authoritative simulation and persisted on active grenades. Unit, standalone, and typed Worker corruption/takeover cases cover both fixes.
-- Round 3 independent static re-review inspected the final diff rebased onto `origin/main@a17dffa` with read-only `git diff`/source commands and reported no remaining blocker, high, or medium findings. Its only non-blocking note was that the exact invalid-stage deletion case runs in shared-validator unit and standalone coverage rather than the local Worker runtime, whose tests remain blocked by host glibc.
+- 第 1 轮独立静态审查发现 1 个 high 和 4 个 medium：v6 checkpoint/房间恢复校验不完整、混合伤害阶段顺序隐式、只在控制器侧实现的 Bot 手雷上限存在竞态、触屏取消会投出手雷，以及坡道只使用点射线碰撞。全部问题经核实后解决：补齐 checkpoint/成员校验及 Worker/standalone 删除覆盖，明确 shots → grenades → zone 合同并增加混合阶段测试，实现确定性权威 AI 手雷上限，拆分触屏取消语义，并实现带索引/全扫描一致性的有限矩形球体 sweep。
+- 第 2 轮独立静态复审确认第 1 轮的 high 和 3 个 medium 已关闭，随后发现 2 个剩余 medium：不可能的 `ready`/安全区阶段 checkpoint 仍可能恢复，以及 player 类型的接管 AI 可以绕过上限。恢复逻辑现在只接受可恢复的 flight/combat/一致 finished 状态及生产范围内的安全区阶段；AI 命令来源传入权威模拟并持久化到活跃手雷。单元、standalone 和带类型的 Worker 损坏/接管测试覆盖这两项修复。
+- 第 3 轮独立静态复审使用只读 `git diff`/源码命令检查 rebase 到 `origin/main@a17dffa` 的最终差异，结论为没有剩余 blocker、high 或 medium。唯一非阻塞说明是：精确的非法阶段删除场景由共享校验器单元测试和 standalone 覆盖，而本地 Worker runtime 测试仍受主机 glibc 限制。

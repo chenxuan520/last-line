@@ -44,7 +44,7 @@ describe("town map layout", () => {
     expect(first.obstacles).toHaveLength(448);
     expect(first.obstacles.filter((building) => building.storyCount > 1)).toHaveLength(233);
     expect(first.obstacles.filter((building) => building.storyCount >= 4)).toHaveLength(54);
-    expect(first.skybridges).toHaveLength(32);
+    expect(first.skybridges).toHaveLength(56);
     expect(first.roadSegments.length).toBeGreaterThanOrEqual(100);
     expect(first.roadSegments.length).toBeLessThanOrEqual(170);
     expect(first.lootSpawnPoints).toHaveLength(

@@ -48,7 +48,7 @@
 1. 用户要求把灰炉城从宏观正交棋盘改造成更自然的城市路网。
 2. 我确认 `main`、工作区和关联 plan，完成道路图、街区退线、POI、cover、tree、natural detail、协议和 checkpoint 修改。
 3. 我执行了 typecheck、完整测试、构建、预算检查、压力验证和 Chrome 验收。
-4. 独立 reviewer 提出两项 medium 和一项 low；我逐项修复并完成复审。
+4. 独立审查者 提出两项 medium 和一项 low；我逐项修复并完成复审。
 5. 提交前执行 `git pull`，确认 `main` 与远端一致。
 6. 创建实现提交 `addd672 feat: create organic Greyfurnace streets` 并推送。
 
@@ -60,7 +60,7 @@
 8. 我查询 Cloudflare Worker deployment，获得 Worker Version ID。
 9. 我运行 production multiplayer smoke，并额外验证 island/town 私人房。
 10. 这些事实全部是在实现提交 `addd672` 已经创建并推送后获得的。
-11. 我错误地再次编辑关联 plan，把步骤 7 至 9 的结果追加到 `## Build`。
+11. 我错误地再次编辑关联 plan，把步骤 7 至 9 的结果追加到 `## 构建`。
 12. 此时工作区只剩一个 plan 文件变更。这本应触发立即停止。
 13. 我没有执行 staged-path 禁止检查，反而把 plan 加入暂存区。
 14. 我创建 `724eadd docs: record organic town deployment`。
@@ -255,7 +255,7 @@ all stagedPaths start with .agents/plans/
 | --- | --- | --- |
 | 实现文件 | 与实现一起提交 | 不适用 |
 | 测试结果 | 可写 plan | 只报告用户 |
-| reviewer 结论 | 可写 plan | 只报告用户 |
+| 审查者 结论 | 可写 plan | 只报告用户 |
 | commit hash | 不可能在 commit 前知道最终值 | 只报告用户 |
 | CI run/result | 通常提交后得知 | 只报告用户 |
 | Pages/Worker deployment | 通常提交后得知 | 只报告用户 |
@@ -286,7 +286,7 @@ all stagedPaths start with .agents/plans/
 - “文档、部署、清理、记账、工作区卫生”不能推导出例外；
 - Worker 部署验证不会重新授予仓库写权限。
 
-### 7.3 Git pre-commit hook
+### 7.3 Git 提交前 hook
 
 仓库新增 `.githooks/pre-commit`。hook 直接读取 Git index：
 
@@ -350,7 +350,7 @@ core.hooksPath=.githooks
 
 执行 commit 前必须依次检查：
 
-1. reviewer 门禁是否完成；
+1. 审查者 门禁是否完成；
 2. 所有验证是否完成；
 3. staged paths 是否只包含当前任务文件；
 4. staged paths 是否全部属于 `.agents/plans/`；若是，停止；
@@ -430,7 +430,7 @@ core.hooksPath=.githooks
 - 全局 OpenCode 配置中的 `AGENTS.md`；
 - 实际加载的全局 OpenCode `agents/code-writer.md`；
 - 与当前任务相关的 project plan；
-- `customize-opencode` skill。
+- `customize-opencode` 技能。
 
 发现的正向记录要求主要来自项目 `AGENTS.md` 和全局 code-writer 的 Plan 联动章节：实现、验证、部署信息应写入关联 plan。但没有任何一条提示词要求创建 plan-only commit，也没有任何一条提示词允许在实现 commit 后回写 plan。相反，当前项目规则明确禁止这种行为。
 

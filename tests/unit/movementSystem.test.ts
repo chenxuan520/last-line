@@ -3,6 +3,7 @@ import { GridNavigator } from "../../src/ai/navigation/GridNavigator";
 import {
   BUILDING_ROOF_CAP_HEIGHT,
   createMapLayout,
+  getBuildingRoofNavigationPoint,
   getTerrainHeight,
   MAP_HALF_SIZE,
   MAP_ROCK_OBSTACLES,
@@ -10,6 +11,7 @@ import {
   MAP_WALL_SEGMENTS,
 } from "../../src/config/map";
 import { createIdleCommand, type ActorCommand } from "../../src/game/commands/ActorCommand";
+import { closestPointOnObstacle2D } from "../../src/game/rules/obstacleGeometry";
 import { createActorState, type MatchState } from "../../src/game/state/types";
 import {
   getSupportHeight,
@@ -49,17 +51,8 @@ describe("MovementSystem", () => {
     const actor = obstacleState.actors.actor;
     expect(actor).toBeDefined();
     if (actor) {
-      const closestX = clamp(
-        actor.position.x,
-        wall.center.x - wall.width / 2,
-        wall.center.x + wall.width / 2,
-      );
-      const closestZ = clamp(
-        actor.position.z,
-        wall.center.z - wall.depth / 2,
-        wall.center.z + wall.depth / 2,
-      );
-      expect(Math.hypot(actor.position.x - closestX, actor.position.z - closestZ)).toBeGreaterThanOrEqual(
+      const closest = closestPointOnObstacle2D(wall, actor.position.x, actor.position.z);
+      expect(Math.hypot(actor.position.x - closest.x, actor.position.z - closest.z)).toBeGreaterThanOrEqual(
         ACTOR_RADIUS - 0.001,
       );
     }
@@ -76,9 +69,8 @@ describe("MovementSystem", () => {
 
     new MovementSystem().processCommand(state, actor.id, movingCommand(1, 0), 1 / 30);
 
-    const closestX = clamp(actor.position.x, wall.center.x - wall.width / 2, wall.center.x + wall.width / 2);
-    const closestZ = clamp(actor.position.z, wall.center.z - wall.depth / 2, wall.center.z + wall.depth / 2);
-    expect(Math.hypot(actor.position.x - closestX, actor.position.z - closestZ)).toBeGreaterThanOrEqual(
+    const closest = closestPointOnObstacle2D(wall, actor.position.x, actor.position.z);
+    expect(Math.hypot(actor.position.x - closest.x, actor.position.z - closest.z)).toBeGreaterThanOrEqual(
       ACTOR_RADIUS,
     );
   });
@@ -207,7 +199,9 @@ describe("MovementSystem", () => {
 
   it("walks up a roof ramp, jumps on the roof, and falls back to terrain", () => {
     const layout = createMapLayout(0);
-    const obstacle = layout.obstacles.find((entry) => entry.storyCount === 1);
+    const obstacle = layout.obstacles.find((entry) =>
+      entry.storyCount === 1 && (entry.footprint ?? "rectangle") === "rectangle"
+    );
     const ramp = layout.roofRamps.find((entry) => entry.obstacleId === obstacle?.id && entry.fromLevel === 0);
     const door = layout.wallOpenings.find((entry) =>
       entry.obstacleId === obstacle?.id && entry.storyIndex === 0 && entry.kind === "door"
@@ -219,11 +213,8 @@ describe("MovementSystem", () => {
       z: door.center.z - 1.5,
     };
     const roofY = obstacle.center.y + obstacle.height / 2 + BUILDING_ROOF_CAP_HEIGHT;
-    const roof = {
-      x: obstacle.center.x,
-      y: roofY + GROUND_HEIGHT,
-      z: obstacle.center.z,
-    };
+    const roof = getBuildingRoofNavigationPoint(layout, obstacle);
+    if (!roof) throw new Error("roof navigation point missing");
     const state = createState(outside.x, outside.z, outside.y);
     const actor = state.actors.actor;
     if (!actor) throw new Error("test actor missing");
@@ -237,7 +228,9 @@ describe("MovementSystem", () => {
     advance(state, createIdleCommand(), 90, 1 / 60);
     expect(actor.position.y).toBeCloseTo(roofY + GROUND_HEIGHT, 1);
 
-    advance(state, movingCommand(1, 0), 180, 1 / 60);
+    const westDistance = roof.x - (obstacle.center.x - obstacle.width / 2);
+    const eastDistance = obstacle.center.x + obstacle.width / 2 - roof.x;
+    advance(state, movingCommand(westDistance < eastDistance ? -1 : 1, 0), 600, 1 / 60);
     advance(state, createIdleCommand(), 90, 1 / 60);
     expect(actor.position.y).toBeCloseTo(getTerrainHeight(actor.position.x, actor.position.z, layout) + GROUND_HEIGHT, 1);
   });
@@ -342,11 +335,8 @@ describe("MovementSystem", () => {
     state.mapSeed = layout.seed;
     const actor = state.actors.actor;
     if (!actor) throw new Error("test actor missing");
-    const roof = {
-      x: building.center.x,
-      y: building.baseY + building.storyHeight * building.storyCount + BUILDING_ROOF_CAP_HEIGHT + GROUND_HEIGHT,
-      z: building.center.z,
-    };
+    const roof = getBuildingRoofNavigationPoint(layout, building);
+    if (!roof) throw new Error("roof navigation point missing");
     const navigator = new GridNavigator(layout);
     followPath(state, navigator.findPath(actor.position, roof), layout, 4_000);
     expect(actor.position.y).toBeCloseTo(roof.y, 1);
@@ -365,19 +355,18 @@ describe("MovementSystem", () => {
     expect(Math.hypot(actor.position.x - ground.x, actor.position.z - ground.z)).toBeLessThan(0.8);
   });
 
-  it("blocks roof movement with the authoritative architectural edge", () => {
+  it("blocks roof movement with an authoritative rooftop volume", () => {
     const layout = createMapLayout(0);
-    const edge = layout.wallSegments.find((wall) =>
+    const volume = layout.wallSegments.find((wall) =>
       wall.role === "architectural" &&
-      wall.architecturalFeature === "roof-edge" &&
-      wall.id.endsWith("roof-edge-left")
+      wall.architecturalFeature === "roof-volume"
     );
-    const building = layout.obstacles.find((entry) => entry.id === edge?.obstacleId);
-    if (!building || !edge) throw new Error("architectural roof edge missing");
+    const building = layout.obstacles.find((entry) => entry.id === volume?.obstacleId);
+    if (!building || !volume) throw new Error("architectural rooftop volume missing");
     const roofY = building.baseY + building.storyHeight * building.storyCount + BUILDING_ROOF_CAP_HEIGHT;
     const state = createState(
-      edge.center.x + edge.width / 2 + ACTOR_RADIUS + 1,
-      edge.center.z,
+      volume.center.x + volume.width / 2 + ACTOR_RADIUS + 1,
+      volume.center.z,
       roofY + GROUND_HEIGHT,
     );
     state.mapSeed = layout.seed;
@@ -386,22 +375,49 @@ describe("MovementSystem", () => {
 
     advance(state, movingCommand(-1, 0, true), 120, 1 / 60);
 
-    expect(actor.position.x).toBeGreaterThanOrEqual(edge.center.x + edge.width / 2 + ACTOR_RADIUS - 0.002);
+    expect(actor.position.x).toBeGreaterThanOrEqual(volume.center.x + volume.width / 2 + ACTOR_RADIUS - 0.002);
     expect(actor.position.y).toBeCloseTo(roofY + GROUND_HEIGHT, 2);
   });
 
-  it("does not add an invisible roof cap above architectural wall records", () => {
-    const layout = createMapLayout(0);
-    const edge = layout.wallSegments.find((wall) =>
-      wall.role === "architectural" &&
-      wall.architecturalFeature === "roof-edge" &&
-      wall.id.endsWith("roof-edge-left")
+  it("blocks movement against a rotated wall from a hexagonal building", () => {
+    const layout = createMapLayout("town", 0);
+    const wall = layout.wallSegments.find((candidate) =>
+      candidate.role === "facade" &&
+      candidate.rotationY !== undefined &&
+      Math.abs(candidate.rotationY) > 0.1
     );
-    if (!edge) throw new Error("architectural roof edge missing");
-    const wallTop = edge.center.y + edge.height / 2;
+    if (!wall) throw new Error("rotated polygon wall missing");
+    const yaw = wall.rotationY ?? 0;
+    const normalX = -Math.sin(yaw);
+    const normalZ = -Math.cos(yaw);
     const state = createState(
-      edge.center.x + edge.width / 2 + ACTOR_RADIUS + 0.08,
-      edge.center.z,
+      wall.center.x + normalX * (wall.depth / 2 + ACTOR_RADIUS + 1),
+      wall.center.z + normalZ * (wall.depth / 2 + ACTOR_RADIUS + 1),
+    );
+    state.mapId = layout.mapId;
+    state.mapSeed = layout.seed;
+    const actor = state.actors.actor;
+    if (!actor) throw new Error("rotated-wall actor missing");
+
+    advance(state, movingCommand(-normalX, -normalZ, true), 120, 1 / 60);
+
+    const localNormalDistance =
+      (actor.position.x - wall.center.x) * normalX +
+      (actor.position.z - wall.center.z) * normalZ;
+    expect(localNormalDistance).toBeGreaterThanOrEqual(wall.depth / 2 + ACTOR_RADIUS - 0.01);
+  });
+
+  it("does not add an invisible cap above rooftop volume records", () => {
+    const layout = createMapLayout(0);
+    const volume = layout.wallSegments.find((wall) =>
+      wall.role === "architectural" &&
+      wall.architecturalFeature === "roof-volume"
+    );
+    if (!volume) throw new Error("architectural rooftop volume missing");
+    const wallTop = volume.center.y + volume.height / 2;
+    const state = createState(
+      volume.center.x + volume.width / 2 + ACTOR_RADIUS + 0.08,
+      volume.center.z,
       wallTop + GROUND_HEIGHT + 0.09,
     );
     state.mapSeed = layout.seed;
@@ -410,13 +426,15 @@ describe("MovementSystem", () => {
 
     new MovementSystem().processCommand(state, actor.id, movingCommand(-1, 0), 0.12);
 
-    expect(actor.position.x).toBeLessThan(edge.center.x - edge.width / 2 - 0.01);
+    expect(actor.position.x).toBeLessThan(volume.center.x + volume.width / 2 - 0.01);
   });
 
   it("physically traverses every seed-zero internal staircase in both directions", () => {
     const layout = createMapLayout(0);
     const navigator = new GridNavigator(layout);
-    for (const building of layout.obstacles.filter((entry) => entry.storyCount > 1)) {
+    for (const building of layout.obstacles.filter((entry) =>
+      entry.storyCount > 1 && (entry.footprint ?? "rectangle") === "rectangle"
+    )) {
       const groundRamp = layout.roofRamps.find((ramp) => ramp.obstacleId === building.id && ramp.fromLevel === 0);
       if (!groundRamp) throw new Error(`ground ramp missing: ${building.id}`);
       const state = createState(
@@ -426,11 +444,8 @@ describe("MovementSystem", () => {
       );
       const actor = state.actors.actor;
       if (!actor) throw new Error("stair actor missing");
-      const roof = {
-        x: building.center.x,
-        y: building.baseY + building.storyHeight * building.storyCount + BUILDING_ROOF_CAP_HEIGHT + GROUND_HEIGHT,
-        z: building.center.z,
-      };
+      const roof = getBuildingRoofNavigationPoint(layout, building);
+      if (!roof) throw new Error(`roof navigation point missing: ${building.id}`);
       followPath(state, navigator.findPath(actor.position, roof), layout, 4_000);
       expect(actor.position.y, `${building.id}:up`).toBeCloseTo(roof.y, 1);
       const ground = {
@@ -443,6 +458,40 @@ describe("MovementSystem", () => {
         building.baseY + building.storyHeight + BUILDING_ROOF_CAP_HEIGHT + GROUND_HEIGHT,
       );
     }
+  }, 30_000);
+
+  it("physically traverses a polygon building's internal staircase in both directions", () => {
+    const layout = createMapLayout("town", 0);
+    const building = layout.obstacles.find((entry) =>
+      entry.storyCount > 1 && (entry.footprint ?? "rectangle") !== "rectangle"
+    );
+    const groundRamp = layout.roofRamps.find((ramp) =>
+      ramp.obstacleId === building?.id && ramp.fromLevel === 0
+    );
+    if (!building || !groundRamp) throw new Error("polygon staircase fixture missing");
+    const navigator = new GridNavigator(layout);
+    const state = createState(
+      groundRamp.centerX,
+      groundRamp.startZ,
+      getTerrainHeight(groundRamp.centerX, groundRamp.startZ, layout) + GROUND_HEIGHT,
+    );
+    state.mapId = layout.mapId;
+    state.mapSeed = layout.seed;
+    const actor = state.actors.actor;
+    if (!actor) throw new Error("polygon stair actor missing");
+    const roof = getBuildingRoofNavigationPoint(layout, building);
+    if (!roof) throw new Error("polygon roof navigation point missing");
+    followPath(state, navigator.findPath(actor.position, roof), layout, 4_000);
+    expect(actor.position.y).toBeCloseTo(roof.y, 1);
+    const ground = {
+      x: groundRamp.centerX,
+      y: getTerrainHeight(groundRamp.centerX, groundRamp.startZ, layout) + GROUND_HEIGHT,
+      z: groundRamp.startZ,
+    };
+    followPath(state, navigator.findPath(actor.position, ground), layout, 4_000);
+    expect(actor.position.y).toBeLessThan(
+      building.baseY + building.storyHeight + BUILDING_ROOF_CAP_HEIGHT + GROUND_HEIGHT,
+    );
   }, 30_000);
 });
 
@@ -593,8 +642,4 @@ function followPath(
     );
   }
   expect(waypointIndex).toBe(path.length);
-}
-
-function clamp(value: number, minimum: number, maximum: number): number {
-  return Math.max(minimum, Math.min(maximum, value));
 }

@@ -8,6 +8,7 @@ import type { AssetEntry } from "../../src/assets/types";
 import {
   createIslandScene,
   selectTerrainTextureAssetId,
+  terrainTextureTint,
 } from "../../src/client/render/scenes/IslandScene";
 import {
   AMMUNITION_DEPOT_WALL_COLOR,
@@ -56,7 +57,7 @@ function expectedRenderedBuildingWallCount(layout: MapLayout): number {
   const doorSillIds = new Set(
     layout.wallOpenings
       .filter((opening) => opening.kind === "door")
-      .map((opening) => `${opening.obstacleId}-wall-${opening.side}-${opening.storyIndex}-sill`),
+      .flatMap((opening) => opening.sillWallId ? [opening.sillWallId] : []),
   );
   return layout.wallSegments.filter((wall) => !doorSillIds.has(wall.id)).length;
 }
@@ -224,6 +225,25 @@ describe("generated map texture integration", () => {
     expect(select(forest, "grass")).toBe("texture.terrain.forest-moss-wet");
     expect(select(forest, "mud")).toBe("texture.terrain.forest-humus");
     expect(select(forest, "road-shoulder")).toBe("texture.terrain.gravel");
+  });
+
+  it("keeps every generated ground texture tint muted and neutral", () => {
+    const terrainIds = GENERATED_MAP_TEXTURE_ASSET_IDS.filter((assetId) =>
+      assetId.startsWith("texture.terrain.") || assetId.startsWith("texture.road.")
+    );
+    for (const assetId of terrainIds) {
+      const tint = terrainTextureTint(assetId);
+      if (!tint) throw new Error(`Terrain tint missing: ${assetId}`);
+      const maximum = Math.max(...tint);
+      const minimum = Math.min(...tint);
+      expect(maximum, assetId).toBeLessThan(0.56);
+      expect(maximum - minimum, assetId).toBeLessThan(0.24);
+    }
+    const drySoil = terrainTextureTint("texture.terrain.dry-soil");
+    const sparseGrassMud = terrainTextureTint("texture.terrain.mud-sparse-grass");
+    if (!drySoil || !sparseGrassMud) throw new Error("Cool soil tint missing");
+    expect(drySoil[2] - drySoil[0]).toBeGreaterThan(0.2);
+    expect(sparseGrassMud[2] - sparseGrassMud[0]).toBeGreaterThan(0.12);
   });
 
   it("keeps semantic ground, wall, and roof fallbacks readable without image payloads", async () => {

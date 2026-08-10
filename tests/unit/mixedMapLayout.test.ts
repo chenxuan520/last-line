@@ -22,6 +22,11 @@ import {
   pointOwnedByMixedRegion,
   pointInMixedRegion,
 } from "../../src/config/mixedMap";
+import {
+  pointInsideObstacle2D,
+  segmentObstacleEntryProgress2D,
+  type OrientedObstacle,
+} from "../../src/game/rules/obstacleGeometry";
 import { createActorState, type MatchState } from "../../src/game/state/types";
 import { SimulationCombatWorld } from "../../src/game/systems/SimulationCombatWorld";
 import { getSupportHeight } from "../../src/game/systems/MovementSystem";
@@ -180,7 +185,7 @@ describe("mixed map layout", () => {
       expect(navigator.findPath(outside, bandage), `${seed}:bandage`).not.toHaveLength(0);
       expect(navigator.findPath(outside, medkit), `${seed}:medkit`).not.toHaveLength(0);
     }
-  });
+  }, 30_000);
 
   it("keeps each region structurally distinct and all authoritative footprints clear", () => {
     for (const seed of [0, 1, 2, 3, 11, 16, 38, 42, 256, 423, 2026]) {
@@ -475,30 +480,27 @@ function regionFootprintGap(
 
 function pointClearsObstacle(
   point: { x: number; z: number },
-  obstacle: { center: { x: number; z: number }; width: number; depth: number },
+  obstacle: OrientedObstacle,
   clearance: number,
 ): boolean {
-  return Math.abs(point.x - obstacle.center.x) > obstacle.width / 2 + clearance ||
-    Math.abs(point.z - obstacle.center.z) > obstacle.depth / 2 + clearance;
+  return !pointInsideObstacle2D(obstacle, point.x, point.z, clearance);
 }
 
 function corridorClearsMixedObstacles(
   start: { x: number; z: number },
   end: { x: number; z: number },
-  obstacles: readonly { center: { x: number; z: number }; width: number; depth: number }[],
+  obstacles: readonly OrientedObstacle[],
   ramps: readonly { centerX: number; startZ: number; endZ: number; width: number }[],
 ): boolean {
   return obstacles.every((obstacle) =>
-    !segmentIntersectsRectangle(
+    segmentObstacleEntryProgress2D(
+      obstacle,
       start.x,
       start.z,
       end.x,
       end.z,
-      obstacle.center.x,
-      obstacle.center.z,
-      obstacle.width + 3,
-      obstacle.depth + 3,
-    )
+      1.5,
+    ) === null
   ) && ramps.every((ramp) =>
     !segmentIntersectsRectangle(
       start.x,

@@ -486,7 +486,7 @@ describe("LocalDurableObjectRuntime", () => {
     }
   });
 
-  it("keeps a current version 9 town checkpoint recoverable across a SQLite restart", async () => {
+  it("keeps a current version 10 town checkpoint recoverable across a SQLite restart", async () => {
     const directory = await mkdtemp(resolve(tmpdir(), "last-line-checkpoint-town-v9-"));
     const databasePath = resolve(directory, "rooms.sqlite");
     const roomId = "room-00000000-0000-4000-8000-000000000003";

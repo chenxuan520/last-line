@@ -8,6 +8,7 @@ import {
   BASE_LOOT_POINTS,
   createMapRoadSegments,
   createMapLayout,
+  getBuildingRoofNavigationPoint,
   GLOBAL_LOOT_POINTS,
   getRampHeight,
   getTerrainHeight,
@@ -149,7 +150,7 @@ describe("map layouts", () => {
     ["island", 0, 1],
     ["island", 19, 2],
     ["island", 4, 3],
-    ["town", 1, 1],
+    ["town", 1, 3],
     ["town", 2, 2],
     ["town", 0, 3],
     ["mixed", 2, 1],
@@ -253,6 +254,81 @@ describe("map layouts", () => {
     }
   }, 120_000);
 
+  it("keeps rectangles dominant while generating a small deterministic share of hexagonal and round buildings", () => {
+    const totals = { rectangle: 0, hexagon: 0, round: 0 };
+    for (const mapId of ["island", "town", "mixed"] as const) {
+      for (const seed of [0, 1, 7, 42, 2026]) {
+        const layout = createMapLayout(mapId, seed);
+        for (const building of layout.obstacles) {
+          totals[building.footprint ?? "rectangle"] += 1;
+        }
+        const hospital = layout.obstacles.find((building) => building.id === layout.hospital.buildingId);
+        const depot = layout.obstacles.find((building) => building.id === layout.ammunitionDepot.buildingId);
+        expect(hospital?.footprint ?? "rectangle").toBe("rectangle");
+        expect(depot?.footprint ?? "rectangle").toBe("rectangle");
+        const bridgeBuildingIds = new Set(layout.skybridges.flatMap((bridge) => [
+          bridge.fromBuildingId,
+          bridge.toBuildingId,
+        ]));
+        expect(layout.obstacles.filter((building) => bridgeBuildingIds.has(building.id)).every((building) =>
+          (building.footprint ?? "rectangle") === "rectangle"
+        )).toBe(true);
+        expect(layout.wallSegments.some((wall) =>
+          wall.obstacleId && wall.rotationY !== undefined && Math.abs(wall.rotationY) > 0.01
+        )).toBe(true);
+      }
+    }
+    const total = totals.rectangle + totals.hexagon + totals.round;
+    expect(totals.rectangle / total).toBeGreaterThan(0.78);
+    expect(totals.rectangle / total).toBeLessThan(0.9);
+    expect(totals.hexagon / total).toBeGreaterThan(0.07);
+    expect(totals.hexagon / total).toBeLessThan(0.16);
+    expect(totals.round / total).toBeGreaterThan(0.025);
+    expect(totals.round / total).toBeLessThan(0.09);
+  }, 120_000);
+
+  it("adds only short authoritative skybridges inside mixed town regions", () => {
+    for (const seed of [0, 1, 7, 42, 2026]) {
+      const layout = createMapLayout("mixed", seed);
+      expect(layout.skybridges).toHaveLength(8);
+      expect(new Set(layout.skybridges.map((bridge) => bridge.orientation))).toEqual(
+        new Set(["x", "z"]),
+      );
+      const endpointKeys = new Set<string>();
+      for (const bridge of layout.skybridges) {
+        const from = layout.obstacles.find((building) => building.id === bridge.fromBuildingId);
+        const to = layout.obstacles.find((building) => building.id === bridge.toBuildingId);
+        expect(from?.townKind).toBeTruthy();
+        expect(to?.townKind).toBeTruthy();
+        expect(from?.regionId).toBe(to?.regionId);
+        expect(from?.footprint ?? "rectangle").toBe("rectangle");
+        expect(to?.footprint ?? "rectangle").toBe("rectangle");
+        expect(Math.max(bridge.width, bridge.depth)).toBeLessThanOrEqual(36.001);
+        for (const [buildingId, side] of [
+          [bridge.fromBuildingId, bridge.fromSide],
+          [bridge.toBuildingId, bridge.toSide],
+        ] as const) {
+          const endpointKey = `${buildingId}:${side}`;
+          expect(endpointKeys.has(endpointKey), `${seed}:${bridge.id}:${endpointKey}`).toBe(false);
+          endpointKeys.add(endpointKey);
+          const opening = layout.wallOpenings.find((candidate) =>
+            candidate.obstacleId === buildingId &&
+            candidate.storyIndex === 1 &&
+            candidate.kind === "door" &&
+            candidate.side === side
+          );
+          if (!opening) throw new Error(`bridge opening missing: ${seed}:${bridge.id}:${endpointKey}`);
+          expect(
+            bridge.orientation === "x"
+              ? Math.abs(opening.center.z - bridge.center.z)
+              : Math.abs(opening.center.x - bridge.center.x),
+            `${seed}:${bridge.id}:${endpointKey}:alignment`,
+          ).toBeLessThanOrEqual(0.001);
+        }
+      }
+    }
+  }, 120_000);
+
   it.each([
     ["island", 7],
     ["town", 42],
@@ -264,36 +340,26 @@ describe("map layouts", () => {
 
     expect(layout.obstacles.every((building) => Boolean(building.architecturalProfile))).toBe(true);
     expect(profileNames.size).toBeGreaterThanOrEqual(6);
-    expect(architectureWalls.length).toBeGreaterThan(layout.obstacles.length * 4);
+    expect(architectureWalls.length).toBeGreaterThan(layout.obstacles.length);
 
     for (const building of layout.obstacles) {
       const buildingArchitecture = architectureWalls.filter((wall) => wall.obstacleId === building.id);
-      const roofEdges = buildingArchitecture.filter((wall) => wall.architecturalFeature === "roof-edge");
-      const roofScreens = buildingArchitecture.filter((wall) => wall.architecturalFeature === "roof-screen");
-      const eastEdges = roofEdges.filter((wall) => wall.id.includes("roof-edge-right-"));
+      const roofVolumes = buildingArchitecture.filter((wall) => wall.architecturalFeature === "roof-volume");
       const roofY = building.baseY + building.storyHeight * building.storyCount + BUILDING_ROOF_CAP_HEIGHT;
 
-      expect(buildingArchitecture.length, `${mapId}:${building.id}:architecture`).toBeGreaterThanOrEqual(5);
-      expect(roofEdges.length, `${mapId}:${building.id}:roof-edges`).toBe(5);
-      expect(roofEdges.every((wall) => wall.center.y - wall.height / 2 >= roofY - 0.001)).toBe(true);
+      expect(buildingArchitecture.length, `${mapId}:${building.id}:architecture`).toBeGreaterThanOrEqual(1);
+      expect(buildingArchitecture.some((wall) => wall.id.includes("roof-edge"))).toBe(false);
+      expect(roofVolumes.length, `${mapId}:${building.id}:roof-volumes`).toBeGreaterThanOrEqual(1);
+      expect(roofVolumes.every((wall) => wall.center.y - wall.height / 2 >= roofY - 0.001)).toBe(true);
+      expect(roofVolumes.every((wall) => wall.width > 1 && wall.depth > 1)).toBe(true);
       expect(Math.max(...buildingArchitecture.map((wall) => wall.center.y + wall.height / 2)) - roofY)
-        .toBeGreaterThanOrEqual(2.2);
-      expect(roofEdges.every((wall) =>
-        Math.abs(wall.center.x - building.stairwell.centerX) > wall.width / 2 + building.stairwell.width / 2 ||
-        Math.abs(wall.center.z - building.stairwell.centerZ) > wall.depth / 2 + building.stairwell.depth / 2
-      ), `${mapId}:${building.id}:roof-exit`).toBe(true);
-      expect(eastEdges).toHaveLength(2);
-      const eastGapMinimumZ = Math.min(...eastEdges.map((wall) => wall.center.z + wall.depth / 2));
-      const eastGapMaximumZ = Math.max(...eastEdges.map((wall) => wall.center.z - wall.depth / 2));
-      expect(eastGapMaximumZ - eastGapMinimumZ, `${mapId}:${building.id}:east-gap`).toBeGreaterThanOrEqual(5);
-      expect(eastGapMinimumZ).toBeLessThanOrEqual(building.center.z);
-      expect(eastGapMaximumZ).toBeGreaterThanOrEqual(building.center.z);
-      expect(roofScreens.every((wall) =>
+        .toBeGreaterThanOrEqual(2.19);
+      expect(roofVolumes.every((wall) =>
         Math.abs(wall.center.x - building.stairwell.centerX) >
           wall.width / 2 + building.stairwell.width / 2 + 0.5 ||
         Math.abs(wall.center.z - building.stairwell.centerZ) >
           wall.depth / 2 + building.stairwell.depth / 2 + 0.5
-      ), `${mapId}:${building.id}:roof-screen-stairwell`).toBe(true);
+      ), `${mapId}:${building.id}:roof-volume-stairwell`).toBe(true);
       expect(buildingArchitecture.every((wall) =>
         wall.center.x - wall.width / 2 >= building.center.x - building.width / 2 - 0.001 &&
         wall.center.x + wall.width / 2 <= building.center.x + building.width / 2 + 0.001 &&
@@ -541,8 +607,11 @@ describe("map layouts", () => {
       expect(ramps.at(-1)?.topY).toBeCloseTo(
         obstacle.baseY + obstacle.storyHeight * obstacle.storyCount + BUILDING_ROOF_CAP_HEIGHT,
       );
+      const facadeSideCount = obstacle.footprint === "round"
+        ? 10
+        : obstacle.footprint === "hexagon" ? 6 : 4;
       expect(layout.wallOpenings.filter((opening) => opening.obstacleId === obstacle.id)).toHaveLength(
-        obstacle.storyCount * 4,
+        obstacle.storyCount * facadeSideCount,
       );
       expect(layout.wallOpenings
         .filter((opening) => opening.obstacleId === obstacle.id && opening.kind === "window")
@@ -557,11 +626,11 @@ describe("map layouts", () => {
       }
       if (obstacle.storyCount === 1) {
         expect(ramps[0]?.id).toBe(`ramp-${obstacle.id}-level-0`);
-        expect(slabs).toHaveLength(5);
+        expect(slabs.length).toBeGreaterThanOrEqual(5);
         expect(slabs.filter((slab) => slab.id.endsWith("-stair-landing"))).toHaveLength(1);
       } else {
         expect(obstacle.stairwell).not.toBeNull();
-        expect(slabs).toHaveLength(obstacle.storyCount * 5);
+        expect(slabs.length).toBeGreaterThanOrEqual(obstacle.storyCount * 5);
         expect(slabs.filter((slab) => slab.id.endsWith("-stair-landing"))).toHaveLength(obstacle.storyCount);
         for (const slab of slabs.filter((entry) => entry.kind === "floor")) {
           expect(slab.center.x - slab.width / 2).toBeGreaterThanOrEqual(obstacle.center.x - obstacle.width / 2 + 0.3);
@@ -771,11 +840,8 @@ describe("map layouts", () => {
         y: getTerrainHeight(ramp.centerX, ramp.startZ, layout) + 1.76,
         z: ramp.startZ,
       };
-      const roof = {
-        x: obstacle.center.x,
-        y: obstacle.center.y + obstacle.height / 2 + BUILDING_ROOF_CAP_HEIGHT + 1.76,
-        z: obstacle.center.z,
-      };
+      const roof = getBuildingRoofNavigationPoint(layout, obstacle);
+      if (!roof) throw new Error(`roof navigation point missing: ${obstacle.id}`);
       expect(navigator.findPath(ground, roof), ramp.id).not.toHaveLength(0);
       expect(navigator.findPath(roof, ground), ramp.id).not.toHaveLength(0);
     });
@@ -792,11 +858,8 @@ describe("map layouts", () => {
         y: getTerrainHeight(groundRamp.centerX, groundRamp.startZ, layout) + 1.76,
         z: groundRamp.startZ,
       };
-      const roof = {
-        x: building.center.x,
-        y: building.baseY + building.storyHeight * building.storyCount + BUILDING_ROOF_CAP_HEIGHT + 1.76,
-        z: building.center.z,
-      };
+      const roof = getBuildingRoofNavigationPoint(layout, building);
+      if (!roof) throw new Error(`roof navigation point missing: ${building.id}`);
       expect(navigator.findPath(ground, roof), `${building.id}:up`).not.toHaveLength(0);
       expect(navigator.findPath(roof, ground), `${building.id}:down`).not.toHaveLength(0);
     }

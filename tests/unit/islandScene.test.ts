@@ -1,5 +1,5 @@
 import { NullEngine } from "@babylonjs/core/Engines/nullEngine";
-import type { Scene } from "@babylonjs/core/scene";
+import { Scene } from "@babylonjs/core/scene";
 import { BackgroundMaterial } from "@babylonjs/core/Materials/Background/backgroundMaterial";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { MultiMaterial } from "@babylonjs/core/Materials/multiMaterial";
@@ -17,11 +17,13 @@ import { AssetCatalog } from "../../src/assets/AssetCatalog";
 import type { AssetEntry } from "../../src/assets/types";
 import {
   applyActorVisualPose,
+  bindTerrainTextureWhenReady,
   bindTextureWhenReady,
   createLoadingBayLayout,
   createNaturalDetailPlacements,
   createIslandScene,
   getSkyAssetId,
+  selectRooftopRailing,
   selectTownPresentationRoads,
   setActorEquipmentVisual,
   setActorWeaponVisual,
@@ -64,7 +66,7 @@ function expectedRenderedBuildingWallCount(layout: MapLayout): number {
   const doorSillIds = new Set(
     layout.wallOpenings
       .filter((opening) => opening.kind === "door")
-      .map((opening) => `${opening.obstacleId}-wall-${opening.side}-${opening.storyIndex}-sill`),
+      .flatMap((opening) => opening.sillWallId ? [opening.sillWallId] : []),
   );
   return layout.wallSegments.filter((wall) => !doorSillIds.has(wall.id)).length;
 }
@@ -256,7 +258,7 @@ describe("IslandScene lifecycle", () => {
       const hospitalDoorSills = new Set(
         layout.wallOpenings
           .filter((opening) => opening.obstacleId === layout.hospital.buildingId && opening.kind === "door")
-          .map((opening) => `${opening.obstacleId}-wall-${opening.side}-${opening.storyIndex}-sill`),
+          .flatMap((opening) => opening.sillWallId ? [opening.sillWallId] : []),
       );
       const hospitalWallBatch = bundle.scene.getMeshByName(
         `building-walls-${HOSPITAL_WALL_COLOR.replace("#", "")}`,
@@ -951,10 +953,10 @@ describe("IslandScene lifecycle", () => {
         expect(bundle.scene.transformNodes.length).toBeLessThanOrEqual(520);
         expect(bundle.scene.materials.length).toBeLessThanOrEqual(75);
         expect(bundle.scene.geometries.length).toBeLessThanOrEqual(2_500);
-        expect(aggregateMeshVertices).toBeLessThanOrEqual(590_000);
-        expect(aggregateMeshIndices).toBeLessThanOrEqual(1_550_000);
-        expect(uniqueGeometryVertices).toBeLessThanOrEqual(420_000);
-        expect(uniqueGeometryIndices).toBeLessThanOrEqual(960_000);
+        expect(aggregateMeshVertices).toBeLessThanOrEqual(660_000);
+        expect(aggregateMeshIndices).toBeLessThanOrEqual(1_620_000);
+        expect(uniqueGeometryVertices).toBeLessThanOrEqual(485_000);
+        expect(uniqueGeometryIndices).toBeLessThanOrEqual(1_070_000);
       } finally {
         bundle.scene.dispose();
       }
@@ -1149,6 +1151,51 @@ describe("IslandScene lifecycle", () => {
     expect(disposedBind).not.toHaveBeenCalled();
   });
 
+  it("keeps procedural terrain colors when Babylon texture upload fails", () => {
+    const engine = new NullEngine();
+    const scene = new Scene(engine);
+    const material = new StandardMaterial("terrain-upload-fallback", scene);
+    const onLoadObservable = new Observable<Texture>();
+    let ready = false;
+    let loadingError = false;
+    const texture = {
+      isReady: () => ready,
+      get loadingError() { return loadingError; },
+      onLoadObservable,
+    } as unknown as Texture;
+    const originalColors = [0.2, 0.3, 0.4, 1, 0.5, 0.6, 0.7, 1];
+    const colors = [...originalColors];
+    const updateVerticesData = vi.fn();
+    const ground = {
+      isDisposed: () => false,
+      updateVerticesData,
+    };
+    const surfaces = [
+      { assetId: "texture.terrain.gravel", textureTint: Color3.FromHexString("#747673") },
+      { assetId: "texture.terrain.gravel", textureTint: Color3.FromHexString("#747673") },
+    ];
+
+    bindTerrainTextureWhenReady(
+      { isDisposed: false },
+      ground,
+      material,
+      texture,
+      "texture.terrain.gravel",
+      surfaces,
+      colors,
+    );
+    loadingError = true;
+    ready = true;
+    onLoadObservable.notifyObservers(texture);
+
+    expect(material.diffuseTexture).toBeNull();
+    expect(colors).toEqual(originalColors);
+    expect(updateVerticesData).not.toHaveBeenCalled();
+
+    scene.dispose();
+    engine.dispose();
+  });
+
   it("keeps the ground renderable when terrain payloads are unavailable", async () => {
     const assets = createAssets();
     vi.spyOn(assets, "resolve").mockImplementation((id, expectedType) => {
@@ -1296,7 +1343,7 @@ describe("IslandScene lifecycle", () => {
     );
 
     expect(layout.obstacles).toHaveLength(448);
-    expect(layout.skybridges).toHaveLength(32);
+    expect(layout.skybridges).toHaveLength(56);
     expect(bundle.scene.meshes.some((mesh) => mesh.name === "island-beach")).toBe(false);
     expect(bundle.scene.meshes.some((mesh) => mesh.name === "island-wet-shore")).toBe(false);
     expect(bundle.scene.meshes.some((mesh) => mesh.name === "building-floor-slabs-batch")).toBe(true);
@@ -1318,6 +1365,10 @@ describe("IslandScene lifecycle", () => {
       const paving = poiPaving.find((mesh) => mesh.name === `town-poi-paving-${index}`);
       expect(paving?.position.x).toBe(point.position.x);
       expect(paving?.position.z).toBe(point.position.z);
+      expect(paving?.material?.name).toBe(index % 2 === 0
+        ? "poi-dark-material"
+        : "road-shoulder-material");
+      expect(paving?.material?.name).not.toBe("poi-accent-material");
       expect(paving?.getBoundingInfo().boundingBox.extendSizeWorld.x).toBeCloseTo(
         TOWN_POINT_HALF_WIDTH,
         2,
@@ -1342,7 +1393,7 @@ describe("IslandScene lifecycle", () => {
     const doorSillIds = new Set(
       layout.wallOpenings
         .filter((opening) => opening.kind === "door")
-        .map((opening) => `${opening.obstacleId}-wall-${opening.side}-${opening.storyIndex}-sill`),
+        .flatMap((opening) => opening.sillWallId ? [opening.sillWallId] : []),
     );
     expect(bundle.scene.meshes
       .filter((mesh) => mesh.name.startsWith("building-walls-"))
@@ -1412,6 +1463,20 @@ describe("IslandScene lifecycle", () => {
       obstacleId: layout.hospital.buildingId,
     });
     expect(renderedBuildingWallCount(low.scene)).toBe(expectedRenderedBuildingWallCount(layout));
+    const eligibleRailingBuildings = layout.obstacles.filter((building) =>
+      (building.footprint ?? "rectangle") === "rectangle" &&
+      building.id !== layout.hospital.buildingId &&
+      building.id !== layout.ammunitionDepot.buildingId
+    );
+    const expectedRailingBuildings = eligibleRailingBuildings.filter((building) =>
+      selectRooftopRailing(layout.mapId, layout.seed, building.id)
+    );
+    const railingBatch = low.scene.getMeshByName("rooftop-railing-batch");
+    expect(expectedRailingBuildings.length / eligibleRailingBuildings.length).toBeGreaterThan(0.08);
+    expect(expectedRailingBuildings.length / eligibleRailingBuildings.length).toBeLessThan(0.22);
+    expect(railingBatch).toMatchObject({ isPickable: false, checkCollisions: false });
+    expect(Number(railingBatch?.metadata?.sourceCount ?? 0)).toBeGreaterThan(expectedRailingBuildings.length * 8);
+    expect(layout.wallSegments.some((wall) => wall.id.includes("railing"))).toBe(false);
     const lowWallBatchSignature = low.scene.meshes
       .filter((mesh) => mesh.name.startsWith("building-walls-"))
       .map((mesh) => `${mesh.name}:${String(mesh.metadata?.sourceCount)}`)
@@ -1591,6 +1656,7 @@ describe("IslandScene lifecycle", () => {
     ]);
     const loadingBayBuildingIds = new Set(layout.obstacles.flatMap((building, index) =>
       index % 2 === 0 &&
+      (building.footprint ?? "rectangle") === "rectangle" &&
       (building.townKind === "factory" ||
         building.townKind === "warehouse" ||
         building.townKind === "commercial")

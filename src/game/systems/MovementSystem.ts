@@ -12,6 +12,11 @@ import {
 } from "../../config/map";
 import type { ActorCommand } from "../commands/ActorCommand";
 import { ACTOR_EYE_HEIGHT, ACTOR_HEIGHT, ACTOR_RADIUS } from "../rules/actorGeometry";
+import {
+  closestPointOnObstacle2D,
+  obstacleBounds2D,
+  obstacleRecoveryPoints,
+} from "../rules/obstacleGeometry";
 import type { ActorState, EntityId, MatchState, Vector3State } from "../state/types";
 
 const WALK_SPEED = 8.7;
@@ -271,12 +276,9 @@ function collidesWithBlocker(
       : 0;
   const roofY = wall.center.y + wall.height / 2 + roofCapHeight;
   if (feetY >= roofY - SURFACE_EPSILON || actorTopY <= wallBottomY + SURFACE_EPSILON) return false;
-  const halfWidth = wall.width / 2;
-  const halfDepth = wall.depth / 2;
-  const closestX = clamp(x, wall.center.x - halfWidth, wall.center.x + halfWidth);
-  const closestZ = clamp(z, wall.center.z - halfDepth, wall.center.z + halfDepth);
-  const deltaX = x - closestX;
-  const deltaZ = z - closestZ;
+  const closest = closestPointOnObstacle2D(wall, x, z);
+  const deltaX = x - closest.x;
+  const deltaZ = z - closest.z;
   return deltaX * deltaX + deltaZ * deltaZ < ACTOR_RADIUS * ACTOR_RADIUS;
 }
 
@@ -287,22 +289,7 @@ function resolveWallOverlap(actor: ActorState, layout: MapLayout): void {
   for (let iteration = 0; iteration < 8 && collides(actor.position.x, actor.position.z, actor.position.y, layout); iteration += 1) {
     const candidates = getNearbyWalls(actor.position.x, actor.position.z, layout)
       .filter((wall) => collidesWithBlocker(actor.position.x, actor.position.z, feetY, wall))
-      .flatMap((wall) => {
-        const minimumX = wall.center.x - wall.width / 2 - padding;
-        const maximumX = wall.center.x + wall.width / 2 + padding;
-        const minimumZ = wall.center.z - wall.depth / 2 - padding;
-        const maximumZ = wall.center.z + wall.depth / 2 + padding;
-        return [
-          { x: minimumX, z: actor.position.z },
-          { x: maximumX, z: actor.position.z },
-          { x: actor.position.x, z: minimumZ },
-          { x: actor.position.x, z: maximumZ },
-          { x: minimumX, z: minimumZ },
-          { x: minimumX, z: maximumZ },
-          { x: maximumX, z: minimumZ },
-          { x: maximumX, z: maximumZ },
-        ];
-      })
+      .flatMap((wall) => obstacleRecoveryPoints(wall, actor.position.x, actor.position.z, padding))
       .filter((candidate) => Math.abs(candidate.x) <= limit && Math.abs(candidate.z) <= limit)
       .sort((left, right) =>
         Math.hypot(left.x - actor.position.x, left.z - actor.position.z) -
@@ -321,10 +308,11 @@ function getNearbyWalls(x: number, z: number, layout: MapLayout): readonly MapOb
   if (!index) {
     index = new Map<number, MapObstacle[]>();
     for (const wall of [...layout.wallSegments, ...layout.rockObstacles, ...layout.coverObstacles, ...layout.treeTrunks]) {
-      const minimumCellX = wallCell(wall.center.x - wall.width / 2 - ACTOR_RADIUS);
-      const maximumCellX = wallCell(wall.center.x + wall.width / 2 + ACTOR_RADIUS);
-      const minimumCellZ = wallCell(wall.center.z - wall.depth / 2 - ACTOR_RADIUS);
-      const maximumCellZ = wallCell(wall.center.z + wall.depth / 2 + ACTOR_RADIUS);
+      const bounds = obstacleBounds2D(wall, ACTOR_RADIUS);
+      const minimumCellX = wallCell(bounds.minimumX);
+      const maximumCellX = wallCell(bounds.maximumX);
+      const minimumCellZ = wallCell(bounds.minimumZ);
+      const maximumCellZ = wallCell(bounds.maximumZ);
       for (let cellX = minimumCellX; cellX <= maximumCellX; cellX += 1) {
         for (let cellZ = minimumCellZ; cellZ <= maximumCellZ; cellZ += 1) {
           const key = spatialGridKey(cellX, cellZ);

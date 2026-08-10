@@ -1,65 +1,73 @@
-# Generated Map Texture Integration
+# 生成式地图纹理接入
 
-## Context
+## 背景
 
-`main@4ed3f37` adds and manifest-registers fourteen generated 256×256 WebP textures for urban ground, rural soil, forest floor, damaged asphalt, building walls, and roof surfaces. The assets are not consumed by the renderer yet. This follow-up cycle integrates them into the architectural-variety branch without changing authoritative map facts.
+`main@4ed3f37` 新增并在清单中注册了 14 张 256×256 WebP 纹理，覆盖城市地面、农村土壤、森林地表、破损沥青、建筑墙面和屋顶表面。资源提交本身尚未被渲染器消费。本轮在不改变权威地图事实的前提下，把它们接入建筑轮廓分支。
 
-The implementation continues on `feat/building-architectural-variety` after committed architecture baseline `8c71a80`.
+实现基于已经提交的建筑轮廓基线 `8c71a80`，继续在 `feat/building-architectural-variety` 分支进行。
 
-## Contract
+## 合同
 
-- Merge `origin/main@4ed3f37` without rewriting the public branch.
-- Consume all newly registered textures through stable asset IDs; gameplay/render code must never reference concrete asset paths.
-- Preserve map geometry, building placement/profile selection, roads, region ownership, loot, AI, protocol 10, checkpoint 9, Worker/standalone semantics, and every authoritative collision fact.
-- Greyfurnace uses urban concrete and damaged asphalt ground treatment, aged concrete/brick industrial facades, and flat membrane or rusted metal roofs.
-- Cinder Mist County derives presentation from the same seeded mixed-region ownership:
-  - town: urban concrete/damaged asphalt plus aged concrete/brick facades and industrial roofs;
-  - rural: dry soil, sparse-grass mud, and gravel plus aged plaster/brick facades and restrained gray/red-brown roof treatment;
-  - forest: humus and wet moss plus weathered plaster/aged concrete cabins and dark gray roof treatment.
-- The island uses gravel/dry-soil natural breakup, aged plaster/brick/concrete facade variation, and flat membrane/gray/red-brown roof variation.
-- Hospital remains visually white and the ammunition depot retains its dedicated dark industrial material/sign. Neither may inherit random ordinary-building wall or roof textures.
-- Texture selection is deterministic from stable map/building facts and independent of quality. Low/medium/high may vary existing detail density, but the selected base wall/roof/ground family must not change.
-- Missing, failed, or invalid payloads retain readable procedural-color fallback. No cross-type UI image may become a world texture.
-- Reuse materials and textures by semantic role/profile; do not create one material or texture per building. Keep scene-resource, JavaScript, chunk, CSS, Worker, and server budgets unchanged; the user-approved generated-image allowance may raise only the raw browser `dist/` ceiling.
-- Production Chrome/Edge MCP verification must use volume `0`. The implementation agent must capture and personally inspect island, Greyfurnace, and Cinder Mist County screenshots, including adjacent wall/roof/ground transitions, tiling scale, brightness, clipping, overlap, and fallback readability. Every round must clean pages and preview servers immediately.
+- 合并 `origin/main@4ed3f37`，不得改写公开分支历史。
+- 所有新纹理必须通过稳定 asset ID 消费；玩法和渲染代码禁止引用具体资源路径。
+- 保持地图几何、建筑位置/轮廓选择、道路、区域归属、物资、AI、Worker/standalone 语义及全部权威碰撞事实不变。后续因删除误加屋顶护栏而改变权威几何时，必须同步提升严格协议和 checkpoint 版本。
+- 灰炉城使用低饱和城市混凝土与破损沥青、老化混凝土/砖墙工业立面，以及平屋顶卷材或锈蚀金属屋顶。
+- 烬岚郡使用同一份种子化混合区域归属派生表现：
+  - 城镇：低饱和城市混凝土/破损沥青、老化混凝土/砖墙立面和工业屋顶；
+  - 农村：低饱和灰褐干土、稀草泥地和碎石，以及老化抹灰/砖墙立面和克制的灰瓦/红褐瓦；
+  - 森林：低饱和腐殖土和湿苔，以及风化抹灰/老化混凝土小屋和深灰屋顶。
+- 苍岬岛使用低饱和碎石/灰褐干土、老化抹灰/砖墙/混凝土立面，以及卷材/灰瓦/红褐瓦屋顶。
+- 医院保持白色；弹药库保留专用深色工业材质和标牌。二者不得继承普通建筑的随机墙面或屋顶纹理。
+- 纹理选择必须由稳定地图/建筑事实确定，并与画质无关。低/中/高画质可以改变既有细节密度，但基础墙面、屋顶和地表材质族不得改变。
+- payload 缺失、无效、解码失败或 Babylon 上传失败时，必须保留可读程序化颜色回退；禁止把跨类型 UI 图片当作世界纹理，也禁止地形变白。
+- 材质和纹理按语义角色/轮廓复用，禁止每栋建筑创建独立材质。纹理接入自身不调整场景几何、JavaScript、chunk、CSS、Worker 或服务端预算；用户批准的生成图片余量只允许提升原始浏览器 `dist/` 上限。本工作树后续因权威圆形/六边形建筑而调整的确定性场景顶点/索引门槛，属于建筑轮廓计划中单独记录并审查的资源决策，不是纹理预算例外。
+- Production Chrome/Edge MCP 验证必须把音量设为 `0`。实现 Agent 必须截取并亲自查看苍岬岛、灰炉城和烬岚郡截图，检查相邻墙面/屋顶/地面过渡、平铺比例、亮度、饱和度、裁剪、重叠和回退可读性。每轮结束后立即清理页面和 preview 服务。
 
-## Plan
+## 计划
 
-1. Add focused failing renderer tests for generated asset consumption, deterministic wall/roof assignment, mixed-region ground ownership, hospital/depot isolation, fallback behavior, and bounded material/texture counts.
-2. Merge `origin/main@4ed3f37` with `--no-commit` so the asset import and renderer integration land in one associated implementation commit.
-3. Extend terrain material classification and batching so semantic region surfaces select the generated ground assets without altering terrain height or authoritative roads.
-4. Extend building wall/roof presentation so deterministic architecture/building roles select the new facade and roof assets while retaining shared authoritative geometry and bounded batches.
-5. Update architecture/asset documentation for the stable texture-role mapping; keep README free of generator internals.
-6. Run focused tests, three-target typecheck, complete required suites, browser/Worker/server/standalone builds, budgets, and `git diff --check`; do not run coverage.
-7. Perform production MCP screenshot inspection for all three maps at volume `0`, fix every visible defect, and clean MCP/preview resources after each round.
-8. Launch one independent reviewer, resolve every blocker/high/medium finding, and request re-review.
-9. Finalize this plan's Build/Review facts before the implementation merge commit, then push the existing PR branch, request fresh `@codex review`, and monitor CI/Cloudflare/Codex without editing the repository after commit.
+1. 添加会失败的聚焦渲染测试，覆盖新资源消费、确定性墙面/屋顶分配、混合区域地表归属、医院/弹药库隔离、回退行为和有界材质/纹理数量。
+2. 使用 `--no-commit` 合并 `origin/main@4ed3f37`，让资源导入和渲染接入进入同一个实现提交。
+3. 扩展地表材质分类与批处理，使语义区域表面选择生成式地面资源，同时不改变地形高度或权威道路。
+4. 扩展墙面/屋顶表现，让确定性建筑角色选择新立面和屋顶资源，同时保留共享权威几何和有界批次。
+5. 更新架构/资源文档中的稳定纹理角色映射；README 不写生成器内部细节。
+6. 运行聚焦测试、三项目 typecheck、完整必需套件、浏览器/Worker/服务端/standalone 构建、预算和 `git diff --check`；不运行覆盖率。
+7. 在音量 `0` 下对三张地图进行 production MCP 截图检查，修复所有可见问题，每轮立即清理 MCP/preview 资源。
+8. 启动独立审查者，解决所有 blocker/high/medium 审查发现并请求复审。
+9. 实现提交前完成本计划的构建/审查记录，然后推送现有 PR 分支，重新请求 `@codex review`，持续监控并直接修复后续审查发现，直到 CI/Cloudflare/Codex 全部无未解决问题。
 
-## Build
+## 构建
 
-- 2026-08-09: Inspected `origin/main@4ed3f37`. It adds fourteen 256×256 generated WebP files and stable manifest IDs, removes the obsolete standalone `metal.webp`, redirects legacy `texture.industrial.metal` to `roof.webp`, and adds manifest declaration tests. No renderer consumes the new IDs yet.
-- 2026-08-09: Mapped all new assets to Greyfurnace, island, and mixed town/rural/forest presentation roles. The integration is explicitly presentation-only; protocol 10 and checkpoint 9 remain unchanged.
-- 2026-08-09: Integrated all fourteen generated textures through stable asset IDs. Terrain uses one shared ground mesh with bounded `MultiMaterial` submeshes; walls and roofs use deterministic map/region families with shared materials. Hospital surfaces remain untextured white, and the ammunition depot retains its dedicated `texture.industrial.metal` surface.
-- 2026-08-09: Added direct integration coverage for island, Greyfurnace, and mixed town/rural/forest ground, wall, roof, hospital/depot isolation, payload-free fallbacks, material/texture limits, and concrete coordinate sampling for mixed-region natural, mud, road-shoulder, and road-core roles.
-- 2026-08-09: Node 24 validation passed: full typecheck; complete unit suite `50 files / 562 tests`; standalone suite `3 files / 33 tests`; browser, Worker dry-run, server, and standalone builds; `git diff --check`; and deterministic budgets. Final artifacts used `1,148,852 / 1,200,000` browser-entry bytes, `3,831,623 / 4,000,000` total JavaScript bytes, `4,654,788 / 4,700,000` raw `dist/` bytes, `576,139 / 615,000` Worker bytes, and `589,411 / 630,000` standalone-server bytes.
-- 2026-08-09: Local Worker runtime tests could not start because this Debian host has glibc 2.28 while the installed `workerd` requires GLIBC 2.29 through 2.35. Worker typecheck and dry-run bundling passed; the runtime suite remains for the Node 24 CI runner.
-- 2026-08-09: Production Chrome MCP verification ran at volume `0` for all three maps. The first mixed-map pass exposed a coarse rural texture checkerboard; replacing it with continuous dry soil plus region-aware gravel/urban-concrete shoulders removed the artifact. Follow-up screenshots confirmed readable wall/roof tiling, continuous town roads and shoulders, mixed forest/rural transitions, no missing ground, no clipping/overlap, and no console error. Every round returned Chrome to `about:blank`, stopped preview, removed screenshots, and released port 4173.
+- 2026-08-09：检查 `origin/main@4ed3f37`。该提交新增 14 张 256×256 WebP 和稳定清单 ID，删除废弃 `metal.webp`，把旧 `texture.industrial.metal` 指向 `roof.webp`，并添加清单声明测试；当时渲染器尚未消费新 ID。
+- 2026-08-09：把全部新资源映射到灰炉城、苍岬岛和混合地图的城镇/农村/森林表现角色。初始接入只改表现，协议 10 和 checkpoint 9 当时保持不变。
+- 2026-08-09：通过稳定 asset ID 接入全部 14 张纹理。地形使用一个共享地面网格和有界 `MultiMaterial` submesh；墙面和屋顶按确定性地图/区域材质族共享材质。医院保持无纹理白色，弹药库保留专用 `texture.industrial.metal` 表面。
+- 2026-08-09：新增直接集成覆盖，验证苍岬岛、灰炉城、混合城镇/农村/森林的地面、墙面、屋顶、医院/弹药库隔离、无 payload 回退、材质/纹理上限，以及混合区域自然地表、泥地、道路肩和道路核心的具体坐标采样。
+- 2026-08-09：Node 24 验证通过：完整 typecheck；单元测试 `50 files / 562 tests`；standalone `3 files / 33 tests`；浏览器、Worker dry-run、服务端和 standalone 构建；`git diff --check`；确定性预算。最终产物为：浏览器入口 `1,148,852 / 1,200,000` 字节，总 JavaScript `3,831,623 / 4,000,000` 字节，原始 `dist/` `4,654,788 / 4,700,000` 字节，Worker `576,139 / 615,000` 字节，standalone 服务端 `589,411 / 630,000` 字节。
+- 2026-08-09：本机 Debian glibc 2.28 无法启动要求 GLIBC 2.29–2.35 的 `workerd`。Worker typecheck 和 dry-run bundle 通过；真实 runtime 套件由 Node 24 CI 承担。
+- 2026-08-09：三张地图均在音量 `0` 下完成 production Chrome MCP。首轮混合地图发现农村地表出现粗糙棋盘块；改为连续灰褐干土并按区域选择碎石/城市混凝土路肩后消失。后续截图确认墙面/屋顶平铺可读、城镇道路和路肩连续、森林/农村过渡正常、地面未消失、无裁剪/重叠、console 无应用错误。每轮都把 Chrome 还原为 `about:blank`、停止 preview、删除截图并释放 4173 端口。
+- 2026-08-09：Codex P2 的 Babylon 上传失败根因已修复。地形材质初始保留程序化顶点色，不预绑定 pending 纹理；只有纹理 readiness 成功后才绑定并切换低饱和 tint。上传失败时材质保持无纹理、颜色数组不变，聚焦回归和完整 `IslandScene` 均通过。
+- 2026-08-09：城市混凝土、干土、腐殖土、苔地、碎石、稀草泥地和破损沥青统一使用低饱和偏灰 tint；医院继续白色，弹药库继续专用工业材质。`generatedMapTextureIntegration` `6/6` 通过。
+- 2026-08-09：实现 Agent 亲自查看苍岬岛 production 截图后发现，大面积干土纹理与近中性 tint 相乘仍保留明显棕橙基调，未达到用户要求。干土改用冷蓝灰 `#455f82`、稀草泥地改用 `#526b78` 抵消图片红黄通道；无纹理 fallback 的 ground/highland/mud/grass/road shoulder 同步改为低饱和灰系。必须重新截图确认后才能关闭该视觉审查发现。
 
-## Review
+## 审查
 
-### Independent review round 1 — 2026-08-09
+### 独立审查第 1 轮 — 2026-08-09
 
-- Scope: static review of the complete pending merge commit against this plan, `origin/main@4ed3f37936125d966735863cf0f3bde8fd504eaa`, and the previously reviewed architectural baseline `8c71a80e237ad48534e79a4fb9065049bfb568c1`. The review focused on the uncommitted texture integration, tests, documentation, and budget adjustment rather than re-reviewing the committed building-shape work.
-- Existing evidence accepted without rerunning: Node 24 typecheck; 562 source unit tests; 33 standalone tests; Worker typecheck and dry-run build; browser, Worker, server, and standalone builds; deterministic budget checks; two production Chrome MCP visual rounds at volume `0`, including the corrected mixed-rural ground transition and immediate browser/preview cleanup. The local Worker runtime gap remains the recorded old-glibc inability to launch `workerd`, not an integration failure.
-- Conclusion: **not approved; one medium finding must be fixed and re-reviewed.** No blocker or high finding was identified.
-- **Medium — mixed-region road shoulders ignore their owning region** (`src/client/render/scenes/IslandScene.ts:1462`): `terrainTextureAssetId` returns gravel for every mixed-map `road-shoulder` before resolving the nearest seeded region. This makes town shoulders use the rural gravel family, despite the contract requiring mixed town presentation to use the Greyfurnace urban-concrete/damaged-asphalt family; it also means the result is not fully derived from the same mixed-region ownership used for natural terrain. Resolve the mixed region before selecting its shoulder treatment (while retaining the visually accepted rural dry-soil body plus gravel shoulder), and add a focused assertion that samples town/rural/forest coordinates rather than only checking the scene-wide set of texture names.
-- **Low — plan wording must reflect the reviewed artifact-budget decision** (`.agents/plans/2026-08-09-generated-map-texture-integration.md:23`): the contract still says artifact budgets remain unchanged, while the implementation raises only `browserDist` from 4.55 MB to 4.70 MB. The user explicitly authorized a larger static-asset allowance, and the net generated-image addition exceeds the old ceiling, so the code/config change itself is accepted as an explicit reviewed budget decision; align the plan wording before the implementation commit. The JavaScript, chunk-count, CSS, Worker, and server ceilings remain unchanged.
-- Static checks otherwise found the fourteen stable asset IDs actually connected to terrain/wall/roof materials, bounded shared material families, valid MultiMaterial/submesh construction, explicit hospital/depot isolation, payload-free procedural fallback, quality-independent selection, no concrete asset paths in renderer code, and no protocol/checkpoint changes beyond the already committed baseline values 10/9.
+- 范围：按本 plan、`origin/main@4ed3f37936125d966735863cf0f3bde8fd504eaa` 和已经审过的建筑轮廓基线 `8c71a80e237ad48534e79a4fb9065049bfb568c1`，静态审查完整待提交 merge diff。重点是未提交纹理接入、测试、文档和预算调整，不重复审查已提交建筑轮廓。
+- 不重复运行并接受既有证据：Node 24 typecheck、562 个源码单元测试、33 个 standalone 测试、Worker typecheck 和 dry-run build、浏览器/Worker/服务端/standalone 构建、确定性预算、音量 `0` 的两轮 production Chrome MCP（含修正后的混合农村地面过渡和即时清理）。本机旧 glibc 无法启动 `workerd` 仍是环境缺口，不是接入失败。
+- 结论：**不通过；存在 1 个 medium，修复后必须复审。** 未发现 blocker 或 high。
+- **Medium — 混合地图路肩忽略所属区域**（`src/client/render/scenes/IslandScene.ts:1462`）：`terrainTextureAssetId` 在解析最近种子区域前就给所有 mixed `road-shoulder` 返回碎石，使城镇路肩错误使用农村碎石材质族。修复要求先解析所属区域；城镇使用城市混凝土，农村/森林保留碎石，并新增按城镇/农村/森林具体坐标采样的断言。
+- **Low — plan 文案必须反映预算决定**（本文件原第 23 行）：实现只把 `browserDist` 从 4.55 MB 提高到 4.70 MB，且用户明确批准更大的静态资源余量。需要明确只有原始浏览器产物预算放宽，JavaScript、chunk、CSS、Worker 和服务端门槛不变。
+- 其余静态检查确认：14 个稳定 asset ID 都实际连接到地面/墙面/屋顶材质；材质族有界共享；`MultiMaterial`/submesh 构造有效；医院/弹药库显式隔离；无 payload 时有程序化回退；选择与画质无关；渲染代码没有具体资源路径；当时协议/checkpoint 仍为已提交基线 10/9。
 
-### Independent review round 2 — 2026-08-09
+### 独立审查第 2 轮 — 2026-08-09
 
-- Scope: static re-review of the round-1 Medium and Low fixes and their adjacent terrain-selection/test paths. The outer agent's post-fix Node 24 app typecheck, focused 5-test integration run, production build, and production Chrome MCP screenshot/console/cleanup evidence were accepted without rerunning.
-- **Round-1 Medium closed:** `terrainTextureAssetId` preserves damaged asphalt as the highest-priority road-core result, handles standalone town/island semantics, then resolves mixed nearest-region ownership before selecting road shoulders. Mixed town shoulders now use urban concrete while rural and forest shoulders use gravel. The exported pure selector calls the same production function, and the focused seed-0 assertions cover town/rural/forest natural, mud, shoulder, and road roles rather than merely checking a scene-wide texture set.
-- **Round-1 Low closed:** the contract now records the user-approved exception only for the raw browser `dist/` ceiling while retaining the scene-resource, JavaScript, chunk, CSS, Worker, and server limits.
-- Conclusion: **approved. No blocker, high, or medium findings remain, and the fixes introduced no new blocker/high/medium issue.**
-- Residual note: Worker runtime tests remain unavailable on this host because its old glibc cannot start `workerd`; the previously recorded Worker typecheck/dry-run evidence and the presentation-only scope remain the available coverage for that environment gap.
+- 范围：静态复审第 1 轮 Medium/Low 修复及相邻地表选择/测试路径。接受外层 Agent 修复后的 Node 24 app typecheck、5 个聚焦集成测试、production build 和 production Chrome MCP 截图/console/清理证据，不重复运行。
+- **第 1 轮 Medium 已关闭：** `terrainTextureAssetId` 保持破损沥青为道路核心最高优先级，先处理独立城镇/岛屿语义，再解析 mixed 最近区域归属后选择路肩。Mixed 城镇路肩使用城市混凝土，农村和森林路肩使用碎石。导出的纯选择器调用同一 production 函数，seed 0 聚焦断言覆盖城镇/农村/森林自然地表、泥地、路肩和道路角色，不再只检查全场纹理集合。
+- **第 1 轮 Low 已关闭：** 合同只对用户批准的原始浏览器 `dist/` 上限做例外，场景资源、JavaScript、chunk、CSS、Worker 和服务端限制保持不变。
+- 结论：**通过。没有剩余 blocker、high、medium，修复也未引入新的同级问题。**
+- 残余说明：本机旧 glibc 无法启动 `workerd`，因此 Worker runtime 测试仍不可用；已有 Worker typecheck/dry-run 证据和只改表现的范围是该环境缺口下的可用覆盖。
+
+### 2026-08-09 合并工作树审查补充
+
+- 后续建筑轮廓合并审查发现 `town-poi-paving` 仍有一半使用棕橙 `poiAccent`，会形成大面积城市橙色铺地。修复后城镇 POI 大铺地只使用深灰与灰色路肩材质；棕橙强调色限制在小面积锈迹、灯光和工业道具。
+- 实现 Agent 的岛屿 production 截图还发现干土纹理即使使用近中性 tint 仍明显偏棕橙。干土/稀草泥地改为冷蓝灰乘法 tint，程序化 fallback 地面同步改灰；重拍岛屿和烬岚郡后确认大面积地板为低饱和冷灰褐，不再整片橙色。

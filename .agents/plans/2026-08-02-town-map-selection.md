@@ -1,4 +1,4 @@
-## Plan
+## 计划
 
 ### 项目背景信息
 
@@ -18,23 +18,23 @@
 - 当前地图大小为 2400m，航线、安全区、小地图投影和场景远裁剪都依赖统一尺寸。第一版 town 继续使用同一地图尺寸和边界，避免改动战斗时长与网络范围。
 - 当前 island 建筑只支持 1–3 层及权威坡道。town 可以将同一套楼板/墙面/坡道规则扩展到 4–5 层，但不得改动 island 的楼层分配、随机调用顺序、比例或 seed 结果；不引入电梯、不可导航楼梯或复杂地下结构。
 - 当前资源可复用；第一版不要求新增外部 GLB/贴图资产，以程序化建筑、道路、围墙、掩体、植被密度和 POI 布局形成城镇差异。
-- 所有代码改动在实现和必要验证完成后、commit/push/deploy/completion report 之前，必须启动独立 `code-reviewer`。所有 blocker/high/medium finding 必须处理并复审通过，才能提交和推送。
+- 所有代码改动在实现和必要验证完成后、commit/push/deploy/completion report 之前，必须启动独立 `code-reviewer`。所有 blocker/high/medium 审查发现必须处理并复审通过，才能提交和推送。
 
 ### 更新日志
 
 - 2026-08-02 13:02：用户确认采用显式 `mapId`，拒绝用 seed 符号位或特殊 seed 区间编码地图。确定地图选择进入单人设置和联机房间选项；开始前已 pull 到 `main@3f17b4a`。
 - 2026-08-02 13:02：用户指定当前 agent 按 `/home/lingchen.judy/ai-workspace/subagents/code-writer.md` 执行，并要求先创建 plan；本轮只建立实施计划，不修改运行时代码。
-- 2026-08-02 13:02：用户再次明确交付门禁：实现完成和 push 前必须启动 reviewer，确认无未解决 blocker/high/medium 后才能提交推送。
+- 2026-08-02 13:02：用户再次明确交付门禁：实现完成和 push 前必须启动 审查者，确认无未解决 blocker/high/medium 后才能提交推送。
 - 2026-08-02 13:04：用户把 town 口径提高为“非常高密度废旧工业化城镇”：核心街区连续楼群必须切碎视线，除主干道、广场和公园外，地面基本看不到远处地平线；允许新增程序化建筑类型，并要求加入房屋之间的二楼权威连廊。
 - 2026-08-02 13:04：量化现有 island 基线为约 221–232 栋建筑、44–46 栋多层、278–300 段坡道、384 棵权威树。town 目标提高为 400–520 栋建筑、45%–60% 多层、24–48 条二楼连廊，核心城区建筑覆盖率和街墙连续度显著高于 island。
 - 2026-08-02 13:04：用户要求将玩家可见的“废旧工业城镇”改为更正式的地图名；确定显示名为“灰炉城”，稳定 `mapId` 仍为 `"town"`。
-- 2026-08-02 13:12：用户要求把全部需求整理成 reviewer 可直接核对的验收口径；新增“用户验收口径 / Reviewer 对照清单”，后续代码 reviewer 必须逐项判定，不能只看测试通过或建筑数量。
-- 2026-08-02 13:12：用户提供隔离式 Chrome DevTools MCP。最终实现必须先由 writer 使用该 MCP 完成真实浏览器验收和自验收，确认页面、交互、控制台与资源清理无问题后，再启动独立 code-reviewer；reviewer 通过前禁止 commit/push。
-- 2026-08-02 13:14：用户允许灰炉城出现 4–5 层废旧厂办楼、工业塔楼等高楼，并允许 writer 自由设计景观；硬约束是该扩展只作用于 town，不能改变苍岬岛既有 1–3 层逻辑和任何 seed 结果。
+- 2026-08-02 13:12：用户要求把全部需求整理成 审查者 可直接核对的验收口径；新增“用户验收口径 / 审查者 对照清单”，后续代码 审查者 必须逐项判定，不能只看测试通过或建筑数量。
+- 2026-08-02 13:12：用户提供隔离式 Chrome DevTools MCP。最终实现必须先由 实现 Agent 使用该 MCP 完成真实浏览器验收和自验收，确认页面、交互、控制台与资源清理无问题后，再启动独立 code-reviewer；审查者 通过前禁止 commit/push。
+- 2026-08-02 13:14：用户允许灰炉城出现 4–5 层废旧厂办楼、工业塔楼等高楼，并允许 实现 Agent 自由设计景观；硬约束是该扩展只作用于 town，不能改变苍岬岛既有 1–3 层逻辑和任何 seed 结果。
 
-### 用户验收口径 / Reviewer 对照清单
+### 用户验收口径 / 审查者 对照清单
 
-以下条目是用户明确确认的需求，优先级高于实现便利性。代码实现完成后的独立 reviewer 必须逐条核对，并在 `## Review` 中记录结论：
+以下条目是用户明确确认的需求，优先级高于实现便利性。代码实现完成后的独立审查者 必须逐条核对，并在 `## 审查` 中记录结论：
 
 1. **地图身份必须显式**
    - 必须存在独立 `mapId`，稳定值为 `"island"` / `"town"`。
@@ -60,7 +60,7 @@
    - 多层建筑比例 45%–60%；主要为 2–3 层，并有 8%–15% 的 town 建筑为 4–5 层工业塔楼/厂办楼。
    - 除主干道、广场、公园和外围缺口外，核心街区连续楼群应让地面玩家基本看不到远处地平线。
    - 核心城区无遮挡距离采样：中位数 ≤90m，90 分位 ≤180m。
-   - Reviewer 必须检查真实布局/场景结果，不能只因建筑数组长度达标就判定密度满足。
+   - 审查者 必须检查真实布局/场景结果，不能只因建筑数组长度达标就判定密度满足。
 
 5. **允许并要求新增程序化建筑类型**
    - 可新增厂房、长仓库、联排楼、狭长商住楼、角楼、塔楼、围墙院落、货箱区、管线支架等。
@@ -80,7 +80,7 @@
    - 4–5 层建筑不是纯外观拉高；每层都必须有权威楼板、墙面、开口、上下层连接和可用空间。
    - 玩家必须能从地面到达 4–5 层并安全返回；AI/GridNavigator 也必须能规划到高层目标。
    - 高层墙体、楼板和屋顶必须参与子弹碰撞与 LOS；不能隔楼命中或穿越不存在的开口。
-   - 苍岬岛仍只生成 1–3 层，reviewer 必须对照 island golden signatures 确认高楼扩展没有改变旧图。
+   - 苍岬岛仍只生成 1–3 层，审查者 必须对照 island golden signatures 确认高楼扩展没有改变旧图。
 
 8. **AI 和物资必须适配高密街区**
    - AI 能通过道路、建筑入口、坡道和连廊移动，不直接穿墙或因空路径直冲障碍。
@@ -93,11 +93,11 @@
    - 性能门禁使用 building/mesh/instance/draw-resource/protocol-byte/raw-artifact 等确定性数量，不以 wall-clock、FPS、heap 或压缩体积作硬门禁。
 
 10. **交付前必须独立代码审查**
-   - Reviewer 只在实现完成后审代码，不负责审 plan。
-   - Writer 完成实现和必要自动测试后，必须先使用用户提供的 Chrome DevTools MCP 完成真实浏览器验收和 writer 自验收。
+   - 审查者 只在实现完成后审代码，不负责审 plan。
+   - Writer 完成实现和必要自动测试后，必须先使用用户提供的 Chrome DevTools MCP 完成真实浏览器验收和 实现 Agent 自验收。
    - MCP 验收通过后、commit/push/deploy/completion report 前，必须启动独立 `code-reviewer`。
-   - 所有 blocker/high/medium finding 必须逐条判断、处理并复审通过。
-   - 未取得 reviewer 无未解决 blocker/high/medium 的结论前，禁止 commit 和 push。
+   - 所有 blocker/high/medium 审查发现必须逐条判断、处理并复审通过。
+   - 未取得 审查者 无未解决 blocker/high/medium 的结论前，禁止 commit 和 push。
 
 11. **Chrome DevTools MCP 验收顺序和配置**
     - MCP 配置：
@@ -116,7 +116,7 @@ args = [
 ]
 ```
 
-    - writer 必须用 MCP 分别验收 production build 的苍岬岛和灰炉城。
+    - 实现 Agent 必须用 MCP 分别验收 production build 的苍岬岛和灰炉城。
     - 至少检查：地图选择持久化、单人双地图启动、HUD 地图名、小地图 POI/道路、灰炉城楼群密度、实际进入 4–5 层、二楼连廊可见与可达、高层/连廊移动与射击遮挡、拾取、控制台 error/warn、手机 844×390 横屏菜单和对局布局。
     - 联机验收至少创建灰炉城私人房，确认大厅地图名、两端 full state/mapId 一致、房主开始后两端场景一致；quick match 分池由 Worker/standalone 契约覆盖，并在可行时用 MCP 双页面补充验证。
     - 游戏音量全程保持 `0`。
@@ -238,7 +238,7 @@ interface MapSkybridge {
 
 ### 文件/模块落点
 
-#### Create
+#### 新增文件
 
 - `src/config/maps.ts`
   - 定义 `MapId`、`DEFAULT_MAP_ID`、地图显示名和 `normalizeMapId`。
@@ -250,7 +250,7 @@ interface MapSkybridge {
 - `tests/unit/townMapLayout.test.ts`
   - 覆盖 town 确定性、400–520 栋密度、道路、街墙遮挡、边界、坡道、连廊、物资和医院。
 
-#### Modify
+#### 修改文件
 
 - `src/config/map.ts`
   - 为 island layout 增加 `mapId/displayName/roadSegments`。
@@ -322,18 +322,18 @@ interface MapSkybridge {
 - 根 `AGENTS.md`
   - 文档地图选择、显式 mapId、旧状态默认值、quick-match 分池和发布维护规则。
 
-#### Check
+#### 检查文件
 
 - 所有 `createMapLayout(...)` 调用，确认状态驱动链路不再隐式默认 island。
 - 所有只比较 `layout.seed` / `navigatorSeed` / `layoutSeed` 的缓存刷新逻辑。
 - 所有手写 `MatchState` 测试 fixture，补 `mapId` 或经过兼容 normalizer。
-- Worker persisted room/checkpoint restore。
+- Worker 持久化房间/checkpoint 恢复。
 - standalone restart/checkpoint 测试。
 - Production protocol smoke 和 Worker deployment。
 
 ### 范围
 
-#### In scope
+#### 范围内
 
 - 两张地图的显式选择。
 - 单人 town 对局完整飞机到结算链路。
@@ -344,7 +344,7 @@ interface MapSkybridge {
 - 旧数据默认 island 的兼容迁移。
 - 协议 4 维护发布。
 
-#### Out of scope
+#### 范围外
 
 - 照片级新美术资产或外部素材采购；允许新增程序化建筑、工业构筑物和材质变体。
 - 电梯、载具、可破坏建筑、复杂楼梯、地下系统。
@@ -413,7 +413,7 @@ interface MapSkybridge {
 
 ### 任务拆解
 
-### Task 1: 建立地图身份和兼容 normalizer
+### 任务 1：建立地图身份和兼容 normalizer
 
 - 目标：引入显式 `MapId`，所有旧数据安全默认 island，不改变任何 island seed 输出。
 - 仓库 / 文件：`src/config/maps.ts`、`src/config/settings.ts`、`src/game/state/types.ts`、`src/config/map.ts`、对应 unit tests。
@@ -428,11 +428,11 @@ interface MapSkybridge {
 - Step 2: 给 settings/state/layout 增加字段。
 - Step 3: 改造 layout factory/cache，并锁定 island golden signatures。
 
-### Task 2: 抽取共享建筑几何并实现 town generator
+### 任务 2：抽取共享建筑几何并实现 town generator
 
 - 目标：生成 deterministic、可导航、权威一致的城镇布局。
 - 仓库 / 文件：`src/config/map.ts`、`src/config/townMap.ts`、必要的共享纯 helper 模块、`tests/unit/townMapLayout.test.ts`。
-- 前置依赖：Task 1。
+- 前置依赖：任务 1。
 - 关键改动点：共享 wall/opening/floor/ramp 生成；town 道路/街区/400–520 栋建筑/24–48 连廊/医院/物资/植被；`MapLayout.roadSegments/skybridges`。
 - 验证方式：
   - town 同 seed 深相等、不同 seed 不同。
@@ -448,11 +448,11 @@ interface MapSkybridge {
 - Step 4: 生成二楼连廊及端点开口/平台/导航结构。
 - Step 5: 补多种子结构、视线密度、连廊和导航测试。
 
-### Task 3: 迁移全部权威消费者到 mapId + mapSeed
+### 任务 3：迁移全部权威消费者到 mapId + mapSeed
 
 - 目标：相同 seed 的两张地图不会复用错误布局，所有规则系统消费同一 layout。
 - 仓库 / 文件：`BattleRoyaleMode.ts`、`GameSimulation.ts`、Movement/Inventory/CombatWorld、BotController、GridNavigator、MatchRuntime。
-- 前置依赖：Task 1、Task 2。
+- 前置依赖：任务 1、任务 2。
 - 关键改动点：state creation 传 mapId；系统缓存比较 mapId+seed；checkpoint restore normalizer；server runtime map consistency。
 - 验证方式：
   - 同 seed 下运行 island 后切 town，确认 movement/LOS/navigation/loot 使用 town。
@@ -464,11 +464,11 @@ interface MapSkybridge {
 - Step 3: 改 MatchRuntime 创建/恢复。
 - Step 4: 全仓搜索并处置隐式 seed-only 调用。
 
-### Task 4: 增加单人地图选择和 town presentation
+### 任务 4：增加单人地图选择和 town presentation
 
 - 目标：菜单可选择地图，单人 town 完整可玩，HUD/minimap 正确显示。
 - 仓库 / 文件：`GameApp.ts`、`BattleRoyaleSession.ts`、`IslandScene.ts`、`GameHud.ts`、`poiVisuals.ts`、`brandSigns.ts`、CSS、settings/UI tests。
-- 前置依赖：Task 2、Task 3。
+- 前置依赖：任务 2、任务 3。
 - 关键改动点：地图 select 和持久化；场景按 layout 分支；HUD 名称/道路/POI 动态化；手机/桌面菜单适配。
 - 验证方式：
   - 本地 Chrome/Edge，音量 0，分别启动 island/town production build。
@@ -480,11 +480,11 @@ interface MapSkybridge {
 - Step 3: HUD/minimap/POI/brand 适配。
 - Step 4: production browser 双地图验收并立即清理浏览器/服务。
 
-### Task 5: 联机房间地图选择和协议升级
+### 任务 5：联机房间地图选择和协议升级
 
 - 目标：房主/quick match 选择地图，全房和服务端一致，旧 room/checkpoint 默认 island。
 - 仓库 / 文件：protocol、MultiplayerClient、GameApp lobby、worker shared/LobbyDirectory/GameRoom、MatchRuntime、standalone tests。
-- 前置依赖：Task 3、Task 4。
+- 前置依赖：任务 3、任务 4。
 - 关键改动点：协议 4；RoomOptions/LobbyView/PublicSummary mapId；quick match 分池；persisted old room/checkpoint migration；lobby 展示。
 - 验证方式：
   - Worker contract：旧 body 默认 island、town create、quick match 分池、join inherited map、lobby/summary mapId。
@@ -493,15 +493,15 @@ interface MapSkybridge {
 - 完成标志：任何客户端、房间、runtime 和 scene 对同一局使用相同 mapId+seed；旧持久化数据恢复为 island。
 
 - Step 1: 协议类型和版本。
-- Step 2: HTTP client/room options/quick match。
-- Step 3: GameRoom persist/lobby/start runtime。
+- 第 2 步：HTTP 客户端/房间选项/快速匹配。
+- 第 3 步：GameRoom 持久化/大厅/启动运行时。
 - Step 4: Worker + standalone 契约测试。
 
-### Task 6: 文档、性能、review 和发布
+### 任务 6：文档、性能、审查和发布
 
 - 目标：完成工程门禁、独立审查、提交推送和生产一致发布。
 - 仓库 / 文件：`AGENTS.md`、README、architecture/deployment、当前 plan。
-- 前置依赖：Task 1–5。
+- 前置依赖：任务 1–5。
 - 关键改动点：文档地图契约和发布流程；Build 更新日志；review 记录；协议维护发布。
 - 验证方式：
   - `npm run typecheck`
@@ -512,21 +512,21 @@ interface MapSkybridge {
   - `npm run build:standalone`
   - `npm run check:budgets`
   - 使用用户提供的 Chrome DevTools MCP 验收 island/town production browser，音量 0，并逐轮清理页面/context/本地服务。
-  - writer 按“用户验收口径 / Reviewer 对照清单”完成自验收并记录证据。
+  - 实现 Agent 按“用户验收口径 / 审查者 对照清单”完成自验收并记录证据。
   - 独立 `code-reviewer` 静态审查，不重复外层已记录的完整门禁。
   - `wrangler deployments status` 与 `npm run test:multiplayer:production`。
 - 完成标志：
   - 无 unresolved blocker/high/medium。
   - plan 的 Build/Review 记录完整。
-  - commit/push 仅在 reviewer 通过后执行。
+  - commit/push 仅在 审查者 通过后执行。
   - Worker 新版本 ID 和 production smoke 记录完成。
 
 - Step 1: 更新文档和 plan Build。
 - Step 2: 运行全部自动测试、typecheck、构建和预算门禁。
 - Step 3: 使用 Chrome DevTools MCP 完成双地图、桌面/手机和联机浏览器验收；每轮立即清理。
-- Step 4: writer 完成自验收，对照用户清单确认无缺口并把证据写入 plan Build。
-- Step 5: 启动独立 reviewer，逐条评估 findings，修复后复审。
-- Step 6: reviewer 通过后 commit/push。
+- Step 4: 实现 Agent 完成自验收，对照用户清单确认无缺口并把证据写入 plan Build。
+- 步骤 5：启动独立审查者，逐条评估审查发现，修复后复审。
+- Step 6: 审查者 通过后 commit/push。
 - Step 7: 按协议维护流程部署 Worker/Pages 并 smoke。
 
 ### 风险与验证
@@ -554,42 +554,42 @@ MVP 定义为：
 4. 联机创建与 quick match 按 mapId 一致。
 5. 两张地图均通过核心规则、浏览器和 multiplayer contract。
 
-计划创建后，下一步由 writer 从 Task 1 开始，先建立兼容测试和 island golden signatures，再修改实现。
+计划创建后，下一步由实现 Agent 从任务 1 开始，先建立兼容测试和 island golden signatures，再修改实现。
 
-## Build
+## 构建
 
 ### 更新日志
 
-- 2026-08-02 13:02：按用户要求先执行 `git pull origin main`，fast-forward 至 `3f17b4a`；确认当前/目标分支均为 `main`、工作区干净。读取 writer/reviewer 规则、现有地图 factory、settings/state、单人 Session、联机 RoomOptions/Lobby/GameRoom/MatchRuntime、checkpoint 和 HUD/scene 链路；本轮只创建 plan，尚未修改运行时代码。
-- 2026-08-02 13:02：创建本 plan，确定显式 `MapId = "island" | "town"`、旧数据默认 island、quick match 按地图分池、协议 4、town 2400m 城镇布局和独立 reviewer 前置于 commit/push 的交付门禁。
-- 2026-08-02 13:26：完成 Task 1 基础层。新增 `src/config/maps.ts`，设置和权威 `MatchState` 增加 `mapId`；`createMapLayout(seed)` 保持 legacy island，新增显式 `createMapLayout(mapId, seed)`、mapId+seed cache key 以及 island metadata/empty skybridges。对 seed 0/42/2026 建立改造前 SHA-256 golden，剥离新增 metadata 后哈希逐字一致；`mapSelection/settings/mapLayout` 针对性测试 7 项通过，`typecheck:app` 通过。当前 town factory 仍明确报未实现，未用 island 冒充 town。
-- 2026-08-02 13:40：完成 Task 2 核心权威布局。灰炉城固定生成 448 栋建筑、233 栋多层、54 栋 4–5 层、32 条二楼连廊、18 条城市道路、250 个物资点、96 棵树、168 个工业掩体和 64 个外围岩石；4–5 层逐层生成墙面、开口、楼板和内部坡道。连廊生成二楼端点门洞、权威桥面和护栏墙，Movement/Combat 通过既有 floor/wall 几何消费，GridNavigator 新增同层跨楼路径。town/grid 针对性测试 12 项和 `typecheck:app` 通过，包含道路清空、核心无遮挡距离、桥面支撑、护栏子弹遮挡、高楼逐层完整性与 AI 连廊跨楼。
-- 2026-08-02 13:41：完成 Task 3 规则/runtime 迁移。GameSimulation、MovementSystem、InventorySystem、SimulationCombatWorld、BotController、BattleRoyaleSession、MultiplayerSession 和 MatchRuntime 的状态驱动布局均改为 `mapId + mapSeed`，缓存刷新同时比较二者；MatchRuntime restore 对旧 state 缺失/非法 mapId 归一化为 island。全仓搜索已无运行时 `createMapLayout(state.mapSeed)` 残留，`typecheck:app` 通过。
-- 2026-08-02 14:00：完成 Task 4/5 主链。单人菜单新增苍岬岛/灰炉城选择并持久化，BattleRoyaleSession/scene/HUD/minimap 使用 state mapId+seed，HUD 地图名/aria/道路来自 layout；灰炉城 NullEngine 场景构建通过，448 栋及连廊批量后 scene mesh <900。联机协议升至 4，create/quick 请求携带 mapId，RoomOptions/LobbyView/PublicSummary/GameRoom/MatchRuntime 持久化 mapId，quick match 按地图分池，旧 room/state 缺字段默认 island；Worker 地图分池 2 项、MatchRuntime town/legacy restore 2 项、standalone town 私房双人 full state/checkpoint restart 1 项均通过，完整 typecheck 通过。
+- 2026-08-02 13:02：按用户要求先执行 `git pull origin main`，fast-forward 至 `3f17b4a`；确认当前/目标分支均为 `main`、工作区干净。读取 实现 Agent/审查者 规则、现有地图 factory、settings/state、单人 Session、联机 RoomOptions/Lobby/GameRoom/MatchRuntime、checkpoint 和 HUD/scene 链路；本轮只创建 plan，尚未修改运行时代码。
+- 2026-08-02 13:02：创建本 plan，确定显式 `MapId = "island" | "town"`、旧数据默认 island、quick match 按地图分池、协议 4、town 2400m 城镇布局和独立审查者 前置于 commit/push 的交付门禁。
+- 2026-08-02 13:26：完成 任务 1 基础层。新增 `src/config/maps.ts`，设置和权威 `MatchState` 增加 `mapId`；`createMapLayout(seed)` 保持 legacy island，新增显式 `createMapLayout(mapId, seed)`、mapId+seed cache key 以及 island metadata/empty skybridges。对 seed 0/42/2026 建立改造前 SHA-256 golden，剥离新增 metadata 后哈希逐字一致；`mapSelection/settings/mapLayout` 针对性测试 7 项通过，`typecheck:app` 通过。当前 town factory 仍明确报未实现，未用 island 冒充 town。
+- 2026-08-02 13:40：完成 任务 2 核心权威布局。灰炉城固定生成 448 栋建筑、233 栋多层、54 栋 4–5 层、32 条二楼连廊、18 条城市道路、250 个物资点、96 棵树、168 个工业掩体和 64 个外围岩石；4–5 层逐层生成墙面、开口、楼板和内部坡道。连廊生成二楼端点门洞、权威桥面和护栏墙，Movement/Combat 通过既有 floor/wall 几何消费，GridNavigator 新增同层跨楼路径。town/grid 针对性测试 12 项和 `typecheck:app` 通过，包含道路清空、核心无遮挡距离、桥面支撑、护栏子弹遮挡、高楼逐层完整性与 AI 连廊跨楼。
+- 2026-08-02 13:41：完成 任务 3 规则/runtime 迁移。GameSimulation、MovementSystem、InventorySystem、SimulationCombatWorld、BotController、BattleRoyaleSession、MultiplayerSession 和 MatchRuntime 的状态驱动布局均改为 `mapId + mapSeed`，缓存刷新同时比较二者；MatchRuntime restore 对旧 state 缺失/非法 mapId 归一化为 island。全仓搜索已无运行时 `createMapLayout(state.mapSeed)` 残留，`typecheck:app` 通过。
+- 2026-08-02 14:00：完成 任务 4/5 主链。单人菜单新增苍岬岛/灰炉城选择并持久化，BattleRoyaleSession/scene/HUD/minimap 使用 state mapId+seed，HUD 地图名/aria/道路来自 layout；灰炉城 NullEngine 场景构建通过，448 栋及连廊批量后 scene mesh <900。联机协议升至 4，create/quick 请求携带 mapId，RoomOptions/LobbyView/PublicSummary/GameRoom/MatchRuntime 持久化 mapId，quick match 按地图分池，旧 room/state 缺字段默认 island；Worker 地图分池 2 项、MatchRuntime town/legacy restore 2 项、standalone town 私房双人 full state/checkpoint restart 1 项均通过，完整 typecheck 通过。
 - 2026-08-02 14:49：完成灰炉城工业建筑视觉差异化收尾。`TownBuildingKind` 六类元数据进入 town `MapBuilding`，核心建筑按厂房、仓库、联排楼、商业楼、角楼和塔楼使用不同权威 footprint，54 栋 4–5 层楼全部为 tower；场景为六类建筑批量生成烟囱、屋顶监视窗、设备间、招牌、角亭和塔冠轮廓，保持 visual-only 且不改变权威 footprint。`typecheck:app`、town/map selection 12 项和灰炉城 NullEngine 场景测试通过；island 生成路径与 golden payload 未增加该字段。
 - 2026-08-02 15:24：完成自动门禁第一轮。完整 typecheck 通过；unit 42 文件 376 项、Worker 4 文件 32 项、standalone 3 文件 20 项全部通过。Debian 10 宿主自带 glibc 2.28 无法启动当前 workerd，Worker suite 使用一次性 Debian 12 glibc 2.36 loader wrapper 执行，结束后原 `workerd` SHA-256 前后均为 `758f6571b186eabeeb9fddd944894bccc42f363c2f8933cf34f8a73e3b10cff4`。三个旧用例在本机仅因 wall-clock timeout 超时，定向重跑证明断言通过后只放宽 harness timeout，未修改 seed 范围、断言或 AI 阈值。
 - 2026-08-02 15:24：浏览器、Worker dry-run、server 和 same-origin standalone 构建全部通过。预算初跑中浏览器 entry/总 JS/chunk/CSS/总 dist 全通过，Worker `424812/400000`、standalone `445074/425000` 超出旧上限。架构资源审查用 esbuild metafile 确认 server 中 town generator 约 8KB、完整权威 map 模块约 68KB，增长来自两端必须共享的第二张权威地图规则而非视觉代码或重复资产；将原始字节硬上限审阅调整为 Worker 450KB、standalone 470KB，分别保留约 5.9% 与 5.6% 余量。
 - 2026-08-02 15:42：完成 Chrome DevTools MCP production 验收，游戏音量全程为 `0`。桌面 1440×900 分别选择并刷新确认灰炉城/苍岬岛持久化，两张地图均进入真实 50 actor 场景并由航线跳伞；HUD、地图名称、小地图 aria、8 个 POI、道路路径和网络资源正常，保存 `/tmp/last-line-town-desktop.webp`、`/tmp/last-line-island-desktop.webp`。844×390、DPR 3、mobile+touch+landscape 仿真中，灰炉城菜单/对局均无横向页面溢出，11 个触控动作按钮、左右双开火按钮和最小触控尺寸通过，保存菜单/对局截图。双隔离 context 创建同一灰炉城私人房，验证同一码、2/10、来宾准备、房主开局及双方 `match.full` 后 HUD/小地图均为灰炉城。每轮均主动关闭页面，确认只剩 `about:blank`，停止对应 standalone 服务并删除临时数据目录；控制台只出现 headless SwiftShader 驱动警告。MCP 发现的 7 个表单元素缺 `name` 已补齐并复验为 5 个联机输入均有稳定 name、console 无 error/issue。
 - 2026-08-02 15:47：按用户最新要求在提交前再次同步线上。第一次直接 `git pull origin main` 因本任务未提交文件重叠被 Git 保护性拒绝，未覆盖文件；随后使用一次性 stash 保存全部本任务文件，fast-forward `main` 从 `3f17b4a` 到 `3c09969`，`stash pop` 自动合并成功且无冲突，stash 已删除。远端新增 pointer-lock 安全请求、联机首帧处理、空降物资可见范围和对局退出 UX 均保留。
 - 2026-08-02 15:50：完成 `3c09969` 合并后的回归。完整 typecheck 通过；map selection、town layout、IslandScene、MatchRuntime、GameApp actions 和 MultiplayerClient 共 6 文件 42 项通过；standalone 3 文件 20 项通过；Worker dry-run、same-origin standalone build 和预算检查通过。合并后原始产物为 browser entry `1050349/1075000`、all JS `3747004/3900000`、CSS `44894/45000`、Worker `424991/450000`、standalone `445253/470000`。
-- 2026-08-02 15:51：完成 writer 自审。对照 11 条用户验收口径确认：地图身份与 seed 独立；所有运行时状态驱动 factory/cache 使用 `mapId + mapSeed`；旧 settings/room/checkpoint 缺失值归一化 island；quick match 按 map 分池；协议为 4；Movement/Combat/LOS/GridNavigator/server/render 同源消费高楼和连廊的 wall/floor/opening/ramp；town 49 Bot 保持原 `>=42/49` 武装阈值。对 seeds 0/42/2026/314159 实测均为 448 栋、核心 384 栋，1400m×1400m 核心 footprint 覆盖率 56.66%–56.76%，多层比例 52.01%，4–5 层比例 12.05%，32 连廊、18 道路、250 物资；island seeds 0/42/2026 golden SHA-256 仍逐字一致。`git diff --check` 通过，无 conflict marker、无 seed 编码地图类型、无运行时 seed-only state factory 残留。高楼/连廊的可达、支撑和射击遮挡由 town layout、Movement、CombatWorld、GridNavigator 单测验证；浏览器验证负责 production 场景可见、HUD、交互、桌面/手机和双端联机一致性。
-- 2026-08-02 17:42：完成 Reviewer Round 1 的 1 high、4 medium 代码修复。GridNavigator 现可组合“建筑门 ↔ 楼内坡道 ↔ 任意楼层 ↔ 二层连廊 ↔ 邻楼 ↔ 地面”；town 连廊端点楼梯井被确定性放在桥门对侧，工业围栏方向与街侧偏移修正并避开全部建筑/坡道。新增真实 `MovementSystem` 路径跟随测试，角色已实际走完街道↔五层、街道↔连廊↔邻楼及楼内↔楼内三类路线。灰炉城 8 个 POI 全部接入稳定视觉类型并由 NullEngine scene metadata 覆盖。核心 LOS 门禁改为 seeds 42/2026/314159 的 800+ 个权威 blocker 外可站立点，纳入建筑、工业掩体、树干和岩石，实测中位数 28m、90 分位 116m。新增 seeds 1/42/99 × 250 个 town 物资的门外导航和权威拾取检查，以及独立 town 49 Bot full-match。
+- 2026-08-02 15:51：完成 实现 Agent 自审。对照 11 条用户验收口径确认：地图身份与 seed 独立；所有运行时状态驱动 factory/cache 使用 `mapId + mapSeed`；旧 settings/room/checkpoint 缺失值归一化 island；quick match 按 map 分池；协议为 4；Movement/Combat/LOS/GridNavigator/server/render 同源消费高楼和连廊的 wall/floor/opening/ramp；town 49 Bot 保持原 `>=42/49` 武装阈值。对 seeds 0/42/2026/314159 实测均为 448 栋、核心 384 栋，1400m×1400m 核心 footprint 覆盖率 56.66%–56.76%，多层比例 52.01%，4–5 层比例 12.05%，32 连廊、18 道路、250 物资；island seeds 0/42/2026 golden SHA-256 仍逐字一致。`git diff --check` 通过，无 conflict marker、无 seed 编码地图类型、无运行时 seed-only state factory 残留。高楼/连廊的可达、支撑和射击遮挡由 town layout、Movement、CombatWorld、GridNavigator 单测验证；浏览器验证负责 production 场景可见、HUD、交互、桌面/手机和双端联机一致性。
+- 2026-08-02 17:42：完成 审查者 第 1 轮 的 1 high、4 medium 代码修复。GridNavigator 现可组合“建筑门 ↔ 楼内坡道 ↔ 任意楼层 ↔ 二层连廊 ↔ 邻楼 ↔ 地面”；town 连廊端点楼梯井被确定性放在桥门对侧，工业围栏方向与街侧偏移修正并避开全部建筑/坡道。新增真实 `MovementSystem` 路径跟随测试，角色已实际走完街道↔五层、街道↔连廊↔邻楼及楼内↔楼内三类路线。灰炉城 8 个 POI 全部接入稳定视觉类型并由 NullEngine scene metadata 覆盖。核心 LOS 门禁改为 seeds 42/2026/314159 的 800+ 个权威 blocker 外可站立点，纳入建筑、工业掩体、树干和岩石，实测中位数 28m、90 分位 116m。新增 seeds 1/42/99 × 250 个 town 物资的门外导航和权威拾取检查，以及独立 town 49 Bot full-match。
 - 2026-08-02 17:42：针对 town full-match 初始 `findPath=73055` 的 operation 回归完成根因优化，而非抬高旧 island 阈值。BotController 新增按 loot ID+generation+失败位置的 320 项不可达目标缓存，移动 36m 或 generation 改变后才重试；失败退避掩体立即拒绝；patrol/zone/forced relocation 候选先过滤权威 blocker。确定性诊断将 town `findPath` 降至约 20.3k；town 独立硬门禁设为 `findPath<=22000`、LOS `<=22000`、shot trace `<=25000`，island 原 `17500/20000/23500` 均保持不变。town 49 Bot full-match 已完成唯一胜者、Bot 拾取、Bot 射击和死亡事件验证。
-- 2026-08-02 17:42：Reviewer finding 5 的附加 production 高楼/连廊人工实操已尝试使用 Chrome MCP 的真实 touch PointerEvent 输入、只读 Babylon active camera 位置，不写权威 state；已真实完成固定 seed 42 灰炉城的飞机→跳伞→门外落地，并确认脚本可穿过建筑门。后续页面内自动驾驶受 headless 50 actor 软件 WebGL 速度、MCP 单调用超时和 waypoint 收敛影响，未形成完整五层/连廊操作记录。用户随后明确允许“如果没有恶劣问题，先推上去看效果，再逐步完善”，因此该项从本次预览推送硬门禁改为明确 follow-up；代码权威链路已有真实 Movement 跟随、CombatWorld 环境遮挡和 GridNavigator 测试，基础 production MCP 的双地图、手机和双端联机证据仍有效。所有失败/中止的 MCP 轮次均立即杀掉隔离 Chrome、停止 standalone 服务并删除临时数据；当前无浏览器或服务残留。
+- 2026-08-02 17:42：审查者第 5 项审查发现的附加 production 高楼/连廊人工实操已尝试使用 Chrome MCP 的真实 touch PointerEvent 输入、只读 Babylon active camera 位置，不写权威 state；已真实完成固定 seed 42 灰炉城的飞机→跳伞→门外落地，并确认脚本可穿过建筑门。后续页面内自动驾驶受 headless 50 actor 软件 WebGL 速度、MCP 单调用超时和 waypoint 收敛影响，未形成完整五层/连廊操作记录。用户随后明确允许“如果没有恶劣问题，先推上去看效果，再逐步完善”，因此该项从本次预览推送硬门禁改为明确后续工作；代码权威链路已有真实 Movement 跟随、CombatWorld 环境遮挡和 GridNavigator 测试，基础 production MCP 的双地图、手机和双端联机证据仍有效。所有失败/中止的 MCP 轮次均立即杀掉隔离 Chrome、停止 standalone 服务并删除临时数据；当前无浏览器或服务残留。
 - 2026-08-02 17:42：修复后回归通过：完整 typecheck；`townMapLayout/gridNavigator/botController/minimap/islandScene/aiLootReachability` 共 6 文件 107 项；Worker dry-run、same-origin standalone build 和预算。最终产物为 browser entry `1054429/1075000`、all JS `3751084/3900000`、CSS `44894/45000`、Worker `433689/450000`、standalone `453783/470000`；`git diff --check` 通过。
 - 2026-08-02 17:50：按用户“commit 前必须 pull”要求再次用一次性 stash 保存全部任务改动，`git pull origin main` 将基线从 `3c09969` fast-forward 至 `65182ab`，随后 `stash pop` 自动合并成功且无冲突、stash 已删除。远端新增 APP_VERSION 注入、CI/Docker release 规则和菜单版本文案均保留；`GameApp` 地图选择、联机输入 name 和版本 footer 自动合并正确。新基线回归再次通过完整 typecheck、上述 6 文件 107 项、Worker dry-run、same-origin standalone build 和预算；最终产物仍为 browser entry `1054429/1075000`、Worker `433689/450000`、standalone `453783/470000`。当前无 MCP Chrome、render loop 或本地 server 残留。
-- 2026-08-02 17:54：Reviewer Round 3 在 `main@65182ab` 新基线上复核通过，确认版本注入/CI/Docker 合并未破坏地图实现，`unresolved blocker/high/medium = 0`。随后按用户要求在真正 commit 前再次执行 `git pull origin main`，结果为 `Already up to date`；当前允许提交预览版本。完整 production 人类五层/连廊实操按用户最新决定保留为推送后 follow-up，正式协议 4 Worker/Pages 维护发布及 production smoke 也不属于本次预览 push。
+- 2026-08-02 17:54：审查者 第 3 轮 在 `main@65182ab` 新基线上复核通过，确认版本注入/CI/Docker 合并未破坏地图实现，`unresolved blocker/high/medium = 0`。随后按用户要求在真正 commit 前再次执行 `git pull origin main`，结果为 `Already up to date`；当前允许提交预览版本。完整 production 人类五层/连廊实操按用户最新决定保留为推送后 follow-up，正式协议 4 Worker/Pages 维护发布及 production smoke 也不属于本次预览 push。
 
-## Review
+## 审查
 
-### Round 1 — 2026-08-02 — 不通过
+### 第 1 轮 — 2026-08-02 — 不通过
 
 - 审查基线：`main@3c09969`；`HEAD` 与基线一致，待审内容为 working tree 中 40 个已跟踪文件及 `src/config/maps.ts`、`src/config/townMap.ts`、`tests/unit/mapSelection.test.ts`、`tests/unit/townMapLayout.test.ts` 等未跟踪文件。
 - 审查依据：本 plan 的 11 条用户验收口径、根 `AGENTS.md`、README、`/home/lingchen.judy/ai-workspace/subagents/code-reviewer.md`、`git diff 3c09969` 及关键调用链。
 - 已信任 Build 中记录的 typecheck、unit 376/376、Worker 32/32、standalone 20/20、post-pull 定向测试、四类构建/预算和 Chrome MCP 结果；本轮未重复这些命令。仅运行了针对现有证据未覆盖风险的只读 Node/tsx 几何诊断：跨建筑/高楼导航、全部 town loot 门口到落点路径、连廊端点高差及真实可站立核心视线采样。
-- 结论：存在 1 个 high、4 个 medium finding。验收项 6、7、8、11 未完成，验收项 4 的 LOS 自动门禁无效；修复并补齐证据后必须复审。当前禁止 commit、push 或 deployment。
+- 结论：存在 1 个 high、4 个 medium 审查发现。验收项 6、7、8、11 未完成，验收项 4 的 LOS 自动门禁无效；修复并补齐证据后必须复审。当前禁止 commit、push 或 deployment。
 
-#### Findings
+#### 审查发现
 
 1. **High — AI 导航没有形成可组合的入口、楼层和连廊拓扑。**
    - 位置：`src/ai/navigation/GridNavigator.ts:90`、`src/ai/navigation/GridNavigator.ts:103`、`src/ai/navigation/GridNavigator.ts:209`、`src/ai/navigation/GridNavigator.ts:317`、`src/ai/navigation/GridNavigator.ts:648`。
@@ -613,13 +613,13 @@ MVP 定义为：
 4. **Medium — 没有完成要求的 town 多种子 AI 与 49 Bot/full-match 回归。**
    - 位置：`tests/unit/aiLootReachability.test.ts:133`、`tests/unit/aiLootReachability.test.ts:168`。
    - 新增 town 用例只用一个 seed 42，且只检查落地后 `>=42/49` Bot 持枪；后面的 49 Bot 打到唯一胜者用例未传 `mapId: "town"`，实际仍跑 island。现有测试没有覆盖 town 多 seed 导航/拾取，也没有 town full-match。
-   - 影响：验收项 8 的明确交付物缺失，且 finding 1 的建筑/高楼路径缺陷因此未被现有门禁发现。
+   - 影响：验收项 8 的明确交付物缺失，且审查发现 1 的建筑/高楼路径缺陷因此未被现有门禁发现。
    - Writer 待处理：在不降低既有阈值的前提下增加 town 多 seed 导航/拾取和真实 49 Bot full-match，记录使用的 mapId 和 seed，并保留 deterministic operation 上限。
 
 5. **Medium — Build 中的 Chrome MCP 记录没有覆盖验收项 11 要求的高楼/连廊实操。**
    - 位置：`.agents/plans/2026-08-02-town-map-selection.md:572`。
    - 已记录双地图启动、HUD/minimap、844×390、双页面联机和逐轮清理，但没有记录“实际从地面进入 4–5 层并返回、实际走上并通过二楼连廊、高层/连廊移动和射击遮挡、灰炉城拾取”的操作与结果。仅进入场景、跳伞和看到地图名不能替代这些明确验收步骤。
-   - 影响：presentation/physical-authority 的关键用户验收没有可审计证据；finding 1 修复后也需要重新确认人类实操链路。
+   - 影响：presentation/physical-authority 的关键用户验收没有可审计证据；审查发现 1 修复后也需要重新确认人类实操链路。
    - Writer 待处理：修复后按 plan 原顺序补做并逐项记录上述 production Chrome/Edge 验收，音量保持 0，每轮立即清页、停服务并确认只剩 `about:blank`。
 
 #### 11 项验收对照
@@ -627,29 +627,29 @@ MVP 定义为：
 1. **通过**：`MapId` 与 `mapSeed` 独立，factory key 为 `mapId + normalizedSeed`，未发现 seed 符号位/范围编码；同 seed 双地图可并存。
 2. **通过**：主菜单、单人、公开/私人创建、lobby/public summary、quick match 分池和房间码继承链路均显式携带地图。
 3. **通过（发布尚未执行）**：island seeds 0/42/2026 golden 保持；旧 settings、HTTP body、persisted room 和 checkpoint state 默认 island；Worker/standalone 共用业务类；协议已升至 4。维护发布属于 review 通过后的部署步骤。
-4. **有待处理**：448 栋、核心覆盖率、多层/高楼比例和实际可站立点 LOS 抽查达到量化目标，但 checked-in LOS 测试无效，见 finding 3。
-5. **通过（POI 表现除外）**：六类 town 建筑和 4–5 层逐层 wall/floor/opening/ramp 使用统一权威几何，island 仍为 1–3 层；town POI 类型缺口见 finding 2。
-6. **不通过**：32 条连廊有权威 floor/rail/opening，Movement/Combat/render 同源，但 AI 不能从地面组合路径到连廊，见 finding 1。
-7. **不通过**：高楼几何和碰撞记录完整，但 GridNavigator 无法从地面到五层或返回；缺少符合要求的完整高层可用链路，见 finding 1。
-8. **不通过**：250 个 ground-floor town loot 在抽查的 seeds 0/42/2026/314159 均可从对应门外到达，但建筑间/高层 AI 路径失败，且没有 town 多 seed/full-match 门禁，见 findings 1、4。
+4. **有待处理**：448 栋、核心覆盖率、多层/高楼比例和实际可站立点 LOS 抽查达到量化目标，但 checked-in LOS 测试无效，见审查发现 3。
+5. **通过（POI 表现除外）**：六类 town 建筑和 4–5 层逐层 wall/floor/opening/ramp 使用统一权威几何，island 仍为 1–3 层；town POI 类型缺口见审查发现 2。
+6. **不通过**：32 条连廊有权威 floor/rail/opening，Movement/Combat/render 同源，但 AI 不能从地面组合路径到连廊，见审查发现 1。
+7. **不通过**：高楼几何和碰撞记录完整，但 GridNavigator 无法从地面到五层或返回；缺少符合要求的完整高层可用链路，见审查发现 1。
+8. **不通过**：250 个 ground-floor town loot 在抽查的 seeds 0/42/2026/314159 均可从对应门外到达，但建筑间/高层 AI 路径失败，且没有 town 多 seed/full-match 门禁，见审查发现 1、4。
 9. **通过**：权威布局质量无关；scene 使用墙/楼板/坡道/工业轮廓批量合并并有 `<900` mesh 硬门禁；Worker/standalone 原始字节上限调整有共享权威地图模块增长和约 5–6% 余量的架构说明，本轮接受该预算调整。
 10. **本轮已执行但未通过**：独立 review 已在 commit/push/deploy 前完成；必须处理所有 high/medium 后复审。
-11. **不通过**：双地图、mobile、双页面和清理证据存在，但缺少高楼/连廊/遮挡/拾取的明确 production 实操记录，见 finding 5。
+11. **不通过**：双地图、mobile、双页面和清理证据存在，但缺少高楼/连廊/遮挡/拾取的明确 production 实操记录，见审查发现 5。
 
 #### 其他核对
 
 - `3c09969` 新增的安全 pointer-lock 请求、`MultiplayerSession` 首帧 `processMessages`/remote pose/reset tick、空降 400m/落地 60m loot replication 及退出路由均保留，未发现本任务覆盖这些逻辑。
 - 未发现无关 `context.Background()`、冲突标记、state-driven seed-only layout factory 或 Cloudflare/standalone 地图业务分叉。
-- Residual risk：本轮未重复外层完整测试、构建、预算或浏览器命令；修复 findings 后应按受影响范围先做定向验证，再由 outer writer 更新 Build 并请求 Round 2 复审。
+- 残余风险：本轮未重复外层完整测试、构建、预算或浏览器命令；修复审查发现后应按受影响范围先做定向验证，再由外层实现 Agent 更新构建记录并请求第 2 轮复审。
 
-### Round 2 — 2026-08-02 — 通过
+### 第 2 轮 — 2026-08-02 — 通过
 
-- 审查基线仍为 `main@3c09969`，`HEAD` 与基线一致；重新完整读取本 plan、最新 Build、Round 1 findings 和当前 `git diff 3c09969`。当前待审范围为 42 个已跟踪文件及 5 个未跟踪任务文件。
-- 已信任 outer writer 记录的完整 typecheck、6 files/107 tests、Worker dry-run、standalone build、budgets、`git diff --check` 和既有 production MCP；未重复这些命令。
+- 审查基线仍为 `main@3c09969`，`HEAD` 与基线一致；重新完整读取本计划、最新构建记录、第 1 轮审查发现和当前 `git diff 3c09969`。当前待审范围为 42 个已跟踪文件及 5 个未跟踪任务文件。
+- 已信任 outer 实现 Agent 记录的完整 typecheck、6 files/107 tests、Worker dry-run、standalone build、budgets、`git diff --check` 和既有 production MCP；未重复这些命令。
 - 本轮仅针对现有证据未直接汇总的两个具体风险运行只读 Node/tsx 检查：seeds 0/1/42/99/2026/314159 的 32 条桥端楼梯井方向和 168 个 cover 两两重叠；结果均为 0 个错误端点、0 个 cover overlap。另以真实 `SimulationCombatWorld` 对 seeds 42/2026/314159 的每个 851 个 blocker 外可站立核心点发射 16 个水平射线，权威命中距离中位数约 27m、90 分位约 108.3m，满足 `≤90m/≤180m`。
-- 结论：Round 1 的 1 high、4 medium finding 均已解决或按用户最新明确授权降为 follow-up residual risk。本轮未发现新的 blocker/high/medium；当前 **unresolved blocker/high/medium = 0**，允许进行用户所说的预览推送看效果。
+- 结论：第 1 轮的 1 high、4 medium 审查发现均已解决或按用户最新明确授权降为后续残余风险。本轮未发现新的 blocker/high/medium；当前**未解决 blocker/high/medium = 0**，允许进行用户所说的预览推送看效果。
 
-#### Round 1 Findings 处置
+#### 第 1 轮 审查发现 处置
 
 1. **High 导航 — 已解决。**
    - `src/ai/navigation/GridNavigator.ts:98` 新增 town exterior-ground 双向组合路径；`src/ai/navigation/GridNavigator.ts:139` 将楼层路径与建筑门外地面连接；`src/ai/navigation/GridNavigator.ts:192` 将入口楼、二楼桥、出口楼及最终目标组合为完整候选路径。
@@ -680,13 +680,13 @@ MVP 定义为：
 - **正式 Worker/Pages 协议 4 上线**：仍必须遵守 plan/AGENTS 的维护发布顺序，并在部署后记录新 Worker version、`wrangler deployments status` 和真实 `npm run test:multiplayer:production`。本轮通过不替代这些部署后门禁。
 - Residual risk：组合桥路径当前会优先选择可用 bridge route，即使 ground route 更短；这是性能/路线质量问题而非正确性阻断，现有 town operation budget 已约束成本。完整 production 人类五层/连廊实操仍是明确 follow-up。
 
-### Round 3 — 2026-08-02 — 新基线快速复核通过
+### 第 3 轮 — 2026-08-02 — 新基线快速复核通过
 
-- 审查基线更新为 `main@65182ab`，`HEAD` 与基线一致；重新读取最新 Build/Review 和 `git diff 65182ab`。本轮仅检查 pull/stash pop 是否破坏 Round 2 结论，以及远端 APP_VERSION/Vite/CI/Docker 版本注入与三个重叠文件的合并结果。
-- 已信任 outer writer 记录的合并后完整 typecheck、6 files/107 tests、Worker dry-run、standalone build、budgets 和 `git diff --check`；本轮未重复测试、构建、预算或 MCP。
-- `AGENTS.md` 同时保留 `65182ab` 的 plan/reviewer 交付规则和本任务的 mapId、高楼/连廊、quick-match 规则；无冲突标记或语义覆盖。
+- 审查基线更新为 `main@65182ab`，`HEAD` 与基线一致；重新读取最新 Build/Review 和 `git diff 65182ab`。本轮仅检查 pull/stash pop 是否破坏 第 2 轮 结论，以及远端 APP_VERSION/Vite/CI/Docker 版本注入与三个重叠文件的合并结果。
+- 已信任 outer 实现 Agent 记录的合并后完整 typecheck、6 files/107 tests、Worker dry-run、standalone build、budgets 和 `git diff --check`；本轮未重复测试、构建、预算或 MCP。
+- `AGENTS.md` 同时保留 `65182ab` 的 plan/审查者 交付规则和本任务的 mapId、高楼/连廊、quick-match 规则；无冲突标记或语义覆盖。
 - `docs/deployment.md` 同时保留 APP_VERSION/Docker build-arg 文档和协议 4 地图维护发布流程；正式 Worker/Pages 部署后门禁不变。
 - `src/app/GameApp.ts` 同时保留 `VERSION ${escapeAttribute(__APP_VERSION__)}` footer、地图选择/持久化、公开房间与 lobby 地图名称、联机输入 `name` 属性。未发现版本注入覆盖地图 UI 或反向覆盖 footer。
 - `.github/workflows/ci.yml`、`Dockerfile`、`vite.config.ts`、`src/vite-env.d.ts` 相对 `65182ab` 均无 working-tree 改动；`APP_VERSION` 的 CI、Docker build arg、Vite define 和类型声明链路完整。
-- 结论：新基线合并未破坏 Round 2 的导航、POI、LOS、AI、联机或 preview-push 结论，亦未引入新的 blocker/high/medium。当前 **unresolved blocker/high/medium = 0**。
-- Residual risk 和交付边界维持 Round 2：完整 production 人类五层/连廊实操仍为 follow-up；正式协议 4 上线仍需维护发布、Worker version 和 production multiplayer smoke。
+- 结论：新基线合并未破坏 第 2 轮 的导航、POI、LOS、AI、联机或 preview-push 结论，亦未引入新的 blocker/high/medium。当前 **unresolved blocker/high/medium = 0**。
+- Residual risk 和交付边界维持 第 2 轮：完整 production 人类五层/连廊实操仍为 follow-up；正式协议 4 上线仍需维护发布、Worker version 和 production multiplayer smoke。

@@ -17,6 +17,7 @@ import type { ActorCommand } from "../game/commands/ActorCommand";
 import { createIdleCommand } from "../game/commands/ActorCommand";
 import { ACTOR_EYE_HEIGHT, ACTOR_HEIGHT } from "../game/rules/actorGeometry";
 import { LOOT_INTERACTION_DISTANCE } from "../game/rules/loot";
+import { pointInsideObstacle2D } from "../game/rules/obstacleGeometry";
 import {
   getActiveWeapon,
   getItemQuantity,
@@ -1430,10 +1431,7 @@ function spatialDistance(a: Vector3State, b: Vector3State): number {
 
 function navigationSurfaceKey(point: Vector3State, layout: MapLayout): string {
   for (const building of layout.obstacles) {
-    if (
-      Math.abs(point.x - building.center.x) > building.width / 2 ||
-      Math.abs(point.z - building.center.z) > building.depth / 2
-    ) continue;
+    if (!pointInsideObstacle2D(building, point.x, point.z)) continue;
     for (let level = building.storyCount; level >= 1; level -= 1) {
       const supportY = building.baseY + level * building.storyHeight + BUILDING_ROOF_CAP_HEIGHT;
       if (point.y >= supportY + 0.15) return `${building.id}:${level}`;
@@ -1452,10 +1450,8 @@ function distanceSquared(a: Vector3State, b: Vector3State): number {
 }
 
 function pointInsideBuilding(point: Vector3State, layout: ReturnType<typeof createMapLayout>): boolean {
-  return layout.obstacles.some(
-    (obstacle) =>
-      Math.abs(point.x - obstacle.center.x) < obstacle.width / 2 - 0.6 &&
-      Math.abs(point.z - obstacle.center.z) < obstacle.depth / 2 - 0.6,
+  return layout.obstacles.some((obstacle) =>
+    pointInsideObstacle2D(obstacle, point.x, point.z, -0.6)
   );
 }
 
@@ -1465,10 +1461,7 @@ function pointInsideGroundBlocker(point: Vector3State, layout: MapLayout): boole
     ...layout.rockObstacles,
     ...layout.coverObstacles,
     ...layout.treeTrunks,
-  ].some((obstacle) =>
-    Math.abs(point.x - obstacle.center.x) <= obstacle.width / 2 + 0.64 &&
-    Math.abs(point.z - obstacle.center.z) <= obstacle.depth / 2 + 0.64
-  );
+  ].some((obstacle) => pointInsideObstacle2D(obstacle, point.x, point.z, 0.64));
 }
 
 function lootPathKey(loot: GroundLootState): string {

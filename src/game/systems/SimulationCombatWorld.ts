@@ -8,6 +8,12 @@ import {
   type RoofRamp,
 } from "../../config/map";
 import { ACTOR_EYE_HEIGHT, ACTOR_HEIGHT, ACTOR_RADIUS } from "../rules/actorGeometry";
+import {
+  obstacleBounds2D,
+  obstacleLocalDirection,
+  obstacleLocalPoint,
+  obstacleWorldDirection,
+} from "../rules/obstacleGeometry";
 import type { ActorState, EntityId, MatchState, Vector3State } from "../state/types";
 import { StaticGridIndex } from "../spatial/StaticGridIndex";
 import type {
@@ -233,12 +239,7 @@ export class SimulationCombatWorld implements CombatWorld {
 }
 
 function createObstacleIndex(obstacles: readonly MapObstacle[]): StaticGridIndex<MapObstacle> {
-  return new StaticGridIndex(obstacles, COMBAT_GRID_CELL_SIZE, (obstacle) => ({
-    minimumX: obstacle.center.x - obstacle.width / 2,
-    maximumX: obstacle.center.x + obstacle.width / 2,
-    minimumZ: obstacle.center.z - obstacle.depth / 2,
-    maximumZ: obstacle.center.z + obstacle.depth / 2,
-  }));
+  return new StaticGridIndex(obstacles, COMBAT_GRID_CELL_SIZE, (obstacle) => obstacleBounds2D(obstacle));
 }
 
 function createRampIndex(ramps: readonly RoofRamp[]): StaticGridIndex<RoofRamp> {
@@ -385,17 +386,20 @@ function intersectObstacle(
   range: number,
   obstacle: MapObstacle,
 ): SurfaceHit | null {
-  return intersectBoxBounds(
-    origin,
-    direction,
+  const localOrigin = obstacleLocalPoint(obstacle, origin.x, origin.z);
+  const localDirection = obstacleLocalDirection(obstacle, direction.x, direction.z);
+  const hit = intersectBoxBounds(
+    { x: localOrigin.x, y: origin.y, z: localOrigin.z },
+    { x: localDirection.x, y: direction.y, z: localDirection.z },
     range,
-    obstacle.center.x - obstacle.width / 2,
-    obstacle.center.x + obstacle.width / 2,
+    -obstacle.width / 2,
+    obstacle.width / 2,
     obstacle.center.y - obstacle.height / 2,
     obstacle.center.y + obstacle.height / 2,
-    obstacle.center.z - obstacle.depth / 2,
-    obstacle.center.z + obstacle.depth / 2,
+    -obstacle.depth / 2,
+    obstacle.depth / 2,
   );
+  return hit ? rotateObstacleNormal(obstacle, hit) : null;
 }
 
 function intersectExpandedObstacle(
@@ -405,17 +409,25 @@ function intersectExpandedObstacle(
   obstacle: MapObstacle,
   radius: number,
 ): SurfaceHit | null {
-  return intersectBoxBounds(
-    origin,
-    direction,
+  const localOrigin = obstacleLocalPoint(obstacle, origin.x, origin.z);
+  const localDirection = obstacleLocalDirection(obstacle, direction.x, direction.z);
+  const hit = intersectBoxBounds(
+    { x: localOrigin.x, y: origin.y, z: localOrigin.z },
+    { x: localDirection.x, y: direction.y, z: localDirection.z },
     range,
-    obstacle.center.x - obstacle.width / 2 - radius,
-    obstacle.center.x + obstacle.width / 2 + radius,
+    -obstacle.width / 2 - radius,
+    obstacle.width / 2 + radius,
     obstacle.center.y - obstacle.height / 2 - radius,
     obstacle.center.y + obstacle.height / 2 + radius,
-    obstacle.center.z - obstacle.depth / 2 - radius,
-    obstacle.center.z + obstacle.depth / 2 + radius,
+    -obstacle.depth / 2 - radius,
+    obstacle.depth / 2 + radius,
   );
+  return hit ? rotateObstacleNormal(obstacle, hit) : null;
+}
+
+function rotateObstacleNormal(obstacle: MapObstacle, hit: SurfaceHit): SurfaceHit {
+  const normal = obstacleWorldDirection(obstacle, hit.normal.x, hit.normal.z);
+  return { ...hit, normal: { x: normal.x, y: hit.normal.y, z: normal.z } };
 }
 
 function intersectBoxBounds(

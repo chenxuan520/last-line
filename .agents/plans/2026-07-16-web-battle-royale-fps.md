@@ -286,7 +286,7 @@
 
 - 2026-07-16 01:40：根据已确认的 brainstorming 结论创建正式计划；锁定 Web 桌面端、20 人 AI 大逃杀、Babylon.js + TypeScript、可替换 2D/3D 素材、未来联网与 5v5 边界。
 
-## Build
+## 构建
 
 ### 更新日志
 
@@ -361,7 +361,7 @@
 
 #### 2026-07-18 17:42 +0800：审查 blocker 与山地环境收敛
 
-- 修复审查 finding：重型 `islandScene`、多 seed 几何和 AI 集成测试显式提供 30–60 秒余量；标准完整 `npm run test` 串行通过，不再依赖单文件验证。
+- 修复审查 审查发现：重型 `islandScene`、多 seed 几何和 AI 集成测试显式提供 30–60 秒余量；标准完整 `npm run test` 串行通过，不再依赖单文件验证。
 - 地图覆盖：8 个野外落区使用“最远候选优先”补地图空白；16 区道路先构建最小连通树再补最近邻支路。新增 seed 0/33/237/358 连通与覆盖测试，最大采样建筑空白小于 720m。
 - 物资全局 spacing：除区内 18–38m 动态间距外，跨区也至少保持 12m，修复相邻落区物资重叠；全图仍固定 240 件、每区 10–20 件。
 - 弹药覆盖：每区至少生成 4 组弹药，保证步枪、轻型、霰弹和狙击四种匹配弹药均存在；动态医疗/装备数量从剩余额度计算。
@@ -419,8 +419,8 @@
 #### 2026-07-18 22:31 +0800：自动换弹与落地 HUD 切换
 
 - 自动换弹：`CombatSystem.fire` 在最后一发完成全部 pellet/trace 处理后检查对应备弹；弹匣为 0 且仍有备弹时立即复用权威 `startReload`，产生 `reload-started` 并驱动既有换弹动画。玩家与 Bot 使用同一规则；无备弹时保持空膛。
-- 航线 HUD：右上角显示逻辑由全局 `state.phase === flight` 改为玩家自身 deployment。玩家仍在飞机/跳伞时显示 `已跳伞 X / 50`；玩家 grounded 的同一帧立即切换为 `${kills} 击杀`，无需等待其余 AI 落地和 flight phase 结束。
-- 新增回归：1 发弹匣 + 30 发备弹开火后断言弹匣归零、`reloadSeconds` 进入配置时长且事件顺序为 `shot-fired → reload-started`；flight phase 中玩家从 parachuting 切 grounded 后计数由 `已跳伞 2 / 50` 立即变为 `3 击杀`。
+- 航线 HUD：右上角显示逻辑由全局 `state.phase === flight` 改为玩家自身 deployment。玩家仍在飞机/跳伞时显示 `已跳伞 X / 50`；玩家 grounded 的同一帧立即切换为 `${kills} 击杀`，无需等待其余 AI 落地和航线阶段结束。
+- 新增回归：1 发弹匣 + 30 发备弹开火后断言弹匣归零、`reloadSeconds` 进入配置时长且事件顺序为 `shot-fired → reload-started`；航线阶段中玩家从 parachuting 切 grounded 后计数由 `已跳伞 2 / 50` 立即变为 `3 击杀`。
 - 最终验证：`npm run typecheck`、定向 52 tests、完整 `npm run test`（18 files / 156 tests）、`npm run build`、`git diff --check` 全通过；完整测试约 194.51 秒，构建仅保留既有大 chunk warning。
 
 #### 2026-07-18 22:45 +0800：动态掉落分散与拾取提示一致性
@@ -446,7 +446,7 @@
 
 - 更正 23:32 的中间方案：用户明确要求不改变原物资视觉规格，因此已完整恢复 `0.62m` box、默认 `scale=(1,1,1)`、原始 rotation/position/pickability；不再缩小、压扁或抬高 marker。生产 smoke 确认 240/240 普通 marker 均保持原规格。
 - 只保留权威落点分散：动态掉落取消尸体正中心候选，从 `1.2m` 环开始，后续为 `1.55/1.9/2.2/2.45/2.65m`；候选仍需满足真实 3D 距离 ≤3m、权威支撑面、墙/边界避让和全局去重。由此避免完整尺寸 marker 直接生成在第一人称脚下。
-- 提示刷新：`pickupPromptSignature` 纳入玩家 health-independent 的实际候选依赖，包括 armor/maxArmor/armorLevel/helmetLevel、武器槽、背包和附近物资三维位置；同级满甲受损后会从“当前无法拾取”立即刷新为“F 拾取”。`pickupPromptText` 与 `findPickupCandidate` 继续共用实际拾取规则。
+- 提示刷新：`pickupPromptSignature` 纳入玩家与生命值无关的实际候选依赖，包括 armor/maxArmor/armorLevel/helmetLevel、武器槽、背包和附近物资三维位置；同级满甲受损后会从“当前无法拾取”立即刷新为“F 拾取”。`pickupPromptText` 与 `findPickupCandidate` 继续共用实际拾取规则。
 - 回归：同级二级满甲附近提示为不可拾，耐久改为 0 后签名变化且提示变为 `F 拾取 二级护甲`；marker NullEngine 测试断言全部恢复默认 scale 与 pickability。
 - 验证：定向 inventory/minimap 26 tests、marker/inventory/minimap 27 tests、`npm run typecheck`、`git diff --check` 通过；视觉恢复后的完整 `npm run test` 为 18 files / 161 tests 全通过，`npm run build` 通过。
 
@@ -459,7 +459,7 @@
 
 #### 2026-07-19 01:16 +0800：拾取提示背包容量依赖收敛
 
-- Reviewer 指出 `maxBackpackStacks` 同样影响 `canActorPickLoot`，但未进入 HUD prompt 缓存签名；已将该字段加入 `pickupPromptSignature`。
+- 审查者 指出 `maxBackpackStacks` 同样影响 `canActorPickLoot`，但未进入 HUD prompt 缓存签名；已将该字段加入 `pickupPromptSignature`。
 - 新增回归：背包容量 1 且唯一 stack 已满时，附近新弹药显示“当前无法拾取”；容量提升到 2 后签名变化，提示立即刷新为 `F 拾取 步枪弹`。
 - 测试稳定：清理遗留 Vite 验收进程后重型 map/AI 独立通过；空间格测试保留结构约束并将重复运动步数从 3000 降到 300，重型场景/AI/模式测试仅增加并发超时余量，不减少业务断言。
 - 最终验证：`npm run typecheck && npm run test && npm run build && git diff --check` 全通过；Vitest 18 files / 163 tests，完整约 83.39 秒。构建仅保留既有大 chunk warning。
@@ -488,7 +488,7 @@
 - 本机 Chrome、生产 `dist/`、1920×1080、中画质、音量 `0`：菜单与 20 人 HUD 正常，控制台无错误；航线/滑翔采样最低 112 FPS、平均约 119 FPS；战斗阶段采样最低 120 FPS、平均约 120 FPS。
 - 真实规则集成：19 个 `BotController` 使用 `SimulationCombatWorld` 完成搜集、交火并产生唯一胜者。
 - 生命周期：Babylon `NullEngine` 连续创建/销毁 4 个岛屿场景后 scene 和 loot marker 引用归零。
-- 终审：最后一轮定向代码审查通过，无明确高风险 finding。
+- 终审：最后一轮定向代码审查通过，无明确高风险 审查发现。
 
 #### 2026-07-19 21:26 +0800：首页 GitHub 入口与 tag 自动 Release
 
@@ -561,8 +561,8 @@
 - 2026-07-21 14:12 补充收尾：触摸模式只按 primary coarse pointer 启用，避免带触屏的桌面笔记本失去鼠标 Pointer Lock；GLB 角色替换时继续保留程序化背包/护甲板/头盔叠层，使装备可见性契约不因素材替换失效。相关 `typecheck:app` 与场景/触控 19 项定向回归通过。残余验证风险仅为 DevTools 可验证多 Pointer 事件链但不能替代真实手机多指手感，部署后建议在一台实际横屏手机上复核按钮尺寸与三指操作。
 - 2026-07-21 14:13：三维物资、手机横屏完整触控、按装备显示角色护甲/头盔及密集交火 AI 性能优化已提交并推送 `main`，实现提交为 `bf4682d feat: enhance mobile gameplay and combat performance`；未跟踪参考文件 `session-ses_082c.md` 保持本地且未提交，等待主分支 CI 和自动部署完成。
 - 2026-07-21 14:20：主分支 CI `29806350457`、GitHub Pages 和 Cloudflare Pages production deployment `9adfd4d4-42ca-4aef-9222-293b37648ad9` 均成功。正式域名已加载新静态包 `index-eNISTJ-b.js`；844×390 手机横屏静音实测完整触控 HUD 可见、250/250 三维物资生效、默认 0 个前胸板/49 个背包、约 120 FPS，控制台无 error/warn。真实手机多指手感仍按前述风险建议补一次人工复核，但不阻塞当前功能与自动门禁。
-- 2026-07-21 15:02：补做 reviewer 后确认其唯一中风险 finding 真实：短横屏同时继承 `top` 并设置 `bottom`，会压缩治疗卡并与武器区重叠。已改为单一 `top` 定位，治疗卡位于准星上方、拾取提示位于准星下方。production build 与 `git diff --check` 通过；静音 preview 在 844×390 和 667×375 强制显示真实治疗 DOM/拾取提示测量，治疗卡 client/scroll 分别为 `57/57px`、拾取提示 `28/28px`，与右下武器区重叠面积均为 0；667×375 截图保存于临时目录，等待 reviewer 复审。
-- 2026-07-21 15:10：reviewer 复审无 findings，确认原中风险布局问题闭环，且原 `5ddf86d..bf4682d` 范围不存在剩余 blocker/high/medium 问题；修复未引入与顶部 HUD、准星、小地图或触控按钮的新重叠。准备提交并推送 CSS 修复及完整 review 记录。
+- 2026-07-21 15:02：补做 审查者 后确认其唯一中风险 审查发现 真实：短横屏同时继承 `top` 并设置 `bottom`，会压缩治疗卡并与武器区重叠。已改为单一 `top` 定位，治疗卡位于准星上方、拾取提示位于准星下方。production build 与 `git diff --check` 通过；静音 preview 在 844×390 和 667×375 强制显示真实治疗 DOM/拾取提示测量，治疗卡 client/scroll 分别为 `57/57px`、拾取提示 `28/28px`，与右下武器区重叠面积均为 0；667×375 截图保存于临时目录，等待 审查者 复审。
+- 2026-07-21 15:10：审查者 复审无 审查发现，确认原中风险布局问题闭环，且原 `5ddf86d..bf4682d` 范围不存在剩余 blocker/high/medium 问题；修复未引入与顶部 HUD、准星、小地图或触控按钮的新重叠。准备提交并推送 CSS 修复及完整 review 记录。
 - 2026-07-21 15:15：review 闭环修复已提交并推送 `main`，提交为 `3b1bfaf fix: stabilize short mobile HUD`；最终 CI `29809517369`、GitHub Pages 和 Cloudflare Pages deployment `e7aa788b-4305-4772-8279-a6307b8c29eb` 均成功。工作区仅保留未跟踪参考文件 `session-ses_082c.md`，未提交。
 
 #### 2026-07-21 17:39 +0800：第二轮性能余量优化完成实现
@@ -572,11 +572,11 @@
 - 规则循环继续移除等价重复工作：Movement 空 cell 复用并改数值格 key；GameSimulation 的稳定命令顺序复用于 Combat；BattleRoyaleMode 每 tick 复用 living actor 集；服务端复用非 cohort Bot 的 continuous command；Bot 复用已传入的存活数并缓存受控 actor 数字 ID。已通过 typecheck、射线/导航/掉落/移动/Bot/模拟/模式/服务端定向回归；新增静态格 corner supercover、60 条导航完整扫描等价、全坡道射线等价及等距 loot ID tie 测试。完整门禁、49 Bot 多 seed 与最终 benchmark 待执行。
 
 - 2026-07-21 17:58：补齐多房间/多 Bot 长期余量：同一 `MapLayout` 的导航 blocker 数组和静态格由所有 Bot 共享，不再为 49 个 Controller 重复构建；每个 Bot 与 `MovementSystem` 强持有本局 layout，避免全局 8-seed cache 在多个房间交错时反复驱逐并重建地图。独立 49 Bot 完整局约 `7.04s`，五个武装 seed 约 `2.69–3.98s`，继续保持每 seed 至少 42/49 武装及唯一胜者；这些时间同样仅作观察。
-- 2026-07-21 17:58：最终自动门禁通过：应用 **28 files / 259 tests**、Worker **3 files / 26 tests**、`npm run typecheck`、`npm run build`、`npm run build:worker` 全部成功；构建仅有既有 >500kB chunk warning。完整套件覆盖 401 seed 地图、多层建筑/坡道、AI 五 seed 搜集和完整局、同时结算、联机运行时、掉落复用及新增索引等价测试。此次没有修改展示层，按项目门禁无需额外浏览器视觉验收；准备进入用户要求的 reviewer 闭环。
-- 2026-07-21 18:18：采纳 reviewer 唯一高风险 finding。确认 `InventorySystem` 首次死亡掉落、Bot 首次跳伞目标与 forced relocation 仍可能在本局 seed 被全局 8 项 cache 驱逐后调用 `createMapLayout(seed)`，与“多房间不重建地图”的目标冲突。现由 `BattleRoyaleSession` / `MatchRuntime` 在房间建立时生成并强持有同一 `MapLayout`，传给 `GameSimulation`、`InventorySystem`、`MovementSystem`、`SimulationCombatWorld` 和全部普通/接管 Bot；Bot 落点与强制迁移、Inventory 死亡/手动掉落均使用该对象，只有真实 mapSeed 改变才重新生成。
-- 2026-07-21 18:18：新增超过 8 个其他 seed 驱逐全局 cache 后的结构回归，以 Proxy 断言死亡掉落和 forced relocation 仍读取原 pinned layout，而非用不稳定耗时阈值；同时固化负坐标、格边界、极小正 delta 和 generation wrap 的静态格测试。`typecheck:app` 以及 Inventory/Bot/StaticGrid/MatchRuntime **4 files / 80 tests** 通过，等待 reviewer 复审和最终完整门禁。
-- 2026-07-21 18:29：reviewer 复审为 `No findings`，确认 pinned layout finding 及完整性能改动范围闭环。修复后的完整门禁由 reviewer 再次执行并通过：应用 **28 files / 262 tests**、Worker **3 files / 26 tests**、`npm run typecheck`、`npm run build`、`npm run build:worker`、`git diff --check f470f9d` 均成功；五 seed 武装率与完整局唯一胜者保持。最终独立基准为 300 rays 中位 `6.96ms`、60 paths 中位 `82.82ms` 且 mismatch 0、四个完整死亡背包中位 `6.23ms`；时间仅作本机观察。当前无展示层改动、无已知 blocker/high/medium finding，等待提交推送。
-- 2026-07-21 18:31：第二轮性能余量优化及 reviewer 闭环已提交并推送 `main`，实现提交为 `0a40305 perf: improve simulation headroom`；`origin/main` 已对齐。未跟踪参考文件 `session-ses_082c.md` 未加入提交，等待主分支 CI 与自动部署完成。
+- 2026-07-21 17:58：最终自动门禁通过：应用 **28 files / 259 tests**、Worker **3 files / 26 tests**、`npm run typecheck`、`npm run build`、`npm run build:worker` 全部成功；构建仅有既有 >500kB chunk warning。完整套件覆盖 401 seed 地图、多层建筑/坡道、AI 五 seed 搜集和完整局、同时结算、联机运行时、掉落复用及新增索引等价测试。此次没有修改展示层，按项目门禁无需额外浏览器视觉验收；准备进入用户要求的 审查者 闭环。
+- 2026-07-21 18:18：采纳 审查者 唯一高风险 审查发现。确认 `InventorySystem` 首次死亡掉落、Bot 首次跳伞目标与 forced relocation 仍可能在本局 seed 被全局 8 项 cache 驱逐后调用 `createMapLayout(seed)`，与“多房间不重建地图”的目标冲突。现由 `BattleRoyaleSession` / `MatchRuntime` 在房间建立时生成并强持有同一 `MapLayout`，传给 `GameSimulation`、`InventorySystem`、`MovementSystem`、`SimulationCombatWorld` 和全部普通/接管 Bot；Bot 落点与强制迁移、Inventory 死亡/手动掉落均使用该对象，只有真实 mapSeed 改变才重新生成。
+- 2026-07-21 18:18：新增超过 8 个其他 seed 驱逐全局 cache 后的结构回归，以 Proxy 断言死亡掉落和 forced relocation 仍读取原 pinned layout，而非用不稳定耗时阈值；同时固化负坐标、格边界、极小正 delta 和 generation wrap 的静态格测试。`typecheck:app` 以及 Inventory/Bot/StaticGrid/MatchRuntime **4 files / 80 tests** 通过，等待 审查者 复审和最终完整门禁。
+- 2026-07-21 18:29：审查者 复审为 `No 审查发现`，确认 pinned layout 审查发现 及完整性能改动范围闭环。修复后的完整门禁由 审查者 再次执行并通过：应用 **28 files / 262 tests**、Worker **3 files / 26 tests**、`npm run typecheck`、`npm run build`、`npm run build:worker`、`git diff --check f470f9d` 均成功；五 seed 武装率与完整局唯一胜者保持。最终独立基准为 300 rays 中位 `6.96ms`、60 paths 中位 `82.82ms` 且 mismatch 0、四个完整死亡背包中位 `6.23ms`；时间仅作本机观察。当前无展示层改动、无已知 blocker/high/medium 审查发现，等待提交推送。
+- 2026-07-21 18:31：第二轮性能余量优化及 审查者 闭环已提交并推送 `main`，实现提交为 `0a40305 perf: improve simulation headroom`；`origin/main` 已对齐。未跟踪参考文件 `session-ses_082c.md` 未加入提交，等待主分支 CI 与自动部署完成。
 - 2026-07-21 18:36：记录提交 `758c2fc docs: record performance optimization` 后，覆盖完整实现的主分支 CI `29822566601` 与 GitHub Pages 均成功；实现提交对应的前一 run 因后续文档 push 被 concurrency 正常取消，不代表校验失败。Cloudflare Pages production deployment `bcab4c96-1b02-4153-8d76-b42b5633affd` 已发布 `758c2fc`，实现提交 `0a40305` 亦有成功 deployment `392673a2-25f5-4ca5-a046-116b0b7884f1`。等待提交本条最终部署记录。
 
 #### 2026-07-21 19:08 +0800：联机移动平滑与快照突发抑制
@@ -584,25 +584,25 @@
 - 用户反馈在线多人场景偶发卡顿和瞬移。定位到两个确定性原因：客户端在处理新 snapshot 后立刻把“snapshot 到达前”的整段 `frameSeconds` 计入刚重置的 100ms 插值，约 100ms 的渲染卡顿会让远端角色同帧直接跳到新位置；服务端落后追 tick 时仍按每 3 个模拟 tick 广播，可能在极短墙钟时间内连续发送多个 snapshot，客户端合并后形成更大的位置跨度。
 - 客户端改为在消费消息前推进旧 transition，新 snapshot 从当前实际渲染位置开始；插值时长按 server tick gap 动态取 `120–250ms`，丢失/合并 snapshot 时自动拉长。远端角色继续只做展示层插值；本地玩家权威快照和未确认输入重放仍写预测状态，但 6m 内的普通 reconciliation 通过独立视觉 offset 在同一时长内归零，真正传送、部署切换和生死切换继续立即对齐，不把平滑状态写回权威规则。
 - 服务端保持 30Hz 权威 tick 与正常每 3 tick 的 10Hz 目标，仅增加 80ms 墙钟最小广播间隔；追帧时抑制 snapshot burst，事件和 loot change 继续累积到下一帧，终局仍强制发送最终 frame。`MultiplayerSession` 同时从初始 full state 固定本局 `MapLayout`，避免首次本地预测时生成地图造成卡顿。
-- 新增纯函数回归覆盖 tick-gap 插值、snapshot 后零进度起步、普通预测校正/真实传送边界，以及 snapshot throttle 的正常节奏、追帧 burst 和时钟重置。`npm run typecheck` 与多人平滑/节流/连接/运行时 **4 files / 9 tests** 通过，等待完整门禁、双客户端静音浏览器验收和 reviewer 闭环。
+- 新增纯函数回归覆盖 tick-gap 插值、snapshot 后零进度起步、普通预测校正/真实传送边界，以及 snapshot throttle 的正常节奏、追帧 burst 和时钟重置。`npm run typecheck` 与多人平滑/节流/连接/运行时 **4 files / 9 tests** 通过，等待完整门禁、双客户端静音浏览器验收和 审查者 闭环。
 - 2026-07-21 19:29：完成本地真实 WebSocket 双客户端验收。两个独立浏览器 context 以 2 名真人加入同一私人房间，服务端 AI 补满 50 人；主音量均为 0，对局持续推进，HUD 约 110–120 FPS，两端控制台均无 error/warn。在观察端对真实远端 `actor-bot-7` 连续采样 240 个 RAF，并主动制造两次约 120ms 主线程停顿：普通帧最大位移约 `0.194m`；两个长帧位移分别约 `1.207m` / `0.354m`，最大折算速度约 `9.84m/s`，处于角色正常移动速度范围，没有快照同帧跳终点或异常大跨度瞬移；包含人工停顿的平均 RAF 仍约 `108.3 FPS`。本轮尚未部署生产，以上为本地 Worker/浏览器证据。
-- 2026-07-21 19:42：首次完整套件中两个既有 100/401-seed 地图枚举仅因并发 CPU 负载超出各自 120/240 秒预算，未出现断言失败；确认 Chrome 仍有多张历史 Babylon 场景标签持续渲染后，按用户新增要求关闭全部本轮及历史验收页、停止 5173/8787 服务，并确认 Chrome 只剩无法关闭的 `about:blank`。清理后原命令无需修改 timeout 即稳定通过：应用 **30 files / 267 tests**、Worker **3 files / 26 tests**、`npm run build`、`npm run build:worker` 全部成功，构建仅保留既有大 chunk warning。今后每次 Chrome 验收结束均执行同样的页面/context、本地服务和最终空白页检查；准备进入 reviewer 闭环。
-- 2026-07-21 19:52：采纳 reviewer 唯一高风险 finding：远端 actor 原先只有重新可见时立即对齐，真实传送及 alive/deployment 变化仍会被 transition 平滑。现统一通过 transition-selection helper 比较旧/新权威 actor；重新可见、alive/deployment 变化、缺少旧状态或 grounded 权威跨度 `>6m` 均零时长立即对齐。为避免机械阈值破坏既有最高约 64m/s 的高空滑翔，parachuting 同状态允许最高 18m 的合法 snapshot 跨度继续平滑；grounded 10m 传送、deployment/alive、重新可见、普通 2m 移动和 parachuting 10m 合法移动均新增回归。`npm run typecheck` 与 smoothing/throttle/runtime **3 files / 10 tests** 通过，等待 reviewer 复审。
-- 2026-07-21 20:00：采纳 reviewer 复审的新 finding：固定 18m parachuting 上限会在正常 3-tick snapshot 下错误平滑 6–18m 的不可能位移。现显式传入真实 server tick gap，并按 `hypot(64m/s 水平滑翔, 5m/s 垂直下降) × gap + 0.35m` 计算本次动态上限，同时保留 18m 硬上限；因此 10m/0.2s 和约 16m/0.25s 合法高速移动继续平滑，17m/0.1s 与 >18m 跳变立即对齐。`MAX_GLIDE_SPEED` / `PARACHUTE_DESCENT_SPEED` 从权威 Movement 导出，避免网络层复制玩法数值。`npm run typecheck` 与 smoothing/throttle/Movement/Runtime **4 files / 29 tests** 通过。
-- 2026-07-21 20:00：按用户要求补齐长期文档。README 新增联机本地预测、远端 120–250ms 插值、传送 snap 和追 tick burst 抑制说明；`docs/architecture.md` 详细记录 snapshot→authoritative replace→pending input replay→visual correction 流程、远端 transition 选择、动态 parachuting 位移预算、80ms snapshot throttle、event/loot 累积和 finished 尾帧契约，并明确所有平滑只属于展示层，不改变命中、拾取、库存、安全区或结果状态。等待 reviewer 第三轮复审。
-- 2026-07-21 20:06：reviewer 第三轮复审为 `No findings`，确认动态 parachuting 预算、18m hard cap、异常 tick、deployment snap、权威常量依赖和 README/architecture 均与实现一致；前两轮其余 smoothing/throttle/reconciliation 范围继续无剩余 blocker/high/medium。Reviewer 再次执行应用 **30 files / 269 tests**、Worker **3 files / 26 tests**、typecheck、应用/Worker build 和 diff check，全部通过。Chrome 保持清理后的仅 `about:blank` 状态，等待提交推送和生产部署。
-- 2026-07-21 20:12：最终联机平滑实现（含动态 parachuting snap 边界、README、architecture 和 reviewer 闭环）已随 `0e3597a fix: smooth multiplayer movement` 推送；CI `29828821107` 与 GitHub Pages 成功。随后 `89423e5` 仅补充本 plan 的提交状态记录。最终 reviewer 为 `No findings`、完整门禁为 269/26 tests 全绿；生产 Worker 尚未更新，避免在未确认活动房间状态时擅自重启在线房间。
+- 2026-07-21 19:42：首次完整套件中两个既有 100/401-seed 地图枚举仅因并发 CPU 负载超出各自 120/240 秒预算，未出现断言失败；确认 Chrome 仍有多张历史 Babylon 场景标签持续渲染后，按用户新增要求关闭全部本轮及历史验收页、停止 5173/8787 服务，并确认 Chrome 只剩无法关闭的 `about:blank`。清理后原命令无需修改 timeout 即稳定通过：应用 **30 files / 267 tests**、Worker **3 files / 26 tests**、`npm run build`、`npm run build:worker` 全部成功，构建仅保留既有大 chunk warning。今后每次 Chrome 验收结束均执行同样的页面/context、本地服务和最终空白页检查；准备进入 审查者 闭环。
+- 2026-07-21 19:52：采纳 审查者 唯一高风险 审查发现：远端 actor 原先只有重新可见时立即对齐，真实传送及 alive/deployment 变化仍会被 transition 平滑。现统一通过 transition-selection helper 比较旧/新权威 actor；重新可见、alive/deployment 变化、缺少旧状态或 grounded 权威跨度 `>6m` 均零时长立即对齐。为避免机械阈值破坏既有最高约 64m/s 的高空滑翔，parachuting 同状态允许最高 18m 的合法 snapshot 跨度继续平滑；grounded 10m 传送、deployment/alive、重新可见、普通 2m 移动和 parachuting 10m 合法移动均新增回归。`npm run typecheck` 与 smoothing/throttle/runtime **3 files / 10 tests** 通过，等待 审查者 复审。
+- 2026-07-21 20:00：采纳 审查者 复审的新 审查发现：固定 18m parachuting 上限会在正常 3-tick snapshot 下错误平滑 6–18m 的不可能位移。现显式传入真实 server tick gap，并按 `hypot(64m/s 水平滑翔, 5m/s 垂直下降) × gap + 0.35m` 计算本次动态上限，同时保留 18m 硬上限；因此 10m/0.2s 和约 16m/0.25s 合法高速移动继续平滑，17m/0.1s 与 >18m 跳变立即对齐。`MAX_GLIDE_SPEED` / `PARACHUTE_DESCENT_SPEED` 从权威 Movement 导出，避免网络层复制玩法数值。`npm run typecheck` 与 smoothing/throttle/Movement/Runtime **4 files / 29 tests** 通过。
+- 2026-07-21 20:00：按用户要求补齐长期文档。README 新增联机本地预测、远端 120–250ms 插值、传送 snap 和追 tick burst 抑制说明；`docs/architecture.md` 详细记录 snapshot→authoritative replace→pending input replay→visual correction 流程、远端 transition 选择、动态 parachuting 位移预算、80ms snapshot throttle、event/loot 累积和 finished 尾帧契约，并明确所有平滑只属于展示层，不改变命中、拾取、库存、安全区或结果状态。等待 审查者 第三轮复审。
+- 2026-07-21 20:06：审查者 第三轮复审为 `No 审查发现`，确认动态 parachuting 预算、18m hard cap、异常 tick、deployment snap、权威常量依赖和 README/architecture 均与实现一致；前两轮其余 smoothing/throttle/reconciliation 范围继续无剩余 blocker/high/medium。审查者 再次执行应用 **30 files / 269 tests**、Worker **3 files / 26 tests**、typecheck、应用/Worker build 和 diff check，全部通过。Chrome 保持清理后的仅 `about:blank` 状态，等待提交推送和生产部署。
+- 2026-07-21 20:12：最终联机平滑实现（含动态 parachuting snap 边界、README、architecture 和 审查者 闭环）已随 `0e3597a fix: smooth multiplayer movement` 推送；CI `29828821107` 与 GitHub Pages 成功。随后 `89423e5` 仅补充本 plan 的提交状态记录。最终 审查者 为 `No 审查发现`、完整门禁为 269/26 tests 全绿；生产 Worker 尚未更新，避免在未确认活动房间状态时擅自重启在线房间。
 - 2026-07-21 20:17：用户明确确认生产当前无活动房间后部署 Worker，production version 为 `551bad64-6740-4d60-a101-491f248e09d0`；`https://lastlinep2p.011203.xyz/health` 返回 `{"ok":true,"service":"lastlinep2p"}`，认证策略接口返回 `registrationLoginRequired=false`，保持既有游客模式。提交 `89423e5` 的 CI `29829200958` 与 GitHub Pages 成功，Cloudflare Pages production deployment `540da630-3f22-44c2-9cd0-5dd6cea24479` 已发布；实现提交 `0e3597a` 对应 deployment 为 `1ae4b36c-fd42-4479-99b0-015f7fc7a5c4`。生产验证使用只读 HTTP/Wrangler 查询，没有重新打开 Chrome；Chrome 仍只保留 `about:blank`。
 
 #### 2026-07-21 23:54 +0800：地面三维物资可见尺寸放大
 
 - 用户反馈低模三维地面物资贴地时过小、难以看清，要求至少达到原经典旋转方块的可见体量。展示层现统一使用 `1.45` 倍模型缩放，并按每个共享 template 的实际最低点计算独立 Y offset，使模型底部保持在权威支撑面上方 `0.04m`，不再有部分几何沉入地面；经典方块关闭模型路径继续保持原 `0.62m`、原位置和原缩放。
 - 改动只作用于 Babylon marker 的 scaling/position；`GroundLootState.position`、拾取距离、AI、掉落支撑、权威碰撞和网络协议均未修改。每条 loot record 仍只有一个 Mesh，14 类共享 geometry/material、死亡材质和 record 原地切换逻辑保持有界。
-- `islandScene.test.ts` 新增全部三维 marker 的世界包围盒回归：每个模型包围盒对角线均不小于经典 `0.62m` 方块的空间对角线，底部均至少高于物资权威地面 `0.039m`；同时覆盖 `1.45` 缩放、经典方块仍为 `1`、步枪切换死亡绷带后原 Mesh/共享资源语义不变。首次定向运行暴露生命周期旧断言仍固定要求 scaling=1，已按模型/经典两条路径分别断言后重跑；`typecheck:app` 与 IslandScene 4 项测试通过，等待完整门禁、静音浏览器视觉验收和 reviewer。
-- 2026-07-22 00:10：最终自动门禁通过：应用 **30 files / 271 tests**、Worker **3 files / 27 tests**、standalone **2 files / 15 tests**、`npm run typecheck`、生产 build 和 `git diff --check` 全绿。静音 production preview 中确认菜单主音量为 `0`、三维模型开关启用；浏览器实际枚举 14 类可用 marker 均为 `1.45` scale，最小模型世界包围盒对角线约 `1.430m`，高于经典方块约 `1.074m`。将 14 类模型与原 `0.62m` 方块并排生成只读视觉 gallery，放大后的枪械、弹药箱、护甲、头盔和医疗物轮廓均清晰，console 无 error/warn；截图 `loot-scale-gallery-close.png` 保存于临时目录。验收后已关闭本轮独立 Chrome context、停止 4173 preview，并确认浏览器只剩 `about:blank`、端口无残留服务。等待 reviewer 终审。
-- 2026-07-22 00:23：逐条确认 reviewer 的 1 项 High、1 项 Medium 和 1 项 Low 均成立并完成修正。High：`GroundLootState.position.y` 是经典 marker 中心、已固定高于真实 support `0.45m`，展示定位现先减去该中心高度，再加模板最低点补偿与 `0.04m` clearance；全部静态物资测试改为通过真实 `getSupportHeight()` 断言底部贴合 terrain/楼板支撑面，而非相对 marker 中心。Medium：型号变化时除原地应用共享 geometry 外，同步恢复目标模板 Euler/quaternion，新增屋顶位置上的已知→fallback→sniper 双向切换，分别验证 fallback `π/4` 旋转、sniper 零旋转及切换后底部始终为 roof support `+0.04m`。Low：浏览器量测记录已改为 reviewer 复核的实际最小约 `1.430m`。定向 IslandScene 4 项、`typecheck:app` 与 diff check 重跑通过，等待 reviewer 复审。
-- 2026-07-22 00:32：采纳 reviewer 复审的 1 项 Medium 测试缺口。确认固定 seed 下 `floorSlabs[0]` 是 `kind="floor"` 的室内楼板，虽然运行时修复在 reviewer 只读真实屋顶复验中正确，但原测试和 00:23 记录将其误称为 roof。测试现显式 `find(slab.kind === "roof")` 并断言 kind，使用 `getSupportHeight()` 证明该点真实 support 等于 roof top，再对 fallback/sniper 切换后的最低点分别断言 roof support `+0.04m`。定向 IslandScene 4 项、`typecheck:app` 和 diff check 通过，等待 reviewer 最终复审。
-- 2026-07-22 00:41：reviewer 最终复审 `No findings`，前述 High/Medium/Low 全部闭环。按用户补充口径再次用静音 production preview 直接核验两条路径：250 个三维 marker 覆盖 14 类，全部 scale=`1.45`；经典黄色旋转方块 template 的 geometry 仍精确为 `0.62×0.62×0.62m`、scaling=`1`、rotation=`(0,π/4,π/4)`，颜色/材质链路未改。控制台无 error/warn；验收后关闭独立 context、停止 4173 服务并确认只剩 `about:blank`。最终完整门禁仍为 271/27/15 tests、typecheck、build 和 diff check 全绿，准备提交推送。
+- `islandScene.test.ts` 新增全部三维 marker 的世界包围盒回归：每个模型包围盒对角线均不小于经典 `0.62m` 方块的空间对角线，底部均至少高于物资权威地面 `0.039m`；同时覆盖 `1.45` 缩放、经典方块仍为 `1`、步枪切换死亡绷带后原 Mesh/共享资源语义不变。首次定向运行暴露生命周期旧断言仍固定要求 scaling=1，已按模型/经典两条路径分别断言后重跑；`typecheck:app` 与 IslandScene 4 项测试通过，等待完整门禁、静音浏览器视觉验收和 审查者。
+- 2026-07-22 00:10：最终自动门禁通过：应用 **30 files / 271 tests**、Worker **3 files / 27 tests**、standalone **2 files / 15 tests**、`npm run typecheck`、生产 build 和 `git diff --check` 全绿。静音 production preview 中确认菜单主音量为 `0`、三维模型开关启用；浏览器实际枚举 14 类可用 marker 均为 `1.45` scale，最小模型世界包围盒对角线约 `1.430m`，高于经典方块约 `1.074m`。将 14 类模型与原 `0.62m` 方块并排生成只读视觉 gallery，放大后的枪械、弹药箱、护甲、头盔和医疗物轮廓均清晰，console 无 error/warn；截图 `loot-scale-gallery-close.png` 保存于临时目录。验收后已关闭本轮独立 Chrome context、停止 4173 preview，并确认浏览器只剩 `about:blank`、端口无残留服务。等待 审查者 终审。
+- 2026-07-22 00:23：逐条确认 审查者 的 1 项 High、1 项 Medium 和 1 项 Low 均成立并完成修正。High：`GroundLootState.position.y` 是经典 marker 中心、已固定高于真实 support `0.45m`，展示定位现先减去该中心高度，再加模板最低点补偿与 `0.04m` clearance；全部静态物资测试改为通过真实 `getSupportHeight()` 断言底部贴合 terrain/楼板支撑面，而非相对 marker 中心。Medium：型号变化时除原地应用共享 geometry 外，同步恢复目标模板 Euler/quaternion，新增屋顶位置上的已知→fallback→sniper 双向切换，分别验证 fallback `π/4` 旋转、sniper 零旋转及切换后底部始终为 roof support `+0.04m`。Low：浏览器量测记录已改为 审查者 复核的实际最小约 `1.430m`。定向 IslandScene 4 项、`typecheck:app` 与 diff check 重跑通过，等待 审查者 复审。
+- 2026-07-22 00:32：采纳 审查者 复审的 1 项 Medium 测试缺口。确认固定 seed 下 `floorSlabs[0]` 是 `kind="floor"` 的室内楼板，虽然运行时修复在 审查者 只读真实屋顶复验中正确，但原测试和 00:23 记录将其误称为 roof。测试现显式 `find(slab.kind === "roof")` 并断言 kind，使用 `getSupportHeight()` 证明该点真实 support 等于 roof top，再对 fallback/sniper 切换后的最低点分别断言 roof support `+0.04m`。定向 IslandScene 4 项、`typecheck:app` 和 diff check 通过，等待 审查者 最终复审。
+- 2026-07-22 00:41：审查者 最终复审 `No 审查发现`，前述 High/Medium/Low 全部闭环。按用户补充口径再次用静音 production preview 直接核验两条路径：250 个三维 marker 覆盖 14 类，全部 scale=`1.45`；经典黄色旋转方块 template 的 geometry 仍精确为 `0.62×0.62×0.62m`、scaling=`1`、rotation=`(0,π/4,π/4)`，颜色/材质链路未改。控制台无 error/warn；验收后关闭独立 context、停止 4173 服务并确认只剩 `about:blank`。最终完整门禁仍为 271/27/15 tests、typecheck、build 和 diff check 全绿，准备提交推送。
 - 2026-07-22 00:47：地面三维物资放大和贴地修复已提交推送 `eb522f9 fix: enlarge ground loot models`。主分支 CI `29849831739` 成功，包含应用 271、Worker 27、standalone 15 项测试、三套 typecheck、应用/Worker/standalone build 和 GitHub Pages 发布；Cloudflare Pages production deployment `2ad615ae-723a-45c9-9b2c-edf367237f35` 已上线该提交，正式域名加载新包 `index-BqJafjOd.js`。本次无 Worker/权威服务改动，不需部署 Worker。工作区只剩外部并发添加的 `.gitignore` 中 `.opencode` 规则，未纳入本任务提交。
 
 #### 2026-07-22 01:19 +0800：三维枪械辨识度与自然物资颜色调整
@@ -610,9 +610,9 @@
 - 用户要求仅将四类三维地面枪械由 `1.45` 倍提高到 `2` 倍，弹药、护甲、头盔和医疗物继续保持 `1.45` 倍；同时修复枪管与枪体之间的可见断口。枪械模板现根据 receiver 前缘和主枪管后缘补一段有重叠的低模连接体，仍在初始化时合并成每型号一份共享 geometry，每条物资记录继续只使用一个 Mesh。
 - 模型缩放改为按 item kind 选择，枪械为 `2`、其余已知物资和 fallback 为 `1.45`；贴地 offset 使用对应型号的实际缩放重新计算，全部类型仍保持最低点为真实 support `+0.04m`。经典黄色旋转方块路径继续保持原 `0.62m`、scale `1`、旋转、位置和材质，不受本次调整影响。
 - 所有非死亡三维物资材质统一为黄色 `#e2c66d`，包括自然生成和手动丢弃；死亡掉落继续使用红色 `#c85e50`。未修改 `GroundLootState`、物资来源、拾取距离、AI、掉落、网络或权威规则。
-- 先补回归并确认旧实现失败，再完成实现：生命周期逐 marker 检查枪械 `2` / 其他 `1.45`；14 类自然物资材质全部为黄色、死亡材质保持红色；四类枪械在原 receiver/barrel 间隙中心执行垂直射线并确认均命中连接几何；全部 marker 继续验证世界最低点贴合真实 support。定向 IslandScene **4 tests**、`npm run typecheck:app` 和 `git diff --check` 已通过，等待完整门禁、静音浏览器视觉验收和用户指定的“先推送、再 reviewer”流程。
-- 2026-07-22 01:28：最终自动门禁通过：应用 **30 files / 271 tests**、Worker **3 files / 27 tests**、standalone **2 files / 15 tests**、`npm run typecheck`、生产 build 和 diff check 全绿。静音 production preview 确认 250 个三维 marker 中四类枪械全部 scale=`2`、其余物资全部 scale=`1.45`、非死亡材质全部为 `#E2C66D`；对局中实际产生的一件死亡霰弹枪保持 `#C85E50`。只读四枪 gallery 可见 receiver、补充连接体和主枪管连续接合，枪械轮廓清楚，console 无 error/warn；截图 `loot-gun-scale-connectivity.png` 存于临时目录。验收后关闭独立 Chrome context、停止 4173 preview，并确认只剩 `about:blank`。下一步按用户明确指定顺序先提交推送，再启动 reviewer。
-- 2026-07-22 01:36：实现、测试、README 和当时 Build 记录已按用户指定顺序先随 `1d65983 fix: refine ground loot models` 提交并推送，随后启动 reviewer。Reviewer 对 `0055e21..1d65983` 完整范围复核为 `No findings`，并再次通过 271/27/15 tests、全量 typecheck、build 和 diff check；详细证据已写入下方 Review。GitHub Actions run `29853134306` 与 GitHub Pages 成功，Cloudflare Pages production deployment `2982e8bd-24af-41c0-9e50-b569aa4c4c5c` 已发布 `1d65983`。本次无 Worker、权威规则或服务端改动，不需部署 Worker；工作区仍只剩外部 `.gitignore` 改动，未纳入提交。
+- 先补回归并确认旧实现失败，再完成实现：生命周期逐 marker 检查枪械 `2` / 其他 `1.45`；14 类自然物资材质全部为黄色、死亡材质保持红色；四类枪械在原 receiver/barrel 间隙中心执行垂直射线并确认均命中连接几何；全部 marker 继续验证世界最低点贴合真实 support。定向 IslandScene **4 tests**、`npm run typecheck:app` 和 `git diff --check` 已通过，等待完整门禁、静音浏览器视觉验收和用户指定的“先推送、再 审查者”流程。
+- 2026-07-22 01:28：最终自动门禁通过：应用 **30 files / 271 tests**、Worker **3 files / 27 tests**、standalone **2 files / 15 tests**、`npm run typecheck`、生产 build 和 diff check 全绿。静音 production preview 确认 250 个三维 marker 中四类枪械全部 scale=`2`、其余物资全部 scale=`1.45`、非死亡材质全部为 `#E2C66D`；对局中实际产生的一件死亡霰弹枪保持 `#C85E50`。只读四枪 gallery 可见 receiver、补充连接体和主枪管连续接合，枪械轮廓清楚，console 无 error/warn；截图 `loot-gun-scale-connectivity.png` 存于临时目录。验收后关闭独立 Chrome context、停止 4173 preview，并确认只剩 `about:blank`。下一步按用户明确指定顺序先提交推送，再启动 审查者。
+- 2026-07-22 01:36：实现、测试、README 和当时 构建 记录已按用户指定顺序先随 `1d65983 fix: refine ground loot models` 提交并推送，随后启动 审查者。审查者 对 `0055e21..1d65983` 完整范围复核为 `No 审查发现`，并再次通过 271/27/15 tests、全量 typecheck、build 和 diff check；详细证据已写入下方 审查。GitHub Actions run `29853134306` 与 GitHub Pages 成功，Cloudflare Pages production deployment `2982e8bd-24af-41c0-9e50-b569aa4c4c5c` 已发布 `1d65983`。本次无 Worker、权威规则或服务端改动，不需部署 Worker；工作区仍只剩外部 `.gitignore` 改动，未纳入提交。
 
 #### 2026-07-22 02:14 +0800：动态枪械复现与主题 favicon
 
@@ -620,80 +620,80 @@
 - `islandScene.test.ts` 保留上述真实规则链路回归，覆盖 inactive ammo record→黄色 drop rifle，以及 inactive spawn SMG record→红色 death SMG；断言动态 marker 与自然同型号共享 geometry、顶点数和 2 倍缩放，防止未来 record generation/source 复用引入来源特有断口。定向 IslandScene 4 项通过。
 - 定位网页丑 favicon 的原因是 `index.html` 直接把“缺失素材”用的红底白叉 `fallback.svg` 当作站点图标。新增独立 `public/assets/ui/favicon.svg`：深绿圆角战术底、浅绿安全区环、岛屿山脊、白色最后防线与定位点，移除红框/叉号，并在 `index.html` 以 `image/svg+xml` 引用；fallback 素材本身继续仅承担资源失败提示，不改变既有 fallback 合同。
 - production build 和 diff check 通过；静音 production preview 中 favicon 请求返回 200 `image/svg+xml`，页面引用新文件且 SVG 不含旧红色/叉号，主题色继续为 `#111711`，console 无 error/warn。图标原图截图 `favicon-preview.png` 存于临时目录。验收后已关闭全部任务 page/context、停止 4173 服务并确认只剩 `about:blank`。
-- 2026-07-22 02:18：最终自动门禁通过：应用 **30 files / 271 tests**、Worker **3 files / 27 tests**、standalone **2 files / 15 tests**、`npm run typecheck`、生产 build 和 diff check 全绿；构建仅保留既有大 chunk warning。动态枪没有可证实的来源差异，因此本轮业务实现只新增独立 favicon，枪械部分仅增加真实 drop/death 规则链回归，不做猜测性修复。等待 reviewer 终审。
-- 2026-07-22 02:26：确认 reviewer 的唯一 Medium 为真实测试证据缺口，不是业务错误。动态回归现显式保存 inactive ammo/SMG 的原 ID、generation 和 marker 引用，分别断言真实 drop/death 后 ID 不变、generation 严格 `+1`、旧 marker 原地复用；死亡 SMG 另选未被复用的第二个自然 SMG marker 作为独立对照，并断言两者不是同一 Mesh、但共享 geometry 和顶点数，消除对象自比。无需修改枪械业务实现，等待定向验证与复审。
-- 2026-07-22 02:27：修正后定向 IslandScene 4 项、`typecheck:app` 和 diff check 通过；reviewer 复审 `No findings`，唯一 Medium 已闭环，favicon 路径/fallback 和“不强改无法复现的动态枪”结论继续成立。准备提交并推送。
+- 2026-07-22 02:18：最终自动门禁通过：应用 **30 files / 271 tests**、Worker **3 files / 27 tests**、standalone **2 files / 15 tests**、`npm run typecheck`、生产 build 和 diff check 全绿；构建仅保留既有大 chunk warning。动态枪没有可证实的来源差异，因此本轮业务实现只新增独立 favicon，枪械部分仅增加真实 drop/death 规则链回归，不做猜测性修复。等待 审查者 终审。
+- 2026-07-22 02:26：确认 审查者 的唯一 Medium 为真实测试证据缺口，不是业务错误。动态回归现显式保存 inactive ammo/SMG 的原 ID、generation 和 marker 引用，分别断言真实 drop/death 后 ID 不变、generation 严格 `+1`、旧 marker 原地复用；死亡 SMG 另选未被复用的第二个自然 SMG marker 作为独立对照，并断言两者不是同一 Mesh、但共享 geometry 和顶点数，消除对象自比。无需修改枪械业务实现，等待定向验证与复审。
+- 2026-07-22 02:27：修正后定向 IslandScene 4 项、`typecheck:app` 和 diff check 通过；审查者 复审 `No 审查发现`，唯一 Medium 已闭环，favicon 路径/fallback 和“不强改无法复现的动态枪”结论继续成立。准备提交并推送。
 - 2026-07-22 02:32：主题 favicon、动态 drop/death 真实链路回归及完整 review 记录已随 `24d2974 fix: refresh site favicon` 提交并推送。GitHub Actions run `29857337386`、GitHub Pages 和 Cloudflare Pages production deployment `76e82504-07b5-46a9-973c-57b7e4983a38` 均成功；本次无 Worker/服务端改动，不需部署 Worker。favicon 已上线，动态枪因三类来源共享同一 geometry 且无法复现来源差异而未做猜测性业务修改。
 
 ## 审查
 
 ### 2026-07-22 02:26 +0800：动态 loot 回归唯一 Medium 复审（通过）
 
-- 审查范围：继续以 `main@e26530c` 为基线，重读最新 Build 617–624 行和上一轮 Review，复核当前完整增量及 `tests/unit/islandScene.test.ts` 对唯一 Medium 的修正；`.gitignore` 外部并发改动继续完全忽略、未触碰且未纳入结论。
-- 审查结论：**通过。本次复审未发现明确问题（No findings）。** 上一轮唯一 Medium 已闭环，当前无 blocker/high/medium finding；不修改动态枪械业务实现、favicon 与 fallback 的前序结论继续成立。
-- Medium disposition：drop rifle 现保存 inactive ammo 的 ID、generation 与旧 marker，并分别断言 ID 不变、generation `+1`、marker 同一引用，再与自然 rifle geometry 对照；death SMG 同样锁定 inactive spawn SMG 的 ID/generation/marker。独立对照通过不同 loot ID 选择第二个仍为 spawn 的 SMG，明确断言 death marker 与其不是同一 Mesh、但共享 geometry 和顶点数，已消除对象自比。两段顺序执行时第一段 record 已恢复 available，第二段只主动停用目标 SMG；真实 Inventory 复用选择及 fixture 状态没有串扰。该测试能同时保护 record/marker 有界复用、跨 item geometry 切换和 death source 展示，保留合理。
-- plan disposition：Build 624 行准确记录了 finding 性质、两条 ID/generation/marker 断言及独立自然 SMG 对照；原 619–620 行关于真实 drop/death 链与共享 geometry 的描述现已有对应持久断言支持。
-- 验证：Reviewer 实际执行定向 IslandScene **4/4 tests**、`npm run typecheck:app` 和 scoped diff check，全部通过。上一轮已通过的完整 **271/27/15 tests**、全量 typecheck 和生产 build 所覆盖的业务/favicon 实现未变化；本轮仅补测试与 plan 记录。
+- 审查范围：继续以 `main@e26530c` 为基线，重读最新 构建 617–624 行和上一轮 审查，复核当前完整增量及 `tests/unit/islandScene.test.ts` 对唯一 Medium 的修正；`.gitignore` 外部并发改动继续完全忽略、未触碰且未纳入结论。
+- 审查结论：**通过。本次复审未发现明确问题（No 审查发现）。** 上一轮唯一 Medium 已闭环，当前无 blocker/high/medium 审查发现；不修改动态枪械业务实现、favicon 与 fallback 的前序结论继续成立。
+- Medium 处置：drop rifle 现保存 inactive ammo 的 ID、generation 与旧 marker，并分别断言 ID 不变、generation `+1`、marker 同一引用，再与自然 rifle geometry 对照；death SMG 同样锁定 inactive spawn SMG 的 ID/generation/marker。独立对照通过不同 loot ID 选择第二个仍为 spawn 的 SMG，明确断言 death marker 与其不是同一 Mesh、但共享 geometry 和顶点数，已消除对象自比。两段顺序执行时第一段 record 已恢复 available，第二段只主动停用目标 SMG；真实 Inventory 复用选择及 fixture 状态没有串扰。该测试能同时保护 record/marker 有界复用、跨 item geometry 切换和 death source 展示，保留合理。
+- plan 处置：构建 624 行准确记录了 审查发现 性质、两条 ID/generation/marker 断言及独立自然 SMG 对照；原 619–620 行关于真实 drop/death 链与共享 geometry 的描述现已有对应持久断言支持。
+- 验证：审查者 实际执行定向 IslandScene **4/4 tests**、`npm run typecheck:app` 和 限定范围的 diff check，全部通过。上一轮已通过的完整 **271/27/15 tests**、全量 typecheck 和生产 build 所覆盖的业务/favicon 实现未变化；本轮仅补测试与 plan 记录。
 
 ### 2026-07-22 02:23 +0800：动态枪械复现与主题 favicon 终审（不通过）
 
-- 审查范围：基于本 plan 最新 Build 617–623 行及前序三维物资 Review，以用户指定 `main@e26530c` 为基线；确认当前 `HEAD/main/origin/main=e26530c139b4c28947285902b40c71d353488b02`、merge-base 相同，完整审查当前 plan、`index.html`、新增 `favicon.svg` 和 `islandScene.test.ts`。工作区 `.gitignore` 外部并发改动完全忽略、未触碰且未纳入结论。
-- 审查结论：**不通过。** 未发现 blocker/high 或业务实现回归；不猜测性修改动态枪械符合当前证据，favicon 实现亦未见问题。但新增回归没有真正锁定其声称的 record 复用与死亡枪几何对照，且 Build 对测试覆盖描述过强，存在 1 项 Medium 验证缺口。
-- **[中][待 writer 补测试并修正记录] 动态 loot 回归会在不复用 record 时继续通过，死亡 SMG 的 geometry/顶点断言还是同一 Mesh 与自身比较。** `tests/unit/islandScene.test.ts:352-371` 虽把 rifle ammo record 置为 inactive，却未断言 drop 后仍是该 ID、generation 严格递增或 marker 引用原地复用；若实现改为新增 record，当前共享 rifle geometry、scale、颜色和 metadata 断言仍全绿。`:373-393` 中 `smgLoot` 与 `naturalSmg` 都取第一个 spawn SMG；当前 fixture 下两者均为 `loot-2`，死亡复用后 `deathSmg` 仍是这个 marker，因此 `deathSmg.geometry === naturalSmg.geometry` 与顶点数比较是对象自比，无法捕获 death source 特有的 geometry 回归。Reviewer 用真实两条 Inventory 链确认当前确实分别复用了 `loot-17`（generation `0→1`）和 `loot-2`（`0→1`），所以这是持久回归的断言缺口，不是现行业务 bug。需显式断言两条动态 loot 的 ID/generation 和旧 marker 引用，并用另一条仍为 spawn 的同型号 SMG marker/预先保存的独立自然对照验证共享 geometry；同步收敛 Build 619–620 行的覆盖表述。
-- 动态枪 disposition：`InventorySystem` 当前真实执行结果与静态调用链一致；`IslandScene` 只按 item/model ID 选择或切换共享 geometry，`source` 仅选择死亡/普通材质，前序四枪连接射线、缩放和支撑面回归继续存在。用户已允许无法复现时不强改，当前没有证据支持修改模板或权威规则；应只修测试证据。
-- favicon disposition：`vite.config.ts` 使用 `base: "./"`，生产 `dist/index.html` 保留 `./assets/ui/favicon.svg`，因此根域解析为 `/assets/...`、GitHub `/last-line/` 解析为 `/last-line/assets/...`；资源已复制到 dist。SVG 只有内部 gradient 与基础图形，无 script、事件、外链、foreignObject 或解析风险，64×64 viewBox/高对比轮廓适合作为 favicon；asset manifest 仍引用原 `fallback.svg`，fallback 合同未改变。
-- 验证：Reviewer 实际执行完整 `npm run test`（应用 **30 files / 271 tests**、Worker **3 files / 27 tests**、standalone **2 files / 15 tests**）、`npm run typecheck`、`npm run build` 和 scoped diff check，全部通过；构建仅保留既有大 chunk warning。通过结果不能覆盖上述断言空洞。待 writer 补齐测试/记录后复审；无需修改业务代码。
+- 审查范围：基于本 plan 最新 构建 617–623 行及前序三维物资 审查，以用户指定 `main@e26530c` 为基线；确认当前 `HEAD/main/origin/main=e26530c139b4c28947285902b40c71d353488b02`、merge-base 相同，完整审查当前 plan、`index.html`、新增 `favicon.svg` 和 `islandScene.test.ts`。工作区 `.gitignore` 外部并发改动完全忽略、未触碰且未纳入结论。
+- 审查结论：**不通过。** 未发现 blocker/high 或业务实现回归；不猜测性修改动态枪械符合当前证据，favicon 实现亦未见问题。但新增回归没有真正锁定其声称的 record 复用与死亡枪几何对照，且 构建 对测试覆盖描述过强，存在 1 项 Medium 验证缺口。
+- **[中][待 实现 Agent 补测试并修正记录] 动态 loot 回归会在不复用 record 时继续通过，死亡 SMG 的 geometry/顶点断言还是同一 Mesh 与自身比较。** `tests/unit/islandScene.test.ts:352-371` 虽把 rifle ammo record 置为 inactive，却未断言 drop 后仍是该 ID、generation 严格递增或 marker 引用原地复用；若实现改为新增 record，当前共享 rifle geometry、scale、颜色和 metadata 断言仍全绿。`:373-393` 中 `smgLoot` 与 `naturalSmg` 都取第一个 spawn SMG；当前 fixture 下两者均为 `loot-2`，死亡复用后 `deathSmg` 仍是这个 marker，因此 `deathSmg.geometry === naturalSmg.geometry` 与顶点数比较是对象自比，无法捕获 death source 特有的 geometry 回归。审查者 用真实两条 Inventory 链确认当前确实分别复用了 `loot-17`（generation `0→1`）和 `loot-2`（`0→1`），所以这是持久回归的断言缺口，不是现行业务 bug。需显式断言两条动态 loot 的 ID/generation 和旧 marker 引用，并用另一条仍为 spawn 的同型号 SMG marker/预先保存的独立自然对照验证共享 geometry；同步收敛 构建 619–620 行的覆盖表述。
+- 动态枪 处置：`InventorySystem` 当前真实执行结果与静态调用链一致；`IslandScene` 只按 item/model ID 选择或切换共享 geometry，`source` 仅选择死亡/普通材质，前序四枪连接射线、缩放和支撑面回归继续存在。用户已允许无法复现时不强改，当前没有证据支持修改模板或权威规则；应只修测试证据。
+- favicon 处置：`vite.config.ts` 使用 `base: "./"`，生产 `dist/index.html` 保留 `./assets/ui/favicon.svg`，因此根域解析为 `/assets/...`、GitHub `/last-line/` 解析为 `/last-line/assets/...`；资源已复制到 dist。SVG 只有内部 gradient 与基础图形，无 script、事件、外链、foreignObject 或解析风险，64×64 viewBox/高对比轮廓适合作为 favicon；asset manifest 仍引用原 `fallback.svg`，fallback 合同未改变。
+- 验证：审查者 实际执行完整 `npm run test`（应用 **30 files / 271 tests**、Worker **3 files / 27 tests**、standalone **2 files / 15 tests**）、`npm run typecheck`、`npm run build` 和 限定范围的 diff check，全部通过；构建仅保留既有大 chunk warning。通过结果不能覆盖上述断言空洞。待 实现 Agent 补齐测试/记录后复审；无需修改业务代码。
 
 ### 2026-07-22 01:35 +0800：1d65983 三维枪械与物资颜色完整审查（通过）
 
-- 审查范围：基于本 plan 最新 Build 608–614 行及既有三维物资 Review，按用户指定基线完整审查 `0055e21..1d65983` 的 4 个文件（plan、README、`IslandScene.ts`、`islandScene.test.ts`）。确认 `0055e21` 是 `1d65983` 唯一父提交及 merge-base，当前 `HEAD/main/origin/main=1d65983f9cd54a4072972e871661d0833f2f439b`；工作区 `.gitignore` 的 `.opencode` 外部并发改动完全忽略、未触碰且未纳入结论。
-- 审查结论：**通过。No findings。** 四类三维枪械均为 `2` 倍，其他 10 类已知物资及 fallback 保持 `1.45`；未发现连接断口、transform/世界包围盒、support 高度、颜色来源、known↔unknown 原地切换、资源有界性或经典方块路径回归。README 与 Build 记录和实际实现一致。
+- 审查范围：基于本 plan 最新 构建 608–614 行及既有三维物资 审查，按用户指定基线完整审查 `0055e21..1d65983` 的 4 个文件（plan、README、`IslandScene.ts`、`islandScene.test.ts`）。确认 `0055e21` 是 `1d65983` 唯一父提交及 merge-base，当前 `HEAD/main/origin/main=1d65983f9cd54a4072972e871661d0833f2f439b`；工作区 `.gitignore` 的 `.opencode` 外部并发改动完全忽略、未触碰且未纳入结论。
+- 审查结论：**通过。No 审查发现。** 四类三维枪械均为 `2` 倍，其他 10 类已知物资及 fallback 保持 `1.45`；未发现连接断口、transform/世界包围盒、support 高度、颜色来源、known↔unknown 原地切换、资源有界性或经典方块路径回归。README 与 构建 记录和实际实现一致。
 - 几何与测试证据：四个硬编码射线点分别位于旧 receiver 前缘与主枪管后缘之间的真实空区：rifle `(0.2945, 0.589)` 中点 `0.44175`、smg `(0.2185, 0.247)` 中点 `0.23275`、shotgun `(0.2945, 0.3515)` 中点 `0.323`、sniper `(0.3515, 0.6365)` 中点 `0.494`；这些位置不落在旧 receiver、主枪管或同型号其他零件上，且 pick predicate 限定为对应 marker，因此不是误命中。连接体宽度为 gap 加两侧各 `0.04×0.95m` 重叠，横截面按 receiver/barrel 尺寸取足以相交的上界，随后与原零件一次性 `MergeMeshes`，不会新增 record 子 Mesh；合并后的实际最低点再按型号 scale 计算 offset。
 - 缩放/贴地与切换：`groundLootModelScale` 读取 `ITEMS[modelId].kind`，当前恰好覆盖 rifle/smg/shotgun/sniper 四种 weapon，ammo/armor/helmet/medical 与 fallback 均返回 `1.45`。offset 与 marker update 使用同一 scale；全部当前 marker 的 world minimum Y 回归继续对真实 `getSupportHeight` 断言 `support+0.04m`。既有真实 roof 上的 rifle→unknown fallback→sniper 测试现在同时跨越 `2→1.45→2`，仍保持同一 Mesh、恢复 fallback/known 各自旋转并在两次切换后贴合 `support+0.04m`。
 - 颜色、经典路径与边界：14 个常规模板材质统一为 `#E2C66D`；marker 每次 sync 都以 `loot.source === "death"` 选择红色死亡材质，其余 `spawn`、`drop` 或缺省 source 均走黄色材质，Inventory 动态非死亡掉落默认 source 为 `drop`。经典关闭模型路径的 `0.62m` box、scale `1`、`(0,π/4,π/4)` 旋转、原 `loot.position` 和原材质创建/选择相对基线均无改动。仍为 15 个模板（14 类 + fallback）、每型号共享 geometry/material、每 record 单 Mesh及至多每型号一个死亡材质；`src/game/`、AI、拾取、掉落、网络和服务端相对基线无 diff，改动范围未出现 `context.Background()`。
-- 验证：Reviewer 实际执行定向 IslandScene **4/4 tests**、`npm run typecheck`、完整 `npm run test`（应用 **30 files / 271 tests**、Worker **3 files / 27 tests**、standalone **2 files / 15 tests**）、`npm run build` 和 `git diff --check 0055e21..1d65983`，全部通过；构建仅保留既有 >500kB chunk warning。GitHub Actions run `29853134306` 的 typecheck、全部测试、应用/Worker/standalone build 与 GitHub Pages deployment 也已成功。本轮 reviewer 未另开浏览器，视觉结论同时参考 Build 01:28 已记录的音量 0 production preview、四枪 gallery、死亡霰弹枪和清理证据；残余风险仅为该视觉证据未由本轮独立重复，不构成代码 finding。
+- 验证：审查者 实际执行定向 IslandScene **4/4 tests**、`npm run typecheck`、完整 `npm run test`（应用 **30 files / 271 tests**、Worker **3 files / 27 tests**、standalone **2 files / 15 tests**）、`npm run build` 和 `git diff --check 0055e21..1d65983`，全部通过；构建仅保留既有 >500kB chunk warning。GitHub Actions run `29853134306` 的 typecheck、全部测试、应用/Worker/standalone build 与 GitHub Pages deployment 也已成功。本轮 审查者 未另开浏览器，视觉结论同时参考 构建 01:28 已记录的音量 0 production preview、四枪 gallery、死亡霰弹枪和清理证据；残余风险仅为该视觉证据未由本轮独立重复，不构成代码 审查发现。
 
 ### 2026-07-22 00:34 +0800：真实屋顶回归最终复审（通过）
 
-- 审查范围：继续以 `main@97a411643fa0964424c20df0ee5d517413969f9a` 为基线，重读本 plan 597–604 行 Build 和最新两轮 Review；复核上一轮唯一 Medium 对应的 `islandScene.test.ts` 增量，并快速复查 `IslandScene.ts`、README、资源有界性和权威边界。`.gitignore` 的 `.opencode` 外部并发改动继续完全忽略且未触碰。
-- 审查结论：**通过。No findings。** 上一轮唯一 Medium 已闭环，前序 High/Medium/Low 继续闭环；未发现新的 blocker/high/medium 问题。
-- Medium disposition：`tests/unit/islandScene.test.ts:346-351` 现通过 `find(slab => slab.kind === "roof")` 显式选择真实 roof slab，并再次断言 `roof.kind === "roof"`；随后用 `getSupportHeight` 证明该点 support 等于 roof top。`:352-369` 在同一既有 marker 引用上完成 known→fallback→sniper，fallback 恢复 `(0,π/4,π/4)`、sniper 恢复零 Euler，两个阶段的 world minimum Y 均为真实 roof support `+0.04m`。旧 marker 的 metadata/geometry 连续原地更新，结合既有 `bundle.lootMeshes.get(loot.id) === marker` 和共享 geometry 断言，单 Mesh/共享资源语义保持。
-- 文档 disposition：Build 第 604 行已如实说明此前 `floorSlabs[0]` 实为室内 floor、00:23 记录误称 roof，并记录改为显式 roof、`getSupportHeight` 和最低点回归；第 602 行继续使用正确的最小 world bounds 约 `1.430m`。README 的放大、贴合支撑面、有界复用和经典方块开关描述与实现一致。
+- 审查范围：继续以 `main@97a411643fa0964424c20df0ee5d517413969f9a` 为基线，重读本 plan 597–604 行 构建 和最新两轮 审查；复核上一轮唯一 Medium 对应的 `islandScene.test.ts` 增量，并快速复查 `IslandScene.ts`、README、资源有界性和权威边界。`.gitignore` 的 `.opencode` 外部并发改动继续完全忽略且未触碰。
+- 审查结论：**通过。No 审查发现。** 上一轮唯一 Medium 已闭环，前序 High/Medium/Low 继续闭环；未发现新的 blocker/high/medium 问题。
+- Medium 处置：`tests/unit/islandScene.test.ts:346-351` 现通过 `find(slab => slab.kind === "roof")` 显式选择真实 roof slab，并再次断言 `roof.kind === "roof"`；随后用 `getSupportHeight` 证明该点 support 等于 roof top。`:352-369` 在同一既有 marker 引用上完成 known→fallback→sniper，fallback 恢复 `(0,π/4,π/4)`、sniper 恢复零 Euler，两个阶段的 world minimum Y 均为真实 roof support `+0.04m`。旧 marker 的 metadata/geometry 连续原地更新，结合既有 `bundle.lootMeshes.get(loot.id) === marker` 和共享 geometry 断言，单 Mesh/共享资源语义保持。
+- 文档 处置：构建 第 604 行已如实说明此前 `floorSlabs[0]` 实为室内 floor、00:23 记录误称 roof，并记录改为显式 roof、`getSupportHeight` 和最低点回归；第 602 行继续使用正确的最小 world bounds 约 `1.430m`。README 的放大、贴合支撑面、有界复用和经典方块开关描述与实现一致。
 - 前序闭环复核：模型路径继续把权威 `support+0.45m` marker 中心换算为最低点 `support+0.04m`，经典方块仍保持原位置/scale；geometry 切换同步目标 Euler/quaternion，known↔fallback offset 与实际姿态一致；14 类共享 geometry/material、每 record 单 Mesh、死亡材质和 offset map 均有界。`GroundLootState`、拾取距离、AI、掉落、网络及权威规则相对基线无 diff。
-- Reviewer 实际执行定向 IslandScene **4 tests**、`npm run typecheck:app` 和 scoped `git diff --check 97a4116`，全部通过。上一轮已通过的完整 **271/27/15 tests**、全量 typecheck 和生产 build 所覆盖业务实现未再变化；本轮只补测试与 plan 记录。Reviewer 未启动浏览器、未修改业务代码，scoped 业务文件未出现 `context.Background()`。
+- 审查者 实际执行定向 IslandScene **4 tests**、`npm run typecheck:app` 和 限定范围的 `git diff --check 97a4116`，全部通过。上一轮已通过的完整 **271/27/15 tests**、全量 typecheck 和生产 build 所覆盖业务实现未再变化；本轮只补测试与 plan 记录。审查者 未启动浏览器、未修改业务代码，限定范围的 业务文件未出现 `context.Background()`。
 
-### 2026-07-22 00:30 +0800：地面三维物资放大 findings 复审（不通过）
+### 2026-07-22 00:30 +0800：地面三维物资放大 审查发现 复审（不通过）
 
-- 审查范围：继续以 `main@97a411643fa0964424c20df0ee5d517413969f9a` 为基线，重读本 plan 597–603 行 Build 和 607–622 行上一轮 Review；复核 `IslandScene.ts`、`islandScene.test.ts`、README 与 plan 当前增量。`.gitignore` 的 `.opencode` 外部并发改动继续完全忽略且未触碰。
-- 审查结论：**不通过。** 上轮 High 的运行时定位错误、Medium 的 stale rotation 行为和 Low 的 `1.430m` 文档数值均已实质修正；但 Build 声称的“屋顶 known→fallback→sniper 回归”实际使用的是室内楼板，仍有 1 项中风险必要验证缺口。当前不能记录 `No findings`。
+- 审查范围：继续以 `main@97a411643fa0964424c20df0ee5d517413969f9a` 为基线，重读本 plan 597–603 行 构建 和 607–622 行上一轮 审查；复核 `IslandScene.ts`、`islandScene.test.ts`、README 与 plan 当前增量。`.gitignore` 的 `.opencode` 外部并发改动继续完全忽略且未触碰。
+- 审查结论：**不通过。** 上轮 High 的运行时定位错误、Medium 的 stale rotation 行为和 Low 的 `1.430m` 文档数值均已实质修正；但 构建 声称的“屋顶 known→fallback→sniper 回归”实际使用的是室内楼板，仍有 1 项中风险必要验证缺口。当前不能记录 `No 审查发现`。
 
-#### Finding 与 disposition
+#### 审查发现 与 处置
 
-1. **[中][待 writer/builder 补测试] 所谓屋顶切换回归实际固定取到室内楼板，没有覆盖用户明确要求的真实 roof slab。** `tests/unit/islandScene.test.ts:346-349` 直接使用 `layout.floorSlabs[0]`；当前确定性测试 seed `2147483648` 下该对象为 `building-0-0-floor-1-left`、`kind="floor"`，不是 `kind="roof"`。因此 `:350-366` 的 known→fallback→sniper、Euler 恢复和最低点断言只证明 raised interior floor，plan 第 603 行“新增屋顶位置”记录不准确。Reviewer 只读改用 `layout.floorSlabs.find(slab => slab.kind === "roof")` 复现后，fallback/sniper 保持同一 Mesh，旋转分别为 `(0,π/4,π/4)` / `(0,0,0)`，最低点分别为真实 roof `+0.03999993m` / `+0.04000018m`，当前实现没有发现屋顶运行时 bug；但应将持久回归明确选取并断言 `kind="roof"`（建议同时以 `getSupportHeight` 复核该点）后再复审。
+1. **[中][待 实现 Agent/实现方 补测试] 所谓屋顶切换回归实际固定取到室内楼板，没有覆盖用户明确要求的真实 roof slab。** `tests/unit/islandScene.test.ts:346-349` 直接使用 `layout.floorSlabs[0]`；当前确定性测试 seed `2147483648` 下该对象为 `building-0-0-floor-1-left`、`kind="floor"`，不是 `kind="roof"`。因此 `:350-366` 的 known→fallback→sniper、Euler 恢复和最低点断言只证明 raised interior floor，plan 第 603 行“新增屋顶位置”记录不准确。审查者 只读改用 `layout.floorSlabs.find(slab => slab.kind === "roof")` 复现后，fallback/sniper 保持同一 Mesh，旋转分别为 `(0,π/4,π/4)` / `(0,0,0)`，最低点分别为真实 roof `+0.03999993m` / `+0.04000018m`，当前实现没有发现屋顶运行时 bug；但应将持久回归明确选取并断言 `kind="roof"`（建议同时以 `getSupportHeight` 复核该点）后再复审。
 
-#### 上轮 findings 复核与验证
+#### 上轮 审查发现 复核与验证
 
 - **High 已闭环：** `IslandScene.ts:1359-1362,1568-1575` 只在模型展示路径从权威 marker 中心减去 `0.45m`，再应用按目标模板姿态计算的最低点补偿和 `0.04m` clearance；经典方块仍使用原权威位置。全部现有 marker 的 NullEngine 循环通过真实 `getSupportHeight` 比较最低点，terrain/室内 spawn 均为 support 约 `+0.04m`；`GroundLootState`、拾取、AI、掉落和网络无 diff。
 - **Medium 行为已闭环：** `IslandScene.ts:1555-1564` 在共享 geometry 原地切换时同步目标模板 Euler，并 clone quaternion 或显式清空为 `null`；offset 仍来自同一目标模板的实际 world bounds。known↔fallback 保持原 Mesh/共享 geometry，未新增子 Mesh 或无界资源。
 - **Low 已闭环：** plan 第 602 行已改为实际最小 world bounds 对角线约 `1.430m`；README 的“清晰放大、贴合支撑面、有界复用”与当前实现一致。
-- Reviewer 实际执行定向 IslandScene **4 tests**、`npm run typecheck`、完整 `npm run test`（应用 **30 files / 271 tests**、Worker **3 files / 27 tests**、standalone **2 files / 15 tests**）、`npm run build` 和 scoped `git diff --check 97a4116`，全部通过；构建仅有既有 >500kB chunk warning。Reviewer 未启动浏览器、未修改业务代码，scoped 业务文件未出现 `context.Background()`。
+- 审查者 实际执行定向 IslandScene **4 tests**、`npm run typecheck`、完整 `npm run test`（应用 **30 files / 271 tests**、Worker **3 files / 27 tests**、standalone **2 files / 15 tests**）、`npm run build` 和 限定范围的 `git diff --check 97a4116`，全部通过；构建仅有既有 >500kB chunk warning。审查者 未启动浏览器、未修改业务代码，限定范围的 业务文件未出现 `context.Background()`。
 
 ### 2026-07-22 00:20 +0800：地面三维物资可见尺寸放大终审（不通过）
 
 - 审查范围：基于用户指定的 `main@97a411643fa0964424c20df0ee5d517413969f9a`，确认当前分支/`HEAD`/`origin/main` 均为该提交且 merge-base 相同；重读本 plan 597–602 行及 426–459、536–563 行三维物资历史，对照 `AGENTS.md`、`README.md`，审查 `IslandScene.ts`、`islandScene.test.ts`、`README.md` 和本 plan 当前增量（4 files / 48 additions / 7 deletions）。工作区 `.gitignore` 的 `.opencode` 外部并发改动按要求完全忽略，未修改、未纳入结论。
-- 审查结论：**不通过。** `1.45` scaling、14 类当前模板的共享 geometry/material、每 record 单 Mesh、死亡材质有界缓存、已知类型间原地 geometry 切换和经典方块关闭路径未见权威规则或资源有界性回归；但支撑面 Y 基准使用错误会让全部正常三维物资悬空，fallback 切换还会保留旧旋转并可能重新沉入地面。当前有 1 项高风险、1 项中风险 finding；不得记录通过。
+- 审查结论：**不通过。** `1.45` scaling、14 类当前模板的共享 geometry/material、每 record 单 Mesh、死亡材质有界缓存、已知类型间原地 geometry 切换和经典方块关闭路径未见权威规则或资源有界性回归；但支撑面 Y 基准使用错误会让全部正常三维物资悬空，fallback 切换还会保留旧旋转并可能重新沉入地面。当前有 1 项高风险、1 项中风险 审查发现；不得记录通过。
 
-#### Findings 与 disposition
+#### 审查发现 与 处置
 
-1. **[高][待 builder 处理] Y offset 把权威 marker 中心误当成支撑面，全部 14 类模型底部实际悬空约 0.49m。** `src/client/render/scenes/IslandScene.ts:1520-1527,1564-1567` 将模板最低点补偿后再整体加到 `loot.position.y`，所以最终最低点恒为 `loot.position.y + 0.04m`。但静态 loot 点和动态掉落都把 `GroundLootState.position.y` 定义为实际 terrain/屋顶/坡道 support `+0.45m`（`src/config/map.ts:1212-1215`、`src/game/systems/InventorySystem.ts:608-614`），最终模型底部因而位于 support 约 `+0.49m`，不是 plan/README 宣称的 `+0.04m` 贴合。Reviewer 只读 NullEngine 复现中，步枪点 support=`20.70447`、loot Y=`21.154`、模型最低点=`21.19400`，离支撑面 `0.48953m`；该关系同样作用于 terrain、屋顶和死亡/手动掉落。`tests/unit/islandScene.test.ts:302,310-318` 只相对 `loot.position.y` 断言，反而固化了错误基准；README 第 19 行“贴合支撑面”和 plan 第 599/601 行因此不准确。Builder 需只修 Babylon 展示位置、不得改 `GroundLootState` 或拾取规则，并补相对真实 support 的平地与屋顶/动态掉落最低点回归；writer 待实现闭环后同步修正文档。
-2. **[中][待 builder/writer 处理] fallback 与已知型号原地切换时只换 geometry，不同步模板旋转，offset 所依据的包围盒与实际姿态失配。** fallback 模板在 `src/client/render/scenes/IslandScene.ts:1380-1382` 带 `(0, π/4, π/4)` 旋转，而 `:1555-1559` 的 `geometry.applyToMesh` 不复制 transform。已知型号 record 切到 fallback 会保留零旋转；fallback record 再切到已知型号会保留 fallback 旋转。Reviewer 只读复现中，fallback→sniper 后最低点落到实际 support 下约 `0.258m`；fallback→bandage 也不再满足新增的 `loot Y +0.039m` 断言。Babylon 9.16.2 的 `applyToMesh` 会重建 bounding info，本问题是 stale rotation 而非 stale bounds。当前测试 `tests/unit/islandScene.test.ts:320-337` 只覆盖两个零根旋转模板的 rifle→bandage，未覆盖 fallback 双向切换或切换后的世界 bounds。当前权威表只生成 14 个已知 ID，因此该路径日常触发概率低，但它是本轮明确要求检查的 fallback/未来型号兼容契约；builder 需在复用更新时恢复目标模板 transform，writer 补 fallback↔已知类型及切换后最低点回归。
-3. **[低][待 writer 修正] plan 的视觉量测记录与当前实际 world bounding-box 结果不一致。** 第 602 行写“最小模型世界包围盒对角线约 `1.648m`”；Reviewer 按测试相同的 `maximumWorld-minimumWorld` 算法枚举当前 14 类时最小为 SMG 约 `1.430m`，bandage 约 `1.470m`。二者仍明显高于测试采用的经典几何对角线 `0.62×√3≈1.074m`，不形成尺寸 blocker，但记录应改成实际指标/数值，避免把 gallery 的其他量测口径写成生产 marker world bounds。
+1. **[高][待 实现方 处理] Y offset 把权威 marker 中心误当成支撑面，全部 14 类模型底部实际悬空约 0.49m。** `src/client/render/scenes/IslandScene.ts:1520-1527,1564-1567` 将模板最低点补偿后再整体加到 `loot.position.y`，所以最终最低点恒为 `loot.position.y + 0.04m`。但静态 loot 点和动态掉落都把 `GroundLootState.position.y` 定义为实际 terrain/屋顶/坡道 support `+0.45m`（`src/config/map.ts:1212-1215`、`src/game/systems/InventorySystem.ts:608-614`），最终模型底部因而位于 support 约 `+0.49m`，不是 plan/README 宣称的 `+0.04m` 贴合。审查者 只读 NullEngine 复现中，步枪点 support=`20.70447`、loot Y=`21.154`、模型最低点=`21.19400`，离支撑面 `0.48953m`；该关系同样作用于 terrain、屋顶和死亡/手动掉落。`tests/unit/islandScene.test.ts:302,310-318` 只相对 `loot.position.y` 断言，反而固化了错误基准；README 第 19 行“贴合支撑面”和 plan 第 599/601 行因此不准确。实现方 需只修 Babylon 展示位置、不得改 `GroundLootState` 或拾取规则，并补相对真实 support 的平地与屋顶/动态掉落最低点回归；实现 Agent 待实现闭环后同步修正文档。
+2. **[中][待 实现方/实现 Agent 处理] fallback 与已知型号原地切换时只换 geometry，不同步模板旋转，offset 所依据的包围盒与实际姿态失配。** fallback 模板在 `src/client/render/scenes/IslandScene.ts:1380-1382` 带 `(0, π/4, π/4)` 旋转，而 `:1555-1559` 的 `geometry.applyToMesh` 不复制 transform。已知型号 record 切到 fallback 会保留零旋转；fallback record 再切到已知型号会保留 fallback 旋转。审查者 只读复现中，fallback→sniper 后最低点落到实际 support 下约 `0.258m`；fallback→bandage 也不再满足新增的 `loot Y +0.039m` 断言。Babylon 9.16.2 的 `applyToMesh` 会重建 bounding info，本问题是 stale rotation 而非 stale bounds。当前测试 `tests/unit/islandScene.test.ts:320-337` 只覆盖两个零根旋转模板的 rifle→bandage，未覆盖 fallback 双向切换或切换后的世界 bounds。当前权威表只生成 14 个已知 ID，因此该路径日常触发概率低，但它是本轮明确要求检查的 fallback/未来型号兼容契约；实现方 需在复用更新时恢复目标模板 transform，实现 Agent 补 fallback↔已知类型及切换后最低点回归。
+3. **[低][待 实现 Agent 修正] plan 的视觉量测记录与当前实际 world bounding-box 结果不一致。** 第 602 行写“最小模型世界包围盒对角线约 `1.648m`”；审查者 按测试相同的 `maximumWorld-minimumWorld` 算法枚举当前 14 类时最小为 SMG 约 `1.430m`，bandage 约 `1.470m`。二者仍明显高于测试采用的经典几何对角线 `0.62×√3≈1.074m`，不形成尺寸 blocker，但记录应改成实际指标/数值，避免把 gallery 的其他量测口径写成生产 marker world bounds。
 
 #### 验证与待处理
 
-- Reviewer 实际执行 `npm run typecheck`、`npm run test`、`npm run build`、定向 `npx vitest run tests/unit/islandScene.test.ts` 和 scoped `git diff --check 97a4116`，全部通过：应用 **30 files / 271 tests**、Worker **3 files / 27 tests**、standalone **2 files / 15 tests**，构建仅有既有 >500kB chunk warning。通过结果不能覆盖上述错误的支撑面基准与缺失 fallback 切换场景。
+- 审查者 实际执行 `npm run typecheck`、`npm run test`、`npm run build`、定向 `npx vitest run tests/unit/islandScene.test.ts` 和 限定范围的 `git diff --check 97a4116`，全部通过：应用 **30 files / 271 tests**、Worker **3 files / 27 tests**、standalone **2 files / 15 tests**，构建仅有既有 >500kB chunk warning。通过结果不能覆盖上述错误的支撑面基准与缺失 fallback 切换场景。
 - 只读调用链确认本次 tracked 业务改动只在 Babylon 展示文件及测试/文档；`src/game/`、AI、掉落、拾取距离、网络和服务端相对基线无 diff，经典方块仍为原 `0.62m`、原旋转、scale `1` 和原 `loot.position`。每 record 单 Mesh、15 个模板（14 类 + fallback）、14 个常规材质及按型号至多一个死亡材质的有界关系保持。
-- Builder 必须先处理 findings 1–2；writer 修正 README/plan 和量测记录并补对应测试后再发起复审。Finding 3 只要求文档证据收敛。Reviewer 未启动浏览器、未修改业务代码，且 scoped 业务文件未出现 `context.Background()`。
+- 实现方 必须先处理 审查发现 1–2；实现 Agent 修正 README/plan 和量测记录并补对应测试后再发起复审。审查发现 3 只要求文档证据收敛。审查者 未启动浏览器、未修改业务代码，且 限定范围的 业务文件未出现 `context.Background()`。
 
 ### 2026-07-16 14:27 +0800：当前未提交实现审查（不通过）
 
@@ -702,7 +702,7 @@
 - 结论：**不通过**。静态构建和现有测试能通过，但完整对局、AI 搜集、公平战斗、素材替换与若干规则存在阻塞问题，尚未达到任务 1–12 和成功标准。
 - 用户约束：未使用 Playwright，也未下载 Playwright Chromium；本次不要求恢复 Playwright。
 
-#### Findings（按严重度）
+#### 审查发现（按严重度）
 
 1. **[严重] AI 无法可靠落地搜集，很多 Bot 会永久空手或卡在不可达物资上。**
    - 证据：`src/config/map.ts:48-58` 生成物资点时不避让 `MAP_OBSTACLES`；几何检查发现 72 个点中 23 个位于建筑碰撞盒内，其中 18 个即使贴墙也超过 3m 交互距离。`src/ai/navigation/GridNavigator.ts:13-16` 对被阻挡目标返回空路径，但 `src/controllers/BotController.ts:158-163` 又把空路径回退为原始目标；同时 `src/controllers/BotController.ts:134-155` 只搜索 85m 内物资，找不到后在 `:113` 直接去圈心。
@@ -779,26 +779,26 @@
 #### 缺失验证与待处理项
 
 - 现有 34 个 Vitest 全部通过，但没有覆盖：真实 BotController 多 seed 完整局、物资可达性、同时致死顺序不变性、正式射速、丢枪/拾枪弹药保持、同类双枪换弹、头盔效果、玩家死亡后的继续推进、真实 GLB 成功/失败 fallback、动态掉落渲染和重开 dispose。
-- Builder 必须先修复 findings 1–9；findings 10–12 也需要补规则或 fallback 实现。Writer/后续验收需补上述 Vitest，并记录至少一次真实 GLB/HUD 清单替换及多次重开内存趋势。
+- 实现方 必须先修复 审查发现 1–9；审查发现 10–12 也需要补规则或 fallback 实现。Writer/后续验收需补上述 Vitest，并记录至少一次真实 GLB/HUD 清单替换及多次重开内存趋势。
 - 已执行：`npm run typecheck` 通过；`npm run test` 8 files / 34 tests 通过；`npm run build` 通过；从 `dist/` 的 Vite preview 打开生产站点并进入航线成功，开发浏览器实测可推进到 combat 且出现 AI 淘汰。构建输出有两个超过 500kB 的 chunk 警告（主 chunk 708kB、GLTF chunk 625kB）。
 - 残余风险：当前浏览器片段约 120 FPS，但未完成 1080p 激战 45/60 FPS、长局内存、连续重开和正式 GLB 的性能验收；因此不能据此确认任务 11 性能基线或无重开泄漏。
 
 ### 2026-07-16 16:08 +0800：第二轮复审（不通过）
 
-- 审查范围：逐项复查首次审查 302–372 行的 12 个 findings，并重点复查规则对局推进、AI 多 seed 搜集、simultaneous combat、`SimulationCombatWorld`、动态掉落、GLB 视觉层、正式局长、图片 fallback 和重开资源释放。
-- 对照基线：本 plan；仓库仍是无 commit 的 `master`，全部实现均为未跟踪文件，没有可用 merge-base 或历史 diff，因此本轮以当前全部文件相对空主分支及首轮 findings 为审查范围。
-- 结论：**不通过**。原 12 项中 8 项已修复，4 项虽修了原始表象但仍有高风险缺口或引入了高风险回归；需要 builder 继续处理下列 4 个高风险 findings 后再复审。
+- 审查范围：逐项复查首次审查 302–372 行的 12 个 审查发现，并重点复查规则对局推进、AI 多 seed 搜集、simultaneous combat、`SimulationCombatWorld`、动态掉落、GLB 视觉层、正式局长、图片 fallback 和重开资源释放。
+- 对照基线：本 plan；仓库仍是无 commit 的 `master`，全部实现均为未跟踪文件，没有可用 merge-base 或历史 diff，因此本轮以当前全部文件相对空主分支及首轮 审查发现 为审查范围。
+- 结论：**不通过**。原 12 项中 8 项已修复，4 项虽修了原始表象但仍有高风险缺口或引入了高风险回归；需要 实现方 继续处理下列 4 个高风险 审查发现 后再复审。
 - 用户约束：未启动浏览器、未使用或建议 Playwright、未下载 Chromium、未启动声音。
 
-#### 第二轮 Findings（按严重度）
+#### 第二轮 审查发现（按严重度）
 
 1. **[高][新回归] 同 tick 最终互杀和最终圈同时致死改成了固定按实体 ID 偏袒 Bot，且胜者完全免除本 tick 伤害。**
    - 证据：`src/game/systems/CombatSystem.ts:175-193` 在所有存活者均会被本 tick 伤害杀死时选择排序后的 `living[0]`，随后直接跳过该角色的全部伤害；`src/game/modes/BattleRoyaleMode.ts:196-208` 对安全区同时致死采用同样策略。固定 ID 中 `bot-*` 排在 `player` 前；`tests/unit/gameSimulation.test.ts:159-168` 已明确把“玩家与 Bot 同时致死后 bot-1 满状态获胜”固化为期望。
    - 复现：只保留 `player` 和 `bot-1`，两者 30 HP、无甲，同 tick 用 34 伤害武器互相命中；无论命令 Map 顺序如何，`bot-1` 都存活并获胜，玩家射向它的伤害被完全丢弃。最终圈中所有剩余角色同 tick 受到致死圈伤时也固定由字典序最小 Bot 获胜。
-   - 影响：首轮 finding 4 的 Map 插入顺序依赖虽消失，但替换成了对固定玩家 ID 永久不利的规则偏置，不满足人类/AI 公平共用规则；真实 30 Hz 对局中 33ms 内的最终互杀会稳定判玩家失败。
+   - 影响：首轮 审查发现 4 的 Map 插入顺序依赖虽消失，但替换成了对固定玩家 ID 永久不利的规则偏置，不满足人类/AI 公平共用规则；真实 30 Hz 对局中 33ms 内的最终互杀会稳定判玩家失败。
    - 待处理：定义无角色类型/ID 偏置的同时致死 contract，并覆盖互换实体 ID、玩家/Bot 身份及最终圈同时致死；不能通过直接跳过胜者全部伤害来制造唯一胜者。
 
-2. **[高][首轮 finding 6 未完全修复] GLB 合同校验仍是可选的，空 GLB 会被当作成功资源并关闭可见 fallback。**
+2. **[高][首轮 审查发现 6 未完全修复] GLB 合同校验仍是可选的，空 GLB 会被当作成功资源并关闭可见 fallback。**
    - 证据：`src/client/render/loadCatalogModel.ts:35-39` 在清单未填写 `metadata.requiredNodes` 时直接跳过节点校验，也不要求至少存在一个可渲染 mesh；`src/client/render/scenes/IslandScene.ts:109-125` 只要 loader 返回非空就关闭所有程序化 Bot/枪械视觉。`tests/unit/loadCatalogModel.test.ts:13-25,73-79` 的“成功 GLB”只有一个空 `root` node、没有 mesh，恰好证明不可见模型会被判成功。正式清单 `public/assets/asset-manifest.json:33-48` 仍全部是程序化模型。
    - 复现：仅将 `model.character.enemy` 或 `model.weapon.rifle` 的清单项改为上述仅含空 root 的 GLB，且不配置 `requiredNodes`；加载返回成功，随后程序化 Bot 或第一人称枪械被禁用，导入模型又没有任何可见 mesh。
    - 影响：所谓“只改清单即可替换 GLB”仍可让所有敌人或武器视觉消失；当前测试只覆盖 loader，没有覆盖 `createIslandScene` 的替换、fallback 保留和反复 dispose，任务 11/成功标准尚未被证明。
@@ -810,7 +810,7 @@
    - 影响：多 seed 测试只证明无战斗环境下 140 秒内至少 15/19 Bot 拿到枪，没有覆盖实战弹药续航；实际 Bot 打空弹匣后会退化为追逐目标直至被击杀或被圈淘汰，任务 9 的搜集/弹药/战斗闭环仍不完整。
    - 待处理：无可装填弹药时应退出交战并寻找当前武器匹配且可达的 ammo，必要时允许换枪；补多 seed、真实 `SimulationCombatWorld` 的搜集—交战—耗尽—补给—继续战斗测试。
 
-4. **[高][首轮 finding 8 修复引入稳定性风险] 动态掉落现在可见，但每次丢弃/拾回都会永久累积规则对象和 Babylon mesh。**
+4. **[高][首轮 审查发现 8 修复引入稳定性风险] 动态掉落现在可见，但每次丢弃/拾回都会永久累积规则对象和 Babylon mesh。**
    - 证据：`src/game/systems/InventorySystem.ts:350-372` 每次掉落都生成新 ID；拾取只在 `:148-151` 将旧 loot 标为 unavailable，从不删除。`src/client/render/LootMarkerViewAdapter.ts:13-20` 只创建/更新 marker，没有删除/dispose；`src/client/render/scenes/IslandScene.ts:525-551` 因而永久保留所有 marker，`src/app/BattleRoyaleSession.ts:156-160` 每帧还遍历并更新整个累计集合。
    - 复现：持枪连续执行 G 丢弃、F 拾回；每轮 `groundLoot` 和 `lootMeshes` 各增加 1，旧对象/mesh 始终保留。持续操作会令每帧同步从开局约 72 项线性增长到数千项；只有整局重开、scene dispose 后才释放。
    - 影响：18 分钟长局可被普通输入制造持续内存与每帧 CPU 增长，违背任务 11 的“无持续内存上涨”；动态掉落由不可见变成了无界视图/状态泄漏。
@@ -818,14 +818,14 @@
 
 #### 原 12 项逐项复查
 
-1. **部分修复，仍不通过**：物资点已避开障碍，导航不再直冲空路径，未持枪 Bot 可全图找武器；5 个 seed 均达到至少 15/19 持枪。但实战耗尽弹药后不会补给，且没有多 seed 完整实战局测试，见新 finding 3。
+1. **部分修复，仍不通过**：物资点已避开障碍，导航不再直冲空路径，未持枪 Bot 可全图找武器；5 个 seed 均达到至少 15/19 持枪。但实战耗尽弹药后不会补给，且没有多 seed 完整实战局测试，见新 审查发现 3。
 2. **已修复**：`BattleRoyaleSession.ts:91-94` 在玩家死亡后不依赖 Pointer Lock 继续推进；fast mode 测试可产生唯一胜者。仍缺玩家中途死亡的会话级自动测试。
 3. **已修复**：地面武器保存并转移完整 `WeaponState`；空枪丢下再拾、替换武器和死亡掉落均有 Vitest。
-4. **原插入顺序问题已修复，但修法不通过**：命令排序和批量伤害使反转 Map 顺序结果一致；新 ID 偏置见 finding 1。
+4. **原插入顺序问题已修复，但修法不通过**：命令排序和批量伤害使反转 Map 顺序结果一致；新 ID 偏置见 审查发现 1。
 5. **已修复**：命中和 LOS 已迁到纯规则 `SimulationCombatWorld`，使用固定角色体积与静态障碍；测试覆盖遮挡、最近目标和状态更新 batching。
-6. **部分修复，仍不通过**：规则 hit volume 已与 GLB 视觉解耦，loader 有最小 GLB 和坏节点测试；但空模型会关闭 fallback，未完成场景级替换/dispose 验证，见 finding 2。
+6. **部分修复，仍不通过**：规则 hit volume 已与 GLB 视觉解耦，loader 有最小 GLB 和坏节点测试；但空模型会关闭 fallback，未完成场景级替换/dispose 验证，见 审查发现 2。
 7. **已修复**：cooldown 可结转负余量，三把武器 30 秒射速测试与配置误差不超过 1 发。
-8. **可见性已修复，但修法不通过**：状态同步会创建新增掉落 marker；旧 loot/mesh 无界累积，见 finding 4。
+8. **可见性已修复，但修法不通过**：状态同步会创建新增掉落 marker；旧 loot/mesh 无界累积，见 审查发现 4。
 9. **已修复**：正式配置航线加全部圈阶段预算为 18 分钟，fast config 独立，已有预算与快速完整推进测试。
 10. **已修复**：换弹完成直接作用于具体 `WeaponState`，同 ID 双枪的活动槽测试通过。
 11. **已修复**：0/1/2 级头盔提供一致的简化全伤害减免，圈伤明确绕过，已有规则测试。
@@ -839,30 +839,30 @@
 - 本轮没有使用浏览器、Playwright、Chromium 或声音。一次尝试用 Node 直接加载 TS 做额外长局采样因 Node 不支持源码中的 TypeScript parameter property 而失败，该失败命令未作为验证证据；随后已用仓库正式 Vitest 命令成功重跑相关测试。
 - 重开释放路径静态上会移除 HumanController 监听、关闭 AudioContext 并 dispose scene/engine，scene dispose 也注册了 GLB container 清理；但没有连续重开、模型实例和音频资源释放的自动测试。受用户禁止浏览器/声音约束，本轮不能据此确认真实浏览器无泄漏。
 - 现有 AI multi-seed 仅覆盖 5 个 seed、无战斗世界和“至少 15/19 持枪”，未覆盖正式配置下多 seed 完整实战局；正式 18 分钟配置也只验证时间预算，未验证真实平均局长和长局性能。
-- Builder 必须处理上述 4 个高风险 findings；writer/验收需补实战多 seed、场景级 GLB、PNG/WebP 坏图、动态 marker 回收和连续重开资源释放证据后再发起第三轮复审。
+- 实现方 必须处理上述 4 个高风险 审查发现；实现 Agent/验收需补实战多 seed、场景级 GLB、PNG/WebP 坏图、动态 marker 回收和连续重开资源释放证据后再发起第三轮复审。
 
 ### 2026-07-16 16:36 +0800：最终复审（不通过）
 
-- 审查范围：重点复查第二轮 4 项 findings，并检查最新 `SimulationCombatWorld` 集成、GLB 视觉不可拾取、重开 dispose、19 Bot 完整局测试及相关调用链。
+- 审查范围：重点复查第二轮 4 项 审查发现，并检查最新 `SimulationCombatWorld` 集成、GLB 视觉不可拾取、重开 dispose、19 Bot 完整局测试及相关调用链。
 - 对照基线：本 plan；仓库仍是无 commit、无 remote 的 `master`，全部实现均为未跟踪文件，故相对主分支的范围仍是当前全仓库，没有可用 merge-base 或历史提交 diff。
-- 结论：**不通过**。空 GLB fallback、普通空弹 Bot 搜索兼容弹药、loot/marker 有界复用等已有实质修复，但第二轮 finding 1、3 仍各留有高风险路径。
+- 结论：**不通过**。空 GLB fallback、普通空弹 Bot 搜索兼容弹药、loot/marker 有界复用等已有实质修复，但第二轮 审查发现 1、3 仍各留有高风险路径。
 - 用户约束：本轮未启动浏览器或声音，未使用 Playwright，未下载 Chromium。
 
-#### 最终 Findings（按严重度）
+#### 最终 审查发现（按严重度）
 
-1. **[高][第二轮 finding 1 未完全修复] 枪战 tie-break 不再固定偏袒 actor class，但仍通过完全免伤制造胜者；最终圈及同 tick 拾取仍固定让 Bot ID 占优。**
+1. **[高][第二轮 审查发现 1 未完全修复] 枪战 tie-break 不再固定偏袒 actor class，但仍通过完全免伤制造胜者；最终圈及同 tick 拾取仍固定让 Bot ID 占优。**
    - `src/game/systems/CombatSystem.ts:184-193` 现按 tick hash 选择幸存者，`tests/unit/gameSimulation.test.ts:170-175` 证明 24 个 tick 中玩家和 Bot 都可获胜；但选中者仍跳过本 tick 的全部伤害，生命和护甲保持原值。
    - `src/game/modes/BattleRoyaleMode.ts:196-207` 仍排序实体 ID 并让 `living[0]` 完全免除致死圈伤；当前 `bot-*` 固定排在 `player` 前，因此最终圈同时致死仍固定判 Bot 获胜。
    - `src/game/GameSimulation.ts:40-46` 还按同一 ID 顺序串行处理拾取，`InventorySystem` 会由先处理者立即把 loot 标为 unavailable；玩家和 Bot 同 tick 争抢同一物资时也固定由 Bot 获得。
    - 影响：核心公平性问题只在互射分支被部分修复；最终圈和物资竞争仍存在稳定 actor-class 偏置，且互射幸存者状态不符合实际已命中的伤害。
-   - Builder 需处理：为战斗、圈伤和物资冲突定义一致且不依赖当前 actor ID 命名的结算规则；不能靠丢弃幸存者全部伤害制造唯一胜者，并补最终圈、同 tick 拾取和互换 ID/kind 测试。
+   - 实现方 需处理：为战斗、圈伤和物资冲突定义一致且不依赖当前 actor ID 命名的结算规则；不能靠丢弃幸存者全部伤害制造唯一胜者，并补最终圈、同 tick 拾取和互换 ID/kind 测试。
 
-2. **[高][第二轮 finding 3 未完全修复] 无弹 Bot 仅在背包有空栈时搜索兼容弹药，背包被不兼容弹种占满后仍会永久失去补给能力。**
+2. **[高][第二轮 审查发现 3 未完全修复] 无弹 Bot 仅在背包有空栈时搜索兼容弹药，背包被不兼容弹种占满后仍会永久失去补给能力。**
    - `src/controllers/BotController.ts:146-165` 已在 `needsAmmo` 时限定当前武器弹种，但 ammo 候选仍无条件要求 `backpack.length < maxBackpackStacks`；同文件 `:157-162` 又允许尚有弹时拾取任意弹种，Bot 本身没有丢弃无用栈或切换到有弹武器的策略。
    - 复现条件：空弹匣步枪 Bot 的背包用其他弹种填满，在附近放步枪弹并保留可见敌人；Bot 不再追敌，但也不会选择或拾取步枪弹，只会转向圈心。
    - `tests/unit/botController.test.ts:176-209` 只覆盖空背包；`tests/unit/aiLootReachability.test.ts:112-150` 的完整局只有一个 seed、以 0.25s 直接步进，且只断言出现过拾取/开火/Bot 击杀，没有覆盖“耗尽—补给—继续战斗”。
    - 影响：正常搜集即可形成的满背包路径仍会让 Bot 在后半局永久空枪，任务 9 的弹药公平和战斗续航未闭环。
-   - Builder 需处理：无兼容弹药时允许腾出无用栈或采用有弹武器，并补满背包兼容弹药、耗尽后续战及多 seed 完整局验证。
+   - 实现方 需处理：无兼容弹药时允许腾出无用栈或采用有弹武器，并补满背包兼容弹药、耗尽后续战及多 seed 完整局验证。
 
 #### 已确认修复与验证
 
@@ -876,22 +876,22 @@
 
 ### 2026-07-16 16:50 +0800：最终两项阻塞定向复查（不通过）
 
-- 审查范围：定向复查上一轮最终 findings 1–2，检查共享 simultaneous survivor、同 tick 物资排序、满背包空枪 Bot 的同命令丢弃/拾取及新增回归测试，并寻找修复引入的严重/高风险回归。
+- 审查范围：定向复查上一轮最终 审查发现 1–2，检查共享 simultaneous survivor、同 tick 物资排序、满背包空枪 Bot 的同命令丢弃/拾取及新增回归测试，并寻找修复引入的严重/高风险回归。
 - 对照基线：本 plan；仓库仍为无 commit 的 `master`，没有可用 merge-base，故以本 plan 上一轮最终复审记录和当前全仓库实现为基线。
 - 结论：**不通过**。固定 actor class 偏置、命令插入顺序依赖、最终圈 selector 未共享、满背包无法拾兼容弹药这几个已验证表象已修复；但 simultaneous survivor 仍保留上一轮明确禁止的完全免伤语义，Bot 修复还引入了高风险重复丢弃回归。
 - 用户约束：未启动浏览器或声音，未使用 Playwright，未下载 Chromium。
 
-#### Findings（按严重度）
+#### 审查发现（按严重度）
 
-1. **[高][上一轮 finding 1 未完全修复] combat 与最终圈虽已共享 tick selector，但选中的 survivor 仍会完全跳过本 tick 已命中的全部伤害。**
+1. **[高][上一轮 审查发现 1 未完全修复] combat 与最终圈虽已共享 tick selector，但选中的 survivor 仍会完全跳过本 tick 已命中的全部伤害。**
    - 证据：`src/game/systems/CombatSystem.ts:185-195` 和 `src/game/modes/BattleRoyaleMode.ts:201-211` 都只对非 survivor 调用 `DamageSystem`；survivor 不损失生命或护甲，也不产生对应受伤事件。直接复现 30 HP、无甲双方同 tick 用 34 伤害步枪互射，胜者仍为 30 HP。
    - 影响：上一轮要求的“不能靠丢弃幸存者全部伤害制造唯一胜者”尚未落实；当前测试只断言 winner 轮换、顺序不变和 loser 掉落枪弹量，没有断言 survivor 的生命、护甲及伤害事件。
-   - Builder 需处理：在保留唯一 survivor 的同时结算其已发生伤害（例如只对最终致死边界做明确、最小化调整），并为 combat 与最终圈补 survivor 生命/护甲/事件断言。
+   - 实现方 需处理：在保留唯一 survivor 的同时结算其已发生伤害（例如只对最终致死边界做明确、最小化调整），并为 combat 与最终圈补 survivor 生命/护甲/事件断言。
 
 2. **[高][本轮新回归] Bot 的一次性 `dropItem` 被决策缓存重复发送，会在后续固定 tick 连续丢弃同类物资。**
    - 证据：`src/controllers/BotController.ts:54-55` 的缓存快路径只清除 `fire`、`interact`、`useItem`，保留 `dropItem`；新逻辑在 `:109-123` 缓存了带 `dropItem` 的拾弹命令。直接按真实 30Hz 连续调用两次：首 tick 正常丢一栈并拾到步枪弹，下一 tick 返回 `interact=false, dropItem="ammo.shell"`，背包又少一栈；远距离决策间隔内可继续重复。
    - 影响：正常存在多个同类栈时，Bot 会额外丢掉多栈药品或第二把枪的弹药，破坏刚修复的补给与战斗续航公平性；新增测试 `tests/unit/botController.test.ts:212-240` 只执行一次 controller/update，未覆盖缓存 tick。
-   - Builder 需处理：缓存返回不得重放一次性动作，至少清空 `dropItem`，并补连续多个 30Hz tick 的 Controller + Inventory 回归测试，断言只丢一栈且兼容弹药已拾取。
+   - 实现方 需处理：缓存返回不得重放一次性动作，至少清空 `dropItem`，并补连续多个 30Hz tick 的 Controller + Inventory 回归测试，断言只丢一栈且兼容弹药已拾取。
 
 #### 已确认修复、验证与残余风险
 
@@ -902,22 +902,22 @@
 
 ### 2026-07-16 17:13 +0800：上一轮两项 blocker 定向复查（通过）
 
-- 审查范围：只复查上一轮 16:50 记录中的两项 blocker：simultaneous survivor 的 combat/final-zone 伤害结算，以及 Bot cached command 的一次性动作清理和满背包补弹路径；同时检查这些最小修复是否引入高风险回归。
+- 审查范围：只复查上一轮 16:50 记录中的两项 blocker：同时幸存者的战斗/最终安全区伤害结算，以及 Bot 缓存命令的一次性动作清理和满背包补弹路径；同时检查这些最小修复是否引入高风险回归。
 - 对照基线：本 plan。仓库仍是无 commit、无 remote 的 `master`，全部文件均未跟踪，无法生成相对主分支的历史 diff；本轮据上一轮记录的具体代码位置与当前实现做定向对照。
-- 结论：**通过。本次审查未发现明确问题或高风险 finding。**
-- Blocker 1 已闭环：combat 对选中 survivor 仍逐笔调用同一 `DamageSystem`，正常扣除开火弹药、执行头盔减伤与护甲吸收、产生受伤事件，只以 `minimumHealth = 1` 限制最终生命下界；因此不会再完全免伤，且最多保留 1 HP。final zone 同样实际调用伤害系统并最多保留 1 HP；圈伤继续按既有规则绕过护甲。
+- 结论：**通过。本次审查未发现明确问题或高风险 审查发现。**
+- Blocker 1 已闭环：combat 对选中幸存者仍逐笔调用同一 `DamageSystem`，正常扣除开火弹药、执行头盔减伤与护甲吸收、产生受伤事件，只以 `minimumHealth = 1` 限制最终生命下界；因此不会再完全免伤，且最多保留 1 HP。最终安全区同样实际调用伤害系统并最多保留 1 HP；圈伤继续按既有规则绕过护甲。
 - Blocker 2 已闭环：Bot 缓存快路径已清空 `fire/reload/jump/interact/switchWeapon/useItem/dropItem` 等一次性动作；满背包空枪 Bot 首 tick 丢弃一栈并拾取兼容弹药后，下一缓存 tick 的 `dropItem` 为 `null`、`interact` 为 `false`，不会重复丢弃。
 - 验证：`npm run typecheck` 通过；相关 Vitest（`gameSimulation`、`battleRoyaleMode`、`botController`、`damageSystem`、`inventorySystem`）5 files / 44 tests 全部通过。
-- 残余验证缺口（非阻塞）：simultaneous combat 新增断言直接覆盖 survivor 的 1 HP，final-zone 用例从 1 HP 起测；护甲扣减、伤害事件和圈伤绕甲分别由现有规则测试与静态调用链覆盖，尚无单个组合用例同时断言全部状态。按用户约束未使用浏览器、声音或 Playwright。
+- 残余验证缺口（非阻塞）：同时战斗新增断言直接覆盖幸存者的 1 HP，最终安全区用例从 1 HP 起测；护甲扣减、伤害事件和圈伤绕甲分别由现有规则测试与静态调用链覆盖，尚无单个组合用例同时断言全部状态。按用户约束未使用浏览器、声音或 Playwright。
 
 ### 2026-07-16 23:34 +0800：未提交武器切换 bug 修复审查（不通过）
 
 - 审查范围：相对 `origin/main`（`3e8d5e3`）的当前未提交改动；重点检查空活动枪拾新枪自动装备、首把枪/双槽替换/AI/掉落重拾、主键盘/小键盘/滚轮和控制器到背包测试链。
 - 对照基线：本 plan 的双主武器槽、统一角色指令入口、AI 同规则及任务 6 验证要求。
 - 结论：**不通过**。规则层主路径未发现高风险回归，但存在一个可复现的一次性输入泄漏和一个关键整链验证缺口。
-- Findings：
-  1. **[中]** `HumanController` 在未获得 pointer lock 时仍缓存主键盘/小键盘切枪请求；会话此时暂停且不调用 `createCommand` 清理，恢复 pointer lock 后旧请求会被执行，导致暂停期间按键泄漏到后续游戏 tick。Builder 需限制非激活输入或在 pointer-lock 边界清理一次性请求，并补回归测试。
-  2. **[中][验证缺口]** 新控制器测试只覆盖“已有双枪时 Numpad2/单向滚轮 -> InventorySystem”，自动装备测试则直接构造 `ActorCommand`；未覆盖原问题的 `F keydown -> HumanController -> InventorySystem 拾枪/自动装备 -> 后续切枪` 整链，也未断言 Digit1/2、Numpad1/2、双向滚轮及请求只消费一次。Writer/builder 需补整链用例。
+- 审查发现：
+  1. **[中]** `HumanController` 在未获得 pointer lock 时仍缓存主键盘/小键盘切枪请求；会话此时暂停且不调用 `createCommand` 清理，恢复 pointer lock 后旧请求会被执行，导致暂停期间按键泄漏到后续游戏 tick。实现方 需限制非激活输入或在 pointer-lock 边界清理一次性请求，并补回归测试。
+  2. **[中][验证缺口]** 新控制器测试只覆盖“已有双枪时 Numpad2/单向滚轮 -> InventorySystem”，自动装备测试则直接构造 `ActorCommand`；未覆盖原问题的 `F keydown -> HumanController -> InventorySystem 拾枪/自动装备 -> 后续切枪` 整链，也未断言 Digit1/2、Numpad1/2、双向滚轮及请求只消费一次。Writer/实现方 需补整链用例。
 - 已确认：空枪且无匹配备弹时拾入空槽会切到新枪；首把枪仍进入活动槽；满双槽仍替换活动槽；武器状态在掉落/重拾和替换时保持；完整 Vitest 中 AI 多 seed/完整局均通过。
 - 验证：`npm run typecheck` 通过；定向 Vitest 4 files / 36 tests 通过；完整 `npm run test` 15 files / 74 tests 通过。未启动浏览器、声音或 Playwright。
 
@@ -925,7 +925,7 @@
 
 - 审查范围：仅复核 23:34 记录中的 Pointer Lock 输入泄漏、控制器到背包整链测试，以及这些修复可能引入的高风险回归。
 - 对照基线：本 plan；当前 `HEAD/main/origin/main` 同为 `3e8d5e3`，目标改动仍为相对该基线的未提交差异。
-- 结论：**通过。本次审查未发现明确问题或高风险 finding。**
+- 结论：**通过。本次审查未发现明确问题或高风险 审查发现。**
 - Blocker 1 已闭环：键盘和鼠标按下仅在当前 canvas 持有 Pointer Lock 时缓存；退出 Pointer Lock 会清空按键、持续开火及全部一次性动作；监听器在 dispose 时对称移除。
 - Blocker 2 已闭环：测试已通过真实 `KeyF` 事件生成控制器命令并进入 `InventorySystem` 完成空枪拾枪自动装备，随后覆盖主键盘、小键盘、双向滚轮、一次性请求消费及暂停输入不泄漏。
 - 高风险回归检查：未发现首把枪、双槽替换、AI 共用规则、掉落/重拾或输入生命周期回归。
@@ -960,8 +960,8 @@
 
 - 审查范围：当前 `main` 工作区相对 `HEAD/origin/main`（`a0a4267`）的全部未提交改动和 3 个未跟踪文件；重点检查 `IslandScene.ts`、`islandScene.test.ts`、地形权威碰撞、射击反馈、生命周期及其余行为改动。
 - 对照基线：本 plan 的固定小岛、禁止程序生成地图、权威规则/渲染边界、任务 7/11/12 与上一轮已验收的物资配额。
-- 结论：**不通过**。需 builder 处理下列阻塞问题后复审；不能记录为通过。
-- Findings 摘要：
+- 结论：**不通过**。需 实现方 处理下列阻塞问题后复审；不能记录为通过。
+- 审查发现 摘要：
   1. **[高]** `createMapLayout` 按每局随机 seed 改变山体、建筑和物资坐标，偏离固定小岛及“不做程序生成地图”的明确范围。
   2. **[高]** 75% 航线自动跳伞会把仍在飞机上的玩家直接横向传送到最近 POI 的物资点，而不是从当前航线位置离机，破坏航线语义并给予无成本精准落点。
   3. **[高]** 渲染地形是 5m 网格三角面，移动/射击却查询连续解析高度；抽样的三角形质心误差最高约 0.063m，已超过弹痕仅 0.04m 的表面偏移。岛外规则还保留 y=0 的无限地面，而可见海面在 y=-1.5，岸边向海射击会生成悬空命中和弹痕，仍有闪烁/漂浮风险。
@@ -969,73 +969,73 @@
   5. **[中]** 每 POI 配额从已验收的 5 武器/4 弹药/3 医疗/6 装备改成 6/4/3/5，并同步改测试固化新语义；当前需求没有对应依据，属于无关玩法平衡回归。
   6. **[中]** `mapLayoutCache` 对随机每局 seed 永久增量缓存且无清理/上限；生产重开会持续保留 layout。场景生命周期测试每轮固定使用同一 seed，无法发现该增长。
   7. **[中][验证缺口]** floor flicker 断言筛选 `metadata.surfaceType`，但实现从未设置该 metadata，因此恒为空；测试没有验证 beach/wet/ocean band 的实际边界、非重叠关系、三角地形与规则表面一致性或连续帧视觉稳定性。
-- Builder 待处理：恢复固定地图和既有物资配额；自动离机保留当前航线坐标；统一渲染地形、移动支撑和射击表面（含海面与坡道）；限制或移除随机 layout cache；补真正能失败的表面重叠、边界射击、坡道遮挡、不同 seed/restart 内存及连续帧视觉回归测试。
+- 实现方 待处理：恢复固定地图和既有物资配额；自动离机保留当前航线坐标；统一渲染地形、移动支撑和射击表面（含海面与坡道）；限制或移除随机 layout cache；补真正能失败的表面重叠、边界射击、坡道遮挡、不同 seed/restart 内存及连续帧视觉回归测试。
 - 验证：`npm run typecheck` 通过；完整 Vitest 18 files / 97 tests 通过；`npm run build` 通过（主 chunk 812.59kB、GLTF chunk 625.30kB 警告）；生产 preview 以音量 `0` 打开航线场景，控制台无 error/warn。自动化 Pointer Lock 无法持续保持，因此未把单帧预览当作 floor flicker 动态验收证据。
 
 ### 2026-07-18 01:52 +0800：更新随机地图需求后的全量终审（不通过）
 
 - 审查范围：当前 `main` 工作区相对 `HEAD/main/origin/main`（均为 `a0a4267`）的全部未提交改动及 3 个未跟踪文件；重点复核有界 seed 地图、floor/perimeter、地形渲染与权威规则、屋顶坡道、自动/手动离机、缓存、AI 公平性、性能和测试。
-- 对照基线：本 plan 已更新的“边界与 POI 固定、共享可序列化 seed 随机丘陵/建筑/物资/装备”要求。01:15 记录中关于“必须恢复固定地图”的 finding 已被最新用户要求明确取代，不再作为问题。
-- 结论：**不通过**。没有发现无界 layout/effect cache 或已复现的地表 band 面积重叠；自动离机也会保留当前航线坐标。但仍有 2 项高风险功能问题和 2 项中风险坡道/AI 问题需要 builder 处理。
-- Findings：
+- 对照基线：本 plan 已更新的“边界与 POI 固定、共享可序列化 seed 随机丘陵/建筑/物资/装备”要求。01:15 记录中关于“必须恢复固定地图”的 审查发现 已被最新用户要求明确取代，不再作为问题。
+- 结论：**不通过**。没有发现无界 layout/effect cache 或已复现的地表 band 面积重叠；自动离机也会保留当前航线坐标。但仍有 2 项高风险功能问题和 2 项中风险坡道/AI 问题需要 实现方 处理。
+- 审查发现：
   1. **[高] 手动过早离机仍可在岛外落地，移动时还会瞬移到边界。** 航线起点可位于 `±400m` 有效地形外；零水平输入时 `moveAxis` 不执行边界 clamp，岛外 `getTerrainHeight` 又返回 `0`，角色会在可见海面上方被判定落地。以 mode 随机源恒为 `0.5` 可得到 `x=520` 的航线起点；立即只按 Space 后可一直在 `x=520` 降至 `y=1.76`，随后首次产生对应轴移动时直接 clamp 到 `399.58`。需为手动离机定义岛外降落/回收规则，禁止站在无权威地形的海面或百米瞬移，并补航线起点早跳测试。
   2. **[高] 可见屋顶比权威屋顶高 0.46m，坡道、站立面和射击反馈没有落在同一表面。** 渲染 roof cap 的底面才是 obstacle/ramp 的 `topY`，可见顶面在其上方 0.46m；Movement 与 Combat 仍使用 obstacle AABB 顶面。结果是坡道终点钻入 roof cap、角色脚底位于可见屋面内部，向屋顶开火产生的 impact/decal 也落在 cap 内而不可见。需让渲染 roof、移动支撑和 `SimulationCombatWorld` 共用同一顶面，并补可见 mesh 顶点/权威命中点/站立高度组合断言。
   3. **[中] AI 导航完全不知道屋顶和坡道，玩家拥有 AI 无法使用的战术空间，Bot 若空降屋顶还会被判为起点 blocked。** `GridNavigator` 只做 obstacle 的二维阻挡，不含 ramp/高度层；Bot 的物资和进圈路径都依赖该 navigator。Movement 却允许降落到 roof support，因此屋顶 Bot 在无可见敌人时会拿到空路径并停住，地面 Bot 也永远不会规划上坡。需明确坡道是否属于 AI 可用导航；若是，应加入分层/坡道连接，若否则至少禁止 Bot 在屋顶落地并消除玩家单方面安全位。
   4. **[中] seed 建筑抖动没有校验坡道与其他建筑，部分合法 seed 会生成被邻楼截断的坡道。** 对 seed `0..9999` 的布局枚举发现 2417 个 ramp/非所属 obstacle 顶视投影相交；例如 seed `8892` 的 `ramp-building-3-4` 与 `building-3-1` 沿 z 重叠约 `3.614m`，且该段坡道高度仍在邻楼 AABB 内，入口不可用。现有测试只检查单个 seed 的 building-building 不重叠。生成时需避让/换向坡道，并补多 seed 的 ramp-building clearance 测试。
 - 验证证据：`npm run typecheck` 通过；完整 `npm run test -- --reporter=verbose` 为 18 files / 100 tests 全部通过；`npm run build` 通过，主 chunk 813.56kB、GLTF chunk 625.30kB，保留既有大 chunk 警告；`git diff --check` 通过。静音生产 preview 可进入航线、自动离机、落地及 AI 战斗，页面显示约 120 FPS，玩家淘汰后规则仍继续推进。
 - 已确认非阻塞项：`mapLayoutCache` 强引用上限为 8，terrain grid 使用 WeakMap；CombatEffects 各池固定容量并可 dispose；ground/beach/wet/ocean band 静态边界无面积重叠；地形规则高度使用与 Babylon 网格一致的三角插值；物资配额保持 5/4/3/6；75% 自动离机保留当前航线位置。
-- Builder 待处理：先修 findings 1–2；同时收敛 findings 3–4 并补手动早跳、屋顶 mesh/rule、Bot 屋顶逃生/坡道导航及多 seed 坡道避让回归。Writer/验收需保留当前 bounded seeded-map 语言，不得恢复已被用户取代的固定地图结论。
+- 实现方 待处理：先修 审查发现 1–2；同时收敛 审查发现 3–4 并补手动早跳、屋顶 mesh/rule、Bot 屋顶逃生/坡道导航及多 seed 坡道避让回归。Writer/验收需保留当前 bounded seeded-map 语言，不得恢复已被用户取代的固定地图结论。
 
 ### 2026-07-18 02:05 +0800：四项 blocker 修复复审（不通过）
 
 - 审查范围：当前 `main` 工作区相对 `HEAD/main/origin/main`（均为 `a0a4267`）的完整未提交 diff；定向复核 01:52 记录的手动/自动离机、屋顶统一、AI 坡道导航、坡道避让，并额外检查反向（`startZ > endZ`）坡道。
 - 对照基线：本 plan 已更新的有界、共享可序列化 seed 控制丘陵/建筑/物资/装备需求；受控随机地图仍是明确预期，不恢复旧固定地图结论。
 - 结论：**不通过；无高风险 blocker，但仍有 2 项中风险 blocker。** 上轮四项的主体修复均已落地，但反向坡道暴露了物资排除回归，且屋顶只统一了高度、未统一可见 footprint。
-- Findings：
-  1. **[中] 反向坡道不会参与 loot 避让，可生成被坡道盖住且无法拾取的物资。** `src/config/map.ts:287-292` 的 `pointInsideRamp` 仍假设 `startZ <= endZ`；新生成的 row 1/2 外向坡道为 `startZ > endZ`，条件恒为 false。枚举 seed `0..9999` 得到 7752 个反向坡道/物资 clearance 重叠，1997 个 seed 至少有一件物资因坡道高度导致 3D 拾取距离超过 3m。seed `1` 的 `loot-33` 位于 `ramp-building-1-3` 下方：loot y=`0.45`、角色站在坡道后的 eye y≈`3.7246`，垂直距离≈`3.2746m`；HUD/Bot 以水平距离提示或反复 interact，但 `InventorySystem.ts:128-134` 拒绝拾取。Builder 需对 ramp z 范围统一使用 min/max，并补反向坡道 loot-clearance/实际拾取测试。
-  2. **[中] 屋顶高度已统一，但可见 roof cap 的 0.8m 四周挑檐仍不在 movement/combat AABB 中。** `IslandScene.ts:433-443` 把 roof 宽深设为 obstacle `+1.6m`，而 `MovementSystem.ts:214-220` 和 `SimulationCombatWorld.ts:210-218` 的 x/z 范围仍只使用 obstacle 本体。以 seed `0` 第一栋楼为例，在墙外 0.5m（仍位于可见挑檐内）向下射击，规则射线穿过屋顶并命中 y≈0 的 terrain，而非可见 roof y=`3.38`；同一区域也不是可站立支撑面。Builder 需让可见 cap footprint 与权威 obstacle footprint 一致，或把挑檐纳入 movement/combat 几何，并补 roof edge 射线/支撑测试。
+- 审查发现：
+  1. **[中] 反向坡道不会参与 loot 避让，可生成被坡道盖住且无法拾取的物资。** `src/config/map.ts:287-292` 的 `pointInsideRamp` 仍假设 `startZ <= endZ`；新生成的 row 1/2 外向坡道为 `startZ > endZ`，条件恒为 false。枚举 seed `0..9999` 得到 7752 个反向坡道/物资 clearance 重叠，1997 个 seed 至少有一件物资因坡道高度导致 3D 拾取距离超过 3m。seed `1` 的 `loot-33` 位于 `ramp-building-1-3` 下方：loot y=`0.45`、角色站在坡道后的 eye y≈`3.7246`，垂直距离≈`3.2746m`；HUD/Bot 以水平距离提示或反复 interact，但 `InventorySystem.ts:128-134` 拒绝拾取。实现方 需对 ramp z 范围统一使用 min/max，并补反向坡道 loot-clearance/实际拾取测试。
+  2. **[中] 屋顶高度已统一，但可见 roof cap 的 0.8m 四周挑檐仍不在 movement/combat AABB 中。** `IslandScene.ts:433-443` 把 roof 宽深设为 obstacle `+1.6m`，而 `MovementSystem.ts:214-220` 和 `SimulationCombatWorld.ts:210-218` 的 x/z 范围仍只使用 obstacle 本体。以 seed `0` 第一栋楼为例，在墙外 0.5m（仍位于可见挑檐内）向下射击，规则射线穿过屋顶并命中 y≈0 的 terrain，而非可见 roof y=`3.38`；同一区域也不是可站立支撑面。实现方 需让可见 cap footprint 与权威 obstacle footprint 一致，或把挑檐纳入 movement/combat 几何，并补 roof edge 射线/支撑测试。
 - 已确认修复：岛外手动 Space 不再离机；75% 航程处所有仍在 aircraft 的 actor 会在当前且位于岛内的航线坐标自动离机；`BUILDING_ROOF_CAP_HEIGHT` 已统一 ramp top、屋顶中心顶面、Movement 支撑和 Combat AABB 的 y 上界；`GridNavigator` 使用当前 seed 的 ramps，屋顶起点/目标路径顺序在正向和反向坡道上均正确；坡道按 building row 朝 POI 外侧生成，对 seed `0..9999` 额外枚举未发现 ramp 与非所属 building 相交，仓库已有 100-seed 回归。
 - 验证：`npm run typecheck` 通过；完整 `npm run test -- --reporter=verbose` 为 18 files / 104 tests 全部通过；`npm run build` 通过，保留主 chunk 814.31kB、GLTF chunk 625.30kB 警告；`git diff --check` 通过。未修改业务源码、未使用 Playwright或声音。
-- Builder 待处理：修复上述两个中风险 blocker；重点新增反向坡道的物资排除/拾取和 roof cap 边缘 render-rule 一致性测试后再复审。
+- 实现方 待处理：修复上述两个中风险 blocker；重点新增反向坡道的物资排除/拾取和 roof cap 边缘 render-rule 一致性测试后再复审。
 
 ### 2026-07-18 02:14 +0800：剩余两项 medium 修复后的最终全量复查（不通过）
 
-- 审查范围：当前 `main` 工作区相对 `HEAD/main/origin/main`（均为 `a0a4267`）的完整未提交 diff；复查此前全部 findings、反向坡道 loot clearance、roof cap x/z/y 边界，并寻找受控随机丘陵引入的新渲染/规则回归。
+- 审查范围：当前 `main` 工作区相对 `HEAD/main/origin/main`（均为 `a0a4267`）的完整未提交 diff；复查此前全部 审查发现、反向坡道 loot clearance、roof cap x/z/y 边界，并寻找受控随机丘陵引入的新渲染/规则回归。
 - 对照基线：本 plan 当前“有界地图、共享可序列化 seed 控制丘陵/建筑/物资/装备”要求；controlled random map 明确保留，不按旧固定地图语言审查。
 - 结论：**不通过；无高风险 blocker，仍有 1 项中风险 blocker。** 上轮反向坡道物资和 roof cap footprint 两项已闭环，但世界安全区边界仍未适配新增丘陵。
-- Finding：
-  1. **[中] 世界安全区环固定在 y=0.18，缩圈后会被权威随机丘陵埋住，导致部分边界完全不可见。** `src/client/render/scenes/IslandScene.ts:963-970` 创建厚度 1.2m 的水平 torus，`src/app/BattleRoyaleSession.ts:189-192` 每帧只更新 x/z 和半径，y 始终为 0.18；而本次 terrain 可高达十余米。torus 顶部约为 y=0.78，因此 terrain 高于该值的边界段会在深度测试中完全位于地表下。对 1000 个确定性对局采样第一阶段 target circle（最终会成为 current circle），1000/1000 均至少有边界点高于 0.78；最差样本约 25% 圆周被埋。影响：玩家在丘陵附近无法从世界场景辨认当前圈边界，虽仍有小地图，但任务 8/10 的场景安全区反馈相对原平地地图发生明确回归。Builder 需让边界按 terrain 高度分段贴地、改为足够高的垂直边界，或采用不被地形埋没且语义明确的表现，并补多 seed 圈边界可见性测试。
-- 已确认全部此前 findings 闭环：岛外手动离机被拒绝；75% 时所有剩余 aircraft actor 在当前且位于岛内的航线坐标自动离机；terrain mesh/规则三角插值一致且 perimeter band 无面积重叠；`BUILDING_ROOF_CAP_HEIGHT` 与 ramp top、Movement、Combat、可见 roof y 一致，roof x/z footprint 也与 obstacle 完全一致；正反向 ramp 的 Movement/Combat/导航顺序正确；BotController 使用当前 seed 的 obstacles/ramps；seed `0..9999` 未发现 ramp/loot 或 ramp/非所属 building 重叠；layout/effect/loot marker 缓存和池有界；物资配额保持 5/4/3/6。
+- 审查发现：
+  1. **[中] 世界安全区环固定在 y=0.18，缩圈后会被权威随机丘陵埋住，导致部分边界完全不可见。** `src/client/render/scenes/IslandScene.ts:963-970` 创建厚度 1.2m 的水平 torus，`src/app/BattleRoyaleSession.ts:189-192` 每帧只更新 x/z 和半径，y 始终为 0.18；而本次 terrain 可高达十余米。torus 顶部约为 y=0.78，因此 terrain 高于该值的边界段会在深度测试中完全位于地表下。对 1000 个确定性对局采样第一阶段 target circle（最终会成为 current circle），1000/1000 均至少有边界点高于 0.78；最差样本约 25% 圆周被埋。影响：玩家在丘陵附近无法从世界场景辨认当前圈边界，虽仍有小地图，但任务 8/10 的场景安全区反馈相对原平地地图发生明确回归。实现方 需让边界按 terrain 高度分段贴地、改为足够高的垂直边界，或采用不被地形埋没且语义明确的表现，并补多 seed 圈边界可见性测试。
+- 已确认全部此前 审查发现 闭环：岛外手动离机被拒绝；75% 时所有剩余 aircraft actor 在当前且位于岛内的航线坐标自动离机；terrain mesh/规则三角插值一致且 perimeter band 无面积重叠；`BUILDING_ROOF_CAP_HEIGHT` 与 ramp top、Movement、Combat、可见 roof y 一致，roof x/z footprint 也与 obstacle 完全一致；正反向 ramp 的 Movement/Combat/导航顺序正确；BotController 使用当前 seed 的 obstacles/ramps；seed `0..9999` 未发现 ramp/loot 或 ramp/非所属 building 重叠；layout/effect/loot marker 缓存和池有界；物资配额保持 5/4/3/6。
 - 额外验证：1000 个随机航线在 75% 自动离机均位于 actor 边界内且所有剩余 actor 同点离机；1000 seed 的 rooftop→中心及中心→rooftop GridNavigator 路径均非空；roof 中心/边缘的 Combat y 命中与支撑面一致（仅精确浮点边界存在非实质性的闭区间舍入差异，不作为 blocker）。
 - 自动验证：`npm run typecheck` 通过；完整 `npm run test -- --reporter=verbose` 为 18 files / 104 tests 全部通过；`npm run build` 通过，保留主 chunk 814.34kB、GLTF chunk 625.30kB 警告；`git diff --check` 通过。未修改业务源码、未使用 Playwright 或声音。
-- Builder 待处理：仅剩上述世界安全区环的丘陵适配及对应多 seed 可见性回归；修复后再进行最终通过复审。
+- 实现方 待处理：仅剩上述世界安全区环的丘陵适配及对应多 seed 可见性回归；修复后再进行最终通过复审。
 
 ### 2026-07-18 02:21 +0800：terrain-following safe-zone ribbon 最终复查（不通过）
 
-- 审查范围：当前 `main` 工作区相对 `HEAD/main/origin/main`（均为 `a0a4267`）的完整未提交 diff；定向复核最后一项世界安全区边界 finding，并回看此前离机、terrain/render/rule、perimeter、roof/ramp、AI、公平性、缓存、性能和测试结论。
+- 审查范围：当前 `main` 工作区相对 `HEAD/main/origin/main`（均为 `a0a4267`）的完整未提交 diff；定向复核最后一项世界安全区边界 审查发现，并回看此前离机、terrain/render/rule、perimeter、roof/ramp、AI、公平性、缓存、性能和测试结论。
 - 对照基线：本 plan 当前有界、共享可序列化 seed 控制随机丘陵/建筑/物资/装备要求；controlled random map 仍为明确需求。
 - 结论：**不通过；无高风险 blocker，仍有 1 项中风险 blocker。** ribbon 顶点会跟随权威 terrain，session 也会按 center/radius 更新，但只校验/采样顶点不足以保证三角形边内不被曲面穿透。
-- Finding：
-  1. **[中] 96 段 ribbon 的顶点虽离地，但 segment 内部仍会被丘陵穿透并局部完全埋没。** `src/client/render/scenes/IslandScene.ts:979-1008` 仅在每个圆周顶点采样 terrain，并用直线三角形连接相邻顶点；权威 terrain 在约 18–26m 长的外圈 segment 内可能高于两端线性插值。对 10,000 个确定性对局、第一阶段收缩的 21 个 center/radius 中间状态、每 segment 10 个内部点采样，9,971 个对局存在至少一个被 terrain 穿透的 ribbon 区段；最深约 0.403m，已接近并可超过 ribbon 的 0.43m 总高度，因此该处仍可完全不可见。最差圆周状态约 2.6% 采样点埋入 terrain。`tests/unit/islandScene.test.ts:79-92` 只断言顶点 lower/upper y 和一次移动后的首顶点，无法发现 segment interior 穿透。Builder 需提高/adaptively subdivide 到与 terrain 网格误差匹配、在 segment 内采样并抬升顶边，或使用不会被地形遮挡的边界表现；测试需断言所有三角形边内插值均高于共享 terrain，而不只是顶点。
-- 已确认修复有效：`BattleRoyaleSession.ts:164-190` 会随规则步同步 center/radius；ribbon mesh 与 vertex/material 数量固定，反复更新不分配新 Babylon mesh；顶点 lower/upper 分别为 terrain +0.12/+0.55；此前全部离机、屋顶、坡道、AI、loot、cache 和 render/rule findings 仍保持闭环。
+- 审查发现：
+  1. **[中] 96 段 ribbon 的顶点虽离地，但 segment 内部仍会被丘陵穿透并局部完全埋没。** `src/client/render/scenes/IslandScene.ts:979-1008` 仅在每个圆周顶点采样 terrain，并用直线三角形连接相邻顶点；权威 terrain 在约 18–26m 长的外圈 segment 内可能高于两端线性插值。对 10,000 个确定性对局、第一阶段收缩的 21 个 center/radius 中间状态、每 segment 10 个内部点采样，9,971 个对局存在至少一个被 terrain 穿透的 ribbon 区段；最深约 0.403m，已接近并可超过 ribbon 的 0.43m 总高度，因此该处仍可完全不可见。最差圆周状态约 2.6% 采样点埋入 terrain。`tests/unit/islandScene.test.ts:79-92` 只断言顶点 lower/upper y 和一次移动后的首顶点，无法发现 segment interior 穿透。实现方 需提高/adaptively subdivide 到与 terrain 网格误差匹配、在 segment 内采样并抬升顶边，或使用不会被地形遮挡的边界表现；测试需断言所有三角形边内插值均高于共享 terrain，而不只是顶点。
+- 已确认修复有效：`BattleRoyaleSession.ts:164-190` 会随规则步同步 center/radius；ribbon mesh 与 vertex/material 数量固定，反复更新不分配新 Babylon mesh；顶点 lower/upper 分别为 terrain +0.12/+0.55；此前全部离机、屋顶、坡道、AI、loot、cache 和 render/rule 审查发现 仍保持闭环。
 - 自动验证：`npm run typecheck` 通过；完整 `npm run test -- --reporter=verbose` 为 18 files / 104 tests 全部通过；`npm run build` 通过，主 chunk 813.57kB、GLTF chunk 625.30kB，保留既有大 chunk 警告；`git diff --check` 通过。未修改业务源码、未使用 Playwright 或声音。
-- Builder 待处理：仅剩 ribbon segment interior 的 terrain clearance 和对应多 seed/中间缩圈状态测试；处理后再发起最终通过复审。
+- 实现方 待处理：仅剩 ribbon segment interior 的 terrain clearance 和对应多 seed/中间缩圈状态测试；处理后再发起最终通过复审。
 
 ### 2026-07-18 02:32 +0800：当前未提交全量独立复审（不通过）
 
 - 审查范围：当前 `main` 工作区相对 `HEAD/main/origin/main`（均为 `a0a4267`）的完整未提交 diff；重点复核有界 seed 地图、单 terrain/perimeter、共享权威地形、roof/ramp movement/combat/navigation、离机边界、terrain-following safe-zone ribbon、缓存/特效池和测试。
 - 对照基线：本 plan 当前“有界地图、共享可序列化 seed 控制随机丘陵/建筑/物资”要求；不恢复已被用户取代的旧固定地图结论。
 - 结论：**不通过；未发现高风险 blocker，仍有 2 项中风险 blocker。**
-- Findings：
-  1. **[中] safe-zone ribbon 的 segment 内部仍会被地形完全穿透。** `IslandScene.ts:979-1002` 固定用 96 段，只在端点采样 terrain 后用直线三角形连接；seed `0`、初始 center `(0,0)`、radius `400` 的 segment 83 在 `t=0.6` 处，terrain 比下边线高约 `0.531m`，也比仅高 `0.43m` 的上边线高约 `0.101m`，该处整条 ribbon 埋入地形。`islandScene.test.ts:79-92` 仍只断言顶点和单个移动后顶点，无法覆盖 segment interior。Builder 需提高/自适应细分或在段内保证上下边 clearance，并补 segment 内插值回归。
-  2. **[中] Bot 的 rooftop target 路径没有接入战斗决策，新增屋顶仍是 AI 无法主动到达的战术层。** `GridNavigator.ts:22-43` 已能生成 ground→roof 路径，但 `BotController.ts:105-129` 对可见敌人始终直接使用水平向量追逐/横移/后退；navigator 只在 loot/安全区分支 `:138,157,159` 使用。seed `0` 第一栋楼上放玩家、地面放持枪 Bot 并使用真实 `SimulationCombatWorld` LOS，连续 60 秒 controller+movement 后 Bot 最大 y 仍为 `1.76`，没有走坡道。`movementSystem.test.ts:139-157` 只直接测试 navigator，未覆盖 BotController 追逐屋顶目标。Builder 需让需接近的屋顶敌人走 ramp path（或明确禁止该战术层），并补 controller+movement/combat 整链测试。
+- 审查发现：
+  1. **[中] safe-zone ribbon 的 segment 内部仍会被地形完全穿透。** `IslandScene.ts:979-1002` 固定用 96 段，只在端点采样 terrain 后用直线三角形连接；seed `0`、初始 center `(0,0)`、radius `400` 的 segment 83 在 `t=0.6` 处，terrain 比下边线高约 `0.531m`，也比仅高 `0.43m` 的上边线高约 `0.101m`，该处整条 ribbon 埋入地形。`islandScene.test.ts:79-92` 仍只断言顶点和单个移动后顶点，无法覆盖 segment interior。实现方 需提高/自适应细分或在段内保证上下边 clearance，并补 segment 内插值回归。
+  2. **[中] Bot 的 rooftop target 路径没有接入战斗决策，新增屋顶仍是 AI 无法主动到达的战术层。** `GridNavigator.ts:22-43` 已能生成 ground→roof 路径，但 `BotController.ts:105-129` 对可见敌人始终直接使用水平向量追逐/横移/后退；navigator 只在 loot/安全区分支 `:138,157,159` 使用。seed `0` 第一栋楼上放玩家、地面放持枪 Bot 并使用真实 `SimulationCombatWorld` LOS，连续 60 秒 controller+movement 后 Bot 最大 y 仍为 `1.76`，没有走坡道。`movementSystem.test.ts:139-157` 只直接测试 navigator，未覆盖 BotController 追逐屋顶目标。实现方 需让需接近的屋顶敌人走 ramp path（或明确禁止该战术层），并补 controller+movement/combat 整链测试。
 - 验证：`npm run typecheck` 通过；完整 `npm run test -- --reporter=verbose` 为 18 files / 104 tests 全部通过；`git diff --check` 通过。额外抽样 5,000 个 seed 未发现 layout 生成失败、越界 loot、坡道被 terrain 穿透或建筑 roof 被 terrain 覆盖；未修改业务源码、未提交。
 
 ### 2026-07-18 02:54 +0800：最终 release-gate 全量复审（不通过）
 
-- 审查范围：当前 `main` 工作区相对 `HEAD/origin/main`（`a0a4267`）的完整未提交 diff；对照本 plan，并复核此前 terrain/floor、权威地形、离机、roof/ramp、loot/cache、safe-zone ribbon 与 Bot combat pursuit findings。
+- 审查范围：当前 `main` 工作区相对 `HEAD/origin/main`（`a0a4267`）的完整未提交 diff；对照本 plan，并复核此前 terrain/floor、权威地形、离机、roof/ramp、loot/cache、safe-zone ribbon 与 Bot combat pursuit 审查发现。
 - 结论：**不通过；未发现高风险 blocker，仍有 1 项中风险 blocker。** controlled-random bounded island 为明确预期，不作为问题。
-- Finding：`BotController.navigate` 在接近当前 waypoint 2m 时重算整条路径，却始终只保存新的 `path[1]`（`src/controllers/BotController.ts:240-245`）。对 ground→roof 路径，`GridNavigator` 会依次返回 ramp start、ramp end、roof target（`src/ai/navigation/GridNavigator.ts:32-42`）；Bot 到达 ramp start 后每次都重新选择 ramp start，无法推进到 ramp end。以当前 seed `2147483648` 的 `building-0-1` 为例，持枪 Bot 追逐屋顶远端目标 60 秒后仍停在 `z=150.622/y=1.797`，而 ramp start/end 为 `150.522/161.722`、屋顶目标 eye y 为 `5.94`。现有 `botController.test.ts:42-68` 只检查首个 command 的方向，没有推进 controller + movement 穿越全部 waypoints。Builder 需保存/消费完整 waypoint 序列，或在到达当前 waypoint 后明确推进下一节点，并补真实多 tick ground→ramp→roof 回归。
+- 审查发现：`BotController.navigate` 在接近当前 waypoint 2m 时重算整条路径，却始终只保存新的 `path[1]`（`src/controllers/BotController.ts:240-245`）。对 ground→roof 路径，`GridNavigator` 会依次返回 ramp start、ramp end、roof target（`src/ai/navigation/GridNavigator.ts:32-42`）；Bot 到达 ramp start 后每次都重新选择 ramp start，无法推进到 ramp end。以当前 seed `2147483648` 的 `building-0-1` 为例，持枪 Bot 追逐屋顶远端目标 60 秒后仍停在 `z=150.622/y=1.797`，而 ramp start/end 为 `150.522/161.722`、屋顶目标 eye y 为 `5.94`。现有 `botController.test.ts:42-68` 只检查首个 command 的方向，没有推进 controller + movement 穿越全部 waypoints。实现方 需保存/消费完整 waypoint 序列，或在到达当前 waypoint 后明确推进下一节点，并补真实多 tick ground→ramp→roof 回归。
 - 验证：`git diff --check`、`npm run typecheck`、完整 Vitest（18 files / 105 tests）及 `npm run build` 均通过；生产 preview 在本机 Chrome、音量 `0` 下可进入航线，控制台无 error/warn。构建保留既有 813.61kB 主 chunk 与 625.30kB GLTF chunk 警告。
 
 ### 2026-07-18 03:02 +0800：Bot 屋顶追击 blocker 最终复核（通过）
@@ -1050,118 +1050,118 @@
 - 审查范围：当前 `main` 相对 `HEAD/origin/main`（`e1c50ba`）的 24 个 tracked 文件完整未提交 diff，包含 README/docs；按用户要求忽略未跟踪的 `session-ses_096e.md`。对照本 plan 及本轮 1200m、6 POI、1+50 AI、可进入建筑、三类武器模型和 UI/文档增量要求。
 - 结论：**不通过。** 参与人数、物资配额、默认程序化武器显隐、墙/屋顶/坡道的主要权威链路和 5-seed 门槛已有测试，但仍有 1 项高风险和 2 项中风险 blocker。
 
-#### Findings（按严重度）
+#### 审查发现（按严重度）
 
-1. **[高] 4Hz 决策缓存会在真实 30Hz 固定步中重复执行同一个 waypoint 移动，复杂路径可永久振荡。** `BotController.ts:79-90` 在决策间隔内复用缓存的 `move`，而 `:318-322` 只按单个传入 `deltaSeconds` 缩放“本步”剩余距离，waypoint 又只在下一次决策的 `:288-293` 才消费。生产会话每个 1/30s 固定步调用 controller；新增 `botController.test.ts:82-118` 却用 0.25s 同时推进 controller 和 Movement，未覆盖缓存 tick。用真实 1/30s 复现 map seed `2147483648` 的 rooftop→ramp→ground loot：Bot 60 秒后仍未拾枪，在 ramp-start `z=486.446` 两侧约 `486.219–487.919` 往复，目标 loot `z=494.446` 始终 available。影响多墙绕行、屋顶追击/撤离和室内路径；builder 需让缓存 tick 能安全消费/截断 waypoint，补真实 30Hz controller+movement 多 waypoint 回归。
-2. **[中] 随机建筑生成未校验世界边界和 terrain clearance，合法 seed 会生成 AI 不可达坡道及被地形穿透的建筑/坡道。** `map.ts:104-121,179-212` 按 POI 外向直接生成坡道并只做平面 building clearance；Movement 在 `MovementSystem.ts:160-163` 把角色限制在 `±599.58m`，navigator 在 `GridNavigator.ts:126-131` 也拒绝界外节点。枚举 seed `0..999` 有 11 条坡道起点越过 600m；seed `331` 的 `ramp-building-5-3` 为 `startZ=605.856/endZ=593.603`，ground↔roof 两向 `findPath` 均为空。另抽样 seed `0..249`，seed `28/building-5-4` footprint 地形最高 `9.3405`，高于权威/可见 roof `8.7935`；并发现坡道表面最多被 terrain 穿入约 `0.533m`。builder 需在接受建筑时校验完整 footprint、坡道、世界边界和 terrain clearance，并补多 seed 生成/导航/表面不相交测试。
-3. **[中] 新增三类稳定 weapon asset ID 没有接入 GLB 替换与武器切换，清单替换会产生错误显隐。** `IslandScene.ts:185-188` 仍只加载 `model.weapon.rifle`，`:202-206` 附加的 rifle GLB 没有 `actorVisual/weaponId` metadata；`:794-797` 因而无法在切到 SMG/shotgun 时隐藏它。`model.weapon.smg`、`model.weapon.shotgun` 虽已写入 manifest，却从未传给 `loadCatalogModel`；敌人 character GLB 成功时 `:195` 还会关闭全部程序化第三人称武器。现有 scene 测试只用 procedural entries。影响文档约定的“只改对应清单项”替换 contract：rifle GLB 会和其他活动枪叠显，另外两类 GLB 被静默忽略。builder 需按 weapon ID 管理 GLB/fallback 的实例与显隐，并补有效/失败 GLB、三类切换、第三人称和 dispose 的场景级测试。
+1. **[高] 4Hz 决策缓存会在真实 30Hz 固定步中重复执行同一个 waypoint 移动，复杂路径可永久振荡。** `BotController.ts:79-90` 在决策间隔内复用缓存的 `move`，而 `:318-322` 只按单个传入 `deltaSeconds` 缩放“本步”剩余距离，waypoint 又只在下一次决策的 `:288-293` 才消费。生产会话每个 1/30s 固定步调用 controller；新增 `botController.test.ts:82-118` 却用 0.25s 同时推进 controller 和 Movement，未覆盖缓存 tick。用真实 1/30s 复现 map seed `2147483648` 的 rooftop→ramp→ground loot：Bot 60 秒后仍未拾枪，在 ramp-start `z=486.446` 两侧约 `486.219–487.919` 往复，目标 loot `z=494.446` 始终 available。影响多墙绕行、屋顶追击/撤离和室内路径；实现方 需让缓存 tick 能安全消费/截断 waypoint，补真实 30Hz controller+movement 多 waypoint 回归。
+2. **[中] 随机建筑生成未校验世界边界和 terrain clearance，合法 seed 会生成 AI 不可达坡道及被地形穿透的建筑/坡道。** `map.ts:104-121,179-212` 按 POI 外向直接生成坡道并只做平面 building clearance；Movement 在 `MovementSystem.ts:160-163` 把角色限制在 `±599.58m`，navigator 在 `GridNavigator.ts:126-131` 也拒绝界外节点。枚举 seed `0..999` 有 11 条坡道起点越过 600m；seed `331` 的 `ramp-building-5-3` 为 `startZ=605.856/endZ=593.603`，ground↔roof 两向 `findPath` 均为空。另抽样 seed `0..249`，seed `28/building-5-4` footprint 地形最高 `9.3405`，高于权威/可见 roof `8.7935`；并发现坡道表面最多被 terrain 穿入约 `0.533m`。实现方 需在接受建筑时校验完整 footprint、坡道、世界边界和 terrain clearance，并补多 seed 生成/导航/表面不相交测试。
+3. **[中] 新增三类稳定 weapon asset ID 没有接入 GLB 替换与武器切换，清单替换会产生错误显隐。** `IslandScene.ts:185-188` 仍只加载 `model.weapon.rifle`，`:202-206` 附加的 rifle GLB 没有 `actorVisual/weaponId` metadata；`:794-797` 因而无法在切到 SMG/shotgun 时隐藏它。`model.weapon.smg`、`model.weapon.shotgun` 虽已写入 manifest，却从未传给 `loadCatalogModel`；敌人 character GLB 成功时 `:195` 还会关闭全部程序化第三人称武器。现有 scene 测试只用 procedural entries。影响文档约定的“只改对应清单项”替换 contract：rifle GLB 会和其他活动枪叠显，另外两类 GLB 被静默忽略。实现方 需按 weapon ID 管理 GLB/fallback 的实例与显隐，并补有效/失败 GLB、三类切换、第三人称和 dispose 的场景级测试。
 
 #### 验证与后续处理
 
 - 已执行 `git diff --check`、`npm run typecheck`、完整 `npm run test`：18 files / 109 tests 全通过；另定向 6 files / 44 tests 全通过。未使用 Playwright、未下载浏览器、未播放声音。
 - 额外以本地 Vite 模块在 Chrome 中静音执行真实 30Hz 规则脚本：5 个 seed 的 140 秒持枪数为 `42/49/48/45/44`，均达到 42/50；但上述多 waypoint 复现稳定失败，说明现有 0.25s 加速测试不能替代真实固定步导航回归。
 - 已确认 `src/game/` 未发现 DOM/Babylon import 或 `context.Background()`；状态仍只保存可序列化 seed/规则数据。默认 procedural manifest 下三类第一/第三人称 mesh 的基础切换测试通过。
-- Builder 必须先处理 finding 1；findings 2–3 也需在 release 前收敛。Writer/验收需补真实 30Hz 多 waypoint、多 seed 地图有效性和有效 GLB 场景级证据后再发起复审。本轮未复跑 build，参考主 agent 已提供的 build/静音生产 preview 通过记录。
+- 实现方 必须先处理 审查发现 1；审查发现 2–3 也需在 release 前收敛。Writer/验收需补真实 30Hz 多 waypoint、多 seed 地图有效性和有效 GLB 场景级证据后再发起复审。本轮未复跑 build，参考主 agent 已提供的 build/静音生产 preview 通过记录。
 
 ### 2026-07-18 17:10 +0800：HEAD(e1c50ba) 完整 diff 与新增 SVG 最终 release-gate 复审（不通过）
 
 - 审查范围：当前 `main` 相对 `HEAD/origin/main`（均为 `e1c50ba`）的 34 个 tracked 文件完整工作区 diff，以及新增 `public/assets/ui/item-ammo-sniper.svg`、`public/assets/ui/weapon-sniper.svg`；按要求忽略 `session-ses_096e.md`。对照本 plan 和用户本轮最终 2400m、1+49 AI、16 落区、240 物资、四类武器等范围。
 - 结论：**不通过。** 旧 30Hz waypoint、建筑/坡道/terrain、四类程序化与 GLB 显隐、`actor-died.weaponId` 等主路径已有实现和定向测试，但完整必跑测试当前不能稳定通过，并发现 5 项中风险功能偏差。
 
-#### Findings（按严重度）
+#### 审查发现（按严重度）
 
-1. **[高][验证阻塞] 完整 `npm run test` 在当前工作区不能稳定通过。** 连续两次完整运行分别为 3 个和 1 个 timeout；第二次清理本轮 Vite dev 进程后仍在 `tests/unit/islandScene.test.ts:15` 的默认 5 秒上限失败（场景四次重建耗时约 5.72 秒）。该文件单独运行可通过，首项约 4.30 秒，说明不是确定性断言失败，但在完整并发套件下余量不足，CI/release check 具有可复现的抖动风险。Builder 需让标准完整命令有稳定余量，并重新提供完整绿灯证据，不能以单文件通过替代。
-2. **[中] 地图/物资生成只做最小间距局部约束，仍会生成大片空白、断开的道路簇和跨区堆叠物资。** `src/config/map.ts:236-258` 只拒绝过近点，没有最大覆盖半径；seed `358` 的地图内 `(1100,1100)` 距最近落区中心约 `1281m`、最近建筑约 `1082m`、最近物资约 `870m`。`src/config/map.ts:187-215` 的每点两个最近邻也不保证全图连通，seed `0..400` 有 56 个 layout 的道路图分裂。另一方面 `src/config/map.ts:497-545,559-574` 的 `selected` 每区重置；同一批 401 seed 中，seed `237` 的 zone 10/14 两件物资仅距 `0.124m`，累计有 1,435 个跨区 pair 小于 `18m`。小地图与地表虽然调用同一道路函数、索引一致，但这些实际布局仍违反本轮重点要求中的大片空白/不合理堆叠收敛目标。Builder 需增加不依赖固定格点的覆盖、道路连通及跨区全局 spacing 校验。
+1. **[高][验证阻塞] 完整 `npm run test` 在当前工作区不能稳定通过。** 连续两次完整运行分别为 3 个和 1 个 timeout；第二次清理本轮 Vite dev 进程后仍在 `tests/unit/islandScene.test.ts:15` 的默认 5 秒上限失败（场景四次重建耗时约 5.72 秒）。该文件单独运行可通过，首项约 4.30 秒，说明不是确定性断言失败，但在完整并发套件下余量不足，CI/release check 具有可复现的抖动风险。实现方 需让标准完整命令有稳定余量，并重新提供完整绿灯证据，不能以单文件通过替代。
+2. **[中] 地图/物资生成只做最小间距局部约束，仍会生成大片空白、断开的道路簇和跨区堆叠物资。** `src/config/map.ts:236-258` 只拒绝过近点，没有最大覆盖半径；seed `358` 的地图内 `(1100,1100)` 距最近落区中心约 `1281m`、最近建筑约 `1082m`、最近物资约 `870m`。`src/config/map.ts:187-215` 的每点两个最近邻也不保证全图连通，seed `0..400` 有 56 个 layout 的道路图分裂。另一方面 `src/config/map.ts:497-545,559-574` 的 `selected` 每区重置；同一批 401 seed 中，seed `237` 的 zone 10/14 两件物资仅距 `0.124m`，累计有 1,435 个跨区 pair 小于 `18m`。小地图与地表虽然调用同一道路函数、索引一致，但这些实际布局仍违反本轮重点要求中的大片空白/不合理堆叠收敛目标。实现方 需增加不依赖固定格点的覆盖、道路连通及跨区全局 spacing 校验。
 3. **[中] 13/16 个区域必然缺少一种匹配弹药，未达到四类武器/弹药的区内可用语义。** `src/game/modes/BattleRoyaleMode.ts:307-320` 对 10–17 件区域把 ammo 数固定为 3，而 loot table 已有 4 种弹药；`createLootEntries` 虽先创建四种候选，区域循环只会 pop 3 个。当前固定 count 多重集中恰有 13 个 10–17 件区域，因此这些区域每局都会随机缺一类弹药；`tests/unit/battleRoyaleMode.test.ts:86-90` 也只要求武器 4 类、弹药至少 3 类。影响是同区已保证出现的某类枪没有对应补充弹，分流到该武器落点的 Bot 打空后必须跨区搜索。
-4. **[中] 圈外跑圈并非最高优先级，低血量 Bot 会先原地治疗。** `src/controllers/BotController.ts:130-145` 在 `outsideZone` 判断前直接返回 medkit/bandage 命令；因此圈外携药 Bot 会停留 2.5–5 秒，后期高圈伤时可直接治疗至死。现有测试只覆盖“圈外有可见敌人”，没有覆盖圈外同时可治疗；Builder 需明确把跑圈放到治疗之前，并补该组合回归。
-5. **[中] 键盘切枪没有清除 9-tick 换弹缓冲，会把旧枪的 R 请求施加到新枪。** `src/controllers/HumanController.ts:120-132` 的 Digit/Numpad 分支仅清理 scope；只有滚轮分支 `:188-193` 清理 `reloadRequestTicks`。实际按 `R` 后同 tick 按 `Digit2`，首个命令同时为 `reload=true/switchWeapon=1`，下一 tick仍为 `reload=true`；而 `GameSimulation` 先处理 inventory switch、后处理 combat，导致新活动枪收到旧请求。Builder 需统一所有切枪入口清理缓冲，并补同 tick 键盘切枪整链测试。
-6. **[中] Pointer Lock 丢失只清了 controller scope，FOV/viewmodel 不会立即退出。** `HumanController.ts:196-205` 会将 `scopeHeld` 置 false，但 `BattleRoyaleSession.ts:177-185` 把 camera FOV 和 view weapon 同步放在 `elapsedSeconds` 变化门控内；按 Esc 后模拟暂停、elapsed 不再变化，因此相机会继续保持 `0.32` 且第一人称枪仍隐藏，直到恢复锁定并推进下一个 fixed tick。HUD overlay 已退出，三者状态不一致。Builder 需让 scope presentation 在失锁边界立即同步，并补暂停/恢复回归。
+4. **[中] 圈外跑圈并非最高优先级，低血量 Bot 会先原地治疗。** `src/controllers/BotController.ts:130-145` 在 `outsideZone` 判断前直接返回 medkit/bandage 命令；因此圈外携药 Bot 会停留 2.5–5 秒，后期高圈伤时可直接治疗至死。现有测试只覆盖“圈外有可见敌人”，没有覆盖圈外同时可治疗；实现方 需明确把跑圈放到治疗之前，并补该组合回归。
+5. **[中] 键盘切枪没有清除 9-tick 换弹缓冲，会把旧枪的 R 请求施加到新枪。** `src/controllers/HumanController.ts:120-132` 的 Digit/Numpad 分支仅清理 scope；只有滚轮分支 `:188-193` 清理 `reloadRequestTicks`。实际按 `R` 后同 tick 按 `Digit2`，首个命令同时为 `reload=true/switchWeapon=1`，下一 tick仍为 `reload=true`；而 `GameSimulation` 先处理 inventory switch、后处理 combat，导致新活动枪收到旧请求。实现方 需统一所有切枪入口清理缓冲，并补同 tick 键盘切枪整链测试。
+6. **[中] Pointer Lock 丢失只清了 controller scope，FOV/viewmodel 不会立即退出。** `HumanController.ts:196-205` 会将 `scopeHeld` 置 false，但 `BattleRoyaleSession.ts:177-185` 把 camera FOV 和 view weapon 同步放在 `elapsedSeconds` 变化门控内；按 Esc 后模拟暂停、elapsed 不再变化，因此相机会继续保持 `0.32` 且第一人称枪仍隐藏，直到恢复锁定并推进下一个 fixed tick。HUD overlay 已退出，三者状态不一致。实现方 需让 scope presentation 在失锁边界立即同步，并补暂停/恢复回归。
 
 #### 验证与后续处理
 
 - `npm run typecheck`：通过。
 - `npm run test`：第一次 18 files / 122 tests 中 3 个 timeout；停止本轮 Vite dev 后第二次为 17 files / 121 tests 通过、`islandScene` 1 个 timeout；`npx vitest run tests/unit/islandScene.test.ts` 单独 2/2 通过。完整命令仍判失败。
 - `npm run build`：通过，仅保留 `index` 约 828.60kB、GLTF 约 625.30kB 的 >500kB warning；`git diff --check e1c50ba` 通过。
-- 额外通过本地 Vite 模块做了 seed `0..400` 的跨区 spacing/道路连通采样及 seed `0..999` 的生成/覆盖采样；1000 seed 未见生成 throw、每区室内物资仍至少 1、远距物资仍至少 6，但得到 findings 2–3 的反例。本轮未使用 Playwright、未下载浏览器、未播放声音。
-- Builder 必须先恢复完整 `npm run test` 的稳定绿灯；同时处理 findings 2–6 并补对应全局 spacing/覆盖、四弹药区内覆盖、圈外治疗、键盘切枪 reload buffer、失锁 scope 同步测试后再复审。上述均为待处理项，不记录通过结论。
+- 额外通过本地 Vite 模块做了 seed `0..400` 的跨区 spacing/道路连通采样及 seed `0..999` 的生成/覆盖采样；1000 seed 未见生成 throw、每区室内物资仍至少 1、远距物资仍至少 6，但得到 审查发现 2–3 的反例。本轮未使用 Playwright、未下载浏览器、未播放声音。
+- 实现方 必须先恢复完整 `npm run test` 的稳定绿灯；同时处理 审查发现 2–6 并补对应全局 spacing/覆盖、四弹药区内覆盖、圈外治疗、键盘切枪 reload buffer、失锁 scope 同步测试后再复审。上述均为待处理项，不记录通过结论。
 
-### 2026-07-18 17:53 +0800：17:10 findings 与山地/狙击/输入增量最终复审（不通过）
+### 2026-07-18 17:53 +0800：17:10 审查发现 与山地/狙击/输入增量最终复审（不通过）
 
-- 审查范围：当前 `main` 相对 `HEAD/origin/main`（均为 `e1c50ba`）的 34 个 tracked 文件完整工作区 diff及新增 sniper 两个 SVG；忽略 `session-ses_096e.md`。重点复核 17:10 的 1 高 + 5 中 findings，并检查新增山峰、环境密度、48m/s 高空滑翔、狙击镜、换弹缓存和死亡武器标签。
+- 审查范围：当前 `main` 相对 `HEAD/origin/main`（均为 `e1c50ba`）的 34 个 tracked 文件完整工作区 diff及新增 sniper 两个 SVG；忽略 `session-ses_096e.md`。重点复核 17:10 的 1 高 + 5 中 审查发现，并检查新增山峰、环境密度、48m/s 高空滑翔、狙击镜、换弹缓存和死亡武器标签。
 - 结论：**不通过。** 上轮测试超时、道路断连、跨区 loot 堆叠、四弹药覆盖、圈外治疗优先级、键盘切枪 reload buffer、失锁 scope presentation 均已闭环；但新的 coverage 点位生成器会对合法 seed 确定性抛错，而且“最大空白 <720m”并未在 401 seed 范围成立。
 
-#### Findings（按严重度）
+#### 审查发现（按严重度）
 
-1. **[高][新增回归] 合法 map seed 可让新 coverage 采样器直接生成失败，整局无法创建。** `src/config/map.ts:298-325` 为每个 wilderness 点只尝试固定 320 个候选；当候选同时不满足 buildable、最小间距和逐点最远覆盖时，立即抛出 `Not enough coverage map points`，没有扩大搜索、回退或重试布局。用当前源码顺序枚举 seed `0..1200`，seed `832`、`859` 均稳定抛错；`createBattleRoyaleState` 会直接传播该异常，生产 `GameApp` 最终进入 LOAD FAILED 而不是开始对局。现有 401-seed 测试只到 `0..400`，无法证明 32-bit 每局 seed 的生成可靠性。Builder 需让采样失败可确定性收敛或安全重试，并加入上述反例及更广 seed 验证。
-2. **[中][上轮 finding 2 未完全闭环] 最远候选策略仍不保证所声明的 `<720m` 建筑覆盖。** `src/config/map.ts:298-324` 只从 320 个随机候选中按带 `0.88–1` 扰动的最近距离打分；`tests/unit/mapLayout.test.ts:129-167` 实际只检查 `[0,33,237,358]` 四个 seed，并非最终证据所称的 401 seed 覆盖。按该测试同样的 `220m` 网格枚举 `0..400`，seed `303` 在 `(1100,-1100)` 到最近建筑约 `966.25m`（最近落区中心约 `1197.77m`、最近 loot 约 `833.27m`），明显超过 720m，仍会出现用户要求收敛的大片空旷区。道路 MST 连通和全局 loot 12m spacing 已确认修复，不在本 finding 范围。
+1. **[高][新增回归] 合法 map seed 可让新 coverage 采样器直接生成失败，整局无法创建。** `src/config/map.ts:298-325` 为每个 wilderness 点只尝试固定 320 个候选；当候选同时不满足 buildable、最小间距和逐点最远覆盖时，立即抛出 `Not enough coverage map points`，没有扩大搜索、回退或重试布局。用当前源码顺序枚举 seed `0..1200`，seed `832`、`859` 均稳定抛错；`createBattleRoyaleState` 会直接传播该异常，生产 `GameApp` 最终进入 LOAD FAILED 而不是开始对局。现有 401-seed 测试只到 `0..400`，无法证明 32-bit 每局 seed 的生成可靠性。实现方 需让采样失败可确定性收敛或安全重试，并加入上述反例及更广 seed 验证。
+2. **[中][上轮 审查发现 2 未完全闭环] 最远候选策略仍不保证所声明的 `<720m` 建筑覆盖。** `src/config/map.ts:298-324` 只从 320 个随机候选中按带 `0.88–1` 扰动的最近距离打分；`tests/unit/mapLayout.test.ts:129-167` 实际只检查 `[0,33,237,358]` 四个 seed，并非最终证据所称的 401 seed 覆盖。按该测试同样的 `220m` 网格枚举 `0..400`，seed `303` 在 `(1100,-1100)` 到最近建筑约 `966.25m`（最近落区中心约 `1197.77m`、最近 loot 约 `833.27m`），明显超过 720m，仍会出现用户要求收敛的大片空旷区。道路 MST 连通和全局 loot 12m spacing 已确认修复，不在本 审查发现 范围。
 
 #### 已确认闭环与验证
 
-- 上轮 finding 1：标准 `npm run test` 本轮实跑为 18 files / 126 tests 全通过，总时长约 125.68s；重型测试显式 timeout 后未再复现完整套件失败。
-- 上轮 findings 3–6：每区四枪/四弹测试通过；圈外判断位于治疗前且有低血 medkit 回归；Digit/Numpad/滚轮均清 reload buffer；scope FOV/viewmodel 每帧同步，失锁不再依赖 elapsed tick。
+- 上轮 审查发现 1：标准 `npm run test` 本轮实跑为 18 files / 126 tests 全通过，总时长约 125.68s；重型测试显式 timeout 后未再复现完整套件失败。
+- 上轮 审查发现 3–6：每区四枪/四弹测试通过；圈外判断位于治疗前且有低血 medkit 回归；Digit/Numpad/滚轮均清 reload buffer；scope FOV/viewmodel 每帧同步，失锁不再依赖 elapsed tick。
 - 山地/规则：seed `0..400` 的现有建筑/坡道/terrain 测试通过；额外对同范围 ramp 宽度与长度做更密采样，未发现超过既有 `0.08m` epsilon 的 terrain 穿入。48m/s 仅用于高空且玩家/Bot 共用同一 MovementSystem，近地仍连续降至约 8–12m/s，未发现明确规则不公平。
 - 狙击/死亡：四类程序化及 GLB 第一/第三人称显隐、RPM、scope 条件、`actor-died.weaponId` 和安全区 `null` weapon 调用链未发现新回归；新增 SVG 内容有效。
 - 性能残余风险（非本轮 blocker）：场景 mesh 仍固定且不随局时增长；但 `<3900` 不是全 seed 严格上界，额外 NullEngine 对 140 栋建筑的 seed `135` 实测为 3975 meshes。结合现有静音 Chrome 约 120 FPS 证据，本轮不把约 2% 超差单列中高风险，但后续不应把单 seed 断言表述成全局硬上限。
 - 自动验证：`npm run typecheck && npm run test && npm run build && git diff --check e1c50ba` 完整通过；构建仅既有 `index` 约 829.78kB、GLTF 约 625.30kB warning。额外本地 Vite 模块枚举发现上述 seed `832/859` 生成失败和 seed `303` coverage 反例。未使用 Playwright、未下载浏览器、未播放声音。
-- Builder 必须处理 findings 1–2，并补生成不抛错及真正覆盖 `0..400`（含 seed 303）的最大空白回归后再复审；本轮不记录通过结论。
+- 实现方 必须处理 审查发现 1–2，并补生成不抛错及真正覆盖 `0..400`（含 seed 303）的最大空白回归后再复审；本轮不记录通过结论。
 
 ### 2026-07-18 20:15 +0800：HEAD(e1c50ba) 完整 diff 与 sniper SVG 最终 release-gate 审查（不通过）
 
 - 审查范围：当前 `main` 相对 `HEAD/origin/main`（均为 `e1c50ba`）的 36 个 tracked 文件完整工作区 diff，以及新增 `public/assets/ui/item-ammo-sniper.svg`、`public/assets/ui/weapon-sniper.svg`；按要求忽略 `session-ses_096e.md`。对照本 plan、本轮用户列出的 2400m/1+49 AI/建筑与屋顶/四类武器/排行榜/死亡物资/观战/后期缩圈/性能主链。
 - 结论：**不通过。** seed `832/859`、401-seed 地图门禁、四枪四弹、30Hz waypoint、GLB/fallback、死亡物资、观战和 15 分钟配置等现有回归大部分通过，但存在 3 项高风险及 3 项中风险 blocker；标准完整测试也连续两次未获绿灯。
 
-#### Findings（按严重度）
+#### 审查发现（按严重度）
 
-1. **[高] 92% 自动离机点可位于岛外，空闲玩家会在海面落地并在首次移动时瞬移百余米。** `src/game/modes/BattleRoyaleMode.ts:28,104-121` 在固定 92% 航程无边界检查地强制离机；`src/game/systems/MovementSystem.ts:49-57` 只约束手动离机，且 `:169-174` 在无水平输入时不做边界恢复。常量随机源 `0.5` 的正式航线为 `x=1560→-1560`；推进到 93% 后玩家在 `x=-1341.6` 离机，空闲下降后仍在该坐标、`y=1.76` 被判 grounded，首次向 x 移动直接跳到 `-1199.435`，瞬移约 `142.165m`。`tests/unit/battleRoyaleMode.test.ts:151-167` 只断言“当前位置离机”，反而未校验当前位置是否在岛内。Builder 需按航线与 actor 半径计算最后合法离机进度/位置，保证自动离机、落地和后续移动均无岛外站立或瞬移，并补多角度/偏移及空闲玩家完整下降回归。
-2. **[高] 权威 LOS 短暂被建筑遮挡后，Bot 会丢弃已生成的屋顶追击路径，真实主链不能稳定走坡道上楼。** `src/controllers/BotController.ts:170-203` 首次看到目标后清空受击调查状态；下一决策若 `SimulationCombatWorld` LOS 暂时为 false，`:205-270` 没有 last-known combat target，直接进入物资/巡逻并重写导航。用 seed `2147483648` 的 `building-0-0`、背对楼顶玩家的持霰弹枪 Bot 复现：受击后会转向、开火并开始坡道路径，但绕楼时 LOS 连续丢失约 61 个 30Hz tick；30 秒后 Bot 从距玩家约 48m 走到 342m 外，未登上该屋顶。现有完整 ground→roof 测试 `tests/unit/botController.test.ts:77-115` 使用 `hasLineOfSight: true` 的假 world；真实 world 用例 `:117-153` 只推进约 0.33 秒，未覆盖完整路径。Builder 需在 LOS 暂失时沿有限时长的最后可见位置/既有 waypoint 继续调查（期间不得开火或更新隐藏目标位置），并补真实 `SimulationCombatWorld + MovementSystem` 的 30Hz 多 tick 上楼回归。
-3. **[高][验证阻塞] 标准完整 `npm run test` 连续两次失败，新增 1.5 秒性能守卫在并发套件下稳定抖动。** 首次完整运行为 17 files/139 tests 通过，`tests/unit/movementSystem.test.ts:80-93` 实测 `2218ms > 1500ms`；按用户要求重试后该项仍为 `2007ms > 1500ms`，且 `tests/unit/loadCatalogModel.test.ts:13` 又触发默认 5 秒 timeout。相同两个文件定向运行时 14/14 通过，移动守卫约 388ms、GLB 用例约 696ms，证明是并发负载下的门禁不稳定而非完整绿灯。Builder/writer 需把性能基准与并发重型套件隔离或采用稳定的专用门禁，同时给 GLB 重型测试明确余量；不能以单文件通过替代 release 命令。
-4. **[中] 同 tick 多攻击者会按实体 ID 顺序覆盖受击方向，正常 ID 体系固定让 AI 优先调查玩家。** `src/game/systems/CombatSystem.ts:81-85,214-225` 按 actor ID 收集并顺序应用伤害；`src/game/systems/DamageSystem.ts:21-29` 每笔伤害覆盖同一 timestamp 的 `lastDamageDirection`。玩家在西、`bot-1` 在东同时命中目标时，无论 command Map 插入顺序，最终方向都固定指向玩家；只把 ID 改成 `a-player/z-bot` 就改为指向 Bot。伤害本身顺序稳定，但新增调查行为形成 actor-class/命名偏置。Builder 需在 batch 层为同 tick 多来源定义不依赖 ID/kind 的公平选择或聚合规则，只记录一次调查信号，并补交换 ID/kind/插入顺序测试。
-5. **[中] 排行榜和结果卡把状态 ID 直接拼进 `innerHTML`，可执行注入内容。** `src/client/ui/GameHud.ts:225-230` 将 `actorLabel(actor.id)` 插入排行榜 HTML，`:270,278` 也把 `winnerId/detail` 插入结果卡。向 `MatchState.actors` 加入 ID ``<img src=x onerror='window.__reviewXss=1'>`` 后显示 Tab 榜，实测 handler 执行、标志变为 1。当前离线局 ID 由本地生成，因此外部可利用面有限，但这不满足本轮明确要求的 XSS 检查，也破坏可迁移状态边界。Builder 需用 DOM 节点与 `textContent` 渲染动态值，或统一严格转义，并补恶意 ID 回归。
-6. **[中] 地图实现与已记录的“20 处路边院落”最终语义不一致，实际硬编码生成 28 处。** 本 plan 实现记录第 375 行及用户本轮基线均明确 `16 山 + 20 路边院落`；`src/config/map.ts:97,143-150` 却把 `COVERAGE_COMPOUND_COUNT` 设为 28，每处再生成 2–3 栋建筑，额外增加 16–24 栋建筑及对应墙/屋顶/坡道 mesh。现有 401-seed `<450m` 门禁依赖这套 28 点实现，却没有断言最终院落数量。Builder 需恢复准确的 20 处语义，并通过改进 20 点的覆盖采样而不是无记录扩量来继续满足 seed 303 与 401-seed 环境空白门禁。
+1. **[高] 92% 自动离机点可位于岛外，空闲玩家会在海面落地并在首次移动时瞬移百余米。** `src/game/modes/BattleRoyaleMode.ts:28,104-121` 在固定 92% 航程无边界检查地强制离机；`src/game/systems/MovementSystem.ts:49-57` 只约束手动离机，且 `:169-174` 在无水平输入时不做边界恢复。常量随机源 `0.5` 的正式航线为 `x=1560→-1560`；推进到 93% 后玩家在 `x=-1341.6` 离机，空闲下降后仍在该坐标、`y=1.76` 被判 grounded，首次向 x 移动直接跳到 `-1199.435`，瞬移约 `142.165m`。`tests/unit/battleRoyaleMode.test.ts:151-167` 只断言“当前位置离机”，反而未校验当前位置是否在岛内。实现方 需按航线与 actor 半径计算最后合法离机进度/位置，保证自动离机、落地和后续移动均无岛外站立或瞬移，并补多角度/偏移及空闲玩家完整下降回归。
+2. **[高] 权威 LOS 短暂被建筑遮挡后，Bot 会丢弃已生成的屋顶追击路径，真实主链不能稳定走坡道上楼。** `src/controllers/BotController.ts:170-203` 首次看到目标后清空受击调查状态；下一决策若 `SimulationCombatWorld` LOS 暂时为 false，`:205-270` 没有 last-known combat target，直接进入物资/巡逻并重写导航。用 seed `2147483648` 的 `building-0-0`、背对楼顶玩家的持霰弹枪 Bot 复现：受击后会转向、开火并开始坡道路径，但绕楼时 LOS 连续丢失约 61 个 30Hz tick；30 秒后 Bot 从距玩家约 48m 走到 342m 外，未登上该屋顶。现有完整 ground→roof 测试 `tests/unit/botController.test.ts:77-115` 使用 `hasLineOfSight: true` 的假 world；真实 world 用例 `:117-153` 只推进约 0.33 秒，未覆盖完整路径。实现方 需在 LOS 暂失时沿有限时长的最后可见位置/既有 waypoint 继续调查（期间不得开火或更新隐藏目标位置），并补真实 `SimulationCombatWorld + MovementSystem` 的 30Hz 多 tick 上楼回归。
+3. **[高][验证阻塞] 标准完整 `npm run test` 连续两次失败，新增 1.5 秒性能守卫在并发套件下稳定抖动。** 首次完整运行为 17 files/139 tests 通过，`tests/unit/movementSystem.test.ts:80-93` 实测 `2218ms > 1500ms`；按用户要求重试后该项仍为 `2007ms > 1500ms`，且 `tests/unit/loadCatalogModel.test.ts:13` 又触发默认 5 秒 timeout。相同两个文件定向运行时 14/14 通过，移动守卫约 388ms、GLB 用例约 696ms，证明是并发负载下的门禁不稳定而非完整绿灯。实现方/实现 Agent 需把性能基准与并发重型套件隔离或采用稳定的专用门禁，同时给 GLB 重型测试明确余量；不能以单文件通过替代 release 命令。
+4. **[中] 同 tick 多攻击者会按实体 ID 顺序覆盖受击方向，正常 ID 体系固定让 AI 优先调查玩家。** `src/game/systems/CombatSystem.ts:81-85,214-225` 按 actor ID 收集并顺序应用伤害；`src/game/systems/DamageSystem.ts:21-29` 每笔伤害覆盖同一 timestamp 的 `lastDamageDirection`。玩家在西、`bot-1` 在东同时命中目标时，无论 command Map 插入顺序，最终方向都固定指向玩家；只把 ID 改成 `a-player/z-bot` 就改为指向 Bot。伤害本身顺序稳定，但新增调查行为形成 actor-class/命名偏置。实现方 需在 batch 层为同 tick 多来源定义不依赖 ID/kind 的公平选择或聚合规则，只记录一次调查信号，并补交换 ID/kind/插入顺序测试。
+5. **[中] 排行榜和结果卡把状态 ID 直接拼进 `innerHTML`，可执行注入内容。** `src/client/ui/GameHud.ts:225-230` 将 `actorLabel(actor.id)` 插入排行榜 HTML，`:270,278` 也把 `winnerId/detail` 插入结果卡。向 `MatchState.actors` 加入 ID ``<img src=x onerror='window.__reviewXss=1'>`` 后显示 Tab 榜，实测 handler 执行、标志变为 1。当前离线局 ID 由本地生成，因此外部可利用面有限，但这不满足本轮明确要求的 XSS 检查，也破坏可迁移状态边界。实现方 需用 DOM 节点与 `textContent` 渲染动态值，或统一严格转义，并补恶意 ID 回归。
+6. **[中] 地图实现与已记录的“20 处路边院落”最终语义不一致，实际硬编码生成 28 处。** 本 plan 实现记录第 375 行及用户本轮基线均明确 `16 山 + 20 路边院落`；`src/config/map.ts:97,143-150` 却把 `COVERAGE_COMPOUND_COUNT` 设为 28，每处再生成 2–3 栋建筑，额外增加 16–24 栋建筑及对应墙/屋顶/坡道 mesh。现有 401-seed `<450m` 门禁依赖这套 28 点实现，却没有断言最终院落数量。实现方 需恢复准确的 20 处语义，并通过改进 20 点的覆盖采样而不是无记录扩量来继续满足 seed 303 与 401-seed 环境空白门禁。
 
 #### 验证与待处理
 
 - `npm run typecheck`：通过。
-- `npm run test`：首次 18 files / 140 tests 中 1 项失败；重试为 2 项失败，均见 finding 3。定向 `loadCatalogModel + movementSystem` 为 2 files / 14 tests 通过。
+- `npm run test`：首次 18 files / 140 tests 中 1 项失败；重试为 2 项失败，均见 审查发现 3。定向 `loadCatalogModel + movementSystem` 为 2 files / 14 tests 通过。
 - `npm run build`：通过；`index` 837.55kB、GLTF 625.30kB，仅保留 >500kB warning。`git diff --check e1c50ba --`：通过。
-- 地图/AI 已在失败的完整套件中实际跑完：seed `832/859`、401-seed 几何与 `<450m`、5-seed 至少 42/49 持枪和 49 Bot 唯一胜者相关断言均通过；这不能覆盖 findings 1–2、4–6。
+- 地图/AI 已在失败的完整套件中实际跑完：seed `832/859`、401-seed 几何与 `<450m`、5-seed 至少 42/49 持枪和 49 Bot 唯一胜者相关断言均通过；这不能覆盖 审查发现 1–2、4–6。
 - 静音生产 smoke：本机 Chrome、volume `0`，菜单显示 50 人/49 AI，生产 HUD 与 400m 小地图可进入，console 无 error/warn。另通过本地 Vite 模块完成自动离机、真实 LOS 屋顶追击、同 tick 受击方向和排行榜注入复现。
-- Builder 必须先处理 findings 1–6；writer 需补岛外自动离机、真实 LOS 完整上楼、同 tick 多来源公平性、排行榜 XSS、准确 20 院落及稳定完整测试门禁。复审前必须提供标准 `npm run test` 完整绿灯，不能记录为通过。
+- 实现方 必须先处理 审查发现 1–6；实现 Agent 需补岛外自动离机、真实 LOS 完整上楼、同 tick 多来源公平性、排行榜 XSS、准确 20 院落及稳定完整测试门禁。复审前必须提供标准 `npm run test` 完整绿灯，不能记录为通过。
 
 ### 2026-07-18 21:05 +0800：cc9c869 后增量与安全区/空中规则 release-gate 复审（不通过）
 
 - 审查范围：当前 `main` 相对已推送 `HEAD/origin/main`（`cc9c869`）的 20 个 tracked 文件完整增量；复核 20:15 记录的 3 高 3 中 blocker，以及提前进下一圈、空中受击和第三圈起加速要求。按要求忽略未跟踪 `session-ses_096e.md`。
 - 结论：**不通过。** 上轮岛外自动离机、真实 LOS 屋顶路径、测试门禁和 20 院落主体已闭环，标准 release 命令本轮全绿；但目标圈实现会让合法生产 seed 的部分 Bot 永久无枪，combat memory 回归了新受击响应，另有同 tick 对向受击、空中目标距离和库存 XSS 三项中风险问题。
 
-#### Findings（按严重度）
+#### 审查发现（按严重度）
 
-1. **[高] 目标圈最高优先级会让圈外落地 Bot 放弃脚下武器，且合法生产 seed 的目标圈内武器不足以维持既有 42/49 武装门槛。** `src/controllers/BotController.ts:169-182` 在近距拾枪 `:268-274` 之前直接返回进目标圈命令；`:380-388` 又永久排除目标圈安全余量外的全部 loot。用 seeded random `73` 生成 `mapSeed=3210391758` 时，首圈 `830m` 安全余量内只有 39 把武器；把无枪 `bot-1` 放在圈外 `loot-6` 正上方（3D 距离 `1.31m`），首命令仍为 `interact=false` 并向目标圈冲刺。因此 49 Bot 中至少 10 个无法从初始资源武装，现有 42/49 测试因使用 `targetRadius=1200` 的测试配置没有覆盖生产首圈。Builder 需在不放弃进圈移动优先级的前提下允许无枪 Bot 同 tick 拾取脚下/极近武器，或保证生产目标圈内可达武器容量，并补生产首圈多 seed 武装率回归。
-2. **[高] 12 秒 combat memory 抢占新受击调查，Bot 会继续追旧目标而背对真实新攻击者；到达最后位置也未实际清除记忆。** 新伤害在 `src/controllers/BotController.ts:108-123` 更新调查方向并清导航，但不清 combat memory；随后 `:223-233` 的旧目标分支先于 `:238-251` 的受击调查返回。复现 Bot 先记住东侧目标、LOS 丢失后被西侧新攻击者命中：权威 `lastDamageDirection=(-1,0,0)`，返回命令却仍 `aim/move=(1,0,0)`。此外距离最后位置 ≤2m 时 `:223-235` 只跳过追击、不清 memory；Bot 巡逻离开后会再次被拉回，直至超时。Builder 需让新受击清除或覆盖旧 combat memory，并在到达最后可见位置时立即清除；补新攻击者优先级、到达、死亡和超时多 tick 回归。
-3. **[中] 同 tick 等量对向伤害的聚合向量为零时，仍回退到 DamageSystem 的 ID 顺序覆盖结果。** `src/game/systems/CombatSystem.ts:213-229` 聚合方向，但 `:243-253` 在长度 `<=1e-9` 时跳过覆盖；此前 `DamageSystem` 循环已逐笔写入方向。东西两侧等伤同时命中时，正反 command 插入顺序都得到 `(-1,0,0)`，仅把 ID 改为 `z-bot/a-player` 就变为 `(1,0,0)`。Builder 需在批处理时抑制逐笔方向写入，并为零/近零聚合定义不依赖 ID/kind 的明确语义；补正交、对向及近抵消测试。
-4. **[中] Bot 对跳伞目标仍使用水平距离做感知和武器射程，能向实际超出枪械射程的高空目标持续浪费弹药。** `src/controllers/BotController.ts:349-360` 的 150m 感知及 `:194-202` 的开火距离都忽略 y。实测地面步枪 Bot 与正上方 parachuting 玩家 3D 距离 200m 时，`SimulationCombatWorld.hasLineOfSight=true`、Bot 返回 `fire=true`，但 170m 步枪权威 trace 为 miss。Builder 需对空中候选使用 3D 感知/武器距离，同时保留 LOS 和视角约束，并补超距不射、入距可射及 aircraft 不可选测试。
-5. **[中] actor ID/结算 XSS 已修，但库存仍把可序列化状态 ID 拼接进 `innerHTML`，存在同类残留注入。** `src/client/ui/GameHud.ts:314-336` 将未知 `weaponId`、`itemId` fallback label 直接插入武器槽/背包 HTML。把活动武器 ID 设为 ``<img src=x onerror='window.__reviewXss=1'>`` 后执行 HUD update，实测 handler 执行且生成恶意 img。当前本地局只生成已知配置 ID，外部利用面有限，但这不满足本轮“XSS 无残留”的验收边界。Builder 需将库存也改为 DOM + `textContent`，或在进入视图前严格验证 ID；补恶意 weapon/item ID 回归。
+1. **[高] 目标圈最高优先级会让圈外落地 Bot 放弃脚下武器，且合法生产 seed 的目标圈内武器不足以维持既有 42/49 武装门槛。** `src/controllers/BotController.ts:169-182` 在近距拾枪 `:268-274` 之前直接返回进目标圈命令；`:380-388` 又永久排除目标圈安全余量外的全部 loot。用 seeded random `73` 生成 `mapSeed=3210391758` 时，首圈 `830m` 安全余量内只有 39 把武器；把无枪 `bot-1` 放在圈外 `loot-6` 正上方（3D 距离 `1.31m`），首命令仍为 `interact=false` 并向目标圈冲刺。因此 49 Bot 中至少 10 个无法从初始资源武装，现有 42/49 测试因使用 `targetRadius=1200` 的测试配置没有覆盖生产首圈。实现方 需在不放弃进圈移动优先级的前提下允许无枪 Bot 同 tick 拾取脚下/极近武器，或保证生产目标圈内可达武器容量，并补生产首圈多 seed 武装率回归。
+2. **[高] 12 秒 combat memory 抢占新受击调查，Bot 会继续追旧目标而背对真实新攻击者；到达最后位置也未实际清除记忆。** 新伤害在 `src/controllers/BotController.ts:108-123` 更新调查方向并清导航，但不清 combat memory；随后 `:223-233` 的旧目标分支先于 `:238-251` 的受击调查返回。复现 Bot 先记住东侧目标、LOS 丢失后被西侧新攻击者命中：权威 `lastDamageDirection=(-1,0,0)`，返回命令却仍 `aim/move=(1,0,0)`。此外距离最后位置 ≤2m 时 `:223-235` 只跳过追击、不清 memory；Bot 巡逻离开后会再次被拉回，直至超时。实现方 需让新受击清除或覆盖旧 combat memory，并在到达最后可见位置时立即清除；补新攻击者优先级、到达、死亡和超时多 tick 回归。
+3. **[中] 同 tick 等量对向伤害的聚合向量为零时，仍回退到 DamageSystem 的 ID 顺序覆盖结果。** `src/game/systems/CombatSystem.ts:213-229` 聚合方向，但 `:243-253` 在长度 `<=1e-9` 时跳过覆盖；此前 `DamageSystem` 循环已逐笔写入方向。东西两侧等伤同时命中时，正反 command 插入顺序都得到 `(-1,0,0)`，仅把 ID 改为 `z-bot/a-player` 就变为 `(1,0,0)`。实现方 需在批处理时抑制逐笔方向写入，并为零/近零聚合定义不依赖 ID/kind 的明确语义；补正交、对向及近抵消测试。
+4. **[中] Bot 对跳伞目标仍使用水平距离做感知和武器射程，能向实际超出枪械射程的高空目标持续浪费弹药。** `src/controllers/BotController.ts:349-360` 的 150m 感知及 `:194-202` 的开火距离都忽略 y。实测地面步枪 Bot 与正上方 parachuting 玩家 3D 距离 200m 时，`SimulationCombatWorld.hasLineOfSight=true`、Bot 返回 `fire=true`，但 170m 步枪权威 trace 为 miss。实现方 需对空中候选使用 3D 感知/武器距离，同时保留 LOS 和视角约束，并补超距不射、入距可射及 aircraft 不可选测试。
+5. **[中] actor ID/结算 XSS 已修，但库存仍把可序列化状态 ID 拼接进 `innerHTML`，存在同类残留注入。** `src/client/ui/GameHud.ts:314-336` 将未知 `weaponId`、`itemId` fallback label 直接插入武器槽/背包 HTML。把活动武器 ID 设为 ``<img src=x onerror='window.__reviewXss=1'>`` 后执行 HUD update，实测 handler 执行且生成恶意 img。当前本地局只生成已知配置 ID，外部利用面有限，但这不满足本轮“XSS 无残留”的验收边界。实现方 需将库存也改为 DOM + `textContent`，或在进入视图前严格验证 ID；补恶意 weapon/item ID 回归。
 
 #### 已确认闭环与验证
 
-- 自动离机：额外枚举 1,344 条角度/偏移航线，岛外样本为 0；最大浮点越界约 `2.27e-13m`，首个 1/30 秒移动最大 `2.133m`。上轮 finding 1 已闭环。
-- 屋顶路径主体：真实 `SimulationCombatWorld + MovementSystem` 30Hz 跑 30 秒，经历 111 tick LOS 丢失后仍到达屋顶，最终距目标约 `0.237m`、脚底与屋顶高度一致；但新受击和到达清理问题见 finding 2。
+- 自动离机：额外枚举 1,344 条角度/偏移航线，岛外样本为 0；最大浮点越界约 `2.27e-13m`，首个 1/30 秒移动最大 `2.133m`。上轮 审查发现 1 已闭环。
+- 屋顶路径主体：真实 `SimulationCombatWorld + MovementSystem` 30Hz 跑 30 秒，经历 111 tick LOS 丢失后仍到达屋顶，最终距目标约 `0.237m`、脚底与屋顶高度一致；但新受击和到达清理问题见 审查发现 2。
 - 测试门禁：`npm run typecheck && npm run test && npm run build && git diff --check cc9c869 --` 全通过；Vitest 18 files / 146 tests，完整约 `84.36s`。401-seed 建筑/坡道/terrain/环境空白、seed `832/859`、5-seed 42/49（测试半径 1200）和 49 Bot 唯一胜者均通过。构建 index `840.28kB`、GLTF `625.30kB`，仅既有 chunk warning。
 - 规则/范围：正式预算确认为 802 秒，前两圈及伤害不变；飞机内拒伤且不参与 hit test，parachuting 可命中、圈伤仅 grounded。20 院落及降低采样后的 401-seed 门禁通过。排行榜 actor ID 与结果卡恶意内容使用 textContent，原复现不再执行。
 - 浏览器：本轮使用本地开发模块完成上述定向复现；按交互确认未继续执行 production smoke。用户提供的静音生产证据未作为独立通过依据。
-- Builder 必须处理 findings 1–5；writer 需补生产首圈武装率、combat memory 新受击/到达、对向聚合、空中 3D 距离和完整库存 XSS 测试，再发起复审。本轮不得记录通过。
+- 实现方 必须处理 审查发现 1–5；实现 Agent 需补生产首圈武装率、combat memory 新受击/到达、对向聚合、空中 3D 距离和完整库存 XSS 测试，再发起复审。本轮不得记录通过。
 
 ### 2026-07-18 21:08 +0800：cc9c869 后增量 release-gate 再复核（不通过）
 
 - 审查范围：当前 `main` 工作区相对已推送 `HEAD/origin/main`（`cc9c869`）的 20 个 tracked 文件增量；对照本 plan、上一轮 blockers 与新增目标圈/空中规则要求，按要求忽略未跟踪 `session-ses_096e.md`。
 - 结论：**不通过。** 自动离机、20 处院落、空中伤害主规则、后期圈时长及标准自动门禁已确认；但 21:05 记录的 2 项高风险、3 项中风险问题在当前业务代码中仍然存在，尚未达到 release gate。
 
-#### Findings（按严重度）
+#### 审查发现（按严重度）
 
-1. **[高] 目标圈最高优先级仍会让无枪 Bot 放弃脚下武器，生产首圈也不保证既有武装门槛。** `src/controllers/BotController.ts:169-182` 在近距拾枪分支 `:268-274` 前直接返回进目标圈；`:380-388` 又排除目标圈余量外的全部 loot。实际以 seeded random `73` 生成 `mapSeed=3210391758`，首圈 830m 余量内仅 37 把武器；无枪 `bot-1` 站在圈外 `loot-6` 的 SMG 上方（3D 距离约 1.31m）仍返回 `interact=false` 并冲圈。现有 5-seed 武装测试使用 `targetRadius=1200` 的测试配置，不能覆盖生产 860m 首圈。Builder 需允许无枪 Bot 在不放弃转移优先级的前提下拾取脚下/极近武器，或以其他方式保证生产多 seed 武装容量，并补生产配置门禁。
-2. **[高] 新受击不会覆盖旧 combat memory，且到达最后位置后记忆未清。** 新伤害分支 `src/controllers/BotController.ts:108-123` 清导航但不清旧战斗记忆；`:223-232` 的旧目标追击又先于 `:238-251` 的受击调查。实际先记住东侧目标、失去 LOS、再被西侧攻击后，权威受击方向为 `(-1,0,0)`，命令仍向东 `aim/move=(1,0,0)`；进入最后位置 2m 后也只跳过当次追击，离开后在 12 秒窗口内会再次被拉回。Builder 需让新受击清除/覆盖旧记忆，并在到达最后位置时立即清除；补新攻击者、到达、死亡、超时多 tick 回归。
-3. **[中] 等量对向同 tick 伤害仍由实体 ID 决定最终受击方向。** `src/game/systems/CombatSystem.ts:213-229` 得到零聚合向量后，`:243-246` 跳过覆盖；此前 `DamageSystem.ts:21-29` 已按排序后的逐笔伤害写方向。实测东/西两侧等伤时，`a-source` 在东、`z-source` 在西得到 `(-1,0,0)`，交换两个 ID 的位置即变成 `(1,0,0)`。Builder 需抑制 batch 内逐笔方向写入，并为零/近零聚合定义不依赖 ID/kind 的语义，补对向与近抵消回归。
-4. **[中] Bot 对跳伞目标仍按水平距离感知和判断武器射程。** `src/controllers/BotController.ts:194-202,349-363` 忽略高度差。实际地面步枪 Bot 与正上方跳伞目标相距 200m 时，权威 LOS 为 true，Bot 返回 `fire=true`，但 170m 步枪权威 trace 为 miss。Builder 需使用 3D 距离做空中感知/开火判断，并补超距不射、入距可射和 aircraft 不可选测试。
-5. **[中] 排行榜/结算已改安全 DOM，但库存仍有同类 XSS 残留。** `src/client/ui/GameHud.ts:314-336` 仍把未知 `weaponId`/`itemId` fallback label 拼进 `innerHTML`；恶意可序列化 ID 可成为可执行标签。Builder 需将武器槽和背包也改为 DOM + `textContent`（或先做严格运行时 ID 校验），并补恶意 weapon/item ID 回归。
+1. **[高] 目标圈最高优先级仍会让无枪 Bot 放弃脚下武器，生产首圈也不保证既有武装门槛。** `src/controllers/BotController.ts:169-182` 在近距拾枪分支 `:268-274` 前直接返回进目标圈；`:380-388` 又排除目标圈余量外的全部 loot。实际以 seeded random `73` 生成 `mapSeed=3210391758`，首圈 830m 余量内仅 37 把武器；无枪 `bot-1` 站在圈外 `loot-6` 的 SMG 上方（3D 距离约 1.31m）仍返回 `interact=false` 并冲圈。现有 5-seed 武装测试使用 `targetRadius=1200` 的测试配置，不能覆盖生产 860m 首圈。实现方 需允许无枪 Bot 在不放弃转移优先级的前提下拾取脚下/极近武器，或以其他方式保证生产多 seed 武装容量，并补生产配置门禁。
+2. **[高] 新受击不会覆盖旧 combat memory，且到达最后位置后记忆未清。** 新伤害分支 `src/controllers/BotController.ts:108-123` 清导航但不清旧战斗记忆；`:223-232` 的旧目标追击又先于 `:238-251` 的受击调查。实际先记住东侧目标、失去 LOS、再被西侧攻击后，权威受击方向为 `(-1,0,0)`，命令仍向东 `aim/move=(1,0,0)`；进入最后位置 2m 后也只跳过当次追击，离开后在 12 秒窗口内会再次被拉回。实现方 需让新受击清除/覆盖旧记忆，并在到达最后位置时立即清除；补新攻击者、到达、死亡、超时多 tick 回归。
+3. **[中] 等量对向同 tick 伤害仍由实体 ID 决定最终受击方向。** `src/game/systems/CombatSystem.ts:213-229` 得到零聚合向量后，`:243-246` 跳过覆盖；此前 `DamageSystem.ts:21-29` 已按排序后的逐笔伤害写方向。实测东/西两侧等伤时，`a-source` 在东、`z-source` 在西得到 `(-1,0,0)`，交换两个 ID 的位置即变成 `(1,0,0)`。实现方 需抑制 batch 内逐笔方向写入，并为零/近零聚合定义不依赖 ID/kind 的语义，补对向与近抵消回归。
+4. **[中] Bot 对跳伞目标仍按水平距离感知和判断武器射程。** `src/controllers/BotController.ts:194-202,349-363` 忽略高度差。实际地面步枪 Bot 与正上方跳伞目标相距 200m 时，权威 LOS 为 true，Bot 返回 `fire=true`，但 170m 步枪权威 trace 为 miss。实现方 需使用 3D 距离做空中感知/开火判断，并补超距不射、入距可射和 aircraft 不可选测试。
+5. **[中] 排行榜/结算已改安全 DOM，但库存仍有同类 XSS 残留。** `src/client/ui/GameHud.ts:314-336` 仍把未知 `weaponId`/`itemId` fallback label 拼进 `innerHTML`；恶意可序列化 ID 可成为可执行标签。实现方 需将武器槽和背包也改为 DOM + `textContent`（或先做严格运行时 ID 校验），并补恶意 weapon/item ID 回归。
 
 #### 实际验证与已确认项
 
@@ -1172,25 +1172,25 @@
 - 自动离机：额外离散验证 59,040 条合法角度/偏移航线，岛外离机为 0；最大浮点越界约 `4.55e-13m`，自动离机进度范围约 `0.8211–0.92`。
 - 目标圈：抽样 100 个生产 seed，首圈余量内武器数为 37–64，2 个 seed 少于 42；seed 73 的近距武器放弃路径已实际复现。
 - 地图：seed `0..400` 均实际生成恰好 20 个 coverage compound；现有 401-seed 建筑/坡道/terrain 门禁随完整测试通过。
-- 空中主规则静态与测试一致：aircraft 在 `DamageSystem` 拒伤且被 `SimulationCombatWorld` 忽略，parachuting 可命中，圈伤只筛 grounded；但空中目标距离问题见 finding 4。
-- 本轮未重复浏览器 smoke；用户提供的静音 Chrome 证据仅作参考，不替代上述未闭环功能 findings。
+- 空中主规则静态与测试一致：aircraft 在 `DamageSystem` 拒伤且被 `SimulationCombatWorld` 忽略，parachuting 可命中，圈伤只筛 grounded；但空中目标距离问题见 审查发现 4。
+- 本轮未重复浏览器 smoke；用户提供的静音 Chrome 证据仅作参考，不替代上述未闭环功能 审查发现。
 
-### 2026-07-18 21:56 +0800：21:08 的 2 高 3 中 findings 闭环复核（不通过）
+### 2026-07-18 21:56 +0800：21:08 的 2 高 3 中 审查发现 闭环复核（不通过）
 
-- 审查范围：当前 `main` 工作区相对已推送 `HEAD/origin/main`（`cc9c869`）的 20 个 tracked 文件增量；定向复核 21:08 记录的 2 高 3 中 findings，并复查自动离机、目标圈、空中规则、20 院落、测试稳定性及 802 秒预算。按要求忽略未跟踪 `session-ses_096e.md`。
+- 审查范围：当前 `main` 工作区相对已推送 `HEAD/origin/main`（`cc9c869`）的 20 个 tracked 文件增量；定向复核 21:08 记录的 2 高 3 中 审查发现，并复查自动离机、目标圈、空中规则、20 院落、测试稳定性及 802 秒预算。按要求忽略未跟踪 `session-ses_096e.md`。
 - 结论：**不通过。** 原 combat memory、对向受击方向、空中 3D 距离和库存 XSS 已闭环；原无枪 Bot 的生产首圈武装问题主体也已修复，但新增的 120m 绕枪豁免范围过宽，会破坏“目标圈内不再跑出去”并在当前圈边界形成稳定往返，仍有 1 项高风险 blocker。
 
-#### Finding
+#### 审查发现
 
-1. **[高] 无枪 Bot 的 120m 绕枪会离开目标圈，并可在当前圈边界永久振荡而拿不到枪。** `src/controllers/BotController.ts:186-199` 只要求 Bot 当前位于 current zone，就用 `findUsefulLoot(..., true)` 放开全部 target-zone 过滤；既没有要求 Bot 尚在 target zone 外，也没有要求候选武器仍位于 current zone。实际把 Bot 放在 target center、target radius 60m（安全余量 52.8m），武器放在 80m 外时，Bot 会直接向圈外移动。更严重的是 current radius 100m、Bot 位于 x=95m、武器位于 x=105m 时，真实 30Hz 推进 10 秒发生 36 次 current-zone 边界穿越，位置只在约 95.38–101.13m 往返，最终仍无枪且 loot 仍 available。现有短绕路测试只覆盖“Bot 在目标圈外、武器仍在大 current zone 内”，无法发现这两个分支。Builder 需将豁免限制为确实尚未进入 target zone 的 Bot，并排除 current zone 外武器（或采用不会在边界切换决策的等价约束）；补“已在 target zone 不出圈”和“current zone 外近枪不振荡”回归。
+1. **[高] 无枪 Bot 的 120m 绕枪会离开目标圈，并可在当前圈边界永久振荡而拿不到枪。** `src/controllers/BotController.ts:186-199` 只要求 Bot 当前位于 current zone，就用 `findUsefulLoot(..., true)` 放开全部 target-zone 过滤；既没有要求 Bot 尚在 target zone 外，也没有要求候选武器仍位于 current zone。实际把 Bot 放在 target center、target radius 60m（安全余量 52.8m），武器放在 80m 外时，Bot 会直接向圈外移动。更严重的是 current radius 100m、Bot 位于 x=95m、武器位于 x=105m 时，真实 30Hz 推进 10 秒发生 36 次 current-zone 边界穿越，位置只在约 95.38–101.13m 往返，最终仍无枪且 loot 仍 available。现有短绕路测试只覆盖“Bot 在目标圈外、武器仍在大 current zone 内”，无法发现这两个分支。实现方 需将豁免限制为确实尚未进入 target zone 的 Bot，并排除 current zone 外武器（或采用不会在边界切换决策的等价约束）；补“已在 target zone 不出圈”和“current zone 外近枪不振荡”回归。
 
 #### 已确认闭环
 
-- 原 finding 1 主体：脚下武器会先 `interact`；生产 seed 73（`mapSeed=3210391758`）用正式配置、无战斗推进至全员落地后 140 秒，实际 48/49 Bot 持枪。5-seed 与 49 Bot 唯一胜者测试继续通过；剩余边界问题见本轮 finding。
-- 原 finding 2：新受击会先 `clearCombatMemory()`；东侧旧目标失去 LOS 后被西侧新攻击者命中，实际立即向西 `aim/move=(-1,0,0)`；到达最后位置后 `combatTargetId` 为 `null`。临时 LOS 丢失的 12 秒坡道追击回归继续通过。
-- 原 finding 3：非零方向按伤害聚合；零向量从去重 `damageSources` 使用共享 tick selector 选择方向。24 tick 覆盖正负方向，反转命令插入顺序结果一致。
-- 原 finding 4：感知和开火均使用 3D 距离；水平 10m、垂直 200m 的 parachuting 目标 LOS 为 true，但实际 `fire=false`。aircraft 仍不可选/不可命中，parachuting 可命中且不吃圈伤。
-- 原 finding 5：排行榜、结果卡、武器槽、背包的动态 actor/item/weapon 内容均通过 DOM + `textContent`；`GameHud` 仅构造期保留本地静态模板 `innerHTML`，未再发现状态 ID 注入路径。
+- 原 审查发现 1 主体：脚下武器会先 `interact`；生产 seed 73（`mapSeed=3210391758`）用正式配置、无战斗推进至全员落地后 140 秒，实际 48/49 Bot 持枪。5-seed 与 49 Bot 唯一胜者测试继续通过；剩余边界问题见本轮 审查发现。
+- 原 审查发现 2：新受击会先 `clearCombatMemory()`；东侧旧目标失去 LOS 后被西侧新攻击者命中，实际立即向西 `aim/move=(-1,0,0)`；到达最后位置后 `combatTargetId` 为 `null`。临时 LOS 丢失的 12 秒坡道追击回归继续通过。
+- 原 审查发现 3：非零方向按伤害聚合；零向量从去重 `damageSources` 使用共享 tick selector 选择方向。24 tick 覆盖正负方向，反转命令插入顺序结果一致。
+- 原 审查发现 4：感知和开火均使用 3D 距离；水平 10m、垂直 200m 的 parachuting 目标 LOS 为 true，但实际 `fire=false`。aircraft 仍不可选/不可命中，parachuting 可命中且不吃圈伤。
+- 原 审查发现 5：排行榜、结果卡、武器槽、背包的动态 actor/item/weapon 内容均通过 DOM + `textContent`；`GameHud` 仅构造期保留本地静态模板 `innerHTML`，未再发现状态 ID 注入路径。
 - 其他同轮要求：59,040 条角度/偏移航线离机点均合法，最大浮点越界约 `4.55e-13m`；seed `0..400` 均为准确 20 处 coverage compound；wall test 无 wall-clock 阈值；正式阶段预算为 802 秒。
 
 #### 实际验证
@@ -1206,7 +1206,7 @@
 ### 2026-07-18 22:15 +0800：最后 blocker 与零半径终局定向复核（通过）
 
 - 审查范围：当前 `main` 工作区相对已推送 `HEAD/origin/main`（`cc9c869`）的增量；仅复核 21:56 记录的 120m 绕枪 blocker，以及随修复发现的 radius=0 终局问题。按要求忽略未跟踪 `session-ses_096e.md`。
-- 结论：**通过。本次审查未发现明确中高风险 blocker。** 21:56 的最后一项高风险 finding 已闭环，零半径精确站圈心不受伤问题也已修复；无枪获取、同时淘汰公平性和 parachuting 免圈伤未回归。
+- 结论：**通过。本次审查未发现明确中高风险 blocker。** 21:56 的最后一项高风险 审查发现 已闭环，零半径精确站圈心不受伤问题也已修复；无枪获取、同时淘汰公平性和 parachuting 免圈伤未回归。
 - 120m 绕枪：`BotController` 现在要求候选 weapon 位于 current zone；Bot 已进入 target zone 时，候选还必须位于 target 安全余量内。实际重跑原 current radius 100m、Bot x=95m、weapon x=105m 的 30Hz/10 秒场景，边界穿越从 36 次降为 0，最大 x 约 94.62m、最终 x 约 2.95m，不再追逐圈外 weapon。已在 target center 时，80m 圈外 weapon 与无 weapon 命令一致。
 - 无枪获取：脚下 weapon 仍返回 `interact=true` 且 move 为零；目标圈外、current zone 内的反方向 80m weapon 仍正常短绕路。新增 110m current-zone 外 weapon 和已在 target zone 的 80m 圈外 weapon 回归均通过；5-seed 仍达到至少 42/49 持枪。
 - 零半径终局：`BattleRoyaleMode` 在 `safeZone.radius <= 0` 时把所有 grounded 存活 actor 纳入圈伤，即使精确位于 target center。3 人同点实际在一 tick 后进入 `finished` 且只剩 1 人；24 tick 的 2 人样本仍覆盖 player/bot 两类胜者。parachuting actor 在 radius=0 时生命保持不变，grounded actor 继续按共享 selector 留唯一幸存者。
@@ -1218,19 +1218,19 @@
 - 审查范围：当前 `main` 工作区相对已推送 `HEAD/origin/main`（`cc9c869`）的 23 个 tracked 文件完整增量；对照本 plan，重点复核动态掉落、HUD/实际拾取候选、自动换弹、落地 HUD，以及此前 AI 目标圈、零半径终局、空中规则和 XSS 修复。按要求忽略未跟踪 `session-ses_096e.md`。
 - 结论：**不通过。** 自动门禁全绿，HUD 与实际拾取已共用同一候选函数，自动换弹事件顺序、marker 复用同步和此前 AI/安全区/XSS 主体未见回归；但仍有 2 项高风险功能 blocker 和 1 项中风险掉落分散问题。
 
-#### Findings（按严重度）
+#### 审查发现（按严重度）
 
-1. **[高] 跳伞中的角色被击杀后会让整局永久停在 flight。** `src/game/systems/MovementSystem.ts:37-39` 不再推进死亡角色，因此死者会永久保留 `deployment="parachuting"`；`src/game/modes/BattleRoyaleMode.ts:91-93,129-133` 在 flight 分支提前返回，并要求包括死者在内的所有 actor 都 grounded 才进入 combat。当前空中规则又明确允许 parachuting actor 被命中（`DamageSystem.ts:14`、`SimulationCombatWorld.ts:53` 只排除 aircraft）。定向复现中，grounded 玩家击杀 1 HP 的 parachuting Bot 后继续执行 120 次 `mode.update(..., 1)`，最终 `flight.progress=1`，但 `phase` 仍为 `flight`、`result=null`、死者仍为 parachuting；安全区和唯一胜者永远不会推进。玩家若在空中死亡，`GameHud.ts:405-408` 也会在观战期间一直显示跳伞计数。Builder 必须让死亡空中角色不阻塞 flight→combat/结算，并补空中死亡后的完整阶段推进及死亡玩家观战 HUD 回归。
-2. **[高] 屋顶边缘死亡掉落会落到地面并超出权威 3m 拾取范围。** `src/game/systems/InventorySystem.ts:474-491` 只校验候选的水平半径、支撑面、墙和 spacing，没有校验候选与 actor 的真实 3D 距离。seed `0` 的 `building-0-0` 上，把 actor 放在屋顶东边缘内侧 0.42m 并掉落常规 10 件完整库存，6 件被放到地面 `y=0.45`，距 actor `5.35–5.47m`；`getPickupCandidates` 在 `:432-440` 会正确把它们排除，因此 HUD 和实际拾取虽一致，却都无法从死亡位置拾到这些物资。现有 `inventorySystem.test.ts` 只覆盖平坦地面中心，不能证明屋顶、坡道或陡坡。Builder 必须把真实 3D ≤3m 纳入落点接受条件/支撑面策略，并补屋顶边缘、室内/门边和坡道回归。
-3. **[中] 多个尸体靠近时候选耗尽会静默回退到同一点，破坏 ≥0.62m spacing。** `InventorySystem.ts:467-473` 每个尸体只有固定 57 个候选，而相邻环点和跨环点并非都满足 0.62m；候选耗尽后 `:493-499` 无条件回退 actor 中心，不再检查已有 loot。4 个同位置、各 10 件库存的尸体实际生成 40 件 loot，但只有 33 个唯一水平坐标，最小间距为 `0`；2–3 个尸体尚能通过。角色之间没有实体碰撞，决赛圈/同时死亡出现近重叠尸体并非不可达场景。Builder 需让回退仍保持 spacing（或采用可确定扩展且有界的候选策略），并补至少 4 个同点/近点完整尸体及 record 复用上界回归。
+1. **[高] 跳伞中的角色被击杀后会让整局永久停在 flight。** `src/game/systems/MovementSystem.ts:37-39` 不再推进死亡角色，因此死者会永久保留 `deployment="parachuting"`；`src/game/modes/BattleRoyaleMode.ts:91-93,129-133` 在 flight 分支提前返回，并要求包括死者在内的所有 actor 都 grounded 才进入 combat。当前空中规则又明确允许 parachuting actor 被命中（`DamageSystem.ts:14`、`SimulationCombatWorld.ts:53` 只排除 aircraft）。定向复现中，grounded 玩家击杀 1 HP 的 parachuting Bot 后继续执行 120 次 `mode.update(..., 1)`，最终 `flight.progress=1`，但 `phase` 仍为 `flight`、`result=null`、死者仍为 parachuting；安全区和唯一胜者永远不会推进。玩家若在空中死亡，`GameHud.ts:405-408` 也会在观战期间一直显示跳伞计数。实现方 必须让死亡空中角色不阻塞 flight→combat/结算，并补空中死亡后的完整阶段推进及死亡玩家观战 HUD 回归。
+2. **[高] 屋顶边缘死亡掉落会落到地面并超出权威 3m 拾取范围。** `src/game/systems/InventorySystem.ts:474-491` 只校验候选的水平半径、支撑面、墙和 spacing，没有校验候选与 actor 的真实 3D 距离。seed `0` 的 `building-0-0` 上，把 actor 放在屋顶东边缘内侧 0.42m 并掉落常规 10 件完整库存，6 件被放到地面 `y=0.45`，距 actor `5.35–5.47m`；`getPickupCandidates` 在 `:432-440` 会正确把它们排除，因此 HUD 和实际拾取虽一致，却都无法从死亡位置拾到这些物资。现有 `inventorySystem.test.ts` 只覆盖平坦地面中心，不能证明屋顶、坡道或陡坡。实现方 必须把真实 3D ≤3m 纳入落点接受条件/支撑面策略，并补屋顶边缘、室内/门边和坡道回归。
+3. **[中] 多个尸体靠近时候选耗尽会静默回退到同一点，破坏 ≥0.62m spacing。** `InventorySystem.ts:467-473` 每个尸体只有固定 57 个候选，而相邻环点和跨环点并非都满足 0.62m；候选耗尽后 `:493-499` 无条件回退 actor 中心，不再检查已有 loot。4 个同位置、各 10 件库存的尸体实际生成 40 件 loot，但只有 33 个唯一水平坐标，最小间距为 `0`；2–3 个尸体尚能通过。角色之间没有实体碰撞，决赛圈/同时死亡出现近重叠尸体并非不可达场景。实现方 需让回退仍保持 spacing（或采用可确定扩展且有界的候选策略），并补至少 4 个同点/近点完整尸体及 record 复用上界回归。
 
 #### 已确认项与验证
 
 - `findPickupCandidate/getPickupCandidates` 与 `pickLoot` 对武器替换、背包部分容量、护甲耐久、头盔等级和稳定距离/ID 排序未发现语义偏差；同 tick `dropItem+interact` 的 ignored loot 只影响该次命令，下一次交互可重新拾取。HUD 导入未形成反向 `game→client` 依赖或循环；当前生产主 chunk 为 843.33kB，未见显著新增 bundle 风险。
-- loot marker adapter 每次 sync 都会重写 position、material、metadata、source 和 enabled，inactive record 复用时状态同步完整。自动换弹位于全部 pellet/trace 之后，无备弹不触发；现有 `shot-fired → reload-started` 回归通过。仍建议 builder 在修复 blocker 时补霰弹、多方同时死亡和切枪边界，但本轮未发现可定位的自动换弹错误。
+- loot marker adapter 每次 sync 都会重写 position、material、metadata、source 和 enabled，inactive record 复用时状态同步完整。自动换弹位于全部 pellet/trace 之后，无备弹不触发；现有 `shot-fired → reload-started` 回归通过。仍建议 实现方 在修复 blocker 时补霰弹、多方同时死亡和切枪边界，但本轮未发现可定位的自动换弹错误。
 - 实际执行 `npm run typecheck && npm run test && npm run build && git diff --check cc9c869 -- . ':(exclude)session-ses_096e.md'` 全通过；Vitest 为 18 files / 157 tests，wall time 102.93s。构建主 chunk 843.33kB、GLTF chunk 625.30kB，仅既有大 chunk warning。
 - 额外通过本地 Vite 模块实际复现上述空中死亡卡 flight、屋顶边缘 6/10 件超距和 4 尸体 spacing=0。用户提供的生产 Chrome、volume 0、50 行排行榜、65–68 FPS、console 无 error/warn 证据已参考，本轮因功能 blocker 未重复浏览器 smoke。
-- Builder 必须处理 findings 1–3；writer 需补空中死亡阶段推进/观战 HUD、屋顶/坡道真实 3D 拾取范围和多尸体 spacing 证据后再发起复审。本轮不得记录通过结论。
+- 实现方 必须处理 审查发现 1–3；实现 Agent 需补空中死亡阶段推进/观战 HUD、屋顶/坡道真实 3D 拾取范围和多尸体 spacing 证据后再发起复审。本轮不得记录通过结论。
 
 ### 2026-07-18 23:08 +0800：动态掉落 3 项 blocker 闭环及 cc9c869 完整增量复核（不通过）
 
@@ -1238,26 +1238,26 @@
 - 对照基线：本 plan 与 `cc9c869317311f46c079b3d67f213d8c9cb9e8c1`；当前分支及远端主分支均为 `main`，工作区增量共 23 个 tracked 文件（业务/测试/README/plan）。
 - 结论：**不通过。** 三项 blocker 的规则主体已闭环，自动门禁全绿；但上一轮明确要求的死亡跳伞玩家观战 HUD 仍未修复，且 HUD 候选没有复用 Inventory 的 alive/grounded 交互前置条件，仍有 2 项中风险 HUD 一致性问题。
 
-#### Findings
+#### 审查发现
 
-1. **[中][flight blocker 未完全闭环] 死亡的 parachuting 玩家在进入 combat/观战后仍永久显示跳伞计数。** `BattleRoyaleSession.ts:120-127` 始终把原始 `player` 传给 HUD；`GameHud.ts:405-408` 又只在 `deployment === "grounded"` 时显示击杀数。空中死亡玩家不会再由 Movement 改为 grounded，因此即使 `BattleRoyaleMode.ts:129-133` 已正确进入 combat，右上角仍保持 `已跳伞 X / 50`。新增 mode 测试只覆盖 dead Bot 不阻塞阶段，没有覆盖上一轮要求的死亡玩家观战 HUD。Builder 需补死亡/非存活条件并增加对应 counter/HUD 回归。
-2. **[中] HUD 拾取提示与实际 Inventory 仍未完全共享交互资格。** `GameHud.ts:200` 对任意 player 调用 `findPickupCandidate`；该函数及 `canActorPickLoot` 只判断距离和物品/容量语义，而实际入口 `InventorySystem.ts:63-65` 还要求 actor `alive && grounded`。因此 parachuting 玩家接近地面物资、或死亡 grounded 玩家尸体物资生成后，HUD 可显示 `F 拾取`，但规则必然拒绝（死亡玩家也不会再提交命令）。Builder 需让共享候选包含 actor 可交互状态，或在 HUD 使用同一前置条件，并补 parachuting/dead 场景回归。
+1. **[中][flight blocker 未完全闭环] 死亡的 parachuting 玩家在进入 combat/观战后仍永久显示跳伞计数。** `BattleRoyaleSession.ts:120-127` 始终把原始 `player` 传给 HUD；`GameHud.ts:405-408` 又只在 `deployment === "grounded"` 时显示击杀数。空中死亡玩家不会再由 Movement 改为 grounded，因此即使 `BattleRoyaleMode.ts:129-133` 已正确进入 combat，右上角仍保持 `已跳伞 X / 50`。新增 mode 测试只覆盖 dead Bot 不阻塞阶段，没有覆盖上一轮要求的死亡玩家观战 HUD。实现方 需补死亡/非存活条件并增加对应 counter/HUD 回归。
+2. **[中] HUD 拾取提示与实际 Inventory 仍未完全共享交互资格。** `GameHud.ts:200` 对任意 player 调用 `findPickupCandidate`；该函数及 `canActorPickLoot` 只判断距离和物品/容量语义，而实际入口 `InventorySystem.ts:63-65` 还要求 actor `alive && grounded`。因此 parachuting 玩家接近地面物资、或死亡 grounded 玩家尸体物资生成后，HUD 可显示 `F 拾取`，但规则必然拒绝（死亡玩家也不会再提交命令）。实现方 需让共享候选包含 actor 可交互状态，或在 HUD 使用同一前置条件，并补 parachuting/dead 场景回归。
 
 #### 已确认闭环与验证
 
-- 原 blocker 1 规则主体：flight→combat 已按每 actor `!alive || grounded` 判断；死亡 parachuting actor 不再卡住阶段。仅观战 HUD 残留见 finding 1。
+- 原 blocker 1 规则主体：flight→combat 已按每 actor `!alive || grounded` 判断；死亡 parachuting actor 不再卡住阶段。仅观战 HUD 残留见 审查发现 1。
 - 原 blocker 2：每个动态候选显式校验与尸体真实 3D 距离 `<=3m`；屋顶边缘完整 10 件掉落回归通过。
 - 原 blocker 3：固定全局候选顺序与扩展候选池生效；4 个同点完整尸体共 40 件得到 40 个唯一坐标，未回退重叠。
-- `canActorPickLoot` 与 `pickLoot` 的武器状态、背包容量、护甲耐久、头盔等级分支主体一致；动态点使用权威 support、墙/边界过滤，inactive loot record 和 marker 的位置、材质、metadata、source、enabled 会同步复用。交互状态缺口见 finding 2。
+- `canActorPickLoot` 与 `pickLoot` 的武器状态、背包容量、护甲耐久、头盔等级分支主体一致；动态点使用权威 support、墙/边界过滤，inactive loot record 和 marker 的位置、材质、metadata、source、enabled 会同步复用。交互状态缺口见 审查发现 2。
 - 自动换弹仍在最后一发全部 trace/pellet 后启动，事件顺序为 `shot-fired → reload-started`；grounded 玩家同帧切换击杀数的既有用例通过，未发现规则回归。
 - 实际执行 `npm run typecheck && npm run test && npm run build && git diff --check cc9c869 -- . ':(exclude)session-ses_096e.md'` 全通过；Vitest 18 files / 160 tests，wall time 105.25s；构建仅保留既有 843.46kB 主 chunk 与 625.30kB GLTF chunk warning。另定向执行 inventory + battle mode 为 2 files / 32 tests 全通过。
-- Builder 需处理上述 2 项中风险 HUD 问题；writer 需补死亡 parachuting 玩家观战 counter，以及 parachuting/dead actor 不显示不可执行拾取提示的验证后再复审。
+- 实现方 需处理上述 2 项中风险 HUD 问题；实现 Agent 需补死亡 parachuting 玩家观战 counter，以及 parachuting/dead actor 不显示不可执行拾取提示的验证后再复审。
 
 ### 2026-07-18 23:20 +0800：动态掉落最新 2 项中风险最终复核（通过）
 
 - 审查范围：当前 `main` 工作区相对主分支基线 `cc9c869317311f46c079b3d67f213d8c9cb9e8c1` 的 23 个 tracked 文件完整增量；重点复核 23:08 记录的死亡 parachuting 玩家 counter、死亡/非 grounded 拾取提示 2 项中风险，并确认此前 flight transition、roof-edge 10 件掉落及 4 尸体 40 件唯一坐标 3 项仍闭环。忽略未跟踪 `session-ses_096e.md`。
-- 对照基线：本 plan 的任务 6、8、10、12、动态掉落/HUD 实现记录及最近两轮 review findings。
-- 结论：**通过。本次审查未发现明确中高风险 finding。** 最新 2 项中风险均已闭环，上一轮 3 项修复未回归。
+- 对照基线：本 plan 的任务 6、8、10、12、动态掉落/HUD 实现记录及最近两轮 review 审查发现。
+- 结论：**通过。本次审查未发现明确中高风险 审查发现。** 最新 2 项中风险均已闭环，上一轮 3 项修复未回归。
 - 最新 2 项闭环：`combatCounterLabel` 仅在 `flight && alive && deployment !== grounded` 时显示跳伞数，死亡 parachuting 玩家在 combat 显示击杀数；`findPickupCandidate` 对死亡或非 grounded actor 返回 `null`，与 `InventorySystem.processCommand` 的交互入口边界一致。
 - 前 3 项仍闭环：flight→combat 使用 `!alive || grounded` 判断；动态掉落候选继续校验与尸体真实 3D 距离 `<=3m`；现有 roof-edge 完整 10 件和 4 个同点尸体 40 件/40 唯一坐标回归均通过。
 - 实际验证：`npm run typecheck && npm run test && npm run build && git diff --check cc9c869 -- . ':(exclude)session-ses_096e.md'` 全通过；Vitest 18 files / 161 tests，wall time 147.63s；构建仅保留既有 >500kB chunk warning。未重复浏览器 smoke。
@@ -1265,11 +1265,11 @@
 ### 2026-07-19 00:09 +0800：origin/main c23a95b 完整 diff 与 release gate 审查（不通过）
 
 - 审查范围：已推送 `origin/main` 的 `c23a95bea6eaf237b04e0eea031f611ed24b4a54` 相对唯一父提交 `cc9c869317311f46c079b3d67f213d8c9cb9e8c1` 的 25 个文件完整 diff，并复核当前 `main` release gate；忽略未跟踪 `session-ses_096e.md`。对照本 plan、`AGENTS.md`、`README.md` 及用户列出的 AI、空中规则、动态掉落、HUD、自动换弹、排行榜/观战/XSS 和 marker 回归要求。
-- 结论：**不通过。** AI、空中规则、动态掉落主链、marker 旧视觉规格、自动换弹、落地计数、排行榜/观战和 XSS 主体均有实现及回归证据，但 HUD 拾取提示新增缓存遗漏了决定护甲可拾性的状态，存在 1 项中风险行为不一致，需 builder 修复后复审。
+- 结论：**不通过。** AI、空中规则、动态掉落主链、marker 旧视觉规格、自动换弹、落地计数、排行榜/观战和 XSS 主体均有实现及回归证据，但 HUD 拾取提示新增缓存遗漏了决定护甲可拾性的状态，存在 1 项中风险行为不一致，需 实现方 修复后复审。
 
-#### Finding
+#### 审查发现
 
-1. **[中] 护甲受损后 HUD 会继续显示“当前无法拾取”，而同一件护甲实际上已可拾取。** `src/client/ui/GameHud.ts:188-234` 的 `promptSignature` 只包含武器槽、背包、玩家位置/部署及附近 loot，未包含 `armorLevel/armor/maxArmor/helmetLevel`；但共享候选规则 `src/game/systems/InventorySystem.ts:462-478` 明确以这些状态判断装备是否可拾。实际在 Chrome 中复现：玩家穿满耐久二级甲、身边放二级甲时提示“二级护甲 · 当前无法拾取”；承伤后 `findPickupCandidate` 已返回该 loot，`InventorySystem` 的 F 交互也会成功拾取并回满耐久，但 HUD 二次 `update` 因签名未变仍保留旧提示。影响是本提交宣称的 HUD/实际拾取一致性在常见受击场景中失效。最小修复方向：让 prompt 签名覆盖 `canActorPickLoot` 读取的全部 actor 状态（至少护甲等级、当前/最大耐久和头盔等级，建议同时覆盖背包容量），或移除这层不完整缓存；补“满耐久不可拾 → 承伤后立即显示可拾 → F 实际拾取”的 HUD 回归。Builder 必须处理；writer 应补对应验证记录。
+1. **[中] 护甲受损后 HUD 会继续显示“当前无法拾取”，而同一件护甲实际上已可拾取。** `src/client/ui/GameHud.ts:188-234` 的 `promptSignature` 只包含武器槽、背包、玩家位置/部署及附近 loot，未包含 `armorLevel/armor/maxArmor/helmetLevel`；但共享候选规则 `src/game/systems/InventorySystem.ts:462-478` 明确以这些状态判断装备是否可拾。实际在 Chrome 中复现：玩家穿满耐久二级甲、身边放二级甲时提示“二级护甲 · 当前无法拾取”；承伤后 `findPickupCandidate` 已返回该 loot，`InventorySystem` 的 F 交互也会成功拾取并回满耐久，但 HUD 二次 `update` 因签名未变仍保留旧提示。影响是本提交宣称的 HUD/实际拾取一致性在常见受击场景中失效。最小修复方向：让 prompt 签名覆盖 `canActorPickLoot` 读取的全部 actor 状态（至少护甲等级、当前/最大耐久和头盔等级，建议同时覆盖背包容量），或移除这层不完整缓存；补“满耐久不可拾 → 承伤后立即显示可拾 → F 实际拾取”的 HUD 回归。实现方 必须处理；实现 Agent 应补对应验证记录。
 
 #### 已确认项与验证
 
@@ -1281,28 +1281,28 @@
 
 ### 2026-07-19 01:09 +0800：origin/main d651b7c 与当前 release gate 复审（不通过）
 
-- 审查范围：已推送 `origin/main` 的 `d651b7cf7b4014867fb43dbe4b9cb6470c588c53` 相对父提交 `c23a95bea6eaf237b04e0eea031f611ed24b4a54` 的 7 个文件完整 diff，并复核当前 main release gate；忽略未跟踪 `session-ses_096e.md`。对照本 plan、`AGENTS.md`、`README.md`、00:09 上轮 finding 及用户列出的 marker、动态掉落、HUD/Inventory、测试稳定性和既有规则回归要求。
+- 审查范围：已推送 `origin/main` 的 `d651b7cf7b4014867fb43dbe4b9cb6470c588c53` 相对父提交 `c23a95bea6eaf237b04e0eea031f611ed24b4a54` 的 7 个文件完整 diff，并复核当前 main release gate；忽略未跟踪 `session-ses_096e.md`。对照本 plan、`AGENTS.md`、`README.md`、00:09 上轮 审查发现 及用户列出的 marker、动态掉落、HUD/Inventory、测试稳定性和既有规则回归要求。
 - 结论：**不通过。** 上轮同级护甲耐久变化不刷新提示的问题已闭环，标准门禁、重型测试和远端 CI 均通过；但 `pickupPromptSignature` 仍遗漏 `canActorPickLoot` 实际读取的一项 inventory 容量状态，尚不能认定“完整覆盖所有 actor/inventory 依赖”。
 
-#### Finding
+#### 审查发现
 
-1. **[中] `pickupPromptSignature` 未包含 `maxBackpackStacks`，背包容量变化后仍可复现提示缓存与实际拾取资格不一致。** `src/client/ui/GameHud.ts:445-459` 已包含 alive/deployment/位置、护甲、头盔、武器槽和背包内容，但遗漏 `player.inventory.maxBackpackStacks`；共享规则 `src/game/systems/InventorySystem.ts:477-478` 明确用该字段判断新栈能否拾取。复现：玩家背包为 1 个满绷带栈、`maxBackpackStacks=1`，身边放步枪弹，提示为“当前无法拾取”；保存签名后只把容量改为 2，`pickupPromptText` 已变为 `F 拾取 步枪弹`，但签名保持不变，真实 `GameHud.update` 会继续保留旧提示。当前生产容量固定为 6，故现网触发面有限，但这违反本轮要求的完整依赖覆盖，并会让既有可序列化 inventory 容量一旦动态配置/扩展就直接回归。最小修法：把 `maxBackpackStacks` 纳入签名，并补“满背包容量 1 → 2”缓存回归；更稳妥的后续方向是让候选规则与缓存依赖键共址，避免新增资格字段时再次漏同步。Builder 需处理，writer 需补验证记录。
+1. **[中] `pickupPromptSignature` 未包含 `maxBackpackStacks`，背包容量变化后仍可复现提示缓存与实际拾取资格不一致。** `src/client/ui/GameHud.ts:445-459` 已包含 alive/deployment/位置、护甲、头盔、武器槽和背包内容，但遗漏 `player.inventory.maxBackpackStacks`；共享规则 `src/game/systems/InventorySystem.ts:477-478` 明确用该字段判断新栈能否拾取。复现：玩家背包为 1 个满绷带栈、`maxBackpackStacks=1`，身边放步枪弹，提示为“当前无法拾取”；保存签名后只把容量改为 2，`pickupPromptText` 已变为 `F 拾取 步枪弹`，但签名保持不变，真实 `GameHud.update` 会继续保留旧提示。当前生产容量固定为 6，故现网触发面有限，但这违反本轮要求的完整依赖覆盖，并会让既有可序列化 inventory 容量一旦动态配置/扩展就直接回归。最小修法：把 `maxBackpackStacks` 纳入签名，并补“满背包容量 1 → 2”缓存回归；更稳妥的后续方向是让候选规则与缓存依赖键共址，避免新增资格字段时再次漏同步。实现方 需处理，实现 Agent 需补验证记录。
 
 #### 已确认项与验证
 
-- 上轮护甲 finding 已闭环：签名现包含 `armor/maxArmor/armorLevel/helmetLevel`；新增测试证明同级二级满甲从 100 变为 0 后签名变化，提示由不可拾切为 `F 拾取 二级护甲`；既有 Inventory 回归证明 F 会拾取并恢复到 100。
+- 上轮护甲 审查发现 已闭环：签名现包含 `armor/maxArmor/armorLevel/helmetLevel`；新增测试证明同级二级满甲从 100 变为 0 后签名变化，提示由不可拾切为 `F 拾取 二级护甲`；既有 Inventory 回归证明 F 会拾取并恢复到 100。
 - marker 业务源码在 `cc9c869`、`c23a95b`、`d651b7c` 三者的 SHA-256 完全一致；仍为 `0.62` box、clone 默认 scale `(1,1,1)`、原 rotation/position 及 `isPickable=true`。NullEngine 完整测试覆盖默认 240 件 loot 对应 marker 数量及全部 scale/pickability；用户提供的最新 volume 0 生产 smoke（240/240、console 无 error/warn）与源码和自动回归一致，本轮未另启浏览器进程。
 - 动态掉落业务源码未被本 commit 改动：仍使用 `1.2/1.55/1.9/2.2/2.45/2.65m` 环候选、真实 3m、权威支撑面、墙/边界过滤和 unavailable record 复用；屋顶边缘 10 件、4 个同点尸体 40 个唯一坐标及 30 次 drop/pick 仅保留 1 条 loot record 的回归均通过。
-- HUD 与 Inventory 继续共用 `findPickupCandidate`；不可拾物名称、死亡/空中无提示、loot ID/位置/数量、护甲耐久刷新主路径均通过。除本轮 finding 的容量字段外，未发现 `canActorPickLoot` 其他 actor/inventory 依赖遗漏。
+- HUD 与 Inventory 继续共用 `findPickupCandidate`；不可拾物名称、死亡/空中无提示、loot ID/位置/数量、护甲耐久刷新主路径均通过。除本轮 审查发现 的容量字段外，未发现 `canActorPickLoot` 其他 actor/inventory 依赖遗漏。
 - 本 commit 的测试调整仅为 timeout 余量（AI 60→120 秒、完整圈 30 秒、NullEngine 30→60 秒）以及空间格重复移动 3000→300 步；未减少 seed、几何、完整局或候选墙段断言。300 步仍会持续撞墙，结构断言仍直接要求当前格候选少于全图墙段的 1/4，足以验证本门禁目的。
 - 本机实际执行 `npm run typecheck && npm run test && npm run build && git diff --check` 全通过；Vitest 18 files / 162 tests，wall time 90.52 秒。独立 `mapLayout` 17 tests / 76.03 秒、`aiLootReachability` 7 tests / 66.87 秒全通过。构建仅保留既有 >500kB chunk warning。
 - GitHub Actions `CI and GitHub Pages` run `29652937142` 对 d651b7c 成功，build 与 GitHub Pages deploy jobs 均成功。自动换弹、落地计数、AI target zone、空中规则和零半径唯一胜者的现有回归随完整套件通过；未发现 `context.Background()`。
 
 ### 2026-07-19 01:26 +0800：origin/main 488d5e0 与当前 release gate 最终复核（通过）
 
-- 审查范围：已推送 `origin/main` 的 `488d5e0d6b898ca1f06eb38e0725229df7e9371d` 相对父提交 `d651b7cf7b4014867fb43dbe4b9cb6470c588c53` 的 3 个文件完整 diff，并复核当前 main release gate；对照本 plan、`AGENTS.md`、`README.md` 及 01:09 上轮唯一 finding，忽略未跟踪 `session-ses_096e.md`。
-- 结论：**通过。本次审查未发现明确中高风险 finding。** `HEAD/main/origin/main` 经 fetch 后均为 `488d5e0`，本提交仅补充 `maxBackpackStacks` 签名依赖、对应回归和 plan 记录，没有无关业务改动。
-- 上轮 finding 已闭环：`pickupPromptSignature` 已纳入 `maxBackpackStacks`；新增回归覆盖容量 `1→2` 后签名变化，提示由“当前无法拾取”刷新为 `F 拾取 步枪弹`。逐项对照 `canActorPickLoot` 后，签名已覆盖 alive/deployment、玩家三维位置、armor/maxArmor、armorLevel/helmetLevel、active slot、双槽 weapon ID、背包 item/quantity/max stacks，以及 3.2m 内可用 loot 的 id/item/quantity/三维位置；未发现仍会改变正常拾取资格的运行时状态遗漏。
+- 审查范围：已推送 `origin/main` 的 `488d5e0d6b898ca1f06eb38e0725229df7e9371d` 相对父提交 `d651b7cf7b4014867fb43dbe4b9cb6470c588c53` 的 3 个文件完整 diff，并复核当前 main release gate；对照本 plan、`AGENTS.md`、`README.md` 及 01:09 上轮唯一 审查发现，忽略未跟踪 `session-ses_096e.md`。
+- 结论：**通过。本次审查未发现明确中高风险 审查发现。** `HEAD/main/origin/main` 经 fetch 后均为 `488d5e0`，本提交仅补充 `maxBackpackStacks` 签名依赖、对应回归和 plan 记录，没有无关业务改动。
+- 上轮 审查发现 已闭环：`pickupPromptSignature` 已纳入 `maxBackpackStacks`；新增回归覆盖容量 `1→2` 后签名变化，提示由“当前无法拾取”刷新为 `F 拾取 步枪弹`。逐项对照 `canActorPickLoot` 后，签名已覆盖 alive/deployment、玩家三维位置、armor/maxArmor、armorLevel/helmetLevel、active slot、双槽 weapon ID、背包 item/quantity/max stacks，以及 3.2m 内可用 loot 的 id/item/quantity/三维位置；未发现仍会改变正常拾取资格的运行时状态遗漏。
 - 视觉与掉落复核：`IslandScene.ts` 相对原基线 `cc9c869` 的 blob hash 完全一致；marker 仍为 `0.62m` box、默认 scale `(1,1,1)`、原 rotation/position 同步和 `isPickable=true`，没有再次缩小。动态掉落业务源码未被本提交修改，候选仍从 `1.2/1.55/1.9/2.2/2.45/2.65m` 环选择并校验与 actor 的真实三维距离 `<=3m`；屋顶边缘 10 件、4 个同点尸体 40 个唯一坐标和 marker NullEngine 回归随完整套件通过。
 - 本机验证：`npm run typecheck` 通过；`npm run test` 为 **18 files / 163 tests** 全通过（79.63s）；`npm run build` 通过，仅保留既有 >500kB chunk warning；工作区及 `488d5e0^..488d5e0` 的 `git diff --check` 均通过。未发现业务源码中的 `context.Background()`。
 - 远端验证：GitHub Actions `CI and GitHub Pages` run `29653749439` 成功，build 与 GitHub Pages deploy jobs 均成功。残余验证缺口仅为本轮未重复人工静音浏览器 smoke，不阻塞本次定向修复与自动 release gate。
@@ -1324,7 +1324,7 @@
 ### 2026-07-19 14:29 +0800：488d5e0 基线完整 tracked diff 最终审查（通过）
 
 - 审查范围：当前 `main` 工作区相对 `HEAD/origin/main=488d5e0d6b898ca1f06eb38e0725229df7e9371d` 的 26 个 tracked 文件、875 additions / 114 deletions；忽略未跟踪 `session-ses_08c4.md`、`session-ses_096e.md`。对照本 plan、`AGENTS.md`、`README.md` 及本轮岩石、植被/地面、飞机、音量、安全区、AI、观战和 UI 要求。
-- 审查结论：**通过。本次审查未发现明确中高风险 finding。** 改动均可追溯到本轮需求；未发现无关业务语义调整或业务源码中的 `context.Background()`。
+- 审查结论：**通过。本次审查未发现明确中高风险 审查发现。** 改动均可追溯到本轮需求；未发现无关业务语义调整或业务源码中的 `context.Background()`。
 - 关键核查：24 个 seed 岩石保持稳定 ID/可序列化布局并接入生成避让、移动空间格/支撑、导航、权威子弹/LOS 和动态掉落；建筑仍使用墙段与屋顶权威几何，门窗开口未被整栋 AABB 封闭，渲染 mesh 不参与命中。树木仍为 128 trunk + 128 合并 foliage，无临时 layer；岩石保持 24 cover + 32 decorative。飞机机舱/世界模型分离，世界模型和两条尾迹固定有界。音量默认 0、合法存储保留，0 音量不创建或播放 AudioContext。少于 5 人仅加速 shrinking，等待和圈伤不翻倍。AI 终局搜索、显式感知门禁、低血掩体撤退及圈外优先均有界。观战锁定、手动循环、停止模拟后的相机刷新及 viewed/local actor HUD 边界符合约定。
 - 本机验证：实际执行 `npm run typecheck && npm run test && npm run build && git diff --check 488d5e0 --` 全通过；Vitest 为 18 files / 173 tests，wall time 77.64s；构建仅保留既有 >500kB chunk warning。已参考本轮静音 Chrome 生产验收：航线平均 120.5/min 119.7，生存平均 119/min 112.2，console/network 0，树/岩石/尾迹计数及 volume 0 正确。
 - 残余风险：音量 localStorage/AudioContext 和完整 session 观战仍主要依赖静态调用链与人工生产验收，未新增浏览器自动化；现有大 chunk warning 未扩大为本轮阻塞项。
@@ -1346,29 +1346,29 @@
 - 审查范围：已推送 `origin/main` 的 `2d402a133ff9c5bfb23a60fcdcda8ecc522902b2` 相对唯一父提交 `936b94870d7ca8c5542177856a711afcd0303b71` 的 20 文件完整 diff；对照本 plan、`AGENTS.md`、`README.md` 及本轮弹匣/弹药、初始绷带、基础 240 + 附加 10 医疗、AI 恢复与共享枪声要求。忽略未跟踪 `session-ses_08c4.md`、`session-ses_096e.md`。
 - 审查结论：**不通过。** 容量与两倍弹药、残弹 WeaponState 转移、设置迁移/公平初始绷带、基础 240 的 RNG/类别语义、追加医疗点、25/26 HP 阈值、空弹切枪/撤退补弹、shot 快照和共享 AudioContext 主链均已落地，但仍有 2 项中风险功能 blocker。
 
-#### Findings
+#### 审查发现
 
-1. **[中] 低血无药 Bot 并未按记录搜索全图可达医疗，目标圈外但当前安全圈内的医疗会被永久排除。** `src/controllers/BotController.ts:272-280` 调用 `findUsefulLoot(actor, state, false, "medical")`，而 `:574-578` 会把 `targetRadius` 安全余量之外的所有候选过滤掉。实际复现：Bot 位于 target center，current radius 2000、target radius 100，20 HP；先看到敌人后断 LOS，唯一 medkit 位于 200m、仍在 current zone 内。第二次决策的 `lootTargetId` 仍为 `null`，命令继续按威胁方向撤退，未选择医疗。影响：收圈目标较小时，即使当前安全区内存在可达药品，AI 也无法完成本轮约定的主动寻医，新增测试仅把药放在 target zone 内 40m，未覆盖该边界。Builder 需解除 medical purpose 的 target-zone-only 过滤，同时显式保留 current-zone/圈外最高优先级，补 target zone 外但 current zone 内、满背包腾位及无可达药继续移动回归。
-2. **[中] 既有 8 个远端枪声占满并发槽时，玩家/当前观战对象的下一枪会被静默丢弃。** `src/client/audio/AudioFeedback.ts:51-75` 只保证同一批事件先处理 observer，`gunshot` 在 `:94-95` 对已满的跨 tick `activeGunshots` 直接返回，无法抢占先前远端 voice。用两个连续 tick 各 4 个仍在 0.18s profile 内的远端 sniper shot 填满 8 槽，再提交 player shot，oscillator 数保持 8，observer shot 未创建。影响：密集 AI 交火中本地/观战枪声会缺失，不符合“当前观察对象全音量、附近 AI 有界播放”的优先级语义。Builder 需为 observer 保留容量或在满载时抢占最旧/最远 remote voice，并用可控 AudioContext 覆盖跨 tick observer 优先、最近 4、并发不超过 8 和结束后回收。
+1. **[中] 低血无药 Bot 并未按记录搜索全图可达医疗，目标圈外但当前安全圈内的医疗会被永久排除。** `src/controllers/BotController.ts:272-280` 调用 `findUsefulLoot(actor, state, false, "medical")`，而 `:574-578` 会把 `targetRadius` 安全余量之外的所有候选过滤掉。实际复现：Bot 位于 target center，current radius 2000、target radius 100，20 HP；先看到敌人后断 LOS，唯一 medkit 位于 200m、仍在 current zone 内。第二次决策的 `lootTargetId` 仍为 `null`，命令继续按威胁方向撤退，未选择医疗。影响：收圈目标较小时，即使当前安全区内存在可达药品，AI 也无法完成本轮约定的主动寻医，新增测试仅把药放在 target zone 内 40m，未覆盖该边界。实现方 需解除 medical purpose 的 target-zone-only 过滤，同时显式保留 current-zone/圈外最高优先级，补 target zone 外但 current zone 内、满背包腾位及无可达药继续移动回归。
+2. **[中] 既有 8 个远端枪声占满并发槽时，玩家/当前观战对象的下一枪会被静默丢弃。** `src/client/audio/AudioFeedback.ts:51-75` 只保证同一批事件先处理 observer，`gunshot` 在 `:94-95` 对已满的跨 tick `activeGunshots` 直接返回，无法抢占先前远端 voice。用两个连续 tick 各 4 个仍在 0.18s profile 内的远端 sniper shot 填满 8 槽，再提交 player shot，oscillator 数保持 8，observer shot 未创建。影响：密集 AI 交火中本地/观战枪声会缺失，不符合“当前观察对象全音量、附近 AI 有界播放”的优先级语义。实现方 需为 observer 保留容量或在满载时抢占最旧/最远 remote voice，并用可控 AudioContext 覆盖跨 tick observer 优先、最近 4、并发不超过 8 和结束后回收。
 
 #### 验证与后续处理
 
 - 本机实际执行 `npm run typecheck && npm run test && npm run build && git diff --check` 全通过；Vitest **18 files / 181 tests**，wall time 76.55s；构建仅保留既有 >500kB chunk warning。`origin/main`、`HEAD` 均为目标 commit，未发现业务源码中的 `context.Background()`。
-- GitHub Actions `CI and GitHub Pages` run `29679548797` 成功，build 与 GitHub Pages deploy jobs 均成功。已参考本轮静音 Chrome 的 250 物资、类别/容量/弹药、shot 快照、volume 0 零音频资源、console/network 0 和约 120 RAF 证据；静音 smoke 不能覆盖 finding 2 的正音量抢占路径。
-- Builder 必须处理上述 2 项；writer 需补全图安全范围寻医及正音量多 tick 音频优先级验证后再发起复审。本轮不得记录通过结论。
+- GitHub Actions `CI and GitHub Pages` run `29679548797` 成功，build 与 GitHub Pages deploy jobs 均成功。已参考本轮静音 Chrome 的 250 物资、类别/容量/弹药、shot 快照、volume 0 零音频资源、console/network 0 和约 120 RAF 证据；静音 smoke 不能覆盖 审查发现 2 的正音量抢占路径。
+- 实现方 必须处理上述 2 项；实现 Agent 需补全图安全范围寻医及正音量多 tick 音频优先级验证后再发起复审。本轮不得记录通过结论。
 
 ## 2026-07-19 16:28 +0800：寻医范围与本地枪声优先级闭环
 
-- Finding 1：`medical` purpose 不再沿用 target-zone 过滤，改为只接受当前安全圈内候选；圈外/进目标圈分支仍在寻医前执行，保持安全区最高优先级。回归把唯一 medkit 放在 target radius 20 之外、current radius 200 之内，低血 Bot 断 LOS 后能选择该可达医疗点。
-- Finding 2：枪声并发拆成 2 个 local/observer 保留 voice 与 6 个 remote voice，总上限仍为 8；远程每 tick 最近 4 条策略保持。新增 FakeAudioContext 回归跨两个 tick 填满 6 个远程 voice 后再提交本地 shotgun，确认第 7 个 oscillator 仍创建，本地声音不再被 AI 挤掉。
+- 审查发现 1：`medical` purpose 不再沿用 target-zone 过滤，改为只接受当前安全圈内候选；圈外/进目标圈分支仍在寻医前执行，保持安全区最高优先级。回归把唯一 medkit 放在 target radius 20 之外、current radius 200 之内，低血 Bot 断 LOS 后能选择该可达医疗点。
+- 审查发现 2：枪声并发拆成 2 个 local/observer 保留 voice 与 6 个 remote voice，总上限仍为 8；远程每 tick 最近 4 条策略保持。新增 FakeAudioContext 回归跨两个 tick 填满 6 个远程 voice 后再提交本地 shotgun，确认第 7 个 oscillator 仍创建，本地声音不再被 AI 挤掉。
 - 最终门禁：`npm run typecheck && npm run test && npm run build && git diff --check` 全通过；Vitest 19 files / 182 tests，完整约 73.01 秒；49 Bot 五 seed 武装率及完整唯一胜者继续通过，构建仅保留既有大 chunk warning。
 
 ## 审查
 
 ### 2026-07-19 16:33 +0800：origin/main ebd2f15 blocker 闭环与 release gate 复审（通过）
 
-- 审查范围：已 fetch 并确认 `HEAD/main/origin/main=ebd2f157a4fb66be36fbe5f737db367844bbd2e4`，唯一父提交为 `2d402a133ff9c5bfb23a60fcdcda8ecc522902b2`；完整增量为 5 files、135 additions / 13 deletions。对照本 plan、`AGENTS.md`、`README.md`、16:23 两项中风险 finding，并复核父提交 20 文件核心交付；忽略未跟踪 session 文件。
-- 审查结论：**通过。本次审查未发现明确中高风险 finding；上轮两项中风险 blocker 均已闭环，当前 release gate 通过。**
+- 审查范围：已 fetch 并确认 `HEAD/main/origin/main=ebd2f157a4fb66be36fbe5f737db367844bbd2e4`，唯一父提交为 `2d402a133ff9c5bfb23a60fcdcda8ecc522902b2`；完整增量为 5 files、135 additions / 13 deletions。对照本 plan、`AGENTS.md`、`README.md`、16:23 两项中风险 审查发现，并复核父提交 20 文件核心交付；忽略未跟踪 session 文件。
+- 审查结论：**通过。本次审查未发现明确中高风险 审查发现；上轮两项中风险 blocker 均已闭环，当前 release gate 通过。**
 - 寻医闭环：`medical` purpose 只按 current safe zone 的 `center/radius` 过滤候选，不再受 target zone 限制；圈外/未进目标圈分支仍在低血、寻医和治疗之前执行并清理 loot target。回归明确设置 `targetRadius=20`、`current radius=200`、唯一 medkit 距中心 `40m`，其移动/瞄准断言可区分“选择医疗”与旧逻辑继续背向威胁撤退；既有圈外携药测试继续证明进圈优先。
 - 音频闭环：gunshot voice 分为 2 个 local/observer 与 6 个 remote 独立计数，总枪声并发上限为 8；remote 每 tick 仍按三维距离排序只取最近 4 个并使用平方距离衰减。local/remote 的 `onended` 闭包分别回收对应计数并断开节点，`dispose` 同时清零两个计数和 context/gain。FakeAudioContext 测试跨两个 handle/tick 将 remote 填至 6 后仍创建第 7 个 local voice；该测试在父提交旧实现中会先得到 8 个 remote、于 `toHaveLength(6)` 失败，因此真实复现旧 bug，不是空断言。既有纯函数和静音测试继续覆盖距离衰减及 volume 0 不触碰 AudioContext。
 - 父提交核心复核：25 HP 撤退、26 HP 战斗；弹匣 `45/48/9/8`、弹药堆 `90/96/18/16`；基础 240 点及 `96/64/29/51` 类别/RNG 语义不变并独立追加 10 个医疗点；初始绷带默认/旧设置迁移/显式关闭及玩家-AI 同开关；空弹副枪切换、撤退换弹与断 LOS 寻兼容弹药；单次 `shot-fired` 的 weapon/origin 快照和 GameApp 级共享 AudioContext 均未见回归。
@@ -1390,9 +1390,9 @@
 - 审查范围：已确认 `HEAD/main/origin/main=0820e61c686b8a231c09ef06eeaa110022b3bddd`，唯一父提交和 merge-base 均为 `7c7a583be3cbcdf6c7d5202442e69c4b8173cd6c`；完整增量为 5 files、308 additions / 56 deletions。对照本 plan、`AGENTS.md`、`README.md` 和本轮满背包/精确拾取/25 HP 恢复要求；忽略两个未跟踪 session 文件。
 - 审查结论：**不通过，release gate 未通过。** 常规多决策搜刮、cached tick 清理、Human F 最近拾取、目标失效不丢包、general 不腾位、medical/compatible-ammo 的 Bot 选择、近枪远弹、空活动槽切枪及 25 HP 撤退/射击/治疗/寻医/巡逻主路径未发现其他明确中高风险回归；但动态 loot record 复用仍存在可实际触发的 ABA blocker。
 
-#### Finding
+#### 审查发现
 
-1. **[中] `interactLootId` 只校验可复用 record 的 ID，没有校验计划时的物品身份/代次，同一 inventory tick 可丢掉替换栈并拾取完全不同的物品。** `src/game/systems/InventorySystem.ts:97-118` 在执行时直接读取该 ID 当前记录；而 `:404-423` 会立即把任意 inactive record 原 ID 改写成新掉落。已用实际模块复现三个同位置 Bot 的合法命令顺序：第一个拾走 `rifle` ID 的 `ammo.rifle`；第二个为寻医丢下 `ammo.shell`，该掉落复用 `rifle` ID；第三个仍持有“以 `ammo.sniper` 换计划中的步枪弹”的旧 targeted command，最终丢掉 `ammo.sniper` 并拾到 `ammo.shell`。事件序列明确为 `item-picked(rifle/ammo.rifle) → item-dropped(rifle/ammo.shell) → item-dropped(med/ammo.sniper) → item-picked(rifle/ammo.shell)`。这会在拥挤争抢/换物时破坏精确拾取、单调换物和“原目标失败不丢包”，并使结果依赖同 tick 轮转顺序。Builder 必须给目标携带并校验 generation/version（或至少计划时 item identity，并阻止同 tick record ABA），且所有校验仍须发生在 drop 前；补真实同 tick `pick → record reuse → stale targeted command` 及正反命令插入顺序回归。writer 需记录该闭环后再发起复审。
+1. **[中] `interactLootId` 只校验可复用 record 的 ID，没有校验计划时的物品身份/代次，同一 inventory tick 可丢掉替换栈并拾取完全不同的物品。** `src/game/systems/InventorySystem.ts:97-118` 在执行时直接读取该 ID 当前记录；而 `:404-423` 会立即把任意 inactive record 原 ID 改写成新掉落。已用实际模块复现三个同位置 Bot 的合法命令顺序：第一个拾走 `rifle` ID 的 `ammo.rifle`；第二个为寻医丢下 `ammo.shell`，该掉落复用 `rifle` ID；第三个仍持有“以 `ammo.sniper` 换计划中的步枪弹”的旧 targeted command，最终丢掉 `ammo.sniper` 并拾到 `ammo.shell`。事件序列明确为 `item-picked(rifle/ammo.rifle) → item-dropped(rifle/ammo.shell) → item-dropped(med/ammo.sniper) → item-picked(rifle/ammo.shell)`。这会在拥挤争抢/换物时破坏精确拾取、单调换物和“原目标失败不丢包”，并使结果依赖同 tick 轮转顺序。实现方 必须给目标携带并校验 generation/version（或至少计划时 item identity，并阻止同 tick record ABA），且所有校验仍须发生在 drop 前；补真实同 tick `pick → record reuse → stale targeted command` 及正反命令插入顺序回归。实现 Agent 需记录该闭环后再发起复审。
 
 #### 验证
 
@@ -1411,10 +1411,10 @@
 
 ### 2026-07-19 17:46 +0800：origin/main a8231e6 ABA 闭环与 release gate 复审（不通过）
 
-- 审查范围：已确认 `HEAD/main/origin/main=a8231e67b1c4b5091149029c219c9311a23a6b41`，唯一父提交和 merge-base 均为 `0820e61c686b8a231c09ef06eeaa110022b3bddd`；完整增量为 8 files、113 additions / 6 deletions。对照本 plan、`AGENTS.md`、`README.md`、17:33 的 ABA finding 及本轮用户列出的 generation、精确拾取、库存/AI 回归与 release gate 要求；忽略两个未跟踪 session 文件。
+- 审查范围：已确认 `HEAD/main/origin/main=a8231e67b1c4b5091149029c219c9311a23a6b41`，唯一父提交和 merge-base 均为 `0820e61c686b8a231c09ef06eeaa110022b3bddd`；完整增量为 8 files、113 additions / 6 deletions。对照本 plan、`AGENTS.md`、`README.md`、17:33 的 ABA 审查发现 及本轮用户列出的 generation、精确拾取、库存/AI 回归与 release gate 要求；忽略两个未跟踪 session 文件。
 - 审查结论：**不通过，release gate 验证尚未闭环。** 业务实现静态上已令 spawn generation 为 0、inactive record 每次复用按旧值严格 `+1`，可选 generation 对旧动态记录按 0 兼容；Bot 的近枪、general、medical、compatible-ammo 路径均携带 loot ID + generation，cached tick 同时清空；Inventory 也在 drop 前校验 available、generation、数量、item config、三维距离、replacement 存在及交换后容量，generation 不匹配不会丢包。Human F/G、死亡掉落、weapon replacement 和 25 HP 恢复主链未见明确业务回归。但上一轮明确要求的真实同 tick、正反命令插入顺序及 record 多次复用回归并未落地。
 
-#### Finding
+#### 审查发现
 
 1. **[中][验证缺口] 新增 ABA 用例只覆盖一次 `generation 0→1` 的固定手工调用顺序，不能作为上一轮要求的真实同 tick/正反顺序/多次复用回归。** `tests/unit/inventorySystem.test.ts:493-538` 直接按 picker→dropper→stale-picker 顺序调用三次 `InventorySystem.processCommand`，没有经过 `GameSimulation.step` 的同 tick 多 actor 排序，没有反转 command Map 插入顺序，也没有断言同一 record 在第二次及后续复用时继续严格递增。当前源码静态上使用 `(reusable.generation ?? 0) + 1`，未发现现存运行时错误；但若错误实现退化为“复用时恒设 1”，现有新增测试和 30 次 drop/pick 用例仍会通过，却会让持有 generation 1 的旧命令在第二次复用后重新触发 ABA。最小处理：用 `GameSimulation.step` 参数化正反 command Map 插入顺序，覆盖真实 `pick→reuse→stale targeted command`；再让同一 record 至少经历 `0→1→2`，以 generation 1 的 stale command 断言 replacement 不丢、结果与插入顺序一致。无需改业务实现。
 
@@ -1422,7 +1422,7 @@
 
 - 本机实际执行 `npm run typecheck && npm run test && npm run build && git diff --check 0820e61 a8231e6` 全通过；Vitest **19 files / 187 tests**，wall time 76.66 秒，包含 49 Bot 五 seed 武装率与完整局唯一胜者；构建仅保留既有 >500kB chunk warning。
 - GitHub Actions `CI and GitHub Pages` run `29681986959` 已成功。未发现业务源码中的 `context.Background()`；工作区仅有按要求忽略的两个未跟踪 session 文件。
-- Builder/writer 只需补上述回归证据并更新验证记录；当前实现的 ABA 防护静态判断为有效，finding 属 release-gate 必需验证缺口，不要求重写业务代码。
+- 实现方/实现 Agent 只需补上述回归证据并更新验证记录；当前实现的 ABA 防护静态判断为有效，审查发现 属 release-gate 必需验证缺口，不要求重写业务代码。
 
 ## 2026-07-19 17:48 +0800：真实同 tick 多代复用验证闭环
 
@@ -1455,7 +1455,7 @@
 ### 2026-07-19 18:58 +0800：origin/main 897b8ee 首页禁用 AI 狙击枪与 release gate 复审（通过）
 
 - 审查范围：fetch 后确认 `HEAD/main/origin/main=897b8ee7070ee65b981299ff3788aaadee2bd0a0`，唯一父提交及 merge-base 均为 `4ee04542e1d4abc3163ea7f9b59c4efc3f2e4baa`；仅审查该提交中“首页禁用 AI 狙击枪”相关的 10 文件增量并复核 release gate，忽略两个未跟踪 session 文件。对照本 plan、`AGENTS.md`、`README.md` 和用户列出的设置迁移、AI 全入口限制、旧状态清理、49 Bot 门槛及 UI 要求。
-- 审查结论：**通过。本次审查未发现明确中高风险 finding，release gate 通过。** `disableAiSnipers` 默认 true；旧存储缺字段回落 true、显式 false 保留，开关 change 即时持久化，开始对局还会重读 DOM。生产 `BattleRoyaleSession` 为全部 Bot 显式传入该值，Controller 保存为每局只读布尔值，不存在仅测试传 true、生产漏传的问题。
+- 审查结论：**通过。本次审查未发现明确中高风险 审查发现，release gate 通过。** `disableAiSnipers` 默认 true；旧存储缺字段回落 true、显式 false 保留，开关 change 即时持久化，开始对局还会重读 DOM。生产 `BattleRoyaleSession` 为全部 Bot 显式传入该值，Controller 保存为每局只读布尔值，不存在仅测试传 true、生产漏传的问题。
 - AI 行为复核：禁用时跳伞落点、脚边快速拾枪及 general/medical/compatible-ammo 的缓存目标和新目标统一经过 sniper weapon/ammo 过滤；地图生成及玩家规则未改。已有 sniper 的清理分支先于战斗决策返回无开火的 drop 命令，Inventory 会在丢活动 sniper 后自动切换副武器；双 sniper 会在后续完整决策逐把清除。设置 false 时上述分支和过滤均关闭，既有拾取、弹药与开火链保持原行为。
 - 测试证据复核：五个 seed 继续逐例断言至少 `42/49` Bot 武装，阈值未降低，并直接断言所有 Bot 零 sniper weapon、零 `ammo.sniper`；完整 49 Bot 局直接断言零 sniper/ammo sniper `item-picked` 及零 sniper `shot-fired`。生产接线另由 `BattleRoyaleSession.ts` 实际调用链确认。
 - UI 复核：第五项使用原生 checkbox 的包裹 label，键盘焦点样式沿用既有 switch，并以 `grid-column: 1 / -1` 独占整行；未发现明显布局、无障碍或持久化中高风险。本轮按约束未启动或操作本机浏览器，也未使用浏览器验证。
@@ -1509,86 +1509,86 @@
 - 2026-07-22 14:12：Chrome DevTools MCP 静音生产预览已确认草地/泥地/道路纹理、墙/屋顶纹理、9 个小地图 POI 图标、晴间/阴天/风暴三种天空均成功加载；发现并修正地表顶点色乘暗、StandardMaterial 纯白/纯黑天空和晴间球顶放射拉伸后，最终画面为全景云层覆盖的悬浮岛，岛外不再有蓝色海洋带，晴间太阳只在上半球。稳定约 120 FPS，console 无 error/warn。
 - 2026-07-22 14:21：最终 `npm run typecheck && npm run test && npm run build && git diff --check` 全通过；Vitest 为应用 30 files / 274 tests、Worker 3 / 27、standalone 2 / 15，生产构建仅保留既有大 chunk warning。新增回归覆盖 3 个 seed 天空选择、晴间球顶/球底 UV 连续、太阳上移、单一天空 mesh、共享墙纹理、地表 3 submesh、屋顶/室内楼板分层、无 ocean mesh 和 9 个 POI 映射。
 
-## Review
+## 审查
 
 ### 2026-07-19 20:35 +0800：origin/main 21cc420 撤退停滞与物资配图关闭审查（不通过）
 
 - 审查范围：确认 `HEAD/main/origin/main=21cc42014e51b4a48218bf679389e45d9df772de`，提交链为 `460773f → 596d720 → 21cc420`，merge-base 为 `460773f`；审查 `460773f..21cc420` 的 8 文件增量，并对照本 plan、`AGENTS.md`、`README.md` 与用户列出的撤退、治疗/导航、设置迁移和 release gate 要求。按要求忽略两个未跟踪 session 文件。
 - 审查结论：**不通过。** 物资配图入口、默认值、菜单读取和 localStorage 加载均已强制关闭，生产 GameApp 创建的 session 会传入 false；内部 icon 渲染及 NullEngine 测试保留，README 一致。真实墙回归确实使用 `MapLayout + SimulationCombatWorld + MovementSystem` 检查实际位移/LOS，且其场景会击穿父提交的直线撤退实现；25 HP 撤退射击、断 LOS 治疗/1 秒后寻医或巡逻、圈外优先及全量回归也通过。但撤退状态还有以下两项中风险问题。
 
-#### Findings
+#### 审查发现
 
-1. **[中] 同一敌人的后续命中会清空 rejected cover 和五方向进度，持续受击时可重新出现墙边停滞。** `src/controllers/BotController.ts:141-167` 对每个新伤害事件都把 `retreatThreatId` 置空，并在低血分支清空 `rejectedRetreatCoverIds`、把 `retreatEscapeIndex` 重置为 0；同一 update 到 `:296-303` 时，即使可见目标仍是原敌人，也会因 ID 已被置空再次按“敌人变化”处理。复现：让有护甲的 25 HP Bot 在新增真实墙场景中被同一个 SMG 敌人以小额伤害持续命中，并在每次命中间推进 `elapsedSeconds`；每次 `lastDamageElapsedSeconds` 更新都会把方向恢复为直线 away、允许已拒绝 cover 重试，无法保证五方向跨决策持续轮换。Builder 需只在攻击者实际变化或撤退结束时清空这些状态，并补同一敌人连续命中的墙边回归。
-2. **[中] 可见敌人切换时只清了 cover 字段，没有清旧导航，新 cover 路径会被 `preserveAim` 逻辑忽略。** `src/controllers/BotController.ts:296-301` 在 target ID 变化时未调用 `clearNavigation()`；随后 `:573-577` 虽找到并记录新 cover，但 `:813-823` 在旧 path 非空且 `preserveAim=true` 时不会因 target 变化重建路径。复现：三角色场景中先让低血 Bot 对敌人 A 选出非空 cover path，在到达前隐藏 A、显示位于另一侧且更近的敌人 B；下一完整决策会把 `retreatCoverId/Target` 改成 B 的 cover，却继续沿 A 的 waypoint 移动，停滞时还可能错误拒绝 B 的 cover。Builder 需在敌人变化时同步清理旧撤退导航，并补 A→B 切换的方向/path 回归。
+1. **[中] 同一敌人的后续命中会清空 rejected cover 和五方向进度，持续受击时可重新出现墙边停滞。** `src/controllers/BotController.ts:141-167` 对每个新伤害事件都把 `retreatThreatId` 置空，并在低血分支清空 `rejectedRetreatCoverIds`、把 `retreatEscapeIndex` 重置为 0；同一 update 到 `:296-303` 时，即使可见目标仍是原敌人，也会因 ID 已被置空再次按“敌人变化”处理。复现：让有护甲的 25 HP Bot 在新增真实墙场景中被同一个 SMG 敌人以小额伤害持续命中，并在每次命中间推进 `elapsedSeconds`；每次 `lastDamageElapsedSeconds` 更新都会把方向恢复为直线 away、允许已拒绝 cover 重试，无法保证五方向跨决策持续轮换。实现方 需只在攻击者实际变化或撤退结束时清空这些状态，并补同一敌人连续命中的墙边回归。
+2. **[中] 可见敌人切换时只清了 cover 字段，没有清旧导航，新 cover 路径会被 `preserveAim` 逻辑忽略。** `src/controllers/BotController.ts:296-301` 在 target ID 变化时未调用 `clearNavigation()`；随后 `:573-577` 虽找到并记录新 cover，但 `:813-823` 在旧 path 非空且 `preserveAim=true` 时不会因 target 变化重建路径。复现：三角色场景中先让低血 Bot 对敌人 A 选出非空 cover path，在到达前隐藏 A、显示位于另一侧且更近的敌人 B；下一完整决策会把 `retreatCoverId/Target` 改成 B 的 cover，却继续沿 A 的 waypoint 移动，停滞时还可能错误拒绝 B 的 cover。实现方 需在敌人变化时同步清理旧撤退导航，并补 A→B 切换的方向/path 回归。
 
 #### 验证与待处理
 
 - 本机实际执行 `npm run typecheck && npm run test && npm run build && git diff --check 460773f..21cc420` 全通过；Vitest **20 files / 210 tests**，80.49 秒；生产构建通过，仅保留既有 >500kB chunk warning。未发现业务源码中的 `context.Background()`。
-- Builder 需处理上述两项撤退状态问题；writer 需补同敌连续受击和敌人切换回归后再发起复审。物资配图强制关闭链无需重写。
+- 实现方 需处理上述两项撤退状态问题；实现 Agent 需补同敌连续受击和敌人切换回归后再发起复审。物资配图强制关闭链无需重写。
 - 按用户约束，本轮未尝试浏览器、浏览器 MCP、Playwright 或直接启动本机浏览器；展示层仍缺实际浏览器视觉复验，但不是上述不通过结论的来源。
 
 ## 2026-07-19 20:40 +0800：持续受击与威胁切换撤退状态闭环
 
-- Finding 1：新伤害只在尚无撤退威胁或攻击方向点积 `<0.2`（明显换向）时重置 cover/rejected/escape；同方向连续命中仅更新威胁位置、时限和 safeSince，不再把 escape index 清零，也保留已拒绝掩体和已知 target ID。
-- Finding 2：可见 target ID 变化时先 `clearNavigation()`，再清 rejected/cover 并重建新威胁的撤退路径，旧 preserveAim path 无法继续劫持新 cover。
+- 审查发现 1：新伤害只在尚无撤退威胁或攻击方向点积 `<0.2`（明显换向）时重置 cover/rejected/escape；同方向连续命中仅更新威胁位置、时限和 safeSince，不再把 escape index 清零，也保留已拒绝掩体和已知 target ID。
+- 审查发现 2：可见 target ID 变化时先 `clearNavigation()`，再清 rejected/cover 并重建新威胁的撤退路径，旧 preserveAim path 无法继续劫持新 cover。
 - 回归：真实墙体 180 个 30Hz tick 中每 6 tick 由同一 player 造成 0.05 damage，仍须在 6 秒内移动 >2m/断 LOS，连续无位移 <1.5 秒；三角色 A→B 威胁切换测试预置旧 preserveAim path，切换后 navigationTarget 必须不再等于旧 target。
 - 最终门禁：typecheck/test/build/diff 全通过；Vitest 20 files / 211 tests，完整约 77.63 秒，49 Bot 五 seed与完整局继续通过。物资配图继续保持入口隐藏、default/read/load 全 false；按用户要求未启动浏览器，MCP 当前不可用。
 
-## Review
+## 审查
 
 ### 2026-07-19 20:45 +0800：origin/main ec0499a 低血撤退闭环复审（通过）
 
-- 审查范围：确认 `HEAD/main/origin/main=ec0499a3d27b40ac8c662679a8552a064ca7f9a7`，父提交及 merge-base 均为 `21cc42014e51b4a48218bf679389e45d9df772de`；本提交相对父提交为 3 files / 78 insertions / 6 deletions，审查 `BotController`、两项新增/增强回归及物资配图生产入口，并对照本 plan 上轮两项 finding。按要求忽略两个未跟踪 session 文件。
-- 审查结论：**通过。本次审查未发现明确中高风险问题。** 上轮两项低血撤退 finding 均已闭环。
-- Finding 1 闭环：同方向后续伤害只更新威胁位置、记忆时限和安全计时，保留 `retreatThreatId`、rejected cover、当前 cover 和五方向 index；方向点积 `<0.2`（夹角大于约 78°）才视为明显换向并重置，边界与“明显换向才切换威胁”一致。真实墙回归每 6 tick 施加一次真实来源伤害，父实现会在每次命中及随后可见目标分支反复清空 index/rejected，无法通过新增的 6 秒位移/LOS 与最长停滞约束。
-- Finding 2 闭环：可见 target ID 变化时先 `clearNavigation()`，再清 cover/rejected/index 并按新目标撤退；预置旧 `preserveAim` path 的 A→B 回归断言旧 navigation target 不得保留，能够击穿父实现中 `preserveAim=true` 阻止 target-changed 重建的路径。
+- 审查范围：确认 `HEAD/main/origin/main=ec0499a3d27b40ac8c662679a8552a064ca7f9a7`，父提交及 merge-base 均为 `21cc42014e51b4a48218bf679389e45d9df772de`；本提交相对父提交为 3 files / 78 insertions / 6 deletions，审查 `BotController`、两项新增/增强回归及物资配图生产入口，并对照本 plan 上轮两项 审查发现。按要求忽略两个未跟踪 session 文件。
+- 审查结论：**通过。本次审查未发现明确中高风险问题。** 上轮两项低血撤退 审查发现 均已闭环。
+- 审查发现 1 闭环：同方向后续伤害只更新威胁位置、记忆时限和安全计时，保留 `retreatThreatId`、rejected cover、当前 cover 和五方向 index；方向点积 `<0.2`（夹角大于约 78°）才视为明显换向并重置，边界与“明显换向才切换威胁”一致。真实墙回归每 6 tick 施加一次真实来源伤害，父实现会在每次命中及随后可见目标分支反复清空 index/rejected，无法通过新增的 6 秒位移/LOS 与最长停滞约束。
+- 审查发现 2 闭环：可见 target ID 变化时先 `clearNavigation()`，再清 cover/rejected/index 并按新目标撤退；预置旧 `preserveAim` path 的 A→B 回归断言旧 navigation target 不得保留，能够击穿父实现中 `preserveAim=true` 阻止 target-changed 重建的路径。
 - 回归复核：25 HP 撤退中射击、断 LOS 后治疗/寻医或恢复巡逻、圈外优先、49 Bot 五 seed武装率和完整局均由全量测试继续覆盖；本提交未改动这些优先级分支。物资配图入口仍从菜单移除，`DEFAULT_SETTINGS`、`readSettings`、`loadSettings` 均固定为 false，生产 session 继续接收 false；内部 dormant 渲染能力不构成生产入口。未发现业务源码中的 `context.Background()`。
 - 验证：本机实际执行 `npm run typecheck && npm run test && npm run build && git diff --check 21cc420 ec0499a` 全通过；Vitest **20 files / 211 tests**，82.38 秒；生产构建通过，仅保留既有 >500kB chunk warning。工作区除本 review plan 追加外仅有按要求忽略的两个未跟踪 session 文件。
 - 残余验证缺口（非阻塞）：按用户约束未尝试浏览器、浏览器 MCP 或 Playwright；本轮结论基于规则/NullEngine 自动测试、实际 diff 与调用链。
 
 ### 2026-07-21 14:55 +0800：bf4682d 三维物资、手机触控、装备视觉与 AI 性能完整审查（不通过）
 
-- 审查范围：以本 plan（重点对照 Build 2026-07-21 13:02–14:20）、`AGENTS.md` 和 `README.md` 为基线，完整审查实现提交 `bf4682dc5c90bd37c361d67258165ca224eb3dd9` 相对指定 base `5ddf86df5ce158ee69c9db3d487783605c545953` 的 25 个文件、1746 additions / 278 deletions；merge-base 即指定 base。后续 `7eadf84` 仅为 plan 文档，不计入实现范围；按要求忽略未跟踪 `session-ses_082c.md`。
+- 审查范围：以本 plan（重点对照 构建 2026-07-21 13:02–14:20）、`AGENTS.md` 和 `README.md` 为基线，完整审查实现提交 `bf4682dc5c90bd37c361d67258165ca224eb3dd9` 相对指定 base `5ddf86df5ce158ee69c9db3d487783605c545953` 的 25 个文件、1746 additions / 278 deletions；merge-base 即指定 base。后续 `7eadf84` 仅为 plan 文档，不计入实现范围；按要求忽略未跟踪 `session-ses_082c.md`。
 - 审查结论：**不通过。** 未发现 blocker/high；三维物资的 14 类共享模板与有界 mesh/material 复用、默认开关/经典方块回退、HUD 图片隔离、装备状态及 GLB 叠层、空间射线索引保守遍历与原顺序、目标 tie、导航/AI 门槛、单机/联机命令边界和桌面 Pointer Lock 未见明确高风险回归，但短横屏下治疗/拾取反馈布局存在 1 项中风险问题。
 
-#### Finding
+#### 审查发现
 
-1. **[中] 短横屏规则同时保留 `top` 和新增 `bottom`，把治疗卡压缩到仅有 padding 的高度，常见手机横屏无法完整显示治疗反馈。** `src/styles/main.css:1282-1317` 给拾取提示和治疗卡设置了 `top: calc(50% + 43px/76px)`；`src/styles/main.css:2274-2283` 在 `(orientation: landscape) and (max-height: 700px)` 下又设置 `bottom: 126px/106px`，却没有将 `top` 复位为 `auto`。本机 Chrome、音量 0、移动设备模拟中，844×390 时 `.healing-progress` 的实际 border-box 仅 `23px`、内容 `scrollHeight=48px`；667×375 仍只有 `23px`，并与后绘制的武器状态区大面积重叠。拾取提示在 667×375 也只有 `18.5px` 高而内容需要 `20px`。实际使用绷带/急救包时，进度条和“移动或开火会中断”会溢出无背景区域或被 HUD 覆盖，违背横屏完整可玩及 CSS 层级要求。Builder 需在短横屏定位中明确只使用一组纵向约束（例如复位 `top`），并用至少 844×390 与 667×375 的真实非隐藏治疗卡/拾取提示验证不裁切、不重叠；writer 需补该浏览器证据后再发起复审。
+1. **[中] 短横屏规则同时保留 `top` 和新增 `bottom`，把治疗卡压缩到仅有 padding 的高度，常见手机横屏无法完整显示治疗反馈。** `src/styles/main.css:1282-1317` 给拾取提示和治疗卡设置了 `top: calc(50% + 43px/76px)`；`src/styles/main.css:2274-2283` 在 `(orientation: landscape) and (max-height: 700px)` 下又设置 `bottom: 126px/106px`，却没有将 `top` 复位为 `auto`。本机 Chrome、音量 0、移动设备模拟中，844×390 时 `.healing-progress` 的实际 border-box 仅 `23px`、内容 `scrollHeight=48px`；667×375 仍只有 `23px`，并与后绘制的武器状态区大面积重叠。拾取提示在 667×375 也只有 `18.5px` 高而内容需要 `20px`。实际使用绷带/急救包时，进度条和“移动或开火会中断”会溢出无背景区域或被 HUD 覆盖，违背横屏完整可玩及 CSS 层级要求。实现方 需在短横屏定位中明确只使用一组纵向约束（例如复位 `top`），并用至少 844×390 与 667×375 的真实非隐藏治疗卡/拾取提示验证不裁切、不重叠；实现 Agent 需补该浏览器证据后再发起复审。
 
 #### 验证与残余风险
 
 - 本机实际执行 `npm run typecheck`、`npm run test`、`npm run build`、`npm run build:worker` 和 `git diff --check 5ddf86d bf4682d` 均通过；应用 **26 files / 254 tests**、Worker **3 files / 26 tests**，五 seed `>=42/49` 武装率及 49 Bot 完整局唯一胜者未降低；构建仅有既有 >500kB chunk warning。未发现业务源码中的 `context.Background()`。
 - Chrome 本地 production preview、音量 0：844×390 横屏触控 HUD、暂停/恢复、390×844 竖屏阻塞与单机冻结、桌面 `is-playing` + Pointer Lock 均复核；上述 CSS 尺寸问题可稳定复现。真实设备多 Pointer 手感仍为非阻塞残余风险，不能由 DevTools 合成 Pointer 完全替代。
 
-### 2026-07-21 15:08 +0800：短横屏 HUD finding 复审（通过）
+### 2026-07-21 15:08 +0800：短横屏 HUD 审查发现 复审（通过）
 
-- 审查范围：对照本 plan 的 Build 2026-07-21 15:02、14:55 Review finding，并复核原实现范围 `5ddf86d..bf4682d`；当前工作区相对 `7eadf84` 仅有本 plan 增量和 `src/styles/main.css` 6 行相关修改，未跟踪 `session-ses_082c.md` 按要求忽略。
-- 审查结论：**通过。本次审查未发现 blocker/high/medium 问题。** 原中风险 finding 已闭环：短横屏的拾取提示与治疗卡均改为单一 `top` 定位，并明确 `bottom: auto`，不再同时受上下边约束而压缩。
+- 审查范围：对照本 plan 的 构建 2026-07-21 15:02、14:55 审查 审查发现，并复核原实现范围 `5ddf86d..bf4682d`；当前工作区相对 `7eadf84` 仅有本 plan 增量和 `src/styles/main.css` 6 行相关修改，未跟踪 `session-ses_082c.md` 按要求忽略。
+- 审查结论：**通过。本次审查未发现 blocker/high/medium 问题。** 原中风险 审查发现 已闭环：短横屏的拾取提示与治疗卡均改为单一 `top` 定位，并明确 `bottom: auto`，不再同时受上下边约束而压缩。
 - 浏览器证据：本机 production preview、音量 0，强制展示真实 `.healing-progress` 与 `.interaction-prompt` DOM。844×390 下治疗卡 `clientHeight/scrollHeight=57/57px`、提示 `28/28px`；667×375 下同为 `57/57px`、`28/28px`，均无裁切。两尺寸逐项计算与右下武器 HUD、顶部 HUD、准星、小地图、摇杆、开火/瞄准/跳跃/拾取/换弹/切枪/绷带/急救和暂停按钮的相交面积，结果全部为 0；控制台无 error/warn。
 - 验证：`npm run build` 与 `git diff --check 7eadf84` 通过，构建仅保留既有大 chunk warning；未发现业务源码中的 `context.Background()`。由于业务实现与测试均未变化，沿用上一轮已通过的 26 files / 254 app tests、3 files / 26 Worker tests、五 seed 武装率和完整局唯一胜者证据。
-- 残余风险：真实手机多指手感仍需设备人工复核，但与本次 CSS finding 无关，不阻塞通过结论。
+- 残余风险：真实手机多指手感仍需设备人工复核，但与本次 CSS 审查发现 无关，不阻塞通过结论。
 
 ### 2026-07-21 18:12 +0800：第二轮性能余量优化完整审查（不通过）
 
-- 审查范围：以本 plan 的 2026-07-21 17:39–17:58 Build 记录、`AGENTS.md`、`README.md` 和用户本轮性能/行为等价要求为基线；确认当前分支为 `main`、`HEAD=origin/main=f470f9d`、merge-base 亦为 `f470f9d`，完整审查工作区相对 `f470f9d` 的 10 个源码文件、4 个测试文件及本 plan 增量。未跟踪参考文件 `session-ses_082c.md` 按要求忽略且未触碰。
+- 审查范围：以本 plan 的 2026-07-21 17:39–17:58 构建 记录、`AGENTS.md`、`README.md` 和用户本轮性能/行为等价要求为基线；确认当前分支为 `main`、`HEAD=origin/main=f470f9d`、merge-base 亦为 `f470f9d`，完整审查工作区相对 `f470f9d` 的 10 个源码文件、4 个测试文件及本 plan 增量。未跟踪参考文件 `session-ses_082c.md` 按要求忽略且未触碰。
 - 审查结论：**不通过。** 静态格 DDA、射线/坡道、导航 indexed/full、掉落顺序与复用、命令/living 集合复用未发现玩法或 AI 质量差异；但“多房间下避免 8-seed cache 驱逐后重建地图”的性能目标只完成了一部分，仍有 1 项高风险阻塞。
 
-#### Finding
+#### 审查发现
 
-1. **[高] 活跃房间持有的 layout 被全局 8-seed cache 驱逐后，死亡掉落和 Bot 强制迁移仍会同步重建整张地图，造成远超 30 Hz tick 预算的停顿。** `src/game/systems/InventorySystem.ts:149-156,708-712` 每个新尸体仍通过 `createMapLayout(state.mapSeed)` 创建 placement context；`src/controllers/BotController.ts:1077-1080` 的 forced relocation 仍把数字 seed 传给 `getTerrainHeight`，后者会再次进入 `createMapLayout`。因此即使 `SimulationCombatWorld`、`MovementSystem` 和 Bot 已强持有本局 `MapLayout`，这些热点也没有复用该对象。`src/config/map.ts:170,319-323` 的 cache 只有 8 项；本机用一个仍被强引用的 layout、再生成 12 个其他 seed 后复现：原 seed 再取返回不同对象并同步重建约 `247ms`，实际 `InventorySystem.dropDeadInventories` 的同类驱逐场景约 `358ms`（默认尸体 3 件掉落），而服务端 tick 预算约 `33ms`。这会在 9 个以上不同 seed 房间交错运行时把任一新死亡/卡死迁移放大为明显房间卡顿，与本轮“为后续功能预留余量”和 Build 中的多房间闭环声明冲突。Builder 需让 Inventory placement 与 Bot relocation 使用每局已持有的 layout，不再在运行时依赖全局 bounded cache 命中；writer 需补一个超过 8 个 seed 交错后执行死亡掉落/强制迁移、结构性断言不重建 layout 的回归，不能用易抖动时间阈值代替。
+1. **[高] 活跃房间持有的 layout 被全局 8-seed cache 驱逐后，死亡掉落和 Bot 强制迁移仍会同步重建整张地图，造成远超 30 Hz tick 预算的停顿。** `src/game/systems/InventorySystem.ts:149-156,708-712` 每个新尸体仍通过 `createMapLayout(state.mapSeed)` 创建 placement context；`src/controllers/BotController.ts:1077-1080` 的 forced relocation 仍把数字 seed 传给 `getTerrainHeight`，后者会再次进入 `createMapLayout`。因此即使 `SimulationCombatWorld`、`MovementSystem` 和 Bot 已强持有本局 `MapLayout`，这些热点也没有复用该对象。`src/config/map.ts:170,319-323` 的 cache 只有 8 项；本机用一个仍被强引用的 layout、再生成 12 个其他 seed 后复现：原 seed 再取返回不同对象并同步重建约 `247ms`，实际 `InventorySystem.dropDeadInventories` 的同类驱逐场景约 `358ms`（默认尸体 3 件掉落），而服务端 tick 预算约 `33ms`。这会在 9 个以上不同 seed 房间交错运行时把任一新死亡/卡死迁移放大为明显房间卡顿，与本轮“为后续功能预留余量”和 构建 中的多房间闭环声明冲突。实现方 需让 Inventory placement 与 Bot relocation 使用每局已持有的 layout，不再在运行时依赖全局 bounded cache 命中；实现 Agent 需补一个超过 8 个 seed 交错后执行死亡掉落/强制迁移、结构性断言不重建 layout 的回归，不能用易抖动时间阈值代替。
 
 #### 验证与残余风险
 
 - 本机实际执行 `npm run test`：应用 **28 files / 259 tests**、Worker **3 files / 26 tests** 全通过；五 seed 均保持 `>=42/49` 武装，49 Bot 完整局产生唯一胜者。`npm run typecheck`、`npm run build`、`npm run build:worker`、`git diff --check f470f9d` 均通过；构建仅有既有 >500kB chunk warning。未发现业务源码中的 `context.Background()`。
 - 额外差分验证：`StaticGridIndex` 对 3 种 cell size、共 30,000 条含负坐标、格边界、corner、极小 delta 的随机线段与 AABB 完整扫描比较，无候选漏失、重复或 source-order 变化，并人工推进 generation wrap；`SimulationCombatWorld` 在 seed `0/42/4294967295` 上比较 7,056 条 indexed/full 射线，覆盖每条坡道的上下垂直与双向斜射，结果逐项一致；两个共享 index 的 navigator 在 6 个 seed 上交错比较 960 条 indexed/full 路径，结果一致。
-- 已静态确认共享 `StaticGridIndex` 返回数组的当前调用链均在下一次 query 前同步消费，未发现嵌套 query 或系统原地修改复用 command；但仓库内 `staticGridIndex` 新增测试只覆盖单个正坐标 corner，负坐标、边界、极小 delta、generation wrap 与返回数组别名仍仅有本轮临时差分证据。该测试缺口本身暂不另列 blocker，修复上述多房间 finding 时建议一并固化关键边界。
-- 本轮没有展示层改动，未做浏览器视觉验收。Builder 必须先处理上述多房间运行时重建问题，再发起复审；其余检查项无需因本结论重写。
+- 已静态确认共享 `StaticGridIndex` 返回数组的当前调用链均在下一次 query 前同步消费，未发现嵌套 query 或系统原地修改复用 command；但仓库内 `staticGridIndex` 新增测试只覆盖单个正坐标 corner，负坐标、边界、极小 delta、generation wrap 与返回数组别名仍仅有本轮临时差分证据。该测试缺口本身暂不另列 blocker，修复上述多房间 审查发现 时建议一并固化关键边界。
+- 本轮没有展示层改动，未做浏览器视觉验收。实现方 必须先处理上述多房间运行时重建问题，再发起复审；其余检查项无需因本结论重写。
 
-### 2026-07-21 18:27 +0800：多房间 pinned layout finding 复审（通过）
+### 2026-07-21 18:27 +0800：多房间 pinned layout 审查发现 复审（通过）
 
-- 审查范围：对照本 plan 2026-07-21 18:12 的唯一高风险 finding，并继续复核当前 `main` 工作区相对指定基线 `f470f9d` 的完整范围；当前 `HEAD=origin/main=f470f9d`、merge-base 为 `f470f9d`，范围为 11 个源码文件、5 个测试文件及本 plan 增量。未跟踪参考文件 `session-ses_082c.md` 继续按要求忽略且未触碰。
-- 审查结论：**通过。本次复审未发现明确问题。** 上轮多房间 cache 驱逐后死亡掉落/forced relocation 重建地图的 finding 已闭环；其余空间索引、射线、导航、AI、掉落和规则循环改动复核后仍未发现行为回归。
-- Finding 闭环：`BattleRoyaleSession` 为单机创建一次本局 layout，并将同一对象传给 `GameSimulation`、`SimulationCombatWorld` 和全部 Bot；`MatchRuntime` 从新局或 checkpoint clone 的 `state.mapSeed` 创建并强持有 layout，传给 Simulation、World、普通 Bot，并在断线接管 Bot 创建时继续传入。`GameSimulation` 再把该对象传给 Inventory/Movement。各系统只在自身观察到 `state.mapSeed` 真变化时回退到 `createMapLayout`；生产对局中 mapSeed 不会原地变化，防御性变化路径仍能更新到新布局。
+- 审查范围：对照本 plan 2026-07-21 18:12 的唯一高风险 审查发现，并继续复核当前 `main` 工作区相对指定基线 `f470f9d` 的完整范围；当前 `HEAD=origin/main=f470f9d`、merge-base 为 `f470f9d`，范围为 11 个源码文件、5 个测试文件及本 plan 增量。未跟踪参考文件 `session-ses_082c.md` 继续按要求忽略且未触碰。
+- 审查结论：**通过。本次复审未发现明确问题。** 上轮多房间 cache 驱逐后死亡掉落/forced relocation 重建地图的 审查发现 已闭环；其余空间索引、射线、导航、AI、掉落和规则循环改动复核后仍未发现行为回归。
+- 审查发现 闭环：`BattleRoyaleSession` 为单机创建一次本局 layout，并将同一对象传给 `GameSimulation`、`SimulationCombatWorld` 和全部 Bot；`MatchRuntime` 从新局或 checkpoint clone 的 `state.mapSeed` 创建并强持有 layout，传给 Simulation、World、普通 Bot，并在断线接管 Bot 创建时继续传入。`GameSimulation` 再把该对象传给 Inventory/Movement。各系统只在自身观察到 `state.mapSeed` 真变化时回退到 `createMapLayout`；生产对局中 mapSeed 不会原地变化，防御性变化路径仍能更新到新布局。
 - 掉落链复核：死亡背包只创建一次使用 pinned layout 的 placement context；手动丢弃、满背包换栈、替换武器/护甲/头盔均汇入 `createGroundLoot`，其无 placement 分支同样先取实例 layout 再创建 context，不会回到全局 cache。自定义 cache 驱逐后验证确认手动和替换掉落均实际读取 pinned layout。
 - Proxy 回归复核：两个测试都会先生成 9 个其他 seed 并确认原 seed 已从 cache 驱逐；上一实现不会持有传入 Proxy，因而 terrain read 断言会失败。Bot 测试的 navigator 也会读取 layout，不能单独证明 forced target 高度来源；本轮另将 navigator stub 为空路径后执行同一 forced relocation，仍观测到 pinned Proxy terrain read，并结合 `BotController.ts:1082-1085` 确认高度直接使用 `this.layout`，不是伪覆盖。StaticGrid 新回归覆盖负 cell、精确边界附近 `1e-12` 坐标和 generation wrap；上一轮 30,000 条随机差分继续作为 tiny-delta/边界补充证据。
 - 构造与对象复用复核：新增参数均有默认值，既有测试/独立调用方兼容；`SimulationCombatWorld(state, false)` 的完整扫描参数语义未改变。复用的 continuous command 没有被规则系统原地修改；living actor 集、命令排序和共享 GridNavigator query buffer 的同步消费关系也未因本轮修复变化。未发现业务源码中的 `context.Background()`。
@@ -1597,40 +1597,40 @@
 
 ### 2026-07-21 19:49 +0800：联机移动平滑与 snapshot burst 完整审查（不通过）
 
-- 审查范围：以本 plan 2026-07-21 19:08–19:42 Build 记录、`AGENTS.md`、`README.md` 和用户给定网络语义边界为基线；确认当前分支为 `main`，`HEAD=origin/main=merge-base=a62899158ab64a4d4cf25757415042dd7e4a3c53`。完整审查工作区相对 `a628991` 的 `MultiplayerSession`、`GameRoom`、两个新增 smoothing/throttle 模块、两个新增测试及 plan 增量，并检查 `MatchRuntime.takeFrame/projectFrame`、`CommandInbox`、重连/full/resync、Movement/layout 和可见性调用链。未跟踪参考文件 `session-ses_082c.md` 按要求忽略且未触碰。
+- 审查范围：以本 plan 2026-07-21 19:08–19:42 构建 记录、`AGENTS.md`、`README.md` 和用户给定网络语义边界为基线；确认当前分支为 `main`，`HEAD=origin/main=merge-base=a62899158ab64a4d4cf25757415042dd7e4a3c53`。完整审查工作区相对 `a628991` 的 `MultiplayerSession`、`GameRoom`、两个新增 smoothing/throttle 模块、两个新增测试及 plan 增量，并检查 `MatchRuntime.takeFrame/projectFrame`、`CommandInbox`、重连/full/resync、Movement/layout 和可见性调用链。未跟踪参考文件 `session-ses_082c.md` 按要求忽略且未触碰。
 - 审查结论：**不通过。** snapshot 前先推进旧 transition、本地 snapshot + pending input replay 后仅叠加视觉 correction、full/resync/重新可见清理、初始 layout pin，以及 30 Hz / `tick % 3` / 80ms throttle 与 finished 强制尾帧的主链未见权威语义回归；但远端 actor 的真实传送和 deployment 边界没有执行约定的立即对齐，存在 1 项高风险功能缺口。
 
-#### Finding
+#### 审查发现
 
-1. **[高] 远端 actor 的大于 6m 传送和 deployment 切换仍被普通 position transition 平滑，违反必须立即对齐的边界。** `src/app/MultiplayerSession.ts:315-323` 为每个远端 actor 无条件从旧 rendered position 创建 `120–250ms` transition，唯一的零时长条件只有“本帧重新进入可见集合”；这里没有比较前后 `alive/deployment`，也没有距离阈值。相应判断只存在于本地 `beginLocalCorrection`（`:521-536`），因此不能保护远端。复现：让一个前后都可见的远端 grounded actor 从 `(0,1.76,0)` 在下一 snapshot 权威移动到 `(10,1.76,0)`；应用 snapshot 后首帧仍采样旧位置，随后 120ms 内经过中间坐标，而不是立即到 10m。远端 `aircraft→parachuting` 或 `parachuting→grounded` 同样会沿旧 transition 起步（死亡虽会被 root 立即隐藏，但不是通用边界处理）。影响是服务端真实传送会被伪装成高速穿墙/穿地移动，部署视觉也可能短暂脱离权威位置，直接偏离本轮明确需求。Builder 需在创建远端 transition 前比较旧/新 actor：重新可见、alive/deployment 变化或前后权威位置距离大于 6m 时使用零时长并丢弃旧 transition；writer 需补能击穿当前实现的会话级或 transition-selection 回归，至少覆盖 >6m、deployment/alive、普通 10Hz 移动和重新可见。
+1. **[高] 远端 actor 的大于 6m 传送和 deployment 切换仍被普通 position transition 平滑，违反必须立即对齐的边界。** `src/app/MultiplayerSession.ts:315-323` 为每个远端 actor 无条件从旧 rendered position 创建 `120–250ms` transition，唯一的零时长条件只有“本帧重新进入可见集合”；这里没有比较前后 `alive/deployment`，也没有距离阈值。相应判断只存在于本地 `beginLocalCorrection`（`:521-536`），因此不能保护远端。复现：让一个前后都可见的远端 grounded actor 从 `(0,1.76,0)` 在下一 snapshot 权威移动到 `(10,1.76,0)`；应用 snapshot 后首帧仍采样旧位置，随后 120ms 内经过中间坐标，而不是立即到 10m。远端 `aircraft→parachuting` 或 `parachuting→grounded` 同样会沿旧 transition 起步（死亡虽会被 root 立即隐藏，但不是通用边界处理）。影响是服务端真实传送会被伪装成高速穿墙/穿地移动，部署视觉也可能短暂脱离权威位置，直接偏离本轮明确需求。实现方 需在创建远端 transition 前比较旧/新 actor：重新可见、alive/deployment 变化或前后权威位置距离大于 6m 时使用零时长并丢弃旧 transition；实现 Agent 需补能击穿当前实现的会话级或 transition-selection 回归，至少覆盖 >6m、deployment/alive、普通 10Hz 移动和重新可见。
 
 #### 验证与待处理
 
-- Reviewer 本机实际执行 `npm run typecheck && npm run test && npm run build && npm run build:worker && git diff --check a628991`，全部通过：应用 **30 files / 267 tests**、Worker **3 files / 26 tests**；构建仅保留既有 >500kB chunk warning。未发现业务源码中的 `context.Background()`。
-- 已复核 writer 的双浏览器静音 WebSocket 证据，其正常移动与 120ms stall 样本支持普通平滑链有效，但样本没有覆盖上述远端传送/deployment 边界，不能抵消 finding。Builder 必须先修复该项；writer 补边界回归后再发起复审。
+- 审查者 本机实际执行 `npm run typecheck && npm run test && npm run build && npm run build:worker && git diff --check a628991`，全部通过：应用 **30 files / 267 tests**、Worker **3 files / 26 tests**；构建仅保留既有 >500kB chunk warning。未发现业务源码中的 `context.Background()`。
+- 已复核 实现 Agent 的双浏览器静音 WebSocket 证据，其正常移动与 120ms stall 样本支持普通平滑链有效，但样本没有覆盖上述远端传送/deployment 边界，不能抵消 审查发现。实现方 必须先修复该项；实现 Agent 补边界回归后再发起复审。
 - 残余验证风险：当前新增测试只直接测试纯 smoothing/throttle helper，没有 `MultiplayerSession` 消息队列/full/coalescing/reconciliation 集成测试，也没有 GameRoom cadence/finished 尾帧 Worker 测试。`GameRoom` 静态调用链显示 `takeFrame` 仅在实际发送时清 events/dirty loot，正常候选仍为每 3 tick，当前未发现第二项明确错误；但 watchdog force restart、runtime restore 和最终帧仍主要依赖代码审查及既有真实浏览器证据。
 
-### 2026-07-21 19:56 +0800：远端传送边界 finding 复审（不通过）
+### 2026-07-21 19:56 +0800：远端传送边界 审查发现 复审（不通过）
 
-- 审查范围：对照本 plan 2026-07-21 19:49 的唯一高风险 finding，并继续复核当前 `main` 工作区相对指定基线 `a62899158ab64a4d4cf25757415042dd7e4a3c53` 的完整改动；`HEAD=origin/main=merge-base=a628991`。重点复核 `createRemotePositionTransition`、snapshot state 替换前后的引用生命周期、本地 prediction correction 与远端 pose map、Movement 的 64m/s 高空滑翔语义，以及上轮 smoothing/throttle/full/resync/visibility/layout 调用链。未跟踪 `session-ses_082c.md` 继续忽略且未触碰。
-- 审查结论：**不通过。** 上轮 0→10m grounded 传送、重新可见、缺少旧 actor、alive/deployment 边界均已正确改为零时长；旧 `actors` map 在替换 state 前保存，pending input replay 只修改新 frame 的本地 actor，权威距离与 rendered transition 起点分工正确，local correction 也不会读取 remote pose。原 finding 已大部分闭环，但 parachuting 的固定 18m 上限没有结合当前 snapshot tick gap，仍会平滑本次间隔内不可能由规则移动产生的真实大位移。
+- 审查范围：对照本 plan 2026-07-21 19:49 的唯一高风险 审查发现，并继续复核当前 `main` 工作区相对指定基线 `a62899158ab64a4d4cf25757415042dd7e4a3c53` 的完整改动；`HEAD=origin/main=merge-base=a628991`。重点复核 `createRemotePositionTransition`、snapshot state 替换前后的引用生命周期、本地 prediction correction 与远端 pose map、Movement 的 64m/s 高空滑翔语义，以及上轮 smoothing/throttle/full/resync/visibility/layout 调用链。未跟踪 `session-ses_082c.md` 继续忽略且未触碰。
+- 审查结论：**不通过。** 上轮 0→10m grounded 传送、重新可见、缺少旧 actor、alive/deployment 边界均已正确改为零时长；旧 `actors` map 在替换 state 前保存，pending input replay 只修改新 frame 的本地 actor，权威距离与 rendered transition 起点分工正确，local correction 也不会读取 remote pose。原 审查发现 已大部分闭环，但 parachuting 的固定 18m 上限没有结合当前 snapshot tick gap，仍会平滑本次间隔内不可能由规则移动产生的真实大位移。
 
-#### Finding
+#### 审查发现
 
-1. **[高] parachuting 的固定 18m 阈值会在正常 10Hz snapshot 下掩盖不可能的 6–18m 权威跳变。** `src/network/PositionSmoothing.ts:83-97` 只按 deployment 选择固定 `18m`，虽然已收到由 tick gap 得出的 `durationSeconds`，却没有用它约束本次合法位移。`MovementSystem` 的高空极限是水平 `64m/s`、垂直 `5m/s`；正常 3 tick/0.1s 快照间最多约 `6.42m`，即使用当前 120ms 最小插值窗口作宽松预算也仅约 `7.7m`。复现：前后均为 parachuting，旧位置 `(0,120,0)`、下一正常快照位置 `(17,119.5,0)`、duration `0.12s`；当前 helper 会创建 120ms transition，虽然该位移不可能由 3 个权威 tick 产生，应视为传送并立即对齐。现有 `tests/unit/positionSmoothing.test.ts:78-85` 只证明 `10m/0.2s` 在高空是合理样本，没有覆盖相同距离在正常 tick gap 下应 snap。影响是在高空或近地阶段把真实权威跳变表现为最高约 142m/s 的高速滑行，近地时仍可能穿过建筑/地形，未完全满足“真实传送不能被平滑掩盖”。Builder 不应退回机械 6m：建议保留 18m 硬上限，同时按实际 tick gap（最好显式传入；或用 interpolation duration 作保守近似）和 `sqrt(64²+5²)m/s` 计算本次动态合法上限并留少量容差。Writer 至少补 `10m/0.2s smooth`、`10–17m/0.12s snap`、接近 250ms 的合法高速 smooth 和 `>18m snap` 回归。
+1. **[高] parachuting 的固定 18m 阈值会在正常 10Hz snapshot 下掩盖不可能的 6–18m 权威跳变。** `src/network/PositionSmoothing.ts:83-97` 只按 deployment 选择固定 `18m`，虽然已收到由 tick gap 得出的 `durationSeconds`，却没有用它约束本次合法位移。`MovementSystem` 的高空极限是水平 `64m/s`、垂直 `5m/s`；正常 3 tick/0.1s 快照间最多约 `6.42m`，即使用当前 120ms 最小插值窗口作宽松预算也仅约 `7.7m`。复现：前后均为 parachuting，旧位置 `(0,120,0)`、下一正常快照位置 `(17,119.5,0)`、duration `0.12s`；当前 helper 会创建 120ms transition，虽然该位移不可能由 3 个权威 tick 产生，应视为传送并立即对齐。现有 `tests/unit/positionSmoothing.test.ts:78-85` 只证明 `10m/0.2s` 在高空是合理样本，没有覆盖相同距离在正常 tick gap 下应 snap。影响是在高空或近地阶段把真实权威跳变表现为最高约 142m/s 的高速滑行，近地时仍可能穿过建筑/地形，未完全满足“真实传送不能被平滑掩盖”。实现方 不应退回机械 6m：建议保留 18m 硬上限，同时按实际 tick gap（最好显式传入；或用 interpolation duration 作保守近似）和 `sqrt(64²+5²)m/s` 计算本次动态合法上限并留少量容差。Writer 至少补 `10m/0.2s smooth`、`10–17m/0.12s snap`、接近 250ms 的合法高速 smooth 和 `>18m snap` 回归。
 
 #### 验证与待处理
 
-- Reviewer 本机实际执行 `npm run typecheck && npm run test && npm run build && npm run build:worker && git diff --check a628991`，全部通过：应用 **30 files / 269 tests**、Worker **3 files / 26 tests**；构建仅保留既有 >500kB chunk warning。未发现业务源码中的 `context.Background()`。
-- 上轮其余检查项继续未发现明确问题：旧 authoritative actor 引用未被新 state/replay 污染；普通 grounded、lifecycle、重新可见和 full/resync snap 正确；snapshot throttle 的候选频率、event/loot 累积和 finished 尾帧静态语义未变化。Builder 需处理上述动态 parachuting 上限，writer 补边界回归后再复审。
+- 审查者 本机实际执行 `npm run typecheck && npm run test && npm run build && npm run build:worker && git diff --check a628991`，全部通过：应用 **30 files / 269 tests**、Worker **3 files / 26 tests**；构建仅保留既有 >500kB chunk warning。未发现业务源码中的 `context.Background()`。
+- 上轮其余检查项继续未发现明确问题：旧 authoritative actor 引用未被新 state/replay 污染；普通 grounded、lifecycle、重新可见和 full/resync snap 正确；snapshot throttle 的候选频率、event/loot 累积和 finished 尾帧静态语义未变化。实现方 需处理上述动态 parachuting 上限，实现 Agent 补边界回归后再复审。
 - 残余验证风险：仍没有 `MultiplayerSession` 消息队列/reconciliation 集成测试或 GameRoom cadence Worker 测试；本轮新增 transition-selection 纯函数测试提高了边界覆盖，但不能替代完整会话链验证。
 
 ### 2026-07-21 20:05 +0800：动态 parachuting 位移预算第三轮复审（通过）
 
-- 审查范围：对照本 plan 2026-07-21 19:49、19:56 两轮唯一高风险 finding，并继续复核当前 `main` 工作区相对指定基线 `a62899158ab64a4d4cf25757415042dd7e4a3c53` 的完整源码、测试和文档改动；`HEAD=origin/main=merge-base=a628991`。重点检查真实 tick gap、动态滑翔预算、0.35m 容差、18m hard cap、异常/倒退/长 tick gap、deployment 边界、Movement 常量依赖，以及 README/architecture 与实现的一致性。未跟踪 `session-ses_082c.md` 按要求忽略且未触碰。
-- 审查结论：**通过。本次审查未发现明确问题（No findings）。** 上轮 parachuting 固定 18m finding 已闭环；前两轮其余已确认安全的 smoothing、prediction、full/resync、visibility、layout pin、snapshot throttle、event/loot 和 finished 尾帧范围继续未发现回归。
+- 审查范围：对照本 plan 2026-07-21 19:49、19:56 两轮唯一高风险 审查发现，并继续复核当前 `main` 工作区相对指定基线 `a62899158ab64a4d4cf25757415042dd7e4a3c53` 的完整源码、测试和文档改动；`HEAD=origin/main=merge-base=a628991`。重点检查真实 tick gap、动态滑翔预算、0.35m 容差、18m hard cap、异常/倒退/长 tick gap、deployment 边界、Movement 常量依赖，以及 README/architecture 与实现的一致性。未跟踪 `session-ses_082c.md` 按要求忽略且未触碰。
+- 审查结论：**通过。本次审查未发现明确问题（No 审查发现）。** 上轮 parachuting 固定 18m 审查发现 已闭环；前两轮其余已确认安全的 smoothing、prediction、full/resync、visibility、layout pin、snapshot throttle、event/loot 和 finished 尾帧范围继续未发现回归。
 - 动态预算复核：`snapshotElapsedSeconds` 使用未 clamp 的 server tick 差；生产 3/6 tick gap 分别得到 0.1/0.2 秒，而 interpolation 仍独立 clamp 到 120–250ms。parachuting 上限为 `min(18, hypot(64,5)×gap+0.35)`：正常 0.1 秒约 6.77m，0.2 秒约 13.19m，0.25 秒约 16.40m，数学上覆盖 Movement 每 tick 可同时发生的最大水平滑翔与垂直下降。0.35m 小于 actor radius，足以容纳边界/浮点余量而不会重新放大到上一轮 18m 固定预算。长 gap 始终被 18m 截断；相同/倒退 tick 被收紧为单 tick 预算，不会扩大平滑范围，正常协议下 stale sequence 又会先被拒绝。高空最大速度可平滑，近地使用同一绝对上界虽较保守，但 hard cap、tick 动态预算及 deployment→grounded 立即 snap 仍保证边界有界。
 - lifecycle 与依赖复核：重新可见、缺少旧 actor、alive/deployment 变化均先于距离判断 snap；旧 authoritative actor map 仍在 state 替换前保存，pending input replay 只影响新本地 actor，remote rendered start 与 authoritative distance 分工不变。`MultiplayerSession` 原本已依赖 `MovementSystem`，新增两个常量导出没有新增依赖方向或循环，也没有改变 Movement 行为；网络 helper 只接收速度参数，没有复制玩法值。
 - 测试与文档复核：新增回归覆盖 `10m/0.2s smooth`、`17m/0.1s snap`、`16m/0.25s smooth`、`19m/0.3s hard-cap snap`，并保留 grounded、alive/deployment、重新可见和新 transition 零进度断言。README 与 `docs/architecture.md` 对 authoritative replace、pending replay、local visual offset、remote tick-gap transition、80ms throttle、event/loot 累积及 finished 尾帧的描述与当前实现一致。
-- Reviewer 本机实际执行 `npm run typecheck && npm run test && npm run build && npm run build:worker && git diff --check a628991`，全部通过：应用 **30 files / 269 tests**、Worker **3 files / 26 tests**；构建仅保留既有 >500kB chunk warning。未发现业务源码中的 `context.Background()`。
+- 审查者 本机实际执行 `npm run typecheck && npm run test && npm run build && npm run build:worker && git diff --check a628991`，全部通过：应用 **30 files / 269 tests**、Worker **3 files / 26 tests**；构建仅保留既有 >500kB chunk warning。未发现业务源码中的 `context.Background()`。
 - 残余风险（非阻塞）：仍无 `MultiplayerSession` 队列/reconciliation 集成测试和 GameRoom cadence Worker 测试；本轮纯函数边界及既有真实双浏览器证据能够覆盖当前修复目标，但不能替代后续对 watchdog restore、消息乱序协议违例和完整会话生命周期的专项自动化。

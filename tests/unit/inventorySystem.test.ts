@@ -526,11 +526,13 @@ describe("InventorySystem", () => {
     expect(Math.hypot(drop.position.x - closestX, drop.position.z - closestZ)).toBeGreaterThanOrEqual(0.25);
   });
 
-  it("keeps roof-edge death drops within the dead actor's 3m interaction range", () => {
+  it("keeps rooftop death drops within the dead actor's 3m interaction range", () => {
     const state = createState();
     const actor = state.actors.player;
     const layout = createMapLayout(state.mapSeed);
-    const building = layout.obstacles[0];
+    const building = layout.obstacles.find((candidate) =>
+      (candidate.footprint ?? "rectangle") === "rectangle"
+    );
     if (!building) throw new Error("building missing");
     actor.position = {
       x: building.center.x + building.width / 2 - 0.01,
