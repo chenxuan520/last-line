@@ -1564,7 +1564,7 @@ describe("IslandScene lifecycle", () => {
         !blueprint.urbanRoadSegments.includes(road)
       )).toBe(true);
     }
-    expect(selectTownPresentationRoads(createMapLayout("mixed", 38))).toHaveLength(4);
+    expect(selectTownPresentationRoads(createMapLayout("mixed", 38))).toHaveLength(8);
     expect(selectTownPresentationRoads(createMapLayout("mixed", 16))).toHaveLength(16);
   });
 

@@ -22,7 +22,7 @@ export interface FragGrenadeConfig {
 
 export const FRAG_GRENADE_CONFIG: Readonly<FragGrenadeConfig> = {
   itemId: FRAG_GRENADE_ITEM_ID,
-  fuseSeconds: 3.5,
+  fuseSeconds: 2.5,
   gravity: 18,
   radius: 8,
   maximumDamage: 120,

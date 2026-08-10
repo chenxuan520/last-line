@@ -28,7 +28,7 @@ describe("BotController", () => {
     bot.position = { x: 0, y: 1.76, z: 0 };
     bot.yaw = 0;
     bot.inventory.backpack = [{ itemId: FRAG_GRENADE_ITEM_ID, quantity: 1 }];
-    player.position = { x: 0, y: 1.76, z: 20 };
+    player.position = { x: 0, y: 1.76, z: 16 };
     const controller = new BotController(1, () => 0.5);
 
     const command = controller.update(bot, state, grenadeGroundWorld(), 1, player.id);
@@ -37,6 +37,31 @@ describe("BotController", () => {
     expect(command.fire).toBe(false);
     expect(command.aimDirection.z).toBeGreaterThan(0.2);
     expect(command.aimDirection.y).toBeGreaterThan(0.9);
+  });
+
+  it("does not throw when the high arc cannot reach the target before the 2.5-second fuse", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    for (const actor of Object.values(state.actors)) {
+      actor.alive = actor.id === bot.id || actor.id === player.id;
+    }
+    bot.position = { x: 0, y: 1.76, z: 0 };
+    bot.yaw = 0;
+    bot.inventory.backpack = [{ itemId: FRAG_GRENADE_ITEM_ID, quantity: 1 }];
+    player.position = { x: 0, y: 1.76, z: 20 };
+
+    const command = new BotController(1, () => 0.5).update(
+      bot,
+      state,
+      grenadeGroundWorld(),
+      1,
+      player.id,
+    );
+
+    expect(command.throwGrenade).toBeNull();
+    expect(command.fire).toBe(true);
   });
 
   it("does not throw a grenade at unsafe close range or above the global active limit", () => {

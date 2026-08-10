@@ -382,7 +382,7 @@ describe("LocalDurableObjectRuntime", () => {
       const state = await environment.rooms.getState(roomId);
       const runtime = new MatchRuntime({
         humanActorIds: ["human-1", "human-2"],
-        seed: 0,
+        seed: 1,
         mapId: "mixed",
         startWithBandage: true,
         disableAiSnipers: true,
@@ -405,7 +405,7 @@ describe("LocalDurableObjectRuntime", () => {
         revision: 1,
         countdownEndsAt: null,
         options: { mapId: "mixed", startWithBandage: true, disableAiSnipers: true },
-        seed: 0,
+        seed: 1,
         expiresAt: Date.now() + 60_000,
         members: persistedMatchMembers(),
         checkpoint: corruptedCheckpoint,
@@ -486,8 +486,8 @@ describe("LocalDurableObjectRuntime", () => {
     }
   });
 
-  it("keeps a current version 10 town checkpoint recoverable across a SQLite restart", async () => {
-    const directory = await mkdtemp(resolve(tmpdir(), "last-line-checkpoint-town-v9-"));
+  it("keeps a current version 11 town checkpoint recoverable across a SQLite restart", async () => {
+    const directory = await mkdtemp(resolve(tmpdir(), "last-line-checkpoint-town-v11-"));
     const databasePath = resolve(directory, "rooms.sqlite");
     const roomId = "room-00000000-0000-4000-8000-000000000003";
     let environment = await createStandaloneEnvironment({ databasePath });

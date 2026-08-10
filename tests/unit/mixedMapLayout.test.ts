@@ -13,6 +13,7 @@ import {
 } from "../../src/config/map";
 import {
   createMixedMapBlueprint,
+  createMixedRandomRegionKinds,
   createMixedRegionSpecs,
   FIXED_MIXED_REGION_NAMES,
   MIXED_REGION_COUNT,
@@ -131,28 +132,37 @@ describe("mixed map layout", () => {
     }
   });
 
-  it("varies the three random region kinds and names across seeds", () => {
+  it("varies random region kinds while always adding at least one more town", () => {
     const signatures = new Set<string>();
-
-    for (let seed = 0; seed < 100_000 && signatures.size < 27; seed += 1) {
-      const randomRegions = createMixedRegionSpecs(seed).filter((region) => !region.fixed);
-      expect(randomRegions).toHaveLength(3);
-      signatures.add(randomRegions.map((region) => region.kind).join("|"));
-    }
-
-    expect(signatures).toEqual(new Set(
+    const expectedSignatures = new Set(
       (["town", "rural", "forest"] as const).flatMap((first) =>
         (["town", "rural", "forest"] as const).flatMap((second) =>
-          (["town", "rural", "forest"] as const).map((third) => `${first}|${second}|${third}`)
+          (["town", "rural", "forest"] as const)
+            .map((third) => [first, second, third] as const)
+            .filter((kinds) => kinds.includes("town"))
+            .map((kinds) => kinds.join("|"))
         )
       ),
-    ));
+    );
+
+    for (let seed = 0; seed < 20_000; seed += 1) {
+      const randomKinds = createMixedRandomRegionKinds(seed);
+      expect(randomKinds).toHaveLength(3);
+      expect(randomKinds).toContain("town");
+      signatures.add(randomKinds.join("|"));
+    }
+
+    expect(signatures).toEqual(expectedSignatures);
+    for (const seed of [0, 1, 2, 11, 16, 38, 42, 2026, 0xffff_ffff]) {
+      expect(createMixedRegionSpecs(seed).filter((region) => region.kind === "town").length, `${seed}:town-count`)
+        .toBeGreaterThanOrEqual(2);
+    }
     expect(createMixedRegionSpecs(11).filter((region) => !region.fixed).map((region) => region.kind))
-      .toEqual(["rural", "rural", "rural"]);
+      .toContain("town");
     expect(createMixedRegionSpecs(16).filter((region) => !region.fixed).map((region) => region.kind))
       .toEqual(["town", "town", "town"]);
     expect(createMixedRegionSpecs(38).filter((region) => !region.fixed).map((region) => region.kind))
-      .toEqual(["forest", "forest", "forest"]);
+      .toContain("town");
   });
 
   it("keeps one reachable hospital named 医院 inside the fixed town", () => {

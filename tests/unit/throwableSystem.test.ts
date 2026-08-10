@@ -18,6 +18,10 @@ import {
 } from "../../src/game/systems/ThrowableSystem";
 
 describe("ThrowableSystem", () => {
+  it("uses a 2.5-second authoritative frag grenade fuse", () => {
+    expect(FRAG_GRENADE_CONFIG.fuseSeconds).toBe(2.5);
+  });
+
   it("consumes one backpack grenade and creates one serializable authoritative projectile", () => {
     const state = createState(["player"]);
     const player = state.actors.player;
@@ -48,6 +52,36 @@ describe("ThrowableSystem", () => {
       grenadeId: "grenade-1",
     }));
     expect(JSON.parse(JSON.stringify(state))).toEqual(state);
+  });
+
+  it("explodes at the configured 2.5-second authoritative fuse boundary", () => {
+    const state = createState(["player", "survivor"]);
+    const player = state.actors.player;
+    const survivor = state.actors.survivor;
+    if (!player || !survivor) throw new Error("fuse fixture actors missing");
+    player.inventory.backpack = [{ itemId: FRAG_GRENADE_ITEM_ID, quantity: 1 }];
+    survivor.position = { x: 100, y: 1.76, z: 0 };
+    const system = new ThrowableSystem();
+    const events: GameEvent[] = [];
+    system.processCommands(
+      state,
+      new Map([[
+        player.id,
+        { ...createIdleCommand(), aimDirection: { x: 0, y: 0, z: 1 }, throwGrenade: "high" },
+      ]]),
+      events,
+    );
+
+    system.update(state, FRAG_GRENADE_CONFIG.fuseSeconds - 0.01, createWorld(), events);
+    expect(state.activeGrenades["grenade-1"]?.fuseSeconds).toBeCloseTo(0.01, 6);
+    expect(events.some((event) => event.type === "grenade-exploded")).toBe(false);
+
+    system.update(state, 0.01, createWorld(), events);
+    expect(state.activeGrenades).toEqual({});
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "grenade-exploded",
+      grenadeId: "grenade-1",
+    }));
   });
 
   it("rejects a throw without inventory and does not consume duplicate one-shot commands", () => {
