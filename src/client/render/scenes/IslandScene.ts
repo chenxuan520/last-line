@@ -1040,12 +1040,6 @@ function createIslandEnvironment(
   );
   mergeStaticBatch(
     scene,
-    "rooftop-railing-batch",
-    (mesh) => mesh.metadata?.decoration === "rooftop-railing",
-    { decoration: "rooftop-railing", detailType: "penetrable-railing" },
-  );
-  mergeStaticBatch(
-    scene,
     "fence-cover-batch",
     (mesh) => mesh.metadata?.decoration === "cover-prop" && mesh.metadata?.coverKind === "fence",
     { decoration: "cover-prop", coverKind: "fence" },
@@ -1746,15 +1740,15 @@ function createRooftopRailings(
     building.id !== layout.ammunitionDepot.buildingId &&
     selectRooftopRailing(layout.mapId, layout.seed, building.id)
   );
+  if (eligible.length === 0) return;
+  const transforms: Matrix[] = [];
   for (const building of eligible) {
     const roofY = building.baseY + building.storyHeight * building.storyCount + BUILDING_ROOF_CAP_HEIGHT;
     const inset = 0.34;
     const halfWidth = building.width / 2 - inset;
     const halfDepth = building.depth / 2 - inset;
     const postSpacing = 4;
-    const pieces: Mesh[] = [];
     const addPiece = (
-      name: string,
       x: number,
       y: number,
       z: number,
@@ -1762,25 +1756,22 @@ function createRooftopRailings(
       height: number,
       depth: number,
     ): void => {
-      const piece = CreateBox(name, { width, height, depth }, scene);
-      piece.position.set(x, y, z);
-      piece.material = materials.fence;
-      piece.checkCollisions = false;
-      piece.isPickable = false;
-      piece.metadata = { decoration: "rooftop-railing", obstacleId: building.id };
-      pieces.push(piece);
+      transforms.push(Matrix.Compose(
+        new Vector3(width, height, depth),
+        Quaternion.Identity(),
+        new Vector3(x, y, z),
+      ));
     };
-    for (const [side, fixed, span, horizontal] of [
-      ["front", -halfDepth, halfWidth * 2, true],
-      ["back", halfDepth, halfWidth * 2, true],
-      ["left", -halfWidth, halfDepth * 2, false],
-      ["right", halfWidth, halfDepth * 2, false],
+    for (const [fixed, span, horizontal] of [
+      [-halfDepth, halfWidth * 2, true],
+      [halfDepth, halfWidth * 2, true],
+      [-halfWidth, halfDepth * 2, false],
+      [halfWidth, halfDepth * 2, false],
     ] as const) {
       const postCount = Math.max(2, Math.ceil(span / postSpacing));
       for (let index = 0; index <= postCount; index += 1) {
         const offset = -span / 2 + index / postCount * span;
         addPiece(
-          `${building.id}-railing-${side}-post-${index}`,
           building.center.x + (horizontal ? offset : fixed),
           roofY + 0.25,
           building.center.z + (horizontal ? fixed : offset),
@@ -1791,7 +1782,6 @@ function createRooftopRailings(
       }
       for (const railHeight of [0.18, 0.42]) {
         addPiece(
-          `${building.id}-railing-${side}-rail-${railHeight}`,
           building.center.x + (horizontal ? 0 : fixed),
           roofY + railHeight,
           building.center.z + (horizontal ? fixed : 0),
@@ -1802,6 +1792,19 @@ function createRooftopRailings(
       }
     }
   }
+  const railing = CreateBox("rooftop-railing-batch", { size: 1 }, scene);
+  const matrices = new Float32Array(transforms.length * 16);
+  transforms.forEach((transform, index) => transform.copyToArray(matrices, index * 16));
+  railing.thinInstanceSetBuffer("matrix", matrices, 16, true);
+  railing.thinInstanceRefreshBoundingInfo(true);
+  railing.material = materials.fence;
+  railing.checkCollisions = false;
+  railing.isPickable = false;
+  railing.metadata = {
+    decoration: "rooftop-railing",
+    detailType: "penetrable-railing",
+    sourceCount: transforms.length,
+  };
 }
 
 export function selectRooftopRailing(mapId: MapId, seed: number, buildingId: string): boolean {
