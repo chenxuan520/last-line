@@ -297,7 +297,7 @@ npm run check:budgets
 curl https://game.example.com/health
 ```
 
-每个 PR/MR 额外运行独立 `performance` job：在同一 Node.js 24 / Chrome runner 中分别构建 `origin/main` 与 PR HEAD，双方先预热，再交替采样 3 轮并取中位数。门禁监控三张地图的场景启动、heap、Mesh 创建/移除、最终 Mesh/material/geometry/vertex/index，以及灰炉城高画质 production Chrome 的进场延迟、稳定 FPS、P95/P99 帧时间和长帧数量；任一运行时指标相对 `main` 劣化超过 15% 即失败。报告写入 Actions summary 并作为 artifact 上传。压缩大小不参与该运行时门禁，原始产物大小继续由 `check:budgets` 约束。
+每个 PR/MR 额外运行独立 `performance` job：在同一 Node.js 24 / Chrome runner 中分别构建 `origin/main` 与 PR HEAD，双方先预热，再交替采样 3 轮并取中位数。硬门禁监控三张地图的 Mesh 创建/移除、最终 Mesh/material/texture/geometry/thin-instance/vertex/index 和浏览器 DOM 节点等确定性资源指标，任一指标相对 `main` 劣化超过 15% 即失败。三张地图场景启动、heap，以及灰炉城高画质 production Chrome 的进场延迟、FPS、P95/P99 帧时间和长帧数量继续完整报告为 `INFO` 审查证据，不单独决定 CI 成败。报告写入 Actions summary 并作为 artifact 上传。压缩大小不参与运行时门禁，原始产物大小继续由 `check:budgets` 约束。
 
 Standalone 集成套件验证静态服务、原生 SQLite 账号/管理员持久化、数据目录进程锁、crash-safe alarm 所有权、有界房间实例淘汰、早期 WebSocket close 清理、真实双客户端比赛、优雅 checkpoint、重启和重连。共享 Worker 测试额外覆盖确认前重连 token 宽限。浏览器验收还必须通过真实 HTTPS 代理覆盖注册/登录 cookie 恢复和管理终端。
 

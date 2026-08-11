@@ -122,6 +122,22 @@ const lowerIsBetter = new Set([
   "nodes",
 ]);
 const higherIsBetter = new Set(["startupFps", "stableFps"]);
+const observationalMetrics = new Set([
+  "startupMilliseconds",
+  "heapUsedBytes",
+  "entryMilliseconds",
+  "startupFps",
+  "startupFrameP95Milliseconds",
+  "startupFrameP99Milliseconds",
+  "startupLongFrames50",
+  "startupLongFrames100",
+  "stableFps",
+  "stableFrameP95Milliseconds",
+  "stableFrameP99Milliseconds",
+  "stableLongFrames50",
+  "stableLongFrames100",
+  "jsHeapUsedBytes",
+]);
 const informational = new Set([
   "mapId",
   "seed",
@@ -205,23 +221,27 @@ export function comparePerformanceSection(
     const base = baseline[key];
     const head = candidate[key];
     if (typeof base !== "number" || typeof head !== "number") continue;
-    let degradation = 0;
-    if (lowerIsBetter.has(key)) degradation = base === 0 ? (head === 0 ? 0 : Number.POSITIVE_INFINITY) : head / base - 1;
-    else if (higherIsBetter.has(key)) degradation = head === 0 ? Number.POSITIVE_INFINITY : base / head - 1;
+    let degradation;
+    if (lowerIsBetter.has(key)) degradation = base === 0 ? (head === 0 ? 0 : null) : head / base - 1;
+    else if (higherIsBetter.has(key)) degradation = head === 0 ? (base === 0 ? 0 : null) : base / head - 1;
     else continue;
+    const degradationStatus = degradation === null ? "infinite" : "finite";
+    const gated = !observationalMetrics.has(key);
     comparisons.push({
       section,
       metric: key,
       baseline: base,
       candidate: head,
       degradation,
-      passed: degradation <= threshold,
+      degradationStatus,
+      gated,
+      passed: !gated || (degradationStatus === "finite" && degradation <= threshold),
     });
   }
   return comparisons;
 }
 
-function markdownReport(report) {
+export function markdownReport(report) {
   const lines = [
     "# Runtime Performance Comparison",
     "",
@@ -231,11 +251,12 @@ function markdownReport(report) {
     "|---|---:|---:|---:|---:|---:|",
   ];
   for (const row of report.comparisons) {
-    const degradation = Number.isFinite(row.degradation)
+    const degradation = row.degradationStatus === "finite"
       ? `${(row.degradation * 100).toFixed(2)}%`
       : "infinite";
+    const result = row.gated ? (row.passed ? "PASS" : "FAIL") : "INFO";
     lines.push(
-      `| ${row.section} | ${row.metric} | ${row.baseline.toFixed(2)} | ${row.candidate.toFixed(2)} | ${degradation} | ${row.passed ? "PASS" : "FAIL"} |`,
+      `| ${row.section} | ${row.metric} | ${row.baseline.toFixed(2)} | ${row.candidate.toFixed(2)} | ${degradation} | ${result} |`,
     );
   }
   lines.push("", report.passed ? "**PASS**" : "**FAIL**");

@@ -1429,6 +1429,41 @@ describe("BotController", () => {
     }
   });
 
+  it("does not scan ground loot for an unarmed bot during an active zone rotation", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    player.alive = false;
+    bot.position = { x: 100, y: 1.76, z: 0 };
+    bot.inventory.weaponSlots = [null, null];
+    bot.inventory.backpack = [];
+    state.safeZone.center = { x: 0, y: 0, z: 0 };
+    state.safeZone.radius = 500;
+    state.safeZone.targetCenter = { x: 0, y: 0, z: 0 };
+    state.safeZone.targetRadius = 40;
+    state.safeZone.status = "shrinking";
+    let scans = 0;
+    state.groundLoot = new Proxy({}, {
+      ownKeys() {
+        scans += 1;
+        return [];
+      },
+    });
+
+    const command = new BotController(1, () => 0.5).update(
+      bot,
+      state,
+      miss,
+      1 / 30,
+      player.id,
+    );
+
+    expect(scans).toBe(0);
+    expect(command.move.x).toBeLessThan(-0.9);
+    expect(command.sprint).toBe(true);
+  });
+
   it("does not repeat depleted-weapon recovery scans within one decision", () => {
     const state = groundedState();
     const bot = state.actors["bot-1"];
@@ -1448,6 +1483,39 @@ describe("BotController", () => {
     new BotController(1, () => 0.5).update(bot, state, miss, 1, player.id);
 
     expect(scans).toBeLessThanOrEqual(3);
+  });
+
+  it("clears stale combat and damage goals after depleted recovery finds nothing", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    for (const actor of Object.values(state.actors)) actor.alive = actor.id === bot.id;
+    bot.inventory.weaponSlots = [createWeaponState("rifle", false), createWeaponState("smg", false)];
+    bot.inventory.backpack = [];
+    state.groundLoot = {};
+    const controller = new BotController(1, () => 0.5);
+    const internal = controller as unknown as {
+      combatLastKnownPosition: Vector3State | null;
+      combatMemoryUntilSeconds: number;
+      damageInvestigationTarget: Vector3State | null;
+      damageInvestigationDirection: Vector3State | null;
+      damageInvestigationUntilSeconds: number;
+    };
+    internal.combatLastKnownPosition = { x: 80, y: 1.76, z: 0 };
+    internal.combatMemoryUntilSeconds = state.elapsedSeconds + 12;
+    internal.damageInvestigationTarget = { x: -80, y: 1.76, z: 0 };
+    internal.damageInvestigationDirection = { x: -1, y: 0, z: 0 };
+    internal.damageInvestigationUntilSeconds = state.elapsedSeconds + 2;
+
+    const command = controller.update(bot, state, miss, 1, player.id);
+
+    expect(internal.combatLastKnownPosition).toBeNull();
+    expect(internal.combatMemoryUntilSeconds).toBe(-1);
+    expect(internal.damageInvestigationTarget).toBeNull();
+    expect(internal.damageInvestigationDirection).toBeNull();
+    expect(internal.damageInvestigationUntilSeconds).toBe(-1);
+    expect(Math.hypot(command.move.x, command.move.z)).toBeGreaterThan(0.9);
   });
 
   it("uses carried medicine when injured", () => {

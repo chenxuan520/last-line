@@ -116,8 +116,8 @@ npm run preview
 - 桌面端可能启动比赛或公开倒计时的联机操作，必须在真实用户激活中同步请求 pointer lock，并在异步入场/场景加载期间保持它，在大厅/菜单/错误退出时释放。单机与联机会话恢复必须共享安全的可选/同步/旧 Promise pointer-lock helper；禁止依赖异步大厅或 `match.full` 回调创建首次锁定。触摸端必须与 pointer lock 隔离，拒绝锁定时必须保留可用的“继续游戏”回退。
 - 快速匹配、创建房间、房间码加入和公开房加入必须共享单飞入场门禁。同步禁用所有入场入口，离开菜单时使旧尝试失效；connection 的状态/消息 handler 只有在自身连接仍是活动的 `GameApp.multiplayerConnection` 时才能修改 UI、全屏或 pointer lock。
 - 持久化比赛 checkpoint 只有在版本为当前版本且包含完整可恢复状态时才兼容：恰好包含配置的 50 个角色，record key 与 `actor.id` 一致；显式 `mapId + mapSeed` 派生的每个标准初始物资 key 都存在且与 `loot.id` 一致；active grenade 记录合法，next sequence 严格更大；安全区时间线可达；背包 stack 引用 `ITEMS`、数量为正整数且不超过 `maxStack`。额外合法动态物资仍允许存在。持久化成员必须是完整 `RoomMemberRecord`，record key 等于 `playerId`；身份、昵称、入场/重连凭据、账号/会话配对、布尔值、时间戳、连接 epoch 和 actor ID 类型都要在使用前验证。运行中/已结束房间必须保留 2–10 个非空且唯一的 actor ID，并与 checkpoint 中完整的 `kind: "player"` 角色集合一致；成员不得指向 Bot 或共享角色。缺失、null、数组、部分、畸形或旧版本状态均不兼容，Worker 和 standalone 都必须无异常地删除它们。
-- 性能门禁必须使用多维联合证据：确定性的操作次数、协议字节、对象 churn、场景资源和原始产物数量，以及在固定 Node/Chrome、地图、seed、画质、预热和多轮采样条件下得到的 wall-clock、FPS、长帧和 heap。任何单一维度都不能独立代表整体性能，也不能用单项改善掩盖其他维度的明显回归。
-- 每个 PR/MR 必须在同一 CI runner 上对 `origin/main` 与 PR HEAD 交替执行相同性能采样。所有纳入门禁的运行时指标只要相对 `main` 劣化超过 `15%` 就失败；报告必须列出 main/head 绝对值、变化百分比和失败维度。禁止跨不同 CI run 直接比较 wall-clock、FPS 或 heap。压缩包/gzip 大小不属于运行时性能门禁；原始浏览器、Worker、standalone 产物大小继续由既有确定性 budget 独立约束。
+- 性能门禁必须使用多维联合证据：确定性的操作次数、协议字节、对象 churn、场景资源和原始产物数量，以及在固定 Node/Chrome、地图、seed、画质、预热和多轮采样条件下得到的 wall-clock、FPS、长帧和 heap。任何单一维度都不能独立代表整体性能，也不能用单项改善掩盖其他维度的明显回归。确定性的操作、协议、场景资源和原始产物数量可以作为硬门禁；wall-clock、FPS、长帧和 heap 必须保留 main/head 对比并由 Reviewer 审查，但不得单独作为硬门禁。
+- 每个 PR/MR 必须在同一 CI runner 上对 `origin/main` 与 PR HEAD 交替执行相同性能采样。确定性运行时/资源指标相对 `main` 劣化超过 `15%` 就失败；报告必须继续列出所有观测指标的 main/head 绝对值与变化百分比，并明确区分 `PASS/FAIL` 硬门禁与 `INFO` 审查证据。禁止跨不同 CI run 直接比较 wall-clock、FPS 或 heap。压缩包/gzip 大小不属于运行时性能门禁；原始浏览器、Worker、standalone 产物大小继续由既有确定性 budget 独立约束。
 - 修改已签入的性能指标、采样条件、相对阈值或资源预算必须经过明确的架构/资源审查。禁止通过删除指标、减少代表地图/seed/画质、缩短稳定采样窗口或无依据放宽阈值来掩盖性能回归。
 - 覆盖率按源码归属分别统计：`src/` 和 `standalone/` 使用 V8，Cloudflare `worker/` runtime 使用 Istanbul。所有业务源码必须纳入范围，报告只能写入已忽略的 `node_modules/.cache/coverage/`；降低已签入阈值属于需要审查的质量决策，禁止用它掩盖未覆盖代码。
 

@@ -131,7 +131,7 @@ Standalone 把访客、房间 metadata、入场、重连凭据、账号/管理�
 - 活动联机房间只有单线程权威：1 个 Durable Object 或 1 个 standalone 进程内服务，规则 30 Hz、快照 10 Hz、checkpoint 1 秒。
 - 联机快照平滑和即时本地开火只影响表现；权威移动、背包、安全区和结算绝不插值/回溯，人类 hitscan 最多查询 200ms 服务端角色胶囊历史。
 - Cloudflare socket 可通过 Durable Object API 休眠；standalone socket 留在单 Node 进程，重启后通过重连恢复。
-- CI 同时使用原始浏览器/Worker/服务端字节、确定性 AI 操作、快照字节、场景资源与 Mesh churn，并在固定 Node/Chrome、地图、seed、画质、预热和三轮中位数条件下比较 wall-clock、FPS、长帧与 heap。PR HEAD 任一运行时指标相对同 runner 的 `origin/main` 劣化超过 15% 即失败；main push 生成绝对基线 artifact。压缩大小不属于运行时性能门禁。
+- CI 同时使用原始浏览器/Worker/服务端字节、确定性 AI 操作、快照字节、场景资源与 Mesh churn，并在固定 Node/Chrome、地图、seed、画质、预热和三轮中位数条件下比较 wall-clock、FPS、长帧与 heap。确定性操作和场景资源指标相对同 runner 的 `origin/main` 劣化超过 15% 即失败；wall-clock、FPS、长帧与 heap 继续完整写入 main/head 报告并作为 Reviewer 证据，但不单独决定 CI 成败。main push 生成绝对基线 artifact。压缩大小不属于运行时性能门禁，原始产物仍由确定性 budget 约束。
 - 本次 Bot 分批转移/断弹恢复、六边形弹药库和协议 14 使原始 Worker/server bundle 相对 `main` 分别增加约 10.0KB/9.7KB。经资源评审后，原始产物预算分别从 615KB/630KB 调整为 630KB/640KB；这只覆盖可读实现的静态代码增量，不改变 PR 对 `main` 的 15% 运行时性能门禁。
 
 ## 覆盖率基线

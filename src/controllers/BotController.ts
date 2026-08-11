@@ -418,7 +418,7 @@ export class BotController {
     if (state.elapsedSeconds <= this.forcedRelocationUntilSeconds) {
       return this.cache(this.forceRelocation(actor, state, command));
     }
-    const nearbyWeapon = !activeWeapon && !outsideCurrentZone
+    const nearbyWeapon = !activeWeapon && !shouldEnterTargetZone && !outsideCurrentZone
       ? this.findUsefulLoot(actor, state, "unbounded")
       : null;
     const nearbyWeaponInsideCurrentZone = Boolean(
@@ -462,6 +462,10 @@ export class BotController {
         this.clearRetreat();
         return this.cache(this.moveToLoot(actor, recoveryLoot, command));
       }
+      this.clearCombatMemory();
+      this.damageInvestigationTarget = null;
+      this.damageInvestigationDirection = null;
+      this.damageInvestigationUntilSeconds = -1;
     }
 
     const openingSkirmish =
@@ -609,7 +613,7 @@ export class BotController {
         command.reload = true;
         return this.cache(command);
       }
-      if ((activeWeapon || alternateWeapon) && !recoverySearchPerformed) {
+      if (activeWeapon || alternateWeapon) {
         this.clearCombatMemory();
         this.damageInvestigationTarget = null;
         this.damageInvestigationDirection = null;
