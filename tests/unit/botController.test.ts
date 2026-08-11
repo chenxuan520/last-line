@@ -1194,12 +1194,371 @@ describe("BotController", () => {
     const controller = new BotController(1, () => 0.5, false, layout, navigator);
 
     controller.update(bot, state, miss, 1 / 30, player.id, 49);
-    bot.position.x += 24;
+    bot.position.x += 10;
     state.elapsedSeconds += 1;
     state.safeZone.secondsRemaining -= 1;
     controller.update(bot, state, miss, 1, player.id, 49);
 
     expect(pathSearches).toBe(1);
+  });
+
+  it("accounts for movement away from a cached route before the latest safe departure", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    player.alive = false;
+    bot.position = { x: 0, y: 1.76, z: 0 };
+    state.safeZone.center = { x: 0, y: 0, z: 0 };
+    state.safeZone.radius = 500;
+    state.safeZone.targetCenter = { x: 100, y: 0, z: 0 };
+    state.safeZone.targetRadius = 40;
+    state.safeZone.status = "waiting";
+    state.safeZone.secondsRemaining = 100;
+    const layout = createMapLayout(state.mapId, state.mapSeed);
+    let targetZoneRouteConstructions = 0;
+    const navigator = {
+      findPath: (start: Vector3State, target: Vector3State) => {
+        if (
+          Math.hypot(
+            target.x - state.safeZone.targetCenter.x,
+            target.z - state.safeZone.targetCenter.z,
+          ) <= state.safeZone.targetRadius
+        ) {
+          targetZoneRouteConstructions += 1;
+        }
+        return start.x < -50
+          ? [
+              { ...start },
+              { x: start.x, y: start.y, z: 100 },
+              { x: target.x, y: target.y, z: 100 },
+              { ...target },
+            ]
+          : [{ ...start }, { ...target }];
+      },
+    } as unknown as GridNavigator;
+    const controller = new BotController(
+      1,
+      () => 0.5,
+      false,
+      layout,
+      navigator,
+      [{ waitSeconds: 100, shrinkSeconds: 0, radius: 40, damagePerSecond: 5 }],
+    );
+
+    controller.update(bot, state, miss, 1 / 30, player.id, 49);
+    expect(targetZoneRouteConstructions).toBe(1);
+
+    bot.position.x = -100;
+    state.elapsedSeconds += 10;
+    state.safeZone.secondsRemaining = 20;
+    const departure = controller.update(bot, state, miss, 10, player.id, 49);
+
+    expect(targetZoneRouteConstructions).toBe(2);
+    expect(departure.move.z).toBeGreaterThan(0.8);
+    expect(Math.hypot(departure.move.x, departure.move.z)).toBeGreaterThan(0.8);
+    expect(departure.sprint).toBe(true);
+  });
+
+  it("recalibrates a traveled route before a later safe departure", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    player.alive = false;
+    bot.position = { x: 0, y: 1.76, z: 0 };
+    state.safeZone.center = { x: 0, y: 0, z: 0 };
+    state.safeZone.radius = 500;
+    state.safeZone.targetCenter = { x: 100, y: 0, z: 0 };
+    state.safeZone.targetRadius = 40;
+    state.safeZone.status = "waiting";
+    state.safeZone.secondsRemaining = 100;
+    const layout = createMapLayout(state.mapId, state.mapSeed);
+    let targetZoneRouteConstructions = 0;
+    const navigator = {
+      findPath: (start: Vector3State, target: Vector3State) => {
+        if (
+          Math.hypot(
+            target.x - state.safeZone.targetCenter.x,
+            target.z - state.safeZone.targetCenter.z,
+          ) <= state.safeZone.targetRadius
+        ) {
+          targetZoneRouteConstructions += 1;
+        }
+        return [{ ...start }, { ...target }];
+      },
+    } as unknown as GridNavigator;
+    const controller = new BotController(
+      1,
+      () => 0.5,
+      false,
+      layout,
+      navigator,
+      [{ waitSeconds: 100, shrinkSeconds: 0, radius: 40, damagePerSecond: 5 }],
+    );
+
+    controller.update(bot, state, miss, 1 / 30, player.id, 49);
+    bot.position.x = -50;
+    state.elapsedSeconds += 5;
+    controller.update(bot, state, miss, 5, player.id, 49);
+    bot.position.x = 0;
+    state.elapsedSeconds += 5;
+    state.safeZone.secondsRemaining = 20;
+    const waiting = controller.update(bot, state, miss, 5, player.id, 49);
+
+    expect(targetZoneRouteConstructions).toBe(2);
+    expect(waiting.move.x).toBeLessThan(0);
+
+    for (let decision = 0; decision < 5; decision += 1) {
+      state.elapsedSeconds += 0.2;
+      state.safeZone.secondsRemaining -= 0.2;
+      controller.update(bot, state, miss, 0.2, player.id, 49);
+    }
+    expect(targetZoneRouteConstructions).toBe(2);
+
+    bot.position.x = -100;
+    state.elapsedSeconds += 9;
+    state.safeZone.secondsRemaining = 10;
+    const departure = controller.update(bot, state, miss, 9, player.id, 49);
+
+    expect(targetZoneRouteConstructions).toBe(3);
+    expect(departure.move.x).toBeGreaterThan(0.5);
+    expect(Math.hypot(departure.move.x, departure.move.z)).toBeGreaterThan(0.9);
+    expect(departure.sprint).toBe(true);
+
+    bot.position.x -= 5;
+    state.elapsedSeconds += 1;
+    state.safeZone.secondsRemaining = 9;
+    controller.update(bot, state, miss, 1, player.id, 49);
+
+    expect(targetZoneRouteConstructions).toBe(3);
+  });
+
+  it("tracks movement issued by cached waypoint advances across a bot cohort interval", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    player.alive = false;
+    bot.position = { x: 0, y: 1.76, z: 0 };
+    const layout = createMapLayout(state.mapId, state.mapSeed);
+    const controller = new BotController(1, () => 0.5, false, layout);
+    const internal = controller as unknown as {
+      cached: ReturnType<typeof createIdleCommand>;
+      decisionSeconds: number;
+      lastIssuedMovementScale: number;
+      navigationPath: Vector3State[];
+      navigationTarget: Vector3State | null;
+      waypointIndex: number;
+      zoneRouteMovementBudget: number;
+      zoneRouteOrigin: Vector3State | null;
+    };
+    internal.cached = {
+      ...createIdleCommand(),
+      move: { x: 0.05, y: 0, z: 0 },
+      sprint: true,
+    };
+    internal.lastIssuedMovementScale = 0.05;
+    internal.decisionSeconds = 1;
+    internal.navigationPath = [
+      { ...bot.position },
+      { ...bot.position },
+      { x: 20, y: bot.position.y, z: 0 },
+    ];
+    internal.navigationTarget = { x: 20, y: bot.position.y, z: 0 };
+    internal.waypointIndex = 1;
+    internal.zoneRouteOrigin = { ...bot.position };
+
+    const switched = controller.update(bot, state, miss, 3 / 30, player.id, 49);
+
+    expect(switched.move.x).toBeGreaterThan(0.9);
+    expect(internal.lastIssuedMovementScale).toBe(1);
+    expect(internal.zoneRouteMovementBudget).toBeCloseTo(11.5 * 0.05 * 3 / 30, 6);
+
+    state.elapsedSeconds += 3 / 30;
+    controller.update(bot, state, miss, 3 / 30, player.id, 49);
+
+    expect(internal.zoneRouteMovementBudget).toBeCloseTo(
+      11.5 * (0.05 + 1) * 3 / 30,
+      6,
+    );
+  });
+
+  it("recalibrates the target-zone route when the navigation surface changes", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    for (const actor of Object.values(state.actors)) actor.alive = actor.id === bot.id;
+    const layout = createMapLayout(state.mapId, state.mapSeed);
+    const building = layout.obstacles.find((candidate) => candidate.id === layout.hospital.buildingId);
+    if (!building) throw new Error("hospital building missing");
+    bot.position = {
+      x: building.center.x,
+      y: building.baseY + 1.76,
+      z: building.center.z,
+    };
+    state.safeZone.center = { ...building.center };
+    state.safeZone.radius = 500;
+    state.safeZone.targetCenter = {
+      x: building.center.x + 300,
+      y: 0,
+      z: building.center.z,
+    };
+    state.safeZone.targetRadius = 40;
+    state.safeZone.status = "waiting";
+    state.safeZone.secondsRemaining = 120;
+    let targetZoneRouteConstructions = 0;
+    const navigator = {
+      findPath: (start: Vector3State, target: Vector3State) => {
+        if (
+          Math.hypot(
+            target.x - state.safeZone.targetCenter.x,
+            target.z - state.safeZone.targetCenter.z,
+          ) <= state.safeZone.targetRadius
+        ) {
+          targetZoneRouteConstructions += 1;
+        }
+        return [{ ...start }, { ...target }];
+      },
+    } as unknown as GridNavigator;
+    const controller = new BotController(1, () => 0.5, false, layout, navigator);
+
+    controller.update(bot, state, miss, 1 / 30, player.id, 49);
+    expect(targetZoneRouteConstructions).toBe(1);
+
+    bot.position.y =
+      building.baseY + building.storyHeight + BUILDING_ROOF_CAP_HEIGHT + 1.76;
+    state.elapsedSeconds += 1;
+    state.safeZone.secondsRemaining -= 1;
+    controller.update(bot, state, miss, 1, player.id, 49);
+
+    expect(targetZoneRouteConstructions).toBe(2);
+  });
+
+  it("clears the previous departure lock when a new waiting stage starts", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    player.alive = false;
+    bot.position = { x: 0, y: 1.76, z: 0 };
+    state.safeZone.center = { x: 0, y: 0, z: 0 };
+    state.safeZone.radius = 500;
+    state.safeZone.targetCenter = { x: 100, y: 0, z: 0 };
+    state.safeZone.targetRadius = 40;
+    state.safeZone.status = "waiting";
+    state.safeZone.secondsRemaining = 1;
+    const layout = createMapLayout(state.mapId, state.mapSeed);
+    const navigator = {
+      findPath: (start: Vector3State, target: Vector3State) => [{ ...start }, { ...target }],
+    } as unknown as GridNavigator;
+    const controller = new BotController(
+      1,
+      () => 0.5,
+      false,
+      layout,
+      navigator,
+      [
+        { waitSeconds: 1, shrinkSeconds: 0, radius: 40, damagePerSecond: 5 },
+        { waitSeconds: 100, shrinkSeconds: 0, radius: 40, damagePerSecond: 5 },
+      ],
+    );
+    const internal = controller as unknown as {
+      zoneRouteMovementBudget: number;
+      zoneTravelKey: string | null;
+    };
+
+    controller.update(bot, state, miss, 1 / 30, player.id, 49);
+    expect(internal.zoneTravelKey).not.toBeNull();
+
+    bot.position = { x: 100, y: 1.76, z: 0 };
+    state.safeZone.status = "shrinking";
+    state.safeZone.secondsRemaining = 0;
+    state.elapsedSeconds += 1;
+    controller.update(bot, state, miss, 1, player.id, 49);
+    expect(internal.zoneTravelKey).not.toBeNull();
+
+    state.safeZone.stageIndex = 1;
+    state.safeZone.status = "waiting";
+    state.safeZone.center = { x: 100, y: 0, z: 0 };
+    state.safeZone.radius = 500;
+    state.safeZone.targetCenter = { x: 300, y: 0, z: 0 };
+    state.safeZone.targetRadius = 40;
+    state.safeZone.secondsRemaining = 100;
+    state.elapsedSeconds += 1;
+    controller.update(bot, state, miss, 1, player.id, 49);
+
+    expect(internal.zoneTravelKey).toBeNull();
+    expect(internal.zoneRouteMovementBudget).toBe(0);
+
+    bot.position.x += 10;
+    state.elapsedSeconds += 1;
+    controller.update(bot, state, miss, 1, player.id, 49);
+
+    expect(internal.zoneRouteMovementBudget).toBeGreaterThan(0);
+  });
+
+  it("invalidates a calibration delay when the shrinking speed doubles", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    player.alive = false;
+    bot.position = { x: 0, y: 1.76, z: 0 };
+    state.safeZone.center = { x: 0, y: 0, z: 0 };
+    state.safeZone.radius = 500;
+    state.safeZone.targetCenter = { x: 100, y: 0, z: 0 };
+    state.safeZone.targetRadius = 40;
+    state.safeZone.status = "waiting";
+    state.safeZone.secondsRemaining = 4;
+    const layout = createMapLayout(state.mapId, state.mapSeed);
+    let targetZoneRouteConstructions = 0;
+    const navigator = {
+      findPath: (start: Vector3State, target: Vector3State) => {
+        const targetZoneRoute = Math.hypot(
+          target.x - state.safeZone.targetCenter.x,
+          target.z - state.safeZone.targetCenter.z,
+        ) <= state.safeZone.targetRadius;
+        if (targetZoneRoute) targetZoneRouteConstructions += 1;
+        if (targetZoneRoute && targetZoneRouteConstructions === 1) {
+          return [
+            { ...start },
+            { x: start.x, y: start.y, z: 220 },
+            { x: target.x, y: target.y, z: 220 },
+            { ...target },
+          ];
+        }
+        return [{ ...start }, { ...target }];
+      },
+    } as unknown as GridNavigator;
+    const controller = new BotController(
+      1,
+      () => 0.5,
+      false,
+      layout,
+      navigator,
+      [{ waitSeconds: 4, shrinkSeconds: 20, radius: 40, damagePerSecond: 5 }],
+    );
+    const internal = controller as unknown as {
+      zoneRouteCalibrationNotBeforeSeconds: number;
+      zoneTravelKey: string | null;
+    };
+
+    controller.update(bot, state, miss, 1 / 30, player.id, 49);
+
+    expect(targetZoneRouteConstructions).toBe(2);
+    expect(internal.zoneRouteCalibrationNotBeforeSeconds).toBeGreaterThan(state.elapsedSeconds);
+    expect(internal.zoneTravelKey).toBeNull();
+
+    state.elapsedSeconds += 0.3;
+    state.safeZone.secondsRemaining -= 0.3;
+    const departure = controller.update(bot, state, miss, 0.3, player.id, 4);
+
+    expect(targetZoneRouteConstructions).toBe(3);
+    expect(internal.zoneTravelKey).not.toBeNull();
+    expect(Math.hypot(departure.move.x, departure.move.z)).toBeGreaterThan(0.9);
+    expect(departure.sprint).toBe(true);
   });
 
   it("picks up a weapon at its feet before rotating into the next zone", () => {

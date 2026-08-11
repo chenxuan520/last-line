@@ -61,6 +61,7 @@ const ZONE_PATH_RETRY_SECONDS = 2;
 const ZONE_TRAVEL_ROUTE_FACTOR = 1.35;
 const ZONE_TRAVEL_SAFETY_SECONDS = 6;
 const ZONE_DEPARTURE_STAGGER_SECONDS = 8;
+const ZONE_ROUTE_CALIBRATION_INTERVAL_SECONDS = 2;
 const OPENING_SKIRMISH_DISTANCE = 45;
 const OPENING_SKIRMISH_END_SECONDS = 25;
 const OPENING_SKIRMISH_LIVING_ACTORS = 25;
@@ -106,6 +107,7 @@ export class BotController {
   private grenadeCooldownSeconds = 0;
   private grenadeEvaluationSeconds = 0;
   private cached = createIdleCommand();
+  private lastIssuedMovementScale = 0;
   private waypoint: Vector3State | null = null;
   private navigationPath: Vector3State[] = [];
   private waypointIndex = 0;
@@ -149,7 +151,11 @@ export class BotController {
   private zonePathRetryAtSeconds = -1;
   private zoneRouteKey: string | null = null;
   private zoneRouteOrigin: Vector3State | null = null;
+  private zoneRouteMovementBudget = 0;
+  private zoneRouteSurfaceKey: string | null = null;
   private zoneRoute: ZoneRoute | null = null;
+  private zoneRouteCalibrationNotBeforeSeconds = -1;
+  private zoneRouteCalibrationShrinkSpeed: 1 | 2 | null = null;
   private zoneTravelKey: string | null = null;
   private readonly perceptionCandidates: ActorState[] = [];
   private controlledActorId = "";
@@ -224,6 +230,7 @@ export class BotController {
     if (actor.deployment === "parachuting") {
       return this.glideToward(actor, this.findLandingTarget(state));
     }
+    this.updateZoneRouteMovementBudget(deltaSeconds);
     const livenessTriggered = this.updateLiveness(actor, state);
 
     if (
@@ -288,7 +295,7 @@ export class BotController {
       if (this.navigationPath.length > 0) {
         this.updateNavigationMovement(actor, command);
       }
-      return command;
+      return this.issueGroundedCommand(command);
     }
     this.decisionSeconds = interval;
     if (this.lastDecisionPosition) {
@@ -1387,26 +1394,45 @@ export class BotController {
       horizontalDistance(actor.position, state.safeZone.targetCenter) - targetRadius,
     );
     const routeDistance = route
-      ? pathLength(route.path)
-      : boundaryDistance * ZONE_TRAVEL_ROUTE_FACTOR;
+      ? pathLength(route.path) + this.zoneRouteMovementBudget
+      : boundaryDistance * ZONE_TRAVEL_ROUTE_FACTOR + this.zoneRouteMovementBudget;
     const shrinkSpeed = livingActors < 5 ? 2 : 1;
     const shrinkSeconds = (this.safeZoneStages[state.safeZone.stageIndex]?.shrinkSeconds ?? 0) / shrinkSpeed;
+    if (
+      this.zoneRouteCalibrationShrinkSpeed !== null &&
+      this.zoneRouteCalibrationShrinkSpeed !== shrinkSpeed
+    ) {
+      this.zoneRouteCalibrationNotBeforeSeconds = -1;
+      this.zoneRouteCalibrationShrinkSpeed = null;
+    }
     const staggerSeconds =
       (Math.imul(this.controlledActorNumericId + 1, 2_654_435_761) >>> 0) /
       0x1_0000_0000 *
       ZONE_DEPARTURE_STAGGER_SECONDS;
     if (!zoneTravelDue(state, routeDistance, shrinkSeconds, staggerSeconds)) return false;
+    if (state.elapsedSeconds < this.zoneRouteCalibrationNotBeforeSeconds) return false;
 
-    const routeMovedDistance = this.zoneRouteOrigin
-      ? horizontalDistance(actor.position, this.zoneRouteOrigin)
-      : Number.POSITIVE_INFINITY;
-    const departureRoute = routeMovedDistance > 0.5
-      ? this.refreshTargetZoneRoute(actor, state, targetRadius)
-      : route;
+    const departureRoute = this.refreshTargetZoneRoute(actor, state, targetRadius);
     const departureDistance = departureRoute
       ? pathLength(departureRoute.path)
       : boundaryDistance * ZONE_TRAVEL_ROUTE_FACTOR;
-    if (!zoneTravelDue(state, departureDistance, shrinkSeconds, staggerSeconds)) return false;
+    if (!zoneTravelDue(state, departureDistance, shrinkSeconds, staggerSeconds)) {
+      const secondsUntilDue = Math.max(
+        0,
+        state.safeZone.secondsRemaining + shrinkSeconds -
+          (
+            departureDistance / SPRINT_SPEED +
+            ZONE_TRAVEL_SAFETY_SECONDS +
+            staggerSeconds
+          ),
+      );
+      if (secondsUntilDue >= ZONE_ROUTE_CALIBRATION_INTERVAL_SECONDS * 2) {
+        this.zoneRouteCalibrationNotBeforeSeconds =
+          state.elapsedSeconds + secondsUntilDue / 2;
+        this.zoneRouteCalibrationShrinkSpeed = shrinkSpeed;
+        return false;
+      }
+    }
 
     this.zoneTravelKey = routeKey;
     if (departureRoute) {
@@ -1425,7 +1451,19 @@ export class BotController {
     targetRadius: number,
   ): ZoneRoute | null {
     const routeKey = targetZoneRouteKey(state, targetRadius);
-    if (this.zoneRouteKey === routeKey) return this.zoneRoute;
+    if (this.zoneRouteKey !== routeKey) {
+      this.zoneTravelKey = null;
+      this.zoneRouteCalibrationNotBeforeSeconds = -1;
+      this.zoneRouteCalibrationShrinkSpeed = null;
+    }
+    const surfaceKey = navigationSurfaceKey(actor.position, this.layout);
+    if (
+      this.zoneRouteKey === routeKey &&
+      this.zoneRouteSurfaceKey === surfaceKey &&
+      this.zoneRouteOrigin &&
+      horizontalDistance(actor.position, this.zoneRouteOrigin) <=
+        this.zoneRouteMovementBudget + WAYPOINT_REACHED_DISTANCE
+    ) return this.zoneRoute;
     return this.refreshTargetZoneRoute(actor, state, targetRadius);
   }
 
@@ -1438,8 +1476,18 @@ export class BotController {
     const route = this.findZoneRoute(actor, state.safeZone.targetCenter, targetRadius);
     this.zoneRouteKey = routeKey;
     this.zoneRouteOrigin = { ...actor.position };
+    this.zoneRouteMovementBudget = 0;
+    this.zoneRouteSurfaceKey = navigationSurfaceKey(actor.position, this.layout);
     this.zoneRoute = route;
+    this.zoneRouteCalibrationNotBeforeSeconds = -1;
+    this.zoneRouteCalibrationShrinkSpeed = null;
     return route;
+  }
+
+  private updateZoneRouteMovementBudget(deltaSeconds: number): void {
+    if (!this.zoneRouteOrigin || this.zoneTravelKey) return;
+    this.zoneRouteMovementBudget +=
+      SPRINT_SPEED * this.lastIssuedMovementScale * Math.max(0, deltaSeconds);
   }
 
   private findZoneRoute(
@@ -1480,7 +1528,11 @@ export class BotController {
   private clearZoneRoute(): void {
     this.zoneRouteKey = null;
     this.zoneRouteOrigin = null;
+    this.zoneRouteMovementBudget = 0;
+    this.zoneRouteSurfaceKey = null;
     this.zoneRoute = null;
+    this.zoneRouteCalibrationNotBeforeSeconds = -1;
+    this.zoneRouteCalibrationShrinkSpeed = null;
     this.zoneTravelKey = null;
   }
 
@@ -1498,6 +1550,11 @@ export class BotController {
 
   private cache(command: ActorCommand): ActorCommand {
     this.cached = command;
+    return this.issueGroundedCommand(command);
+  }
+
+  private issueGroundedCommand(command: ActorCommand): ActorCommand {
+    this.lastIssuedMovementScale = Math.min(1, Math.hypot(command.move.x, command.move.z));
     return command;
   }
 
