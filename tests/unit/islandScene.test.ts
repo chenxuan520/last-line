@@ -1379,6 +1379,7 @@ describe("IslandScene lifecycle", () => {
     expect(new Set(brandSigns.map((mesh) => mesh.name))).toEqual(BRAND_SIGN_ASSET_IDS);
     expect(brandSigns.every((mesh) => !mesh.isPickable && !mesh.checkCollisions)).toBe(true);
     expect(bundle.scene.getMeshByName("hospital-medical-cross")?.metadata).toMatchObject({
+      poiName: "医院",
       poiType: "hospital",
       obstacleId: layout.hospital.buildingId,
     });

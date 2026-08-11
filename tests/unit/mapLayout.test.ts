@@ -23,6 +23,14 @@ import type { MapId } from "../../src/config/maps";
 import { getSupportHeight } from "../../src/game/systems/MovementSystem";
 
 describe("map layouts", () => {
+  it.each([
+    ["island", 42],
+    ["town", 42],
+    ["mixed", 395],
+  ] as const)("uses the same hospital name on %s", (mapId, seed) => {
+    expect(createMapLayout(mapId, seed).hospital.name).toBe("医院");
+  });
+
   it("caches deterministic serializable layouts", () => {
     const first = createMapLayout(2026);
     const second = createMapLayout(2026);

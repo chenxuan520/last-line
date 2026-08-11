@@ -858,7 +858,7 @@ function createTownMapLayout(seed: number): MapLayout {
     ...hospitalMedicalPoints,
   ];
   const hospital: HospitalPoi = {
-    name: "灰炉医院",
+    name: "医院",
     buildingId: hospitalBuilding.id,
     position: {
       x: hospitalBuilding.center.x,
