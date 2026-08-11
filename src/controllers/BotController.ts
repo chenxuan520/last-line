@@ -1,4 +1,8 @@
 import { GridNavigator } from "../ai/navigation/GridNavigator";
+import {
+  BATTLE_ROYALE_CONFIG,
+  type SafeZoneStageConfig,
+} from "../config/battleRoyale";
 import { ITEMS } from "../config/items";
 import {
   createGrenadeThrowVelocity,
@@ -54,6 +58,12 @@ const FORCED_RELOCATION_SECONDS = 20;
 const FORCED_RELOCATION_CLEAR_DISTANCE = 6;
 const FORCED_RELOCATION_PATH_CHECKS = 1;
 const ZONE_PATH_RETRY_SECONDS = 2;
+const ZONE_TRAVEL_ROUTE_FACTOR = 1.35;
+const ZONE_TRAVEL_SAFETY_SECONDS = 6;
+const ZONE_DEPARTURE_STAGGER_SECONDS = 8;
+const OPENING_SKIRMISH_DISTANCE = 45;
+const OPENING_SKIRMISH_END_SECONDS = 25;
+const OPENING_SKIRMISH_LIVING_ACTORS = 25;
 const LOOT_PATH_RETRY_DISTANCE = 36;
 const MAX_REJECTED_LOOT_PATHS = 320;
 const PARACHUTE_TARGET_DEAD_ZONE = 0.75;
@@ -64,13 +74,19 @@ const GRENADE_MINIMUM_TARGET_DISTANCE = 8;
 const GRENADE_MAXIMUM_TARGET_DISTANCE = 32;
 const GRENADE_MINIMUM_SELF_DISTANCE = 10;
 const GRENADE_MAXIMUM_LANDING_ERROR = 4.5;
-type LootPurpose = "general" | "medical" | "compatible-ammo";
+type LootPurpose = "general" | "medical" | "compatible-ammo" | "combat-weapon";
+type LootZoneScope = "target" | "current" | "unbounded";
 
 interface LootSelection {
   loot: GroundLootState;
   generation: number;
   path: Vector3State[];
   replacementItemId: string | null;
+}
+
+interface ZoneRoute {
+  target: Vector3State;
+  path: Vector3State[];
 }
 
 export class BotController {
@@ -131,6 +147,10 @@ export class BotController {
   private forcedRelocationUntilSeconds = -1;
   private forcedRelocationSequence = 0;
   private zonePathRetryAtSeconds = -1;
+  private zoneRouteKey: string | null = null;
+  private zoneRouteOrigin: Vector3State | null = null;
+  private zoneRoute: ZoneRoute | null = null;
+  private zoneTravelKey: string | null = null;
   private readonly perceptionCandidates: ActorState[] = [];
   private controlledActorId = "";
   private controlledActorNumericId = 0;
@@ -141,6 +161,7 @@ export class BotController {
     private readonly disableSnipers = false,
     initialLayout: MapLayout = createMapLayout(0),
     initialNavigator: GridNavigator = new GridNavigator(initialLayout),
+    private readonly safeZoneStages: readonly SafeZoneStageConfig[] = BATTLE_ROYALE_CONFIG.safeZoneStages,
   ) {
     this.layout = initialLayout;
     this.navigator = initialNavigator;
@@ -189,6 +210,7 @@ export class BotController {
       this.clearCombatMemory();
       this.clearRetreat();
       this.clearForcedRelocation();
+      this.clearZoneRoute();
       this.resetNavigationProgress();
     }
     if (!actor.alive) {
@@ -313,6 +335,18 @@ export class BotController {
     const alternateReserveAmmo = alternateWeaponConfig
       ? getItemQuantity(actor, alternateWeaponConfig.ammoItemId)
       : 0;
+    const carriedWeaponCanRecover = actor.inventory.weaponSlots.some((weapon) => {
+      const config = weapon ? WEAPONS[weapon.weaponId] : undefined;
+      return Boolean(
+        weapon &&
+        config &&
+        (
+          weapon.ammoInMagazine > 0 ||
+          weapon.reloadSeconds > 0 ||
+          getItemQuantity(actor, config.ammoItemId) > 0
+        )
+      );
+    });
     const canFight = Boolean(activeWeapon && (activeWeapon.ammoInMagazine > 0 || reserveAmmo > 0));
     if (!activeWeapon && alternateWeapon) {
       command.switchWeapon = alternateSlot;
@@ -342,17 +376,53 @@ export class BotController {
     );
     const outsideTargetZone = horizontalDistance(actor.position, state.safeZone.targetCenter) > targetZoneRadius;
     const outsideCurrentZone = horizontalDistance(actor.position, state.safeZone.center) > state.safeZone.radius;
-    const shouldEnterTargetZone = outsideTargetZone && (!endgameSearch || targetZoneRadius >= 24);
-    if (outsideCurrentZone && state.elapsedSeconds <= this.forcedRelocationUntilSeconds) {
+    const shouldEnterTargetZone = outsideTargetZone && (
+      outsideCurrentZone ||
+      this.shouldBeginTargetZoneTravel(actor, state, targetZoneRadius, livingActors)
+    );
+    const delayedTargetTravel = outsideTargetZone && !shouldEnterTargetZone;
+    const safeLootScope: LootZoneScope = delayedTargetTravel ? "current" : "target";
+    if ((shouldEnterTargetZone || outsideCurrentZone) && activeWeapon?.ammoInMagazine === 0) {
+      if (alternateWeapon?.ammoInMagazine && alternateWeapon.ammoInMagazine > 0) {
+        command.switchWeapon = alternateSlot;
+      } else if (reserveAmmo > 0) {
+        command.reload = true;
+      } else if (alternateWeapon && alternateReserveAmmo > 0) {
+        command.switchWeapon = alternateSlot;
+        command.reload = true;
+      }
+    }
+    if (shouldEnterTargetZone && !outsideCurrentZone && !carriedWeaponCanRecover) {
+      const recoveryLoot =
+        this.findUsefulLoot(actor, state, "target", "compatible-ammo") ??
+        this.findUsefulLoot(actor, state, "target", "combat-weapon");
+      if (recoveryLoot) return this.cache(this.moveToLoot(actor, recoveryLoot, command));
+    }
+    if ((shouldEnterTargetZone || outsideCurrentZone) && state.elapsedSeconds <= this.forcedRelocationUntilSeconds) {
       this.forcedRelocationOrigin = null;
       this.forcedRelocationTarget = null;
       this.forcedRelocationUntilSeconds = -1;
+    }
+    if (
+      state.elapsedSeconds <= this.forcedRelocationUntilSeconds &&
+      !activeWeapon &&
+      !alternateWeapon &&
+      !outsideCurrentZone
+    ) {
+      const recoveryWeapon = this.findUsefulLoot(actor, state, safeLootScope, "combat-weapon");
+      if (
+        recoveryWeapon &&
+        horizontalDistance(actor.position, recoveryWeapon.loot.position) <= UNARMED_WEAPON_DETOUR_DISTANCE
+      ) {
+        this.clearForcedRelocation();
+        return this.cache(this.moveToLoot(actor, recoveryWeapon, command));
+      }
     }
     if (state.elapsedSeconds <= this.forcedRelocationUntilSeconds) {
       return this.cache(this.forceRelocation(actor, state, command));
     }
     const nearbyWeapon = !activeWeapon && !outsideCurrentZone
-      ? this.findUsefulLoot(actor, state, true)
+      ? this.findUsefulLoot(actor, state, "unbounded")
       : null;
     const nearbyWeaponInsideCurrentZone = Boolean(
       nearbyWeapon &&
@@ -360,7 +430,7 @@ export class BotController {
     );
     const nearbyWeaponPreservesTargetZone = Boolean(
       nearbyWeapon &&
-      (outsideTargetZone ||
+      (delayedTargetTravel ||
         horizontalDistance(nearbyWeapon.loot.position, state.safeZone.targetCenter) <= targetZoneRadius),
     );
     if (
@@ -381,7 +451,31 @@ export class BotController {
       return this.cache(this.navigateIntoZone(actor, center, radius, command, state.elapsedSeconds));
     }
 
-    const target = this.findVisibleTarget(actor, state, world);
+    if (!carriedWeaponCanRecover) {
+      const recoveryLoot =
+        this.findUsefulLoot(actor, state, safeLootScope, "compatible-ammo") ??
+        this.findUsefulLoot(actor, state, safeLootScope, "combat-weapon");
+      if (recoveryLoot) {
+        this.clearCombatMemory();
+        this.damageInvestigationTarget = null;
+        this.damageInvestigationDirection = null;
+        this.damageInvestigationUntilSeconds = -1;
+        this.clearRetreat();
+        return this.cache(this.moveToLoot(actor, recoveryLoot, command));
+      }
+    }
+
+    const openingSkirmish =
+      state.safeZone.stageIndex === 0 &&
+      state.safeZone.status === "waiting" &&
+      state.safeZone.secondsRemaining > OPENING_SKIRMISH_END_SECONDS &&
+      livingActors > OPENING_SKIRMISH_LIVING_ACTORS;
+    const target = this.findVisibleTarget(
+      actor,
+      state,
+      world,
+      openingSkirmish ? OPENING_SKIRMISH_DISTANCE : 150,
+    );
     const lowHealth = actor.health <= LOW_HEALTH_RETREAT_HEALTH;
     if (!lowHealth) this.clearRetreat();
     if (target && lowHealth) {
@@ -428,7 +522,7 @@ export class BotController {
         if (state.elapsedSeconds - this.retreatSafeSinceSeconds < RETREAT_HIDE_CONFIRM_SECONDS) {
           return this.cache(command);
         }
-        const medicalLoot = this.findUsefulLoot(actor, state, false, "medical");
+        const medicalLoot = this.findUsefulLoot(actor, state, safeLootScope, "medical");
         if (medicalLoot) return this.cache(this.moveToLoot(actor, medicalLoot, command));
         this.clearRetreat();
         this.clearCombatMemory();
@@ -517,8 +611,10 @@ export class BotController {
         return this.cache(command);
       }
       if (activeWeapon || alternateWeapon) {
-        const ammoLoot = this.findUsefulLoot(actor, state, false, "compatible-ammo");
+        const ammoLoot = this.findUsefulLoot(actor, state, safeLootScope, "compatible-ammo");
         if (ammoLoot) return this.cache(this.moveToLoot(actor, ammoLoot, command));
+        const weaponLoot = this.findUsefulLoot(actor, state, safeLootScope, "combat-weapon");
+        if (weaponLoot) return this.cache(this.moveToLoot(actor, weaponLoot, command));
         this.clearCombatMemory();
         this.damageInvestigationTarget = null;
         this.damageInvestigationDirection = null;
@@ -585,16 +681,16 @@ export class BotController {
       const config = WEAPONS[activeWeapon.weaponId];
       command.reload = Boolean(config && getItemQuantity(actor, config.ammoItemId) > 0);
     }
-    const lootSelection = this.findUsefulLoot(actor, state);
+    const lootSelection = this.findUsefulLoot(actor, state, safeLootScope);
     if (lootSelection) return this.cache(this.moveToLoot(actor, lootSelection, command));
     this.lootTargetId = null;
-    const patrol = this.findPatrolTarget(actor, state, layout, livingActors);
+    const patrol = this.findPatrolTarget(actor, state, layout, livingActors, delayedTargetTravel);
     if (patrol) return this.cache(this.navigate(actor, patrol.target, command, patrol.path));
     this.patrolTarget = null;
     return this.cache(this.navigateIntoZone(
       actor,
-      state.safeZone.targetCenter,
-      state.safeZone.targetRadius,
+      delayedTargetTravel ? state.safeZone.center : state.safeZone.targetCenter,
+      delayedTargetTravel ? state.safeZone.radius : state.safeZone.targetRadius,
       command,
       state.elapsedSeconds,
     ));
@@ -605,9 +701,10 @@ export class BotController {
     state: MatchState,
     layout: ReturnType<typeof createMapLayout>,
     livingActors: number,
+    patrolCurrentZone = false,
   ): { target: Vector3State; path: Vector3State[] } | null {
     const endgameSearch = livingActors <= ENDGAME_SEARCH_ACTORS;
-    const searchCurrentZone = endgameSearch && state.safeZone.targetRadius < 24;
+    const searchCurrentZone = patrolCurrentZone || (endgameSearch && state.safeZone.targetRadius < 24);
     const patrolCenter = searchCurrentZone ? state.safeZone.center : state.safeZone.targetCenter;
     const zoneRadius = searchCurrentZone ? state.safeZone.radius : state.safeZone.targetRadius;
     const patrolRadius = Math.max(
@@ -654,14 +751,19 @@ export class BotController {
     return null;
   }
 
-  private findVisibleTarget(actor: ActorState, state: MatchState, world: CombatWorld): ActorState | null {
+  private findVisibleTarget(
+    actor: ActorState,
+    state: MatchState,
+    world: CombatWorld,
+    maximumDistance: number,
+  ): ActorState | null {
     this.perceptionCandidates.length = 0;
     const facing = { x: Math.sin(actor.yaw), y: 0, z: Math.cos(actor.yaw) };
     for (const candidate of Object.values(state.actors)) {
       if (!candidate.alive || candidate.id === actor.id || candidate.deployment === "aircraft") continue;
       const offset = subtract(candidate.position, actor.position);
       const distanceSquared = offset.x * offset.x + offset.y * offset.y + offset.z * offset.z;
-      if (distanceSquared > 150 ** 2) continue;
+      if (distanceSquared > maximumDistance ** 2) continue;
       const direction = normalizeFlat(offset);
       const inView = distanceSquared < 12 ** 2 || direction.x * facing.x + direction.z * facing.z > -0.2;
       if (inView) this.perceptionCandidates.push(candidate);
@@ -801,7 +903,7 @@ export class BotController {
   private findUsefulLoot(
     actor: ActorState,
     state: MatchState,
-    allowOutsideTargetZone = false,
+    zoneScope: LootZoneScope = "target",
     purpose: LootPurpose = "general",
   ): LootSelection | null {
     const hasWeapon = actor.inventory.weaponSlots.some((weapon) => weapon !== null);
@@ -813,10 +915,11 @@ export class BotController {
       activeWeapon.ammoInMagazine === 0 &&
       getItemQuantity(actor, weaponConfig.ammoItemId) === 0
     );
-    const compatibleAmmoItemIds = new Set(actor.inventory.weaponSlots.flatMap((weapon) => {
+    const compatibleAmmoItemIds = actor.inventory.weaponSlots.flatMap((weapon) => {
       const ammoItemId = weapon ? WEAPONS[weapon.weaponId]?.ammoItemId : undefined;
       return ammoItemId ? [ammoItemId] : [];
-    }));
+    });
+    const isCompatibleAmmo = (itemId: string): boolean => compatibleAmmoItemIds.includes(itemId);
     const lootZoneRadius = Math.max(
       0,
       state.safeZone.targetRadius - Math.min(ZONE_SAFETY_MARGIN, state.safeZone.targetRadius * 0.12),
@@ -832,18 +935,20 @@ export class BotController {
       if (purpose === "general") return undefined;
       if (purpose === "compatible-ammo") {
         return actor.inventory.backpack.find((stack) =>
-          ITEMS[stack.itemId]?.kind === "ammo" && !compatibleAmmoItemIds.has(stack.itemId)
+          ITEMS[stack.itemId]?.kind === "ammo" && !isCompatibleAmmo(stack.itemId)
         )?.itemId;
       }
       return actor.inventory.backpack.find((stack) =>
-        ITEMS[stack.itemId]?.kind !== "medical" && !compatibleAmmoItemIds.has(stack.itemId)
+        ITEMS[stack.itemId]?.kind !== "medical" && !isCompatibleAmmo(stack.itemId)
       )?.itemId ?? actor.inventory.backpack.find((stack) => ITEMS[stack.itemId]?.kind !== "medical")?.itemId;
     };
     const isUseful = (loot: GroundLootState): boolean => {
       if (!loot.available || !this.isAllowedLoot(loot)) return false;
-      const insideAllowedZone = purpose === "medical"
-        ? horizontalDistance(loot.position, state.safeZone.center) <= state.safeZone.radius
-        : allowOutsideTargetZone || horizontalDistance(loot.position, state.safeZone.targetCenter) <= lootZoneRadius;
+      const insideAllowedZone = zoneScope === "unbounded"
+        ? true
+        : zoneScope === "current"
+          ? horizontalDistance(loot.position, state.safeZone.center) <= state.safeZone.radius
+          : horizontalDistance(loot.position, state.safeZone.targetCenter) <= lootZoneRadius;
       if (!insideAllowedZone) return false;
       const item = ITEMS[loot.itemId];
       if (!item) return false;
@@ -852,7 +957,15 @@ export class BotController {
         return item.kind === "medical" && actor.health < actor.maxHealth && replacementItemId !== undefined;
       }
       if (purpose === "compatible-ammo") {
-        return item.kind === "ammo" && compatibleAmmoItemIds.has(item.id) && replacementItemId !== undefined;
+        return item.kind === "ammo" && isCompatibleAmmo(item.id) && replacementItemId !== undefined;
+      }
+      if (purpose === "combat-weapon") {
+        if (item.kind !== "weapon" || !item.weaponId || loot.weapon?.weaponId !== item.weaponId) return false;
+        const config = WEAPONS[item.weaponId];
+        return Boolean(
+          config &&
+          (loot.weapon.ammoInMagazine > 0 || getItemQuantity(actor, config.ammoItemId) > 0)
+        );
       }
       return hasWeapon
         ? (item.kind === "ammo" && (!needsAmmo || item.id === weaponConfig?.ammoItemId) && replacementItemId === null) ||
@@ -903,7 +1016,7 @@ export class BotController {
     }
     candidates.sort((left, right) => left.distance - right.distance || left.loot.id.localeCompare(right.loot.id));
     const nearbyCandidateCount = Math.min(3, candidates.length);
-    const candidateOffset = hasWeapon || nearbyCandidateCount === 0
+    const candidateOffset = purpose === "combat-weapon" || hasWeapon || nearbyCandidateCount === 0
       ? 0
       : (this.controlledActorNumericId * 7 + this.landingPoiWave) % nearbyCandidateCount;
     const orderedCandidates = candidateOffset === 0
@@ -1246,6 +1359,107 @@ export class BotController {
     if (elapsedSeconds < this.zonePathRetryAtSeconds) {
       return this.moveDirectlyIntoZone(actor, center, command);
     }
+    for (const candidate of this.zoneEntryCandidates(actor, center, radius)) {
+      const path = this.navigator.findPath(actor.position, candidate);
+      if (path.length > 0) {
+        this.zonePathRetryAtSeconds = -1;
+        return this.navigate(actor, candidate, command, path);
+      }
+    }
+    this.zonePathRetryAtSeconds = elapsedSeconds + ZONE_PATH_RETRY_SECONDS;
+    return this.moveDirectlyIntoZone(actor, center, command);
+  }
+
+  private shouldBeginTargetZoneTravel(
+    actor: ActorState,
+    state: MatchState,
+    targetRadius: number,
+    livingActors: number,
+  ): boolean {
+    if (state.safeZone.status !== "waiting") {
+      this.clearZoneRoute();
+      return true;
+    }
+    const routeKey = targetZoneRouteKey(state, targetRadius);
+    if (this.zoneTravelKey === routeKey) return true;
+    const route = this.getTargetZoneRoute(actor, state, targetRadius);
+    const boundaryDistance = Math.max(
+      0,
+      horizontalDistance(actor.position, state.safeZone.targetCenter) - targetRadius,
+    );
+    const routeDistance = route
+      ? pathLength(route.path)
+      : boundaryDistance * ZONE_TRAVEL_ROUTE_FACTOR;
+    const shrinkSpeed = livingActors < 5 ? 2 : 1;
+    const shrinkSeconds = (this.safeZoneStages[state.safeZone.stageIndex]?.shrinkSeconds ?? 0) / shrinkSpeed;
+    const staggerSeconds =
+      (Math.imul(this.controlledActorNumericId + 1, 2_654_435_761) >>> 0) /
+      0x1_0000_0000 *
+      ZONE_DEPARTURE_STAGGER_SECONDS;
+    if (!zoneTravelDue(state, routeDistance, shrinkSeconds, staggerSeconds)) return false;
+
+    const routeMovedDistance = this.zoneRouteOrigin
+      ? horizontalDistance(actor.position, this.zoneRouteOrigin)
+      : Number.POSITIVE_INFINITY;
+    const departureRoute = routeMovedDistance > 0.5
+      ? this.refreshTargetZoneRoute(actor, state, targetRadius)
+      : route;
+    const departureDistance = departureRoute
+      ? pathLength(departureRoute.path)
+      : boundaryDistance * ZONE_TRAVEL_ROUTE_FACTOR;
+    if (!zoneTravelDue(state, departureDistance, shrinkSeconds, staggerSeconds)) return false;
+
+    this.zoneTravelKey = routeKey;
+    if (departureRoute) {
+      this.navigationTarget = { ...departureRoute.target };
+      this.navigationPreservesAim = false;
+      this.navigationPath = departureRoute.path.map((point) => ({ ...point }));
+      this.waypointIndex = Math.min(1, Math.max(0, this.navigationPath.length - 1));
+      this.resetNavigationProgress();
+    }
+    return true;
+  }
+
+  private getTargetZoneRoute(
+    actor: ActorState,
+    state: MatchState,
+    targetRadius: number,
+  ): ZoneRoute | null {
+    const routeKey = targetZoneRouteKey(state, targetRadius);
+    if (this.zoneRouteKey === routeKey) return this.zoneRoute;
+    return this.refreshTargetZoneRoute(actor, state, targetRadius);
+  }
+
+  private refreshTargetZoneRoute(
+    actor: ActorState,
+    state: MatchState,
+    targetRadius: number,
+  ): ZoneRoute | null {
+    const routeKey = targetZoneRouteKey(state, targetRadius);
+    const route = this.findZoneRoute(actor, state.safeZone.targetCenter, targetRadius);
+    this.zoneRouteKey = routeKey;
+    this.zoneRouteOrigin = { ...actor.position };
+    this.zoneRoute = route;
+    return route;
+  }
+
+  private findZoneRoute(
+    actor: ActorState,
+    center: Vector3State,
+    radius: number,
+  ): ZoneRoute | null {
+    for (const target of this.zoneEntryCandidates(actor, center, radius)) {
+      const path = this.navigator.findPath(actor.position, target);
+      if (path.length > 0) return { target, path };
+    }
+    return null;
+  }
+
+  private zoneEntryCandidates(
+    actor: ActorState,
+    center: Vector3State,
+    radius: number,
+  ): Vector3State[] {
     const fromCenter = normalizeFlat(subtract(actor.position, center));
     const entryRadius = Math.max(0, radius * 0.72);
     const candidates: Vector3State[] = [{
@@ -1261,16 +1475,14 @@ export class BotController {
         z: center.z + Math.sin(angle) * radius * 0.55,
       });
     }
-    for (const candidate of candidates) {
-      if (pointInsideGroundBlocker(candidate, this.layout)) continue;
-      const path = this.navigator.findPath(actor.position, candidate);
-      if (path.length > 0) {
-        this.zonePathRetryAtSeconds = -1;
-        return this.navigate(actor, candidate, command, path);
-      }
-    }
-    this.zonePathRetryAtSeconds = elapsedSeconds + ZONE_PATH_RETRY_SECONDS;
-    return this.moveDirectlyIntoZone(actor, center, command);
+    return candidates;
+  }
+
+  private clearZoneRoute(): void {
+    this.zoneRouteKey = null;
+    this.zoneRouteOrigin = null;
+    this.zoneRoute = null;
+    this.zoneTravelKey = null;
   }
 
   private moveDirectlyIntoZone(
@@ -1450,6 +1662,36 @@ function distanceSquared(a: Vector3State, b: Vector3State): number {
   return (a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2;
 }
 
+function pathLength(path: readonly Vector3State[]): number {
+  let length = 0;
+  for (let index = 1; index < path.length; index += 1) {
+    const previous = path[index - 1];
+    const current = path[index];
+    if (previous && current) length += horizontalDistance(previous, current);
+  }
+  return length;
+}
+
+function targetZoneRouteKey(state: MatchState, targetRadius: number): string {
+  return [
+    state.safeZone.stageIndex,
+    state.safeZone.targetCenter.x,
+    state.safeZone.targetCenter.z,
+    targetRadius,
+  ].join(":");
+}
+
+function zoneTravelDue(
+  state: MatchState,
+  routeDistance: number,
+  shrinkSeconds: number,
+  staggerSeconds: number,
+): boolean {
+  return state.safeZone.secondsRemaining <= 1 ||
+    state.safeZone.secondsRemaining + shrinkSeconds <=
+      routeDistance / SPRINT_SPEED + ZONE_TRAVEL_SAFETY_SECONDS + staggerSeconds;
+}
+
 function pointInsideBuilding(point: Vector3State, layout: ReturnType<typeof createMapLayout>): boolean {
   return layout.obstacles.some((obstacle) =>
     pointInsideObstacle2D(obstacle, point.x, point.z, -0.6)
@@ -1457,12 +1699,10 @@ function pointInsideBuilding(point: Vector3State, layout: ReturnType<typeof crea
 }
 
 function pointInsideGroundBlocker(point: Vector3State, layout: MapLayout): boolean {
-  return [
-    ...layout.obstacles,
-    ...layout.rockObstacles,
-    ...layout.coverObstacles,
-    ...layout.treeTrunks,
-  ].some((obstacle) => pointInsideObstacle2D(obstacle, point.x, point.z, 0.64));
+  return layout.obstacles.some((obstacle) => pointInsideObstacle2D(obstacle, point.x, point.z, 0.64)) ||
+    layout.rockObstacles.some((obstacle) => pointInsideObstacle2D(obstacle, point.x, point.z, 0.64)) ||
+    layout.coverObstacles.some((obstacle) => pointInsideObstacle2D(obstacle, point.x, point.z, 0.64)) ||
+    layout.treeTrunks.some((obstacle) => pointInsideObstacle2D(obstacle, point.x, point.z, 0.64));
 }
 
 function lootPathKey(loot: GroundLootState): string {

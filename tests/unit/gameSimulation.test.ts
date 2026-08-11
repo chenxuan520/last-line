@@ -96,6 +96,120 @@ describe("GameSimulation combat", () => {
     });
   });
 
+  it("coalesces AI shotgun presentation while preserving every authoritative pellet trace", () => {
+    const simulation = createSimulation();
+    const bot = simulation.state.actors["bot-1"];
+    if (!bot) throw new Error("bot missing");
+    bot.inventory.weaponSlots = [createWeaponState("shotgun"), null];
+    bot.inventory.activeWeaponSlot = 0;
+    let authoritativeTraces = 0;
+    const world: CombatWorld = {
+      traceShot: () => null,
+      traceShotDetailed: () => {
+        authoritativeTraces += 1;
+        return {
+          targetId: null,
+          point: { x: 0, y: 1.76, z: 12 },
+          normal: { x: 0, y: 0, z: -1 },
+          hitType: "environment",
+        };
+      },
+    };
+
+    simulation.step(1 / 30, new Map([[bot.id, fireCommand]]), world);
+    const events = simulation.drainEvents();
+
+    expect(authoritativeTraces).toBe(WEAPONS.shotgun?.pellets);
+    expect(events.filter((event) => event.type === "shot-fired")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "shot-traced")).toHaveLength(1);
+  });
+
+  it("uses an AI shotgun actor hit as the representative presentation trace", () => {
+    const simulation = createSimulation();
+    const bot = simulation.state.actors["bot-1"];
+    if (!bot) throw new Error("bot missing");
+    bot.inventory.weaponSlots = [createWeaponState("shotgun"), null];
+    bot.inventory.activeWeaponSlot = 0;
+    let pellet = 0;
+    const world: CombatWorld = {
+      traceShot: () => null,
+      traceShotDetailed: () => {
+        pellet += 1;
+        return pellet === 1
+          ? {
+              targetId: null,
+              point: { x: 0, y: 1.76, z: 12 },
+              normal: { x: 0, y: 0, z: -1 },
+              hitType: "miss",
+            }
+          : {
+              targetId: "player",
+              point: { x: 0, y: 1.76, z: 8 },
+              normal: { x: 0, y: 0, z: -1 },
+              hitType: "actor",
+            };
+      },
+    };
+
+    simulation.step(1 / 30, new Map([[bot.id, fireCommand]]), world);
+    const traces = simulation.drainEvents().filter((event) => event.type === "shot-traced");
+
+    expect(traces).toHaveLength(1);
+    expect(traces[0]).toMatchObject({ hitType: "actor", targetId: "player" });
+    expect(simulation.state.actors.player.health).toBeLessThan(100);
+  });
+
+  it("omits AI shotgun presentation when every authoritative pellet misses", () => {
+    const simulation = createSimulation();
+    const bot = simulation.state.actors["bot-1"];
+    if (!bot) throw new Error("bot missing");
+    bot.inventory.weaponSlots = [createWeaponState("shotgun"), null];
+    bot.inventory.activeWeaponSlot = 0;
+    let authoritativeTraces = 0;
+    const world: CombatWorld = {
+      traceShot: () => null,
+      traceShotDetailed: () => {
+        authoritativeTraces += 1;
+        return {
+          targetId: null,
+          point: { x: 0, y: 1.76, z: 42 },
+          normal: { x: 0, y: 0, z: -1 },
+          hitType: "miss",
+        };
+      },
+    };
+
+    simulation.step(1 / 30, new Map([[bot.id, fireCommand]]), world);
+    const events = simulation.drainEvents();
+
+    expect(authoritativeTraces).toBe(WEAPONS.shotgun?.pellets);
+    expect(events.filter((event) => event.type === "shot-fired")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "shot-traced")).toHaveLength(0);
+  });
+
+  it("preserves every player shotgun presentation trace", () => {
+    const simulation = createSimulation("shotgun");
+    let authoritativeTraces = 0;
+    const world: CombatWorld = {
+      traceShot: () => null,
+      traceShotDetailed: () => {
+        authoritativeTraces += 1;
+        return {
+          targetId: null,
+          point: { x: 0, y: 1.76, z: 12 },
+          normal: { x: 0, y: 0, z: -1 },
+          hitType: "environment",
+        };
+      },
+    };
+
+    simulation.step(1 / 30, new Map([["player", fireCommand]]), world);
+    const events = simulation.drainEvents();
+
+    expect(authoritativeTraces).toBe(WEAPONS.shotgun?.pellets);
+    expect(events.filter((event) => event.type === "shot-traced")).toHaveLength(WEAPONS.shotgun?.pellets);
+  });
+
   it("finishes every actor's movement before tracing combat", () => {
     const simulation = createSimulation();
     const world: CombatWorld = {

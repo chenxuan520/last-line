@@ -41,6 +41,7 @@ import {
   type MapLayout,
   type MapWallSegment,
   type MapWallOpening,
+  wallOpeningOutwardDirection,
 } from "../../../config/map";
 import { getActiveWeapon, type ActorState, type EntityId, type FlightState, type GroundLootState } from "../../../game/state/types";
 import { ACTOR_EYE_HEIGHT, ACTOR_HEIGHT, ACTOR_RADIUS } from "../../../game/rules/actorGeometry";
@@ -1154,7 +1155,12 @@ function createAmmunitionDepotSign(
 ): void {
   const building = layout.obstacles.find((candidate) => candidate.id === layout.ammunitionDepot.buildingId);
   if (!building) throw new Error("Ammunition depot building missing from scene layout");
-  const texture = catalogTexture(scene, assets, "ui.item.ammo-depot", 1, Texture.CLAMP_ADDRESSMODE);
+  const door = layout.wallOpenings.find((opening) =>
+    opening.obstacleId === building.id && opening.storyIndex === 0 && opening.kind === "door"
+  );
+  if (!door) throw new Error("Ammunition depot ground door missing from scene layout");
+  const outward = wallOpeningOutwardDirection(door);
+  const texture = catalogTexture(scene, assets, "decal.poi.ammo-depot", 1, Texture.CLAMP_ADDRESSMODE);
   const signMaterial = new StandardMaterial("ammunition-depot-sign-material", scene);
   signMaterial.diffuseColor = fallbackMaterial.diffuseColor.scale(1.35);
   signMaterial.emissiveColor = Color3.FromHexString("#9aa88d").scale(0.12);
@@ -1172,9 +1178,12 @@ function createAmmunitionDepotSign(
     scene,
   );
   sign.position.set(
-    building.center.x,
+    door.center.x + outward.x * 0.08,
     building.baseY + Math.min(building.storyHeight - 0.8, 3.5),
-    building.center.z - building.depth / 2 - 0.04,
+    door.center.z + outward.z * 0.08,
+  );
+  sign.rotation.y = door.rotationY ?? (
+    door.side === "left" || door.side === "right" ? Math.PI / 2 : 0
   );
   sign.material = signMaterial;
   sign.checkCollisions = false;
@@ -1183,6 +1192,8 @@ function createAmmunitionDepotSign(
     decoration: "ammunition-depot-sign",
     poiName: layout.ammunitionDepot.name,
     poiType: "ammo-depot",
+    assetId: "decal.poi.ammo-depot",
+    openingId: door.id,
     obstacleId: building.id,
   };
   sign.freezeWorldMatrix();

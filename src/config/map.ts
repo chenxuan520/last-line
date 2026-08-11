@@ -598,6 +598,11 @@ export function createMapLayout(mapIdOrSeed: MapId | number, explicitSeed?: numb
     hospitalSelection.buildingId,
     (building) => building.id.startsWith(`building-${POI_NAMES.indexOf("旧仓区")}-`),
     mapPoints[POI_NAMES.indexOf("旧仓区")]?.position,
+    (building) =>
+      buildingLootFitsFootprint(building, "hexagon", baseLootSpawnPoints) &&
+      baseLootSpawnPoints.every((point) =>
+        !pointInsideObstacle2D({ ...building, footprint: "hexagon" }, point.x, point.z, 12)
+      ),
   );
   const treePlacementRamps = assignedObstacles.flatMap((building) => {
     if (building.storyCount > 1) return createInternalRamps(building, terrainHills);
@@ -612,9 +617,10 @@ export function createMapLayout(mapIdOrSeed: MapId | number, explicitSeed?: numb
       building.id,
       building.id !== hospitalSelection.buildingId && building.id !== depotSelection.buildingId,
     );
+    const finalFootprint = building.id === depotSelection.buildingId ? "hexagon" : footprint;
     const shapedBuilding = {
       ...building,
-      footprint,
+      footprint: finalFootprint,
       ...(building.id === depotSelection.buildingId
         ? { color: AMMUNITION_DEPOT_WALL_COLOR }
         : {}),
@@ -761,6 +767,7 @@ function createTownMapLayout(seed: number): MapLayout {
     hospitalBuilding.id,
     (building) => building.townKind === "warehouse" || building.townKind === "factory",
     { x: 540, y: 0, z: 540 },
+    (building) => !skybridgeBuildingIds.has(building.id),
   );
   const depotIndex = baseObstacles.findIndex((building) => building.id === depotSelection.buildingId);
   const depotBase = baseObstacles[depotIndex];
@@ -776,9 +783,10 @@ function createTownMapLayout(seed: number): MapLayout {
         building.id !== depotSelection.buildingId &&
         !skybridgeBuildingIds.has(building.id),
     );
+    const finalFootprint = building.id === depotSelection.buildingId ? "hexagon" : footprint;
     const shapedBuilding = {
       ...building,
-      footprint,
+      footprint: finalFootprint,
       ...(building.id === depotSelection.buildingId
         ? { color: AMMUNITION_DEPOT_WALL_COLOR }
         : {}),
@@ -829,6 +837,7 @@ function createTownMapLayout(seed: number): MapLayout {
     wallOpenings,
     terrainHills,
     seed,
+    new Set([depotSelection.buildingId]),
   );
   const supplementalMedicalPoints = createTownSupplementalMedicalPoints(
     blueprint.landingZones,
@@ -982,6 +991,10 @@ function createMixedMapLayout(seed: number): MapLayout {
       stairwell: createBuildingStairwell(geometry, building.stairwellSide),
     };
   });
+  const skybridges = createMixedSkybridges(generatedObstacles, 8);
+  const skybridgeBuildingIds = new Set(
+    skybridges.flatMap((bridge) => [bridge.fromBuildingId, bridge.toBuildingId]),
+  );
   const depotSelection = selectAmmunitionDepotBuilding(
     generatedObstacles,
     blueprint.hospitalBuildingId,
@@ -989,10 +1002,7 @@ function createMixedMapLayout(seed: number): MapLayout {
       building.regionId === fixedTown.id &&
       (building.townKind === "warehouse" || building.townKind === "factory"),
     { x: fixedTown.centerX, y: 0, z: fixedTown.centerZ },
-  );
-  const skybridges = createMixedSkybridges(generatedObstacles, 8);
-  const skybridgeBuildingIds = new Set(
-    skybridges.flatMap((bridge) => [bridge.fromBuildingId, bridge.toBuildingId]),
+    (building) => !skybridgeBuildingIds.has(building.id),
   );
   const coloredObstacles = generatedObstacles.map((building) => {
     const elevatedBuilding = skybridgeBuildingIds.has(building.id) && building.storyCount < 2
@@ -1006,9 +1016,10 @@ function createMixedMapLayout(seed: number): MapLayout {
         elevatedBuilding.id !== depotSelection.buildingId &&
         !skybridgeBuildingIds.has(elevatedBuilding.id),
     );
+    const finalFootprint = elevatedBuilding.id === depotSelection.buildingId ? "hexagon" : footprint;
     const shapedBuilding = {
       ...elevatedBuilding,
-      footprint,
+      footprint: finalFootprint,
       ...(elevatedBuilding.id === depotSelection.buildingId
         ? { color: AMMUNITION_DEPOT_WALL_COLOR }
         : {}),
@@ -1074,6 +1085,7 @@ function createMixedMapLayout(seed: number): MapLayout {
     coverObstacles,
     treeTrunks,
     seed,
+    new Set([depotSelection.buildingId]),
   );
   const hospitalBuildingBeforeStairwell = coloredObstacles.find(
     (building) => building.id === blueprint.hospitalBuildingId,
@@ -1327,6 +1339,7 @@ function createMixedLootSpawnPoints(
   covers: readonly MapCoverObstacle[],
   trees: readonly MapTreeTrunk[],
   seed: number,
+  reservedBuildingIds: ReadonlySet<string> = new Set(),
 ): Vector3State[] {
   const selected: Vector3State[] = [];
   const buildingUseCounts = new Map<string, number>();
@@ -1337,7 +1350,9 @@ function createMixedLootSpawnPoints(
     if (!region) throw new Error(`Mixed map loot region missing for zone ${zoneIndex}`);
     const targetCount = counts[zoneIndex] ?? 0;
     const regionBuildings = buildings
-      .filter((building) => building.regionId === region.id)
+      .filter((building) =>
+        building.regionId === region.id && !reservedBuildingIds.has(building.id)
+      )
       .sort((left, right) =>
         distanceSquared2d(left.center.x, left.center.z, zone.position.x, zone.position.z) -
           distanceSquared2d(right.center.x, right.center.z, zone.position.x, zone.position.z) ||
@@ -2122,6 +2137,7 @@ function createTownLootSpawnPoints(
   openings: readonly MapWallOpening[],
   terrainHills: readonly TerrainHill[],
   seed: number,
+  reservedBuildingIds: ReadonlySet<string> = new Set(),
 ): Vector3State[] {
   const random = createSeededRandom(seed ^ 0xc2b2ae35);
   const usedBuildingIds = new Set<string>();
@@ -2138,7 +2154,11 @@ function createTownLootSpawnPoints(
       const startIndex = (slot * 3 + zoneIndex) % nearbyBuildings.length;
       const building = Array.from({ length: nearbyBuildings.length }, (_, offset) =>
         nearbyBuildings[(startIndex + offset) % nearbyBuildings.length]
-      ).find((candidate) => candidate && !usedBuildingIds.has(candidate.id));
+      ).find((candidate) =>
+        candidate &&
+        !reservedBuildingIds.has(candidate.id) &&
+        !usedBuildingIds.has(candidate.id)
+      );
       if (!building) throw new Error(`Town loot building missing for ${zone.name}`);
       usedBuildingIds.add(building.id);
       const opening = openings.find((candidate) =>
@@ -2739,8 +2759,11 @@ function selectAmmunitionDepotBuilding(
   hospitalBuildingId: string,
   preferred: (building: MapBuilding) => boolean,
   anchor: Vector3State | undefined,
+  allowed: (building: MapBuilding) => boolean = () => true,
 ): AmmunitionDepotSelection {
-  const eligible = buildings.filter((building) => building.id !== hospitalBuildingId);
+  const eligible = buildings.filter((building) =>
+    building.id !== hospitalBuildingId && allowed(building)
+  );
   const preferredBuildings = eligible.filter(preferred);
   const pool = preferredBuildings.length > 0 ? preferredBuildings : eligible;
   const selected = [...pool].sort((left, right) => {
@@ -2756,6 +2779,18 @@ function selectAmmunitionDepotBuilding(
   })[0];
   if (!selected) throw new Error("Ammunition depot building selection failed");
   return { buildingId: selected.id };
+}
+
+function buildingLootFitsFootprint(
+  building: MapBuilding,
+  footprint: BuildingFootprint,
+  lootPoints: readonly Vector3State[],
+): boolean {
+  const candidate = { ...building, footprint };
+  return lootPoints.every((point) =>
+    !pointInsideObstacle2D(building, point.x, point.z) ||
+    pointInsideObstacle2D(candidate, point.x, point.z, -LOOT_OBSTACLE_CLEARANCE)
+  );
 }
 
 function assignStairwellsAvoidingLoot(
@@ -4061,8 +4096,8 @@ function createBuildingInteriorLootPoints(
   roofRamps: readonly RoofRamp[],
   existingLoot: readonly Vector3State[],
 ): Vector3State[] {
-  const xFractions = [-0.32, 0, 0.32];
-  const zFractions = [-0.3, -0.12, 0.12, 0.3];
+  const xFractions = [-0.28, -0.14, 0, 0.14, 0.28];
+  const zFractions = [-0.28, -0.14, 0, 0.14, 0.28];
   const level = 0;
   const candidates = xFractions.flatMap((xFraction) => zFractions.map((zFraction) => {
     const x = round(building.center.x + building.width * xFraction);
@@ -4074,20 +4109,42 @@ function createBuildingInteriorLootPoints(
       z,
     };
   })).filter((candidate) =>
+    pointInsideObstacle2D(building, candidate.x, candidate.z, -1) &&
     !pointInsideStairwell(candidate, building, LOOT_OBSTACLE_CLEARANCE) &&
-    isClearLootPoint(candidate, wallSegments, roofRamps, existingLoot, [], 2.5)
+    isClearLootPoint(candidate, wallSegments, roofRamps, existingLoot, [], 12)
   );
-  const selected: Vector3State[] = [];
-  for (const candidate of candidates) {
-    if (selected.every((point) => Math.hypot(point.x - candidate.x, point.z - candidate.z) >= 4)) {
-      selected.push(candidate);
-    }
-    if (selected.length === AMMUNITION_DEPOT_LOOT_POINTS) return selected;
-  }
+  const selected = selectSpacedLootPoints(candidates, AMMUNITION_DEPOT_LOOT_POINTS, 4);
+  if (selected) return selected;
   throw new Error(
     `${building.id} has no clear level-${level} special loot layout ` +
-    `(${selected.length}/${AMMUNITION_DEPOT_LOOT_POINTS})`,
+    `(0/${AMMUNITION_DEPOT_LOOT_POINTS})`,
   );
+}
+
+function selectSpacedLootPoints(
+  candidates: readonly Vector3State[],
+  count: number,
+  minimumSpacing: number,
+): Vector3State[] | null {
+  const selected: Vector3State[] = [];
+  const search = (startIndex: number): boolean => {
+    if (selected.length === count) return true;
+    const remaining = count - selected.length;
+    for (let index = startIndex; index <= candidates.length - remaining; index += 1) {
+      const candidate = candidates[index];
+      if (!candidate) continue;
+      if (selected.some((point) =>
+        Math.hypot(point.x - candidate.x, point.z - candidate.z) < minimumSpacing
+      )) {
+        continue;
+      }
+      selected.push(candidate);
+      if (search(index + 1)) return true;
+      selected.pop();
+    }
+    return false;
+  };
+  return search(0) ? selected : null;
 }
 
 function createGrenadeLootSpawnPoints(

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { GridNavigator } from "../../src/ai/navigation/GridNavigator";
 import { BUILDING_ROOF_CAP_HEIGHT, createMapLayout, getTerrainHeight } from "../../src/config/map";
 import { FRAG_GRENADE_CONFIG, FRAG_GRENADE_ITEM_ID } from "../../src/config/throwables";
 import { BotController } from "../../src/controllers/BotController";
@@ -250,6 +251,56 @@ describe("BotController", () => {
     const command = new BotController(1, () => 0.5).update(bot, state, blocked, 1, "player");
 
     expect(command.fire).toBe(false);
+  });
+
+  it("keeps looting and patrolling instead of opening long-range fights during the first-zone spread", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    bot.position = { x: 0, y: 1.76, z: 0 };
+    bot.yaw = Math.PI / 2;
+    player.position = { x: 80, y: 1.76, z: 0 };
+    state.safeZone.stageIndex = 0;
+    state.safeZone.status = "waiting";
+    state.safeZone.secondsRemaining = 120;
+    state.groundLoot = {};
+
+    const command = new BotController(1, () => 0.5).update(
+      bot,
+      state,
+      miss,
+      1 / 30,
+      player.id,
+      50,
+    );
+
+    expect(command.fire).toBe(false);
+    expect(Math.hypot(command.move.x, command.move.z)).toBeGreaterThan(0.9);
+  });
+
+  it("restores full combat perception near the end of the first waiting stage", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    bot.position = { x: 0, y: 1.76, z: 0 };
+    bot.yaw = Math.PI / 2;
+    player.position = { x: 80, y: 1.76, z: 0 };
+    state.safeZone.stageIndex = 0;
+    state.safeZone.status = "waiting";
+    state.safeZone.secondsRemaining = 25;
+
+    const command = new BotController(1, () => 0.5).update(
+      bot,
+      state,
+      miss,
+      1 / 30,
+      player.id,
+      50,
+    );
+
+    expect(command.fire).toBe(true);
   });
 
   it("checks dense combat line of sight in nearest-target order", () => {
@@ -555,6 +606,7 @@ describe("BotController", () => {
       y: obstacle.center.y + obstacle.height / 2 + BUILDING_ROOF_CAP_HEIGHT + 1.76,
       z: obstacle.center.z,
     };
+    state.safeZone.secondsRemaining = 25;
     bot.yaw = Math.atan2(player.position.x - bot.position.x, player.position.z - bot.position.z);
 
     const controller = new BotController(1, () => 0.5, false, layout);
@@ -693,6 +745,9 @@ describe("BotController", () => {
     const bot = state.actors["bot-1"];
     const player = state.actors.player;
     if (!obstacle || !bot || !player) throw new Error("test setup missing");
+    for (const actor of Object.values(state.actors)) {
+      actor.alive = actor.id === bot.id || actor.id === player.id;
+    }
     const botX = obstacle.center.x - obstacle.width / 2 - 35;
     bot.position = { x: botX, y: getTerrainHeight(botX, obstacle.center.z, layout) + 1.76, z: obstacle.center.z };
     player.position = {
@@ -906,6 +961,45 @@ describe("BotController", () => {
     expect(internal.forcedRelocationUntilSeconds).toBe(-1);
   });
 
+  it("abandons forced relocation to recover a loaded weapon while unarmed inside the safe zone", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    player.alive = false;
+    bot.inventory.weaponSlots = [null, null];
+    bot.inventory.backpack = [];
+    bot.position = { x: 0, y: 1.76, z: 0 };
+    state.elapsedSeconds = 10;
+    state.groundLoot.weapon = {
+      id: "weapon",
+      itemId: "weapon.rifle",
+      quantity: 1,
+      weapon: createWeaponState("rifle"),
+      position: { x: 1, y: 0.45, z: 0 },
+      available: true,
+    };
+    const controller = new BotController(1, () => 0.5);
+    const internal = controller as unknown as {
+      forcedRelocationOrigin: Vector3State | null;
+      forcedRelocationTarget: Vector3State | null;
+      forcedRelocationUntilSeconds: number;
+    };
+    internal.forcedRelocationOrigin = { ...bot.position };
+    internal.forcedRelocationTarget = { x: 100, y: bot.position.y, z: 0 };
+    internal.forcedRelocationUntilSeconds = 30;
+
+    const command = controller.update(bot, state, miss, 1 / 30, player.id);
+
+    expect(command).toMatchObject({
+      interact: true,
+      interactLootId: "weapon",
+      interactLootGeneration: 0,
+    });
+    expect(internal.forcedRelocationTarget).toBeNull();
+    expect(internal.forcedRelocationUntilSeconds).toBe(-1);
+  });
+
   it("uses its pinned layout for forced relocation after the global seed cache is evicted", () => {
     const state = groundedState();
     const bot = state.actors["bot-1"];
@@ -999,7 +1093,7 @@ describe("BotController", () => {
     })).toBe(false);
   }, 30_000);
 
-  it("moves into the next target zone before the current zone starts shrinking", () => {
+  it("keeps patrolling the current safe zone while the next-zone travel budget is ample", () => {
     const state = groundedState();
     const bot = state.actors["bot-1"];
     const player = state.actors.player;
@@ -1013,10 +1107,99 @@ describe("BotController", () => {
     state.safeZone.status = "waiting";
     state.safeZone.secondsRemaining = 90;
 
-    const command = new BotController(1, () => 0.5).update(bot, state, miss, 1 / 30, player.id);
+    state.groundLoot = {};
+    const controller = new BotController(1, () => 0.5);
+    const command = controller.update(bot, state, miss, 1 / 30, player.id);
+    const navigationTarget = (controller as unknown as {
+      navigationTarget: Vector3State | null;
+    }).navigationTarget;
 
-    expect(command.move.x).toBeGreaterThan(0.9);
+    expect(Math.hypot(command.move.x, command.move.z)).toBeGreaterThan(0.9);
     expect(command.sprint).toBe(true);
+    expect(navigationTarget).not.toBeNull();
+    expect(Math.hypot(
+      (navigationTarget?.x ?? Number.POSITIVE_INFINITY) - state.safeZone.targetCenter.x,
+      (navigationTarget?.z ?? Number.POSITIVE_INFINITY) - state.safeZone.targetCenter.z,
+    )).toBeGreaterThan(state.safeZone.targetRadius);
+    expect(Math.hypot(
+      (navigationTarget?.x ?? Number.POSITIVE_INFINITY) - state.safeZone.center.x,
+      (navigationTarget?.z ?? Number.POSITIVE_INFINITY) - state.safeZone.center.z,
+    )).toBeLessThanOrEqual(state.safeZone.radius);
+  });
+
+  it("uses the full navigable detour length for the latest safe departure without repeated route searches", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    player.alive = false;
+    bot.position = { x: 100, y: 1.76, z: 0 };
+    state.safeZone.center = { x: 0, y: 0, z: 0 };
+    state.safeZone.radius = 500;
+    state.safeZone.targetCenter = { x: 0, y: 0, z: 0 };
+    state.safeZone.targetRadius = 60;
+    state.safeZone.status = "waiting";
+    state.safeZone.secondsRemaining = 5;
+    const layout = createMapLayout(state.mapId, state.mapSeed);
+    let pathSearches = 0;
+    const detourPath = [
+      { ...bot.position },
+      { x: 100, y: 1.76, z: 130 },
+      { x: -30, y: 1.76, z: 130 },
+      { x: -30, y: 1.76, z: 0 },
+      { x: 0, y: 1.76, z: 0 },
+    ];
+    const navigator = {
+      findPath: () => {
+        pathSearches += 1;
+        return detourPath;
+      },
+    } as unknown as GridNavigator;
+    const controller = new BotController(1, () => 0.5, false, layout, navigator);
+
+    const departure = controller.update(bot, state, miss, 1 / 30, player.id, 49);
+    const searchesAtDeparture = pathSearches;
+    bot.position.x += 5;
+    state.elapsedSeconds += 1;
+    state.safeZone.secondsRemaining -= 1;
+    controller.update(bot, state, miss, 1, player.id, 49);
+
+    expect(departure.move.x).toBeCloseTo(0, 5);
+    expect(departure.move.z).toBeGreaterThan(0.9);
+    expect(searchesAtDeparture).toBe(2);
+    expect(pathSearches).toBe(searchesAtDeparture);
+  });
+
+  it("caches a distant target-zone route across ordinary movement before departure", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    player.alive = false;
+    bot.position = { x: 0, y: 1.76, z: 0 };
+    state.safeZone.targetCenter = { x: 200, y: 0, z: 0 };
+    state.safeZone.targetRadius = 60;
+    state.safeZone.center = { x: -1_000, y: 0, z: 0 };
+    state.safeZone.radius = 2_000;
+    state.safeZone.status = "waiting";
+    state.safeZone.secondsRemaining = 120;
+    const layout = createMapLayout(state.mapId, state.mapSeed);
+    let pathSearches = 0;
+    const navigator = {
+      findPath: (start: Vector3State, target: Vector3State) => {
+        if (target.x > 100) pathSearches += 1;
+        return [{ ...start }, { ...target }];
+      },
+    } as unknown as GridNavigator;
+    const controller = new BotController(1, () => 0.5, false, layout, navigator);
+
+    controller.update(bot, state, miss, 1 / 30, player.id, 49);
+    bot.position.x += 24;
+    state.elapsedSeconds += 1;
+    state.safeZone.secondsRemaining -= 1;
+    controller.update(bot, state, miss, 1, player.id, 49);
+
+    expect(pathSearches).toBe(1);
   });
 
   it("picks up a weapon at its feet before rotating into the next zone", () => {
@@ -1081,6 +1264,7 @@ describe("BotController", () => {
     state.safeZone.radius = 100;
     state.safeZone.targetCenter = { x: 500, y: 0, z: 0 };
     state.safeZone.targetRadius = 60;
+    state.safeZone.secondsRemaining = 1;
     state.groundLoot.weapon = {
       id: "weapon",
       itemId: "weapon.rifle",
@@ -1171,6 +1355,34 @@ describe("BotController", () => {
     expect(command.sprint).toBe(true);
   });
 
+  it("prioritizes escaping the current toxic zone over ammunition at its feet", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    player.alive = false;
+    bot.position = { x: 200, y: 1.76, z: 0 };
+    bot.inventory.weaponSlots = [createWeaponState("rifle", false), createWeaponState("smg", false)];
+    bot.inventory.backpack = [];
+    state.safeZone.center = { x: 0, y: 0, z: 0 };
+    state.safeZone.radius = 40;
+    state.safeZone.targetCenter = { x: 0, y: 0, z: 0 };
+    state.safeZone.targetRadius = 40;
+    state.groundLoot.rifleAmmo = {
+      id: "rifleAmmo",
+      itemId: "ammo.rifle",
+      quantity: 90,
+      position: { x: 200, y: 0.45, z: 0 },
+      available: true,
+    };
+
+    const command = new BotController(1, () => 0.5).update(bot, state, miss, 1 / 30, player.id);
+
+    expect(command.interact).toBe(false);
+    expect(command.move.x).toBeLessThan(-0.9);
+    expect(command.sprint).toBe(true);
+  });
+
   it("uses carried medicine when injured", () => {
     const state = groundedState();
     const bot = state.actors["bot-1"];
@@ -1251,22 +1463,76 @@ describe("BotController", () => {
     expect(command.sprint).toBe(true);
   });
 
-  it("keeps searching the current zone when the final target radius is zero", () => {
+  it("converges toward the final center before the target radius reaches zero", () => {
     const state = groundedState();
     const bot = state.actors["bot-1"];
     const player = state.actors.player;
     if (!bot || !player) throw new Error("actors missing");
     for (const actor of Object.values(state.actors)) actor.alive = actor.id === bot.id || actor.id === player.id;
+    state.safeZone.center = { x: 0, y: 0, z: 0 };
     state.safeZone.radius = 120;
+    state.safeZone.targetCenter = { x: -80, y: 0, z: 0 };
     state.safeZone.targetRadius = 0;
-    bot.position = { x: 0, y: getTerrainHeight(0, 0, state.mapSeed) + 1.76, z: 0 };
+    state.safeZone.status = "waiting";
+    state.safeZone.secondsRemaining = 1;
+    bot.position = { x: 80, y: getTerrainHeight(80, 0, state.mapSeed) + 1.76, z: 0 };
     player.position = { x: 500, y: getTerrainHeight(500, 0, state.mapSeed) + 1.76, z: 0 };
     const hidden: CombatWorld = { traceShot: () => null, hasLineOfSight: () => false };
+    const controller = new BotController(1, () => 0.5);
 
-    const command = new BotController(1, () => 0.5).update(bot, state, hidden, 1 / 30, player.id);
+    const command = controller.update(bot, state, hidden, 1 / 30, player.id, 2);
+    const navigationTarget = (controller as unknown as {
+      navigationTarget: Vector3State | null;
+    }).navigationTarget;
 
     expect(Math.hypot(command.move.x, command.move.z)).toBeGreaterThan(0.9);
     expect(command.sprint).toBe(true);
+    expect(navigationTarget).not.toBeNull();
+    expect(Math.hypot(
+      (navigationTarget?.x ?? Number.POSITIVE_INFINITY) - state.safeZone.targetCenter.x,
+      (navigationTarget?.z ?? Number.POSITIVE_INFINITY) - state.safeZone.targetCenter.z,
+    )).toBeLessThanOrEqual(12);
+  });
+
+  it("moves into a small final target zone before it starts shrinking", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    for (const actor of Object.values(state.actors)) {
+      actor.alive = actor.id === bot.id || actor.id === player.id;
+    }
+    player.position = { x: -500, y: 1.76, z: 0 };
+    bot.position = { x: 90, y: getTerrainHeight(90, 0, state.mapSeed) + 1.76, z: 0 };
+    state.safeZone.center = { x: 0, y: 0, z: 0 };
+    state.safeZone.radius = 120;
+    state.safeZone.targetCenter = { x: 0, y: 0, z: 0 };
+    state.safeZone.targetRadius = 10;
+    state.safeZone.status = "waiting";
+    state.safeZone.secondsRemaining = 1;
+    state.groundLoot = {};
+    const hidden: CombatWorld = { traceShot: () => null, hasLineOfSight: () => false };
+    const controller = new BotController(1, () => 0.5);
+
+    const command = controller.update(
+      bot,
+      state,
+      hidden,
+      1 / 30,
+      player.id,
+      2,
+    );
+    const navigationTarget = (controller as unknown as {
+      navigationTarget: Vector3State | null;
+    }).navigationTarget;
+
+    expect(Math.hypot(command.move.x, command.move.z)).toBeGreaterThan(0.9);
+    expect(command.sprint).toBe(true);
+    expect(navigationTarget).not.toBeNull();
+    expect(Math.hypot(
+      (navigationTarget?.x ?? Number.POSITIVE_INFINITY) - state.safeZone.targetCenter.x,
+      (navigationTarget?.z ?? Number.POSITIVE_INFINITY) - state.safeZone.targetCenter.z,
+    )).toBeLessThanOrEqual(state.safeZone.targetRadius);
   });
 
   it("patrols during the early game when no target or useful loot exists", () => {
@@ -1566,6 +1832,46 @@ describe("BotController", () => {
     expect(state.groundLoot.shotgun.available).toBe(true);
     expect(state.groundLoot.rifleAmmo.available).toBe(false);
     expect(events.some((event) => event.type === "item-dropped")).toBe(false);
+  });
+
+  it("replaces an unusable weapon with a loaded ground weapon when no compatible ammo remains", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    player.alive = false;
+    bot.position = { x: 0, y: 1.76, z: 0 };
+    bot.inventory.weaponSlots = [createWeaponState("rifle", false), createWeaponState("smg", false)];
+    bot.inventory.activeWeaponSlot = 0;
+    bot.inventory.backpack = [];
+    state.groundLoot = {
+      shotgun: {
+        id: "shotgun",
+        itemId: "weapon.shotgun",
+        quantity: 1,
+        weapon: createWeaponState("shotgun"),
+        position: { x: 1, y: 0.45, z: 0 },
+        available: true,
+      },
+    };
+    const controller = new BotController(1, () => 0.5);
+    const inventory = new InventorySystem();
+    const movement = new MovementSystem();
+    const events: import("../../src/game/state/types").GameEvent[] = [];
+
+    for (let decision = 0; decision < 30 && state.groundLoot.shotgun?.available; decision += 1) {
+      const command = controller.update(bot, state, miss, 0.5, player.id);
+      movement.processCommand(state, bot.id, command, 0.5);
+      inventory.processCommand(state, bot.id, command, events);
+      state.elapsedSeconds += 0.5;
+    }
+
+    expect(state.groundLoot.shotgun?.available).toBe(false);
+    expect(getActiveWeapon(bot)?.weaponId).toBe("shotgun");
+    expect(getActiveWeapon(bot)?.ammoInMagazine).toBeGreaterThan(0);
+    expect(events.some((event) =>
+      event.type === "item-picked" && event.actorId === bot.id && event.itemId === "weapon.shotgun"
+    )).toBe(true);
   });
 
   it("keeps the replacement stack when a planned loot target is no longer available", () => {

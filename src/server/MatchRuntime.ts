@@ -4,6 +4,7 @@ import { WEAPONS } from "../config/weapons";
 import { createMapLayout, type MapLayout } from "../config/map";
 import { DEFAULT_MAP_ID, normalizeMapId, type MapId } from "../config/maps";
 import { FRAG_GRENADE_CONFIG } from "../config/throwables";
+import { GridNavigator } from "../ai/navigation/GridNavigator";
 import { BotController } from "../controllers/BotController";
 import { createIdleCommand, type ActorCommand } from "../game/commands/ActorCommand";
 import { GameSimulation } from "../game/GameSimulation";
@@ -27,7 +28,7 @@ const TAKEOVER_TICKS = SIMULATION_TICK_RATE * 5;
 const ACTOR_REPLICATION_RANGE = 400;
 const LOOT_REPLICATION_RANGE = 60;
 const AIRBORNE_LOOT_REPLICATION_RANGE = ACTOR_REPLICATION_RANGE;
-export const MATCH_CHECKPOINT_VERSION = 12;
+export const MATCH_CHECKPOINT_VERSION = 13;
 const MINIMUM_CLOSED_SAFE_ZONE_SECONDS = BATTLE_ROYALE_CONFIG.safeZoneStages.reduce(
   (total, stage) => total + stage.waitSeconds + stage.shrinkSeconds / 2,
   0,
@@ -42,6 +43,7 @@ export interface MatchRuntimeOptions {
   mapId?: MapId;
   startWithBandage: boolean;
   disableAiSnipers: boolean;
+  createBotNavigator?: (layout: MapLayout) => GridNavigator;
   state?: MatchState;
   tick?: number;
   snapshotSequence?: number;
@@ -61,9 +63,11 @@ export class MatchRuntime {
   private readonly simulation: GameSimulation;
   private readonly world: LagCompensatedCombatWorld;
   private readonly layout: MapLayout;
+  private readonly botNavigator: GridNavigator;
   private readonly bots = new Map<EntityId, BotController>();
   private readonly botContinuousCommands = new Map<EntityId, ActorCommand>();
   private readonly takeoverBots = new Map<EntityId, BotController>();
+  private readonly aiActorIds = new Set<EntityId>();
   private readonly disconnectedAtTick = new Map<EntityId, number>();
   private readonly inbox = new CommandInbox();
   private readonly pendingEvents: SequencedGameEvent[] = [];
@@ -86,6 +90,7 @@ export class MatchRuntime {
         },
       );
     this.layout = createMapLayout(this.state.mapId, this.state.mapSeed);
+    this.botNavigator = options.createBotNavigator?.(this.layout) ?? new GridNavigator(this.layout);
     this.simulation = new GameSimulation(this.state, new BattleRoyaleMode(BATTLE_ROYALE_CONFIG, random), WEAPONS, this.layout);
     this.tickValue = options.tick ?? 0;
     this.snapshotSequenceValue = options.snapshotSequence ?? 0;
@@ -100,6 +105,7 @@ export class MatchRuntime {
         seededRandom(options.seed + 1_000 + index),
         options.disableAiSnipers,
         this.layout,
+        this.botNavigator,
       ));
       const idle = createIdleCommand();
       this.botContinuousCommands.set(actor.id, continuousCommand(idle));
@@ -162,7 +168,7 @@ export class MatchRuntime {
   public step(): void {
     if (this.state.phase === "finished") return;
     const commands = new Map<EntityId, ActorCommand>();
-    const aiActorIds = new Set<EntityId>();
+    this.aiActorIds.clear();
     const rewindTicks = new Map<EntityId, number>();
     let livingActorCount: number | undefined;
     const getLivingActorCount = (): number => {
@@ -181,10 +187,11 @@ export class MatchRuntime {
             seededRandom(this.options.seed + 20_000 + index),
             this.options.disableAiSnipers,
             this.layout,
+            this.botNavigator,
           );
           this.takeoverBots.set(actorId, controller);
         }
-        aiActorIds.add(actorId);
+        this.aiActorIds.add(actorId);
         commands.set(actorId, controller.update(
           actor,
           this.state,
@@ -203,7 +210,7 @@ export class MatchRuntime {
     for (const [actorId, controller] of this.bots) {
       const actor = this.state.actors[actorId];
       if (actor?.alive) {
-        aiActorIds.add(actorId);
+        this.aiActorIds.add(actorId);
         if (botIndex % BOT_COHORTS === this.tickValue % BOT_COHORTS) {
           const command = controller.update(
             actor,
@@ -223,7 +230,7 @@ export class MatchRuntime {
     }
     this.world.beginStep(this.tickValue, rewindTicks);
     try {
-      this.simulation.step(SIMULATION_STEP_SECONDS, commands, this.world, aiActorIds);
+      this.simulation.step(SIMULATION_STEP_SECONDS, commands, this.world, this.aiActorIds);
     } finally {
       this.world.endStep();
     }

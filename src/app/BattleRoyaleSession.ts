@@ -112,6 +112,7 @@ export class BattleRoyaleSession {
   private readonly clock = new FixedStepClock();
   private readonly humanController: HumanController;
   private readonly botControllers = new Map<EntityId, BotController>();
+  private readonly botActorIds: ReadonlySet<EntityId>;
   private readonly combatWorld: SimulationCombatWorld;
   private readonly audio: AudioFeedback;
   private readonly effects: CombatEffects;
@@ -171,6 +172,7 @@ export class BattleRoyaleSession {
       layout,
       settings.disableAiSnipers,
     );
+    this.botActorIds = new Set(this.botControllers.keys());
   }
 
   public static async create(
@@ -327,7 +329,7 @@ export class BattleRoyaleSession {
       deltaSeconds,
       commands,
       this.combatWorld,
-      new Set(this.botControllers.keys()),
+      this.botActorIds,
     );
     this.processEvents();
   }
