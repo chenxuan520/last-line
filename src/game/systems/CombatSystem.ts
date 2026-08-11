@@ -48,6 +48,7 @@ interface PendingDamage {
 }
 
 const TIMER_EPSILON_SECONDS = 1e-9;
+const EMPTY_ACTOR_IDS: ReadonlySet<EntityId> = new Set();
 
 export class CombatSystem {
   public constructor(
@@ -84,11 +85,12 @@ export class CombatSystem {
     world: CombatWorld,
     events: GameEvent[],
     orderedEntries?: readonly (readonly [EntityId, ActorCommand])[],
+    aiActorIds: ReadonlySet<EntityId> = EMPTY_ACTOR_IDS,
   ): void {
     const pendingDamage: PendingDamage[] = [];
     const orderedCommands = orderedEntries ?? [...commands].sort(([leftId], [rightId]) => compareIds(leftId, rightId));
     for (const [actorId, command] of orderedCommands) {
-      this.collectCommand(state, actorId, command, world, events, pendingDamage);
+      this.collectCommand(state, actorId, command, world, events, pendingDamage, aiActorIds.has(actorId));
     }
     this.applyPendingDamage(state, pendingDamage, events);
   }
@@ -110,6 +112,7 @@ export class CombatSystem {
     world: CombatWorld,
     events: GameEvent[],
     pendingDamage: PendingDamage[],
+    aiControlled: boolean,
   ): void {
     const actor = state.actors[actorId];
     if (!actor?.alive || actor.deployment !== "grounded") {
@@ -119,7 +122,7 @@ export class CombatSystem {
       this.startReload(actor, events);
     }
     if (command.fire && command.throwGrenade === null) {
-      this.fire(actor, command, world, events, pendingDamage);
+      this.fire(actor, command, world, events, pendingDamage, aiControlled);
     }
   }
 
@@ -160,6 +163,7 @@ export class CombatSystem {
     world: CombatWorld,
     events: GameEvent[],
     pendingDamage: PendingDamage[],
+    aiControlled: boolean,
   ): void {
     const weapon = getActiveWeapon(actor);
     const config = weapon ? this.weapons[weapon.weaponId] : undefined;
@@ -177,6 +181,7 @@ export class CombatSystem {
     weapon.cooldownSeconds += 60 / config.roundsPerMinute;
     const origin = { x: actor.position.x, y: actor.position.y, z: actor.position.z };
     events.push({ type: "shot-fired", actorId: actor.id, weaponId: config.id, origin });
+    let aiPresentationTrace: ShotResult | null = null;
     for (let pellet = 0; pellet < config.pellets; pellet += 1) {
       const direction = addSpread(normalize(command.aimDirection), config.spreadRadians, this.random);
       const trace = {
@@ -188,20 +193,25 @@ export class CombatSystem {
       const detailed = world.traceShotDetailed?.(trace);
       const targetId = detailed ? detailed.targetId : world.traceShot(trace);
       if (detailed) {
-        events.push({
-          type: "shot-traced",
-          actorId: actor.id,
-          origin: trace.origin,
-          end: detailed.point,
-          normal: detailed.normal,
-          hitType: detailed.hitType,
-          targetId: detailed.targetId,
-        });
+        if (aiControlled) {
+          if (
+            detailed.hitType !== "miss" &&
+            (
+              !aiPresentationTrace ||
+              shotResultPriority(detailed) > shotResultPriority(aiPresentationTrace)
+            )
+          ) {
+            aiPresentationTrace = detailed;
+          }
+        } else {
+          emitShotTrace(events, actor.id, trace.origin, detailed);
+        }
       }
       if (targetId && targetId !== actor.id) {
         pendingDamage.push({ targetId, sourceId: actor.id, amount: config.damage, weaponId: config.id });
       }
     }
+    if (aiPresentationTrace) emitShotTrace(events, actor.id, origin, aiPresentationTrace);
     if (weapon.ammoInMagazine === 0 && getItemQuantity(actor, config.ammoItemId) > 0) {
       this.startReload(actor, events);
     }
@@ -293,6 +303,27 @@ export class CombatSystem {
 
 function compareIds(left: EntityId, right: EntityId): number {
   return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function emitShotTrace(
+  events: GameEvent[],
+  actorId: EntityId,
+  origin: Vector3State,
+  result: ShotResult,
+): void {
+  events.push({
+    type: "shot-traced",
+    actorId,
+    origin,
+    end: result.point,
+    normal: result.normal,
+    hitType: result.hitType,
+    targetId: result.targetId,
+  });
+}
+
+function shotResultPriority(result: ShotResult): number {
+  return result.hitType === "actor" ? 2 : result.hitType === "environment" ? 1 : 0;
 }
 
 function normalize(value: Vector3State): Vector3State {

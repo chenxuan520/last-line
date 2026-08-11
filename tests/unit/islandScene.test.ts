@@ -38,6 +38,7 @@ import {
   HOSPITAL_WALL_COLOR,
   MAP_SIZE,
   type MapLayout,
+  wallOpeningOutwardDirection,
 } from "../../src/config/map";
 import { mixedFootprintClearsRoads } from "../../src/config/mixedMap";
 import { createMixedMapBlueprint, MIXED_REGION_COUNT } from "../../src/config/mixedMap";
@@ -77,6 +78,25 @@ function renderedBuildingWallCount(scene: Scene): number {
   return scene.meshes
     .filter((mesh) => mesh.name.startsWith("building-walls-"))
     .reduce((total, mesh) => total + Number(mesh.metadata?.sourceCount ?? 0), 0);
+}
+
+function expectAmmunitionDepotSignAligned(
+  layout: MapLayout,
+  sign: import("@babylonjs/core/Meshes/abstractMesh").AbstractMesh | null,
+): void {
+  const door = layout.wallOpenings.find((opening) =>
+    opening.obstacleId === layout.ammunitionDepot.buildingId &&
+    opening.storyIndex === 0 &&
+    opening.kind === "door"
+  );
+  if (!door) throw new Error("Ammunition depot door missing");
+  const outward = wallOpeningOutwardDirection(door);
+  expect(sign?.metadata).toMatchObject({ openingId: door.id });
+  expect(sign?.position.x).toBeCloseTo(door.center.x + outward.x * 0.08, 3);
+  expect(sign?.position.z).toBeCloseTo(door.center.z + outward.z * 0.08, 3);
+  expect(sign?.rotation.y).toBeCloseTo(door.rotationY ?? (
+    door.side === "left" || door.side === "right" ? Math.PI / 2 : 0
+  ), 5);
 }
 
 function expectedRenderedWallVertices(walls: readonly MapLayout["wallSegments"][number][]): number {
@@ -243,8 +263,10 @@ describe("IslandScene lifecycle", () => {
         decoration: "ammunition-depot-sign",
         poiName: "弹药库",
         poiType: "ammo-depot",
+        assetId: "decal.poi.ammo-depot",
         obstacleId: layout.ammunitionDepot.buildingId,
       });
+      expectAmmunitionDepotSignAligned(layout, ammunitionDepotSign);
       const ammunitionDepotWallBatch = bundle.scene.getMeshByName(
         `building-walls-${AMMUNITION_DEPOT_WALL_COLOR.replace("#", "")}`,
       );
@@ -1356,6 +1378,18 @@ describe("IslandScene lifecycle", () => {
     const brandSigns = bundle.scene.meshes.filter((mesh) => mesh.metadata?.decoration === "brand-sign");
     expect(new Set(brandSigns.map((mesh) => mesh.name))).toEqual(BRAND_SIGN_ASSET_IDS);
     expect(brandSigns.every((mesh) => !mesh.isPickable && !mesh.checkCollisions)).toBe(true);
+    expect(bundle.scene.getMeshByName("hospital-medical-cross")?.metadata).toMatchObject({
+      poiName: "医院",
+      poiType: "hospital",
+      obstacleId: layout.hospital.buildingId,
+    });
+    expect(bundle.scene.getMeshByName("ammunition-depot-sign")?.metadata).toMatchObject({
+      poiName: "弹药库",
+      poiType: "ammo-depot",
+      assetId: "decal.poi.ammo-depot",
+      obstacleId: layout.ammunitionDepot.buildingId,
+    });
+    expectAmmunitionDepotSignAligned(layout, bundle.scene.getMeshByName("ammunition-depot-sign"));
     expect(new Set(bundle.scene.meshes
       .filter((mesh) => mesh.metadata?.decoration === "poi")
       .map((mesh) => mesh.metadata?.poiName)
@@ -1466,6 +1500,13 @@ describe("IslandScene lifecycle", () => {
       poiType: "hospital",
       obstacleId: layout.hospital.buildingId,
     });
+    expect(low.scene.getMeshByName("ammunition-depot-sign")?.metadata).toMatchObject({
+      poiName: "弹药库",
+      poiType: "ammo-depot",
+      assetId: "decal.poi.ammo-depot",
+      obstacleId: layout.ammunitionDepot.buildingId,
+    });
+    expectAmmunitionDepotSignAligned(layout, low.scene.getMeshByName("ammunition-depot-sign"));
     expect(renderedBuildingWallCount(low.scene)).toBe(expectedRenderedBuildingWallCount(layout));
     const eligibleRailingBuildings = layout.obstacles.filter((building) =>
       (building.footprint ?? "rectangle") === "rectangle" &&
@@ -1886,6 +1927,7 @@ function createAssets(): AssetCatalog {
   ];
   const textureAssetIds = [
     "ui.item.ammo-depot",
+    "decal.poi.ammo-depot",
     "texture.terrain.grass",
     "texture.terrain.mud",
     "texture.road",

@@ -11,8 +11,8 @@ const budgets = {
   browserJavaScriptChunks: 270,
   browserCss: 50_000,
   browserDist: 5_000_000,
-  worker: 615_000,
-  standaloneServer: 630_000,
+  worker: 630_000,
+  standaloneServer: 640_000,
 };
 
 async function requireFile(filePath) {

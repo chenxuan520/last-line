@@ -63,7 +63,7 @@ export class GameSimulation {
       this.inventory.processCommand(this.state, actorId, command, this.events);
     }
     this.throwables.processCommands(this.state, commands, this.events, aiActorIds);
-    this.combat.processCommands(this.state, commands, world, this.events, orderedCommands);
+    this.combat.processCommands(this.state, commands, world, this.events, orderedCommands, aiActorIds);
     this.throwables.update(this.state, deltaSeconds, world, this.events);
     this.mode.update(this.state, deltaSeconds, this.events);
     this.inventory.dropDeadInventories(this.state, this.events);

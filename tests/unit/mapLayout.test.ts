@@ -23,6 +23,14 @@ import type { MapId } from "../../src/config/maps";
 import { getSupportHeight } from "../../src/game/systems/MovementSystem";
 
 describe("map layouts", () => {
+  it.each([
+    ["island", 42],
+    ["town", 42],
+    ["mixed", 395],
+  ] as const)("uses the same hospital name on %s", (mapId, seed) => {
+    expect(createMapLayout(mapId, seed).hospital.name).toBe("医院");
+  });
+
   it("caches deterministic serializable layouts", () => {
     const first = createMapLayout(2026);
     const second = createMapLayout(2026);
@@ -111,6 +119,20 @@ describe("map layouts", () => {
     expect(layout.ammunitionDepot.name).toBe("弹药库");
     expect(layout.ammunitionDepot.buildingId).not.toBe(layout.hospital.buildingId);
     expect(depot.color).toBe(AMMUNITION_DEPOT_WALL_COLOR);
+      expect(depot.footprint).toBe("hexagon");
+      expect(layout.skybridges.every((bridge) =>
+        bridge.fromBuildingId !== depot.id && bridge.toBuildingId !== depot.id
+      )).toBe(true);
+      expect(layout.wallSegments.filter((wall) => wall.obstacleId === depot.id)).toHaveLength(
+        depot.storyCount * 6 * 4 + 1,
+      );
+      expect(layout.wallOpenings.filter((opening) => opening.obstacleId === depot.id)).toHaveLength(
+        depot.storyCount * 6,
+      );
+      expect(layout.wallOpenings
+        .filter((opening) => opening.obstacleId === depot.id)
+        .every((opening) => opening.rotationY !== undefined))
+        .toBe(true);
     expect(layout.lootSpawnPoints).toHaveLength(
       GLOBAL_LOOT_POINTS +
       AMMUNITION_DEPOT_LOOT_POINTS +
@@ -151,13 +173,12 @@ describe("map layouts", () => {
     ["island", 0, 1],
     ["island", 19, 2],
     ["island", 4, 3],
-    ["town", 1, 3],
-    ["town", 2, 2],
-    ["town", 0, 3],
-    ["mixed", 2, 1],
-    ["mixed", 1, 2],
+    ["town", 0, 1],
+    ["town", 3, 2],
+    ["town", 15, 3],
+    ["mixed", 1, 1],
+    ["mixed", 3, 2],
     ["mixed", 0, 3],
-    ["mixed", 5, 4],
   ] as const)(
     "keeps ammunition only on the ground floor of the %s depot for seed %i",
     (mapId, seed, expectedStories) => {
@@ -256,7 +277,7 @@ describe("map layouts", () => {
         const hospital = layout.obstacles.find((building) => building.id === layout.hospital.buildingId);
         const depot = layout.obstacles.find((building) => building.id === layout.ammunitionDepot.buildingId);
         expect(hospital?.footprint ?? "rectangle").toBe("rectangle");
-        expect(depot?.footprint ?? "rectangle").toBe("rectangle");
+        expect(depot?.footprint).toBe("hexagon");
         const bridgeBuildingIds = new Set(layout.skybridges.flatMap((bridge) => [
           bridge.fromBuildingId,
           bridge.toBuildingId,

@@ -180,8 +180,26 @@ describe("AI loot reachability", () => {
     }
 
     const armedBots = bots.filter((bot) => getActiveWeapon(bot) !== null);
+    const availableWeapons = Object.values(state.groundLoot).filter(
+      (loot) => loot.available && loot.itemId.startsWith("weapon."),
+    );
+    const unarmedPositions = bots
+      .filter((bot) => getActiveWeapon(bot) === null)
+      .map((bot) => ({
+        id: bot.id,
+        x: Math.round(bot.position.x),
+        z: Math.round(bot.position.z),
+        nearest: Math.round(
+          Math.min(...availableWeapons.map((loot) =>
+            Math.hypot(bot.position.x - loot.position.x, bot.position.z - loot.position.z)
+          )),
+        ),
+      }));
     expect(bots.every((bot) => bot.deployment === "grounded")).toBe(true);
-    expect(armedBots.length, `${armedBots.length} ${mapId} bots armed`).toBeGreaterThanOrEqual(42);
+    expect(
+      armedBots.length,
+      `${armedBots.length} ${mapId} bots armed, ${availableWeapons.length} available: ${JSON.stringify(unarmedPositions)}`,
+    ).toBeGreaterThanOrEqual(42);
   }, 120_000);
 
   it.each([1, 42, 99])("keeps Greyfurnace City loot navigable and interactable with seed %i", (seed) => {
@@ -277,19 +295,20 @@ describe("AI loot reachability", () => {
     }
   }, 120_000);
 
-  it("keeps four-story ammunition depots stocked only on the ground floor", () => {
-    const layout = createMapLayout("mixed", 5);
+  it("keeps multi-story hexagonal ammunition depots stocked only on the ground floor", () => {
+    const layout = createMapLayout("mixed", 0);
     const groundLevel = layout.ammunitionDepot.levels[0];
     const depot = layout.obstacles.find((building) => building.id === layout.ammunitionDepot.buildingId);
-    if (!groundLevel || !depot) throw new Error("Four-story ammunition depot missing");
+    if (!groundLevel || !depot) throw new Error("Multi-story ammunition depot missing");
     const navigator = new GridNavigator(layout);
     const inventory = new InventorySystem(layout);
-    const state = createBattleRoyaleState("player", TEST_CONFIG, mapSeedRandom(5), { mapId: "mixed" });
+    const state = createBattleRoyaleState("player", TEST_CONFIG, mapSeedRandom(0), { mapId: "mixed" });
     const player = state.actors.player;
-    if (!player) throw new Error("Four-story depot test player missing");
+    if (!player) throw new Error("Multi-story depot test player missing");
     const start = outsideBuildingDoor(layout, depot.id);
 
-    expect(depot.storyCount).toBe(4);
+    expect(depot.storyCount).toBe(3);
+    expect(depot.footprint).toBe("hexagon");
     expect(layout.ammunitionDepot.levels).toEqual([groundLevel]);
     expect(groundLevel.level).toBe(0);
     for (const index of groundLevel.lootIndices) {
@@ -359,6 +378,13 @@ describe("AI loot reachability", () => {
     let actorCommands = 0;
     let steps = 0;
     let peakGroundLoot = Object.keys(state.groundLoot).length;
+    let minimumLivingActorsBeforeTwoMinutes = bots.length + 1;
+    const earlyDeaths: Array<{
+      actorId: string;
+      sourceId: string | null;
+      weaponId: string | null;
+      elapsedSeconds: number;
+    }> = [];
 
     for (let tick = 0; tick < 1_200 && state.phase !== "finished"; tick += 1) {
       const commands = new Map<EntityId, ActorCommand>([["player", createIdleCommand()]]);
@@ -372,8 +398,24 @@ describe("AI loot reachability", () => {
       actorCommands += commands.size;
       simulation.step(0.25, commands, world);
       steps += 1;
-      allEvents.push(...simulation.drainEvents());
+      const stepEvents = simulation.drainEvents();
+      allEvents.push(...stepEvents);
       peakGroundLoot = Math.max(peakGroundLoot, Object.keys(state.groundLoot).length);
+      if (state.elapsedSeconds <= 120) {
+        for (const event of stepEvents) {
+          if (event.type !== "actor-died") continue;
+          earlyDeaths.push({
+            actorId: event.actorId,
+            sourceId: event.sourceId,
+            weaponId: event.weaponId,
+            elapsedSeconds: state.elapsedSeconds,
+          });
+        }
+        minimumLivingActorsBeforeTwoMinutes = Math.min(
+          minimumLivingActorsBeforeTwoMinutes,
+          Object.values(state.actors).filter((actor) => actor.alive).length,
+        );
+      }
     }
 
     const living = Object.values(state.actors).filter((actor) => actor.alive);
@@ -403,6 +445,10 @@ describe("AI loot reachability", () => {
       event.type === "shot-fired" && event.actorId.startsWith("bot-") && event.weaponId === "sniper"
     )).toBe(false);
     expect(allEvents.some((event) => event.type === "actor-died" && event.sourceId?.startsWith("bot-"))).toBe(true);
+    expect(
+      minimumLivingActorsBeforeTwoMinutes,
+      JSON.stringify({ mapId, earlyDeaths }),
+    ).toBeGreaterThanOrEqual(26);
     expect(controllerUpdates).toBeLessThanOrEqual(47_000);
     expect(actorCommands).toBeLessThanOrEqual(48_000);
     const operationBudget: Record<MapId, {
@@ -417,7 +463,17 @@ describe("AI loot reachability", () => {
     expect(findPath.mock.calls.length).toBeLessThanOrEqual(operationBudget[mapId].findPath);
     expect(hasLineOfSight.mock.calls.length).toBeLessThanOrEqual(operationBudget[mapId].lineOfSight);
     expect(traceShotDetailed.mock.calls.length).toBeLessThanOrEqual(operationBudget[mapId].shotTrace);
-    expect(allEvents.length).toBeLessThanOrEqual(7_000);
+    expect(
+      allEvents.length,
+      JSON.stringify({
+        eventCounts: Object.fromEntries(
+          [...new Set(allEvents.map((event) => event.type))]
+            .sort()
+            .map((type) => [type, allEvents.filter((event) => event.type === type).length]),
+        ),
+        living: living.map((actor) => actor.id),
+      }),
+    ).toBeLessThanOrEqual(7_000);
     expect(peakGroundLoot).toBeLessThanOrEqual(300);
     expect(steps).toBeLessThanOrEqual(1_200);
   }, 600_000);
