@@ -348,11 +348,25 @@ export class BotController {
       );
     });
     const canFight = Boolean(activeWeapon && (activeWeapon.ammoInMagazine > 0 || reserveAmmo > 0));
-    if (!activeWeapon && alternateWeapon) {
-      command.switchWeapon = alternateSlot;
-      return this.cache(command);
-    }
-    const nearbyGroundWeapon = !activeWeapon && !alternateWeapon
+    const targetZoneRadius = Math.max(
+      0,
+      state.safeZone.targetRadius - Math.min(ZONE_SAFETY_MARGIN, state.safeZone.targetRadius * 0.12),
+    );
+    const outsideTargetZone = horizontalDistance(actor.position, state.safeZone.targetCenter) > targetZoneRadius;
+    const outsideCurrentZone = horizontalDistance(actor.position, state.safeZone.center) > state.safeZone.radius;
+    const shouldEnterTargetZone = outsideTargetZone && (
+      outsideCurrentZone ||
+      this.shouldBeginTargetZoneTravel(actor, state, targetZoneRadius, livingActors)
+    );
+    const delayedTargetTravel = outsideTargetZone && !shouldEnterTargetZone;
+    const safeLootScope: LootZoneScope = delayedTargetTravel ? "current" : "target";
+    if (!activeWeapon && alternateWeapon) command.switchWeapon = alternateSlot;
+    const nearbyGroundWeapon = (
+      !activeWeapon &&
+      !alternateWeapon &&
+      !shouldEnterTargetZone &&
+      !outsideCurrentZone
+    )
       ? Object.values(state.groundLoot)
         .filter((loot) =>
           loot.available &&
@@ -370,18 +384,6 @@ export class BotController {
       command.interactLootGeneration = nearbyGroundWeapon.generation ?? 0;
       return this.cache(command);
     }
-    const targetZoneRadius = Math.max(
-      0,
-      state.safeZone.targetRadius - Math.min(ZONE_SAFETY_MARGIN, state.safeZone.targetRadius * 0.12),
-    );
-    const outsideTargetZone = horizontalDistance(actor.position, state.safeZone.targetCenter) > targetZoneRadius;
-    const outsideCurrentZone = horizontalDistance(actor.position, state.safeZone.center) > state.safeZone.radius;
-    const shouldEnterTargetZone = outsideTargetZone && (
-      outsideCurrentZone ||
-      this.shouldBeginTargetZoneTravel(actor, state, targetZoneRadius, livingActors)
-    );
-    const delayedTargetTravel = outsideTargetZone && !shouldEnterTargetZone;
-    const safeLootScope: LootZoneScope = delayedTargetTravel ? "current" : "target";
     if ((shouldEnterTargetZone || outsideCurrentZone) && activeWeapon?.ammoInMagazine === 0) {
       if (alternateWeapon?.ammoInMagazine && alternateWeapon.ammoInMagazine > 0) {
         command.switchWeapon = alternateSlot;
@@ -392,12 +394,6 @@ export class BotController {
         command.reload = true;
       }
     }
-    if (shouldEnterTargetZone && !outsideCurrentZone && !carriedWeaponCanRecover) {
-      const recoveryLoot =
-        this.findUsefulLoot(actor, state, "target", "compatible-ammo") ??
-        this.findUsefulLoot(actor, state, "target", "combat-weapon");
-      if (recoveryLoot) return this.cache(this.moveToLoot(actor, recoveryLoot, command));
-    }
     if ((shouldEnterTargetZone || outsideCurrentZone) && state.elapsedSeconds <= this.forcedRelocationUntilSeconds) {
       this.forcedRelocationOrigin = null;
       this.forcedRelocationTarget = null;
@@ -407,6 +403,7 @@ export class BotController {
       state.elapsedSeconds <= this.forcedRelocationUntilSeconds &&
       !activeWeapon &&
       !alternateWeapon &&
+      !shouldEnterTargetZone &&
       !outsideCurrentZone
     ) {
       const recoveryWeapon = this.findUsefulLoot(actor, state, safeLootScope, "combat-weapon");
@@ -435,6 +432,7 @@ export class BotController {
     );
     if (
       nearbyWeapon &&
+      !shouldEnterTargetZone &&
       nearbyWeaponInsideCurrentZone &&
       nearbyWeaponPreservesTargetZone &&
       horizontalDistance(actor.position, nearbyWeapon.loot.position) <= UNARMED_WEAPON_DETOUR_DISTANCE
@@ -451,7 +449,8 @@ export class BotController {
       return this.cache(this.navigateIntoZone(actor, center, radius, command, state.elapsedSeconds));
     }
 
-    if (!carriedWeaponCanRecover) {
+    const recoverySearchPerformed = !carriedWeaponCanRecover;
+    if (recoverySearchPerformed) {
       const recoveryLoot =
         this.findUsefulLoot(actor, state, safeLootScope, "compatible-ammo") ??
         this.findUsefulLoot(actor, state, safeLootScope, "combat-weapon");
@@ -610,11 +609,7 @@ export class BotController {
         command.reload = true;
         return this.cache(command);
       }
-      if (activeWeapon || alternateWeapon) {
-        const ammoLoot = this.findUsefulLoot(actor, state, safeLootScope, "compatible-ammo");
-        if (ammoLoot) return this.cache(this.moveToLoot(actor, ammoLoot, command));
-        const weaponLoot = this.findUsefulLoot(actor, state, safeLootScope, "combat-weapon");
-        if (weaponLoot) return this.cache(this.moveToLoot(actor, weaponLoot, command));
+      if ((activeWeapon || alternateWeapon) && !recoverySearchPerformed) {
         this.clearCombatMemory();
         this.damageInvestigationTarget = null;
         this.damageInvestigationDirection = null;

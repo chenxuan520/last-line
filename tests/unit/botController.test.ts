@@ -1383,6 +1383,73 @@ describe("BotController", () => {
     expect(command.sprint).toBe(true);
   });
 
+  it("does not interrupt an active zone rotation for recovery loot at its feet", () => {
+    for (const recoveryKind of ["ammo", "weapon"] as const) {
+      const state = groundedState();
+      const bot = state.actors["bot-1"];
+      const player = state.actors.player;
+      if (!bot || !player) throw new Error("actors missing");
+      player.alive = false;
+      bot.position = { x: 100, y: 1.76, z: 0 };
+      bot.inventory.weaponSlots = [createWeaponState("rifle", false), createWeaponState("smg", false)];
+      bot.inventory.backpack = [];
+      state.safeZone.center = { x: 0, y: 0, z: 0 };
+      state.safeZone.radius = 500;
+      state.safeZone.targetCenter = { x: 0, y: 0, z: 0 };
+      state.safeZone.targetRadius = 40;
+      state.safeZone.status = "shrinking";
+      state.groundLoot.recovery = recoveryKind === "ammo"
+        ? {
+            id: "recovery",
+            itemId: "ammo.rifle",
+            quantity: 90,
+            position: { x: 100, y: 0.45, z: 0 },
+            available: true,
+          }
+        : {
+            id: "recovery",
+            itemId: "weapon.shotgun",
+            quantity: 1,
+            weapon: createWeaponState("shotgun"),
+            position: { x: 100, y: 0.45, z: 0 },
+            available: true,
+          };
+
+      const command = new BotController(1, () => 0.5).update(
+        bot,
+        state,
+        miss,
+        1 / 30,
+        player.id,
+      );
+
+      expect(command.interact, recoveryKind).toBe(false);
+      expect(command.move.x, recoveryKind).toBeLessThan(-0.9);
+      expect(command.sprint, recoveryKind).toBe(true);
+    }
+  });
+
+  it("does not repeat depleted-weapon recovery scans within one decision", () => {
+    const state = groundedState();
+    const bot = state.actors["bot-1"];
+    const player = state.actors.player;
+    if (!bot || !player) throw new Error("actors missing");
+    player.alive = false;
+    bot.inventory.weaponSlots = [createWeaponState("rifle", false), createWeaponState("smg", false)];
+    bot.inventory.backpack = [];
+    let scans = 0;
+    state.groundLoot = new Proxy({}, {
+      ownKeys() {
+        scans += 1;
+        return [];
+      },
+    });
+
+    new BotController(1, () => 0.5).update(bot, state, miss, 1, player.id);
+
+    expect(scans).toBeLessThanOrEqual(3);
+  });
+
   it("uses carried medicine when injured", () => {
     const state = groundedState();
     const bot = state.actors["bot-1"];
