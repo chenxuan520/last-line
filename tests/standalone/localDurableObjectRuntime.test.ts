@@ -486,8 +486,8 @@ describe("LocalDurableObjectRuntime", () => {
     }
   });
 
-  it("keeps a current version 13 town checkpoint recoverable across a SQLite restart", async () => {
-    const directory = await mkdtemp(resolve(tmpdir(), "last-line-checkpoint-town-v13-"));
+  it("keeps a current version 14 town checkpoint recoverable across a SQLite restart", async () => {
+    const directory = await mkdtemp(resolve(tmpdir(), "last-line-checkpoint-town-v14-"));
     const databasePath = resolve(directory, "rooms.sqlite");
     const roomId = "room-00000000-0000-4000-8000-000000000003";
     let environment = await createStandaloneEnvironment({ databasePath });

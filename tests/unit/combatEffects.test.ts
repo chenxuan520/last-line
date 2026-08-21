@@ -73,7 +73,39 @@ describe("CombatEffects", () => {
       activeParticles: 32,
     });
     effects.update(1);
+    effects.update(1 / 60);
     expect(effects.counters.activeExplosions).toBe(0);
+    effects.dispose();
+    scene.dispose();
+    engine.dispose();
+  });
+
+  it("expands grenade animation to an eight-meter visual radius", () => {
+    const engine = new NullEngine();
+    const scene = new Scene(engine);
+    const effects = new CombatEffects(scene);
+
+    effects.handleEvents([{
+      type: "grenade-exploded",
+      grenadeId: "grenade",
+      actorId: "player",
+      position: { x: 0, y: 1, z: 0 },
+    }], "player");
+    effects.update(0.34);
+
+    const explosion = scene.getMeshByName("combat-effect-explosion-0");
+    expect(explosion?.isEnabled()).toBe(true);
+    expect((explosion?.scaling.x ?? 0) / 2).toBe(8);
+    expect(effects.counters.activeExplosions).toBe(1);
+
+    effects.update(0.18);
+    const particleRadius = Math.max(...scene.meshes
+      .filter((mesh) => mesh.name.startsWith("combat-effect-particle-") && mesh.isEnabled())
+      .map((mesh) => Math.hypot(mesh.position.x, mesh.position.z)));
+    expect(particleRadius).toBeCloseTo(8, 6);
+    effects.update(1 / 60);
+    expect(effects.counters).toMatchObject({ activeExplosions: 0, activeParticles: 0 });
+
     effects.dispose();
     scene.dispose();
     engine.dispose();

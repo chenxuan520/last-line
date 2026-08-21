@@ -293,7 +293,7 @@ export class BotController {
         throwGrenade: null,
       };
       if (this.navigationPath.length > 0) {
-        this.updateNavigationMovement(actor, command);
+        this.updateNavigationMovement(actor, command, false);
       }
       return this.issueGroundedCommand(command);
     }
@@ -1135,7 +1135,11 @@ export class BotController {
     return command;
   }
 
-  private updateNavigationMovement(actor: ActorState, command: ActorCommand): void {
+  private updateNavigationMovement(
+    actor: ActorState,
+    command: ActorCommand,
+    trackProgress = true,
+  ): void {
     while (
       this.waypointIndex < this.navigationPath.length &&
       spatialDistance(actor.position, this.navigationPath[this.waypointIndex] as Vector3State) < WAYPOINT_REACHED_DISTANCE
@@ -1155,7 +1159,7 @@ export class BotController {
       this.navigationProgressKey = waypointKey;
       this.navigationProgressDistance = waypointDistance;
       this.navigationNoProgressDecisions = 0;
-    } else {
+    } else if (trackProgress) {
       this.navigationNoProgressDecisions = waypointDistance < this.navigationProgressDistance - 0.08
         ? 0
         : this.navigationNoProgressDecisions + 1;

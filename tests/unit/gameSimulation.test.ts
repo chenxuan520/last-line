@@ -593,8 +593,8 @@ function runGrenadeThenZone(commandOrder: readonly string[]) {
     z: 0,
   });
   const grenadeTarget = createActorState("bot-1", "bot", {
-    x: 4,
-    y: getTerrainHeight(4, 0, 0) + 1.76,
+    x: 10,
+    y: getTerrainHeight(10, 0, 0) + 1.76,
     z: 0,
   });
   const zoneTarget = createActorState("bot-2", "bot", {

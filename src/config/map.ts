@@ -510,31 +510,11 @@ export function createMapLayout(mapIdOrSeed: MapId | number, explicitSeed?: numb
     ...createCoverageMountains(terrainRandom),
   ];
 
-  const pointRandom = createSeededRandom(normalizedSeed ^ 0x27d4eb2f);
-  const mapPoints = createSeededMapPoints(
-    POI_NAMES,
-    pointRandom,
-    [],
-    MAJOR_POINT_MINIMUM_DISTANCE,
+  const { mapPoints, wildernessPoints, coveragePoints } = islandPoints(
+    normalizedSeed,
     terrainHills,
-  );
-  const wildernessPoints = createSeededMapPoints(
-    WILDERNESS_NAMES,
-    pointRandom,
-    mapPoints,
-    LANDING_ZONE_MINIMUM_DISTANCE,
-    terrainHills,
-    true,
   );
   const landingZones = [...mapPoints, ...wildernessPoints];
-  const coveragePoints = createSeededMapPoints(
-    Array.from({ length: COVERAGE_COMPOUND_COUNT }, (_, index) => `路边院落 ${index + 1}`),
-    pointRandom,
-    landingZones,
-    180,
-    terrainHills,
-    true,
-  );
   const buildingAreas = createBuildingAreas(mapPoints, wildernessPoints, coveragePoints);
   const obstacleRandom = createSeededRandom(normalizedSeed ^ 0x85ebca6b);
   const baseObstacles = createSeededBuildings(
@@ -594,7 +574,10 @@ export function createMapLayout(mapIdOrSeed: MapId | number, explicitSeed?: numb
     hospitalSelection,
   );
   const depotSelection = selectAmmunitionDepotBuilding(
-    assignedObstacles,
+    assignedObstacles.filter((building) =>
+      isSafeIsland(building) &&
+      baseLootSpawnPoints.every((point) => !pointInsideObstacle(point, building, 12))
+    ),
     hospitalSelection.buildingId,
     (building) => building.id.startsWith(`building-${POI_NAMES.indexOf("旧仓区")}-`),
     mapPoints[POI_NAMES.indexOf("旧仓区")]?.position,
@@ -2470,83 +2453,112 @@ export const BOT_SPAWN_POINTS: readonly Vector3State[] = Array.from({ length: 49
   return { x, y: getTerrainHeight(x, z) + ACTOR_EYE_HEIGHT, z };
 });
 
+function islandPoints(seed: number, terrainHills: readonly TerrainHill[]) {
+  for (let attempt = 0; attempt < 64; attempt += 1) {
+    const random = createSeededRandom(seed ^ 0x27d4eb2f ^ Math.imul(attempt + 1, 0x9e3779b9));
+    const mapPoints = createSeededMapPoints(
+      POI_NAMES,
+      random,
+      [],
+      MAJOR_POINT_MINIMUM_DISTANCE,
+      terrainHills,
+      0,
+    );
+    if (mapPoints.length !== POI_NAMES.length) continue;
+    const wildernessPoints = createSeededMapPoints(
+      WILDERNESS_NAMES,
+      random,
+      mapPoints,
+      LANDING_ZONE_MINIMUM_DISTANCE,
+      terrainHills,
+      1,
+    );
+    if (wildernessPoints.length !== WILDERNESS_NAMES.length) continue;
+    const landingZones = [...mapPoints, ...wildernessPoints];
+    if (centralGapPoint(landingZones).y > 450) continue;
+    const coveragePoints = createSeededMapPoints(
+      Array.from({ length: COVERAGE_COMPOUND_COUNT }, (_, index) => `路边院落 ${index + 1}`),
+      random,
+      landingZones,
+      180,
+      terrainHills,
+      2,
+    );
+    if (coveragePoints.length === COVERAGE_COMPOUND_COUNT) {
+      return { mapPoints, wildernessPoints, coveragePoints };
+    }
+  }
+  throw new Error(`Island layout ${seed}`);
+}
+
 function createSeededMapPoints(
   names: readonly string[],
   random: () => number,
   existing: readonly MapPoint[],
   minimumDistance: number,
   terrainHills: readonly TerrainHill[],
-  maximizeCoverage = false,
+  mode: 0 | 1 | 2,
 ): MapPoint[] {
   const selected: MapPoint[] = [];
   const limit = MAP_HALF_SIZE - POINT_MAP_MARGIN;
-  if (maximizeCoverage) {
-    while (selected.length < names.length) {
-      let bestPosition: Vector3State | null = null;
-      let bestScore = Number.NEGATIVE_INFINITY;
-      for (let sample = 0; sample < 480; sample += 1) {
-        const candidate = {
-          x: round(randomBetween(random, -limit, limit)),
-          y: 0,
-          z: round(randomBetween(random, -limit, limit)),
-        };
-        if (!isBuildableMapPoint(candidate, terrainHills)) continue;
-        const nearestDistance = [...existing, ...selected].reduce(
-          (nearest, point) => Math.min(
-            nearest,
-            Math.hypot(candidate.x - point.position.x, candidate.z - point.position.z),
-          ),
-          Number.POSITIVE_INFINITY,
-        );
-        if (nearestDistance < minimumDistance) continue;
-        const score = nearestDistance * randomBetween(random, 0.88, 1);
-        if (score > bestScore) {
-          bestScore = score;
-          bestPosition = candidate;
-        }
+  while (selected.length < names.length) {
+    const points = [...existing, ...selected];
+    const target = mode === 2
+      ? null
+      : points.length === 0 ? { x: 0, z: 0 } : centralGapPoint(points);
+    let best: Vector3State | null = null;
+    let bestScore = Number.NEGATIVE_INFINITY;
+    for (let sample = 0; sample < 600; sample += 1) {
+      const candidate = {
+        x: round(randomBetween(random, -limit, limit)),
+        y: 0,
+        z: round(randomBetween(random, -limit, limit)),
+      };
+      if (!isBuildableMapPoint(candidate, terrainHills)) continue;
+      if (mode !== 2) {
+        const edge = Math.max(Math.abs(candidate.x), Math.abs(candidate.z)) >= 800;
+        if (edge && points.filter((point) =>
+          Math.max(Math.abs(point.position.x), Math.abs(point.position.z)) >= 800
+        ).length >= 6) continue;
+        if (islandCorner(candidate) && points.some((point) => islandCorner(point.position))) continue;
       }
-      if (!bestPosition) {
-        for (let sample = 0; sample < 1_000; sample += 1) {
-          const candidate = {
-            x: round(randomBetween(random, -limit, limit)),
-            y: 0,
-            z: round(randomBetween(random, -limit, limit)),
-          };
-          if (!isBuildableMapPoint(candidate, terrainHills)) continue;
-          const nearestDistance = [...existing, ...selected].reduce(
-            (nearest, point) => Math.min(
-              nearest,
-              Math.hypot(candidate.x - point.position.x, candidate.z - point.position.z),
-            ),
-            Number.POSITIVE_INFINITY,
-          );
-          if (nearestDistance > bestScore) {
-            bestScore = nearestDistance;
-            bestPosition = candidate;
-          }
-        }
+      if (mode === 0 && selected.length === 0 && Math.hypot(candidate.x, candidate.z) > 360) {
+        continue;
       }
-      if (!bestPosition) throw new Error("Not enough buildable coverage points");
-      selected.push({ name: names[selected.length] ?? `区域 ${selected.length + 1}`, position: bestPosition });
+      const nearest = points.reduce((distance, point) => Math.min(
+        distance,
+        Math.hypot(candidate.x - point.position.x, candidate.z - point.position.z),
+      ), Number.POSITIVE_INFINITY);
+      if (mode !== 2 && nearest < minimumDistance) continue;
+      const score = target
+        ? nearest * 0.25 - Math.hypot(candidate.x - target.x, candidate.z - target.z)
+        : nearest * randomBetween(random, 0.88, 1);
+      if (score > bestScore) {
+        bestScore = score;
+        best = candidate;
+      }
     }
-    return selected;
+    if (!best) return selected;
+    selected.push({ name: names[selected.length] ?? `区域 ${selected.length + 1}`, position: best });
   }
-  for (let attempt = 0; attempt < names.length * 4_000 && selected.length < names.length; attempt += 1) {
-    const candidate = {
-      x: round(randomBetween(random, -limit, limit)),
-      y: 0,
-      z: round(randomBetween(random, -limit, limit)),
-    };
-    if (!isBuildableMapPoint(candidate, terrainHills)) continue;
-    if ([...existing, ...selected].some((point) =>
-      Math.hypot(candidate.x - point.position.x, candidate.z - point.position.z) < minimumDistance
-    )) {
-      continue;
-    }
-    selected.push({ name: names[selected.length] ?? `区域 ${selected.length + 1}`, position: candidate });
-  }
-  if (selected.length !== names.length) throw new Error("Not enough irregular map points");
   return selected;
+}
+
+function centralGapPoint(points: readonly MapPoint[]): Vector3State {
+  let target = { x: 0, y: -1, z: 0 };
+  for (let x = -600; x <= 600; x += 100) {
+    for (let z = -600; z <= 600; z += 100) {
+      const nearestDistance = Math.min(...points.map((point) =>
+        Math.hypot(x - point.position.x, z - point.position.z)
+      ));
+      if (nearestDistance > target.y) target = { x, y: nearestDistance, z };
+    }
+  }
+  return target;
+}
+
+function islandCorner(position: Pick<Vector3State, "x" | "z">): boolean {
+  return Math.abs(position.x) >= 700 && Math.abs(position.z) >= 700;
 }
 
 function createCoverageMountains(random: () => number): TerrainHill[] {
@@ -2730,7 +2742,10 @@ function selectHospitalBuilding(
   random: () => number,
 ): HospitalSelection {
   const preferred = buildings
-    .filter((building) => Number(building.id.split("-")[1]) < LANDING_ZONE_COUNT)
+    .filter((building) =>
+      Number(building.id.split("-")[1]) < LANDING_ZONE_COUNT &&
+      isSafeIsland(building)
+    )
     .sort((left, right) => left.width * left.depth - right.width * right.depth || left.id.localeCompare(right.id));
   const pool = preferred.slice(0, Math.max(1, Math.ceil(preferred.length * 0.45)));
   const startIndex = Math.floor(random() * pool.length);
@@ -2791,6 +2806,15 @@ function buildingLootFitsFootprint(
     !pointInsideObstacle2D(building, point.x, point.z) ||
     pointInsideObstacle2D(candidate, point.x, point.z, -LOOT_OBSTACLE_CLEARANCE)
   );
+}
+
+function isSafeIsland(building: MapBuilding): boolean {
+  return Math.max(
+    Math.abs(building.center.x) + building.width / 2,
+    Math.abs(building.center.z) + building.depth / 2,
+  ) <= MAP_HALF_SIZE - 200 &&
+    Math.hypot(building.center.x, building.center.z) <= 1_000 &&
+    !islandCorner(building.center);
 }
 
 function assignStairwellsAvoidingLoot(

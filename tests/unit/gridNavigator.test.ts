@@ -141,11 +141,22 @@ describe("GridNavigator spatial index", () => {
     if (!building || building.footprint === "rectangle") {
       throw new Error("polygon roof navigation fixture missing");
     }
-    const unsafeTarget = {
-      x: 574.13868,
-      y: building.baseY + building.storyHeight * building.storyCount + BUILDING_ROOF_CAP_HEIGHT + 1.76,
-      z: 112.24312,
-    };
+    let unsafeTarget: { x: number; y: number; z: number } | null = null;
+    for (let progress = 0.5; progress <= 1; progress += 0.01) {
+      const x = building.center.x + (building.width / 2 - 0.05) * progress;
+      const z = building.center.z + (building.depth / 2 - 0.05) * progress;
+      if (
+        isBuildingRoofNavigationPoint(layout, building, x, z, 0) &&
+        !isBuildingRoofNavigationPoint(layout, building, x, z)
+      ) {
+        unsafeTarget = {
+          x,
+          y: building.baseY + building.storyHeight * building.storyCount + BUILDING_ROOF_CAP_HEIGHT + 1.76,
+          z,
+        };
+      }
+    }
+    if (!unsafeTarget) throw new Error("unsafe polygon roof target missing");
     const safeStart = getBuildingRoofNavigationPoint(layout, building);
     if (!safeStart) throw new Error("safe polygon roof point missing");
 

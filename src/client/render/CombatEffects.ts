@@ -22,12 +22,16 @@ const MUZZLE_LIFETIME_SECONDS = 0.06;
 const IMPACT_LIFETIME_SECONDS = 0.16;
 const DECAL_LIFETIME_SECONDS = 8;
 const EXPLOSION_LIFETIME_SECONDS = 0.34;
+const GRENADE_EXPLOSION_VISUAL_RADIUS = 8;
+const GRENADE_EXPLOSION_INITIAL_RADIUS = 0.6;
+const GRENADE_PARTICLE_LIFETIME_SECONDS = 0.52;
 
 type ShotTracedEvent = Extract<GameEvent, { type: "shot-traced" }>;
 
 interface TimedMeshSlot {
   readonly mesh: Mesh;
   remainingSeconds: number;
+  finalFrame: boolean;
 }
 
 interface ParticleSlot extends TimedMeshSlot {
@@ -35,6 +39,7 @@ interface ParticleSlot extends TimedMeshSlot {
   velocityY: number;
   velocityZ: number;
   gravity: number;
+  holdFinalFrame: boolean;
 }
 
 interface EffectMaterials {
@@ -129,6 +134,7 @@ export class CombatEffects {
         velocityY: 0,
         velocityZ: 0,
         gravity: 0,
+        holdFinalFrame: false,
       };
     });
     this.decals = Array.from({ length: DECAL_CAPACITY }, (_, index) => {
@@ -204,24 +210,35 @@ export class CombatEffects {
     updateTimedPool(this.impacts, deltaSeconds);
     updateTimedPool(this.decals, deltaSeconds);
     for (const explosion of this.explosions) {
+      if (finishFinalFrame(explosion)) continue;
       if (explosion.remainingSeconds <= 0) continue;
-      const progress = 1 - explosion.remainingSeconds / EXPLOSION_LIFETIME_SECONDS;
-      explosion.mesh.scaling.setAll(1.2 + progress * 7);
+      const remainingSeconds = Math.max(0, explosion.remainingSeconds - deltaSeconds);
+      const progress = 1 - remainingSeconds / EXPLOSION_LIFETIME_SECONDS;
+      const radius = GRENADE_EXPLOSION_INITIAL_RADIUS +
+        progress * (GRENADE_EXPLOSION_VISUAL_RADIUS - GRENADE_EXPLOSION_INITIAL_RADIUS);
+      explosion.mesh.scaling.setAll(radius * 2);
+      explosion.remainingSeconds = remainingSeconds || Number.EPSILON;
+      explosion.finalFrame = remainingSeconds === 0;
     }
-    updateTimedPool(this.explosions, deltaSeconds);
 
     for (const particle of this.particles) {
+      if (finishFinalFrame(particle)) continue;
       if (particle.remainingSeconds <= 0) continue;
-      particle.remainingSeconds -= deltaSeconds;
+      const elapsedSeconds = Math.min(deltaSeconds, particle.remainingSeconds);
+      particle.remainingSeconds -= elapsedSeconds;
+      particle.mesh.position.x += particle.velocityX * elapsedSeconds;
+      particle.mesh.position.y += particle.velocityY * elapsedSeconds;
+      particle.mesh.position.z += particle.velocityZ * elapsedSeconds;
+      particle.velocityY -= particle.gravity * elapsedSeconds;
       if (particle.remainingSeconds <= 0) {
-        particle.remainingSeconds = 0;
-        particle.mesh.setEnabled(false);
-        continue;
+        if (particle.holdFinalFrame) {
+          particle.remainingSeconds = Number.EPSILON;
+          particle.finalFrame = true;
+        } else {
+          particle.remainingSeconds = 0;
+          particle.mesh.setEnabled(false);
+        }
       }
-      particle.mesh.position.x += particle.velocityX * deltaSeconds;
-      particle.mesh.position.y += particle.velocityY * deltaSeconds;
-      particle.mesh.position.z += particle.velocityZ * deltaSeconds;
-      particle.velocityY -= particle.gravity * deltaSeconds;
     }
   }
 
@@ -280,11 +297,14 @@ export class CombatEffects {
       particle.mesh.position.set(position.x, position.y, position.z);
       particle.mesh.scaling.setAll(1.4);
       particle.mesh.material = sequence % 2 === 0 ? this.materials.spark : this.materials.dust;
-      particle.velocityX = Math.cos(angle) * (2.6 + sequence * 0.12);
+      const horizontalSpeed = GRENADE_EXPLOSION_VISUAL_RADIUS / GRENADE_PARTICLE_LIFETIME_SECONDS *
+        (0.75 + sequence / (PARTICLES_PER_GRENADE_EXPLOSION - 1) * 0.25);
+      particle.velocityX = Math.cos(angle) * horizontalSpeed;
       particle.velocityY = 2.2 + (sequence % 3) * 0.6;
-      particle.velocityZ = Math.sin(angle) * (2.6 + sequence * 0.12);
+      particle.velocityZ = Math.sin(angle) * horizontalSpeed;
       particle.gravity = 5.5;
-      activate(particle, 0.52);
+      particle.holdFinalFrame = true;
+      activate(particle, GRENADE_PARTICLE_LIFETIME_SECONDS);
     }
   }
 
@@ -372,6 +392,7 @@ export class CombatEffects {
     slot.velocityY = this.surfaceNormal.y * normalSpeed + (dust ? 0.22 : 0.55);
     slot.velocityZ = this.surfaceNormal.z * normalSpeed + Math.sin(angle) * spread;
     slot.gravity = dust ? 0.8 : 4.8;
+    slot.holdFinalFrame = false;
     activate(slot, dust ? 0.42 : 0.24);
   }
 
@@ -401,7 +422,7 @@ function pooledMesh(mesh: Mesh): TimedMeshSlot {
   mesh.isPickable = false;
   mesh.checkCollisions = false;
   mesh.setEnabled(false);
-  return { mesh, remainingSeconds: 0 };
+  return { mesh, remainingSeconds: 0, finalFrame: false };
 }
 
 function acquireIndex(pool: readonly TimedMeshSlot[], cursor: number): number {
@@ -414,7 +435,16 @@ function acquireIndex(pool: readonly TimedMeshSlot[], cursor: number): number {
 
 function activate(slot: TimedMeshSlot, lifetimeSeconds: number): void {
   slot.remainingSeconds = lifetimeSeconds;
+  slot.finalFrame = false;
   slot.mesh.setEnabled(true);
+}
+
+function finishFinalFrame(slot: TimedMeshSlot): boolean {
+  if (!slot.finalFrame) return false;
+  slot.finalFrame = false;
+  slot.remainingSeconds = 0;
+  slot.mesh.setEnabled(false);
+  return true;
 }
 
 function updateTimedPool(pool: readonly TimedMeshSlot[], deltaSeconds: number): void {
