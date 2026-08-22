@@ -83,6 +83,8 @@
 - 2026-08-22 04:38：Review 修复后完整三套 typecheck、unit `51/592`、Worker `4/52`、standalone `3/33` 再次通过；最终 browser build 与全部预算通过，browser entry 更新为 `1,165,893 / 1,200,000`，Worker/standalone 仍为 `614,901 / 615,000`、`625,676 / 630,000`。production bundle 再验收显示启用中的真实爆炸网格精确为 `8m`，8 个粒子保持活动，未创建额外灯光，console 无 error/warn；实现 Agent 再次亲自查看其与 8 米参考环贴合的截图并清理全部资源。
 - 2026-08-22 05:03：提交前同步发现 `origin/main` 已推进到 `0fbfe4c`，其中六边形弹药库已占用协议 14/checkpoint 13 并把 Worker/server 预算调整为 630KB/640KB。当前分支在保留新 main 全部语义的基础上完成冲突解决，本任务最终改用协议 15/checkpoint 14；旧 14 客户端与旧 13 checkpoint 均被拒绝。
 - 2026-08-22 05:03：合并后最终三套 typecheck、unit `51 files / 616 tests`、Worker `4 files / 52 tests`、standalone `3 files / 33 tests` 和 performance contracts `2/2` 通过；browser、Worker dry-run、server、same-origin standalone、最终 browser rebuild、budget 与 `git diff --check` 通过。最终产物为 browser entry `1,171,935 / 1,200,000`、all JavaScript `3,854,706 / 4,000,000`、`dist` `4,677,871 / 5,000,000`、Worker `627,793 / 630,000`、standalone `638,159 / 640,000`。
+- 2026-08-22 12:48：PR #7 Codex 提出两项 P2：Bot 最小自伤距离仍写死 10 米，未包含角色胶囊半径；8 米视觉半径仍是渲染器本地常量。两项均接受。`FragGrenadeConfig.visualRadius = 8` 成为共享表现配置，`CombatEffects` 不再保留独立数值；Bot 最小落点距离改为 `FRAG_GRENADE_CONFIG.radius + ACTOR_RADIUS`，并新增 13.4 米目标会被新安全边界拒绝的真实轨迹回归。
+- 2026-08-22 12:48：Codex 修复后手雷聚焦 `10/10`、三套 typecheck、Worker `52/52`、standalone `33/33`、browser/Worker/server build、budget 和 `git diff --check` 通过。完整 unit 在与 typecheck 并行的高负载下为 `611/613`，仅两个未修改 town 用例超过既有 5 秒墙钟；两项按原 timeout 单独重跑分别约 1.05 秒和 1.18 秒通过，未修改 timeout 或断言。最终产物为 browser entry `1,171,981 / 1,200,000`、Worker `627,851 / 630,000`、standalone `638,217 / 640,000`。
 
 ## Review
 
@@ -93,3 +95,5 @@
 - 最终 Finding：blocker 0、high 0、medium 0、low 0，**批准提交**。性能结论：池容量、Mesh/material 数量不变，每帧只增加固定 36 个轻量状态分支，无新增分配或超过 15% 的风险；地图生成对比约 `+3.7%`。Reviewer 提醒 Worker 预算仅余 99B，后续共享代码变化必须继续检查。
 - 2026-08-22 05:03：提交前同步改变了审查基线并引入六边形弹药库、Bot 生存/性能与预算改动；上述批准仅适用于旧基线。已在新基线 `origin/main@0fbfe4c` 完成合并和全套验证，等待独立 Reviewer 对最终组合 diff 再审查。
 - 2026-08-22 05:03：最终独立 Reviewer 以 `origin/main@0fbfe4c` 复审完整组合 diff，确认六边形弹药库、Bot 生存/性能、协议 15/checkpoint 14、精确 8 米可见帧、5 米胶囊伤害和池复用均正确。最终 Finding 为 blocker 0、high 0、medium 0、low 0，**批准提交**；性能结论为固定容量池无新增分配或调用放大，未见超过 15% 的风险。
+- 2026-08-22 12:48：Codex 两项 P2 已实现并完成验证，等待独立 Reviewer 复审共享视觉配置、Bot 自伤边界及测试充分性后提交 follow-up。
+- 2026-08-22 12:50：独立 Reviewer 复审 Codex follow-up 未发现 blocker/high/medium/low，批准提交。Reviewer 确认 `radius + ACTOR_RADIUS = 10.42m` 能保证胶囊爆炸距离至少 10 米；13.4 米 fixture 的预测落点约 10.022 米，旧门槛会投、新门槛拒绝，16 米安全投掷仍成立。`visualRadius` 不进入网络状态/checkpoint，无需在同一未合并协议 15/checkpoint 14 内再次升级；普通环境粒子、固定池和性能保持不变。

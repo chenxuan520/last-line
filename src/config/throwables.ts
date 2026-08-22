@@ -11,6 +11,7 @@ export interface FragGrenadeConfig {
   radius: number;
   maximumDamage: number;
   fullDamageRadius: number;
+  visualRadius: number;
   collisionRadius: number;
   restitution: number;
   tangentialDamping: number;
@@ -27,6 +28,7 @@ export const FRAG_GRENADE_CONFIG: Readonly<FragGrenadeConfig> = {
   radius: 10,
   maximumDamage: 140,
   fullDamageRadius: 3,
+  visualRadius: 8,
   collisionRadius: 0.18,
   restitution: 0.42,
   tangentialDamping: 0.72,

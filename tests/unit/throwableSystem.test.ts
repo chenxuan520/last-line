@@ -250,6 +250,7 @@ describe("ThrowableSystem", () => {
       radius: 10,
       maximumDamage: 140,
       fullDamageRadius: 3,
+      visualRadius: 8,
     });
     expect(grenadeDamage(0)).toBe(FRAG_GRENADE_CONFIG.maximumDamage);
     expect(grenadeDamage(FRAG_GRENADE_CONFIG.fullDamageRadius)).toBe(

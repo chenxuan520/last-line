@@ -6,6 +6,7 @@ import { CreateDisc } from "@babylonjs/core/Meshes/Builders/discBuilder";
 import { CreateSphere } from "@babylonjs/core/Meshes/Builders/sphereBuilder";
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { Scene } from "@babylonjs/core/scene";
+import { FRAG_GRENADE_CONFIG } from "../../config/throwables";
 import type { EntityId, GameEvent } from "../../game/state/types";
 
 const TRACER_CAPACITY = 16;
@@ -22,7 +23,6 @@ const MUZZLE_LIFETIME_SECONDS = 0.06;
 const IMPACT_LIFETIME_SECONDS = 0.16;
 const DECAL_LIFETIME_SECONDS = 8;
 const EXPLOSION_LIFETIME_SECONDS = 0.34;
-const GRENADE_EXPLOSION_VISUAL_RADIUS = 8;
 const GRENADE_EXPLOSION_INITIAL_RADIUS = 0.6;
 const GRENADE_PARTICLE_LIFETIME_SECONDS = 0.52;
 
@@ -215,7 +215,7 @@ export class CombatEffects {
       const remainingSeconds = Math.max(0, explosion.remainingSeconds - deltaSeconds);
       const progress = 1 - remainingSeconds / EXPLOSION_LIFETIME_SECONDS;
       const radius = GRENADE_EXPLOSION_INITIAL_RADIUS +
-        progress * (GRENADE_EXPLOSION_VISUAL_RADIUS - GRENADE_EXPLOSION_INITIAL_RADIUS);
+        progress * (FRAG_GRENADE_CONFIG.visualRadius - GRENADE_EXPLOSION_INITIAL_RADIUS);
       explosion.mesh.scaling.setAll(radius * 2);
       explosion.remainingSeconds = remainingSeconds || Number.EPSILON;
       explosion.finalFrame = remainingSeconds === 0;
@@ -297,7 +297,7 @@ export class CombatEffects {
       particle.mesh.position.set(position.x, position.y, position.z);
       particle.mesh.scaling.setAll(1.4);
       particle.mesh.material = sequence % 2 === 0 ? this.materials.spark : this.materials.dust;
-      const horizontalSpeed = GRENADE_EXPLOSION_VISUAL_RADIUS / GRENADE_PARTICLE_LIFETIME_SECONDS *
+      const horizontalSpeed = FRAG_GRENADE_CONFIG.visualRadius / GRENADE_PARTICLE_LIFETIME_SECONDS *
         (0.75 + sequence / (PARTICLES_PER_GRENADE_EXPLOSION - 1) * 0.25);
       particle.velocityX = Math.cos(angle) * horizontalSpeed;
       particle.velocityY = 2.2 + (sequence % 3) * 0.6;

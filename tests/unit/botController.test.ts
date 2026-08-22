@@ -66,7 +66,7 @@ describe("BotController", () => {
   });
 
   it("does not throw a grenade at unsafe close range or above the global active limit", () => {
-    for (const setup of ["close", "saturated"] as const) {
+    for (const setup of ["close", "blast-radius", "saturated"] as const) {
       const state = groundedState();
       const bot = state.actors["bot-1"];
       const player = state.actors.player;
@@ -75,7 +75,11 @@ describe("BotController", () => {
       bot.position = { x: 0, y: 1.76, z: 0 };
       bot.yaw = 0;
       bot.inventory.backpack = [{ itemId: FRAG_GRENADE_ITEM_ID, quantity: 1 }];
-      player.position = { x: 0, y: 1.76, z: setup === "close" ? 5 : 20 };
+      player.position = {
+        x: 0,
+        y: 1.76,
+        z: setup === "close" ? 5 : setup === "blast-radius" ? 13.4 : 20,
+      };
       if (setup === "saturated") {
         for (let index = 0; index < 6; index += 1) {
           state.activeGrenades[`grenade-${index}`] = {
