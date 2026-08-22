@@ -150,7 +150,7 @@ export class MovementSystem {
       const support = getSupportHeight(
         actor.position.x,
         actor.position.z,
-        feetY + MAX_WALKABLE_STEP_HEIGHT,
+        feetY + MAX_WALKABLE_STEP_HEIGHT - SURFACE_EPSILON,
         layout,
       );
       const supportDelta = support - feetY;
@@ -257,7 +257,12 @@ function moveAxis(
 
 function collides(x: number, z: number, eyeY: number, layout: MapLayout): boolean {
   const feetY = eyeY - ACTOR_EYE_HEIGHT;
-  const candidateSupport = getSupportHeight(x, z, feetY + MAX_WALKABLE_STEP_HEIGHT, layout);
+  const candidateSupport = getSupportHeight(
+    x,
+    z,
+    feetY + MAX_WALKABLE_STEP_HEIGHT - SURFACE_EPSILON,
+    layout,
+  );
   const effectiveFeetY = Math.max(feetY, candidateSupport);
   for (const obstacle of getNearbyWalls(x, z, layout)) {
     if (collidesWithBlocker(x, z, effectiveFeetY, obstacle)) return true;

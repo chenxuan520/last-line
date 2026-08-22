@@ -95,7 +95,7 @@ describe("MatchRuntime", () => {
     expect(restored.state).toEqual(checkpoint.state);
   });
 
-  it("accepts only complete version 13 checkpoints for explicit map identities", () => {
+  it("accepts only complete version 14 checkpoints for explicit map identities", () => {
     const runtime = new MatchRuntime({
       humanActorIds: ["human-1", "human-2"],
       seed: 1,
@@ -106,7 +106,7 @@ describe("MatchRuntime", () => {
     const checkpoint = runtime.checkpoint();
     const checkpointLayout = createMapLayout(checkpoint.state.mapId, checkpoint.state.mapSeed);
 
-    expect(MATCH_CHECKPOINT_VERSION).toBe(13);
+    expect(MATCH_CHECKPOINT_VERSION).toBe(14);
     expect(checkpointLayout.ammunitionDepot.levels).toHaveLength(1);
     expect(isMatchCheckpointCompatible(checkpoint)).toBe(true);
     expect(isMatchCheckpointCompatible({

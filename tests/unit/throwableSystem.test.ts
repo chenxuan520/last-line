@@ -9,6 +9,7 @@ import {
   type MatchState,
   type Vector3State,
 } from "../../src/game/state/types";
+import { ACTOR_HEIGHT, ACTOR_RADIUS } from "../../src/game/rules/actorGeometry";
 import type { CombatWorld } from "../../src/game/systems/CombatSystem";
 import {
   closestActorCapsulePoint,
@@ -244,13 +245,49 @@ describe("ThrowableSystem", () => {
     expect(Object.values(first.actors).filter((actor) => actor.alive)).toHaveLength(1);
   });
 
-  it("uses full damage near the center and reaches zero at the radius", () => {
+  it("uses the configured ten-meter blast, three-meter full-damage, and five-meter lethal radii", () => {
+    expect(FRAG_GRENADE_CONFIG).toMatchObject({
+      radius: 10,
+      maximumDamage: 140,
+      fullDamageRadius: 3,
+      visualRadius: 8,
+    });
     expect(grenadeDamage(0)).toBe(FRAG_GRENADE_CONFIG.maximumDamage);
     expect(grenadeDamage(FRAG_GRENADE_CONFIG.fullDamageRadius)).toBe(
       FRAG_GRENADE_CONFIG.maximumDamage,
     );
-    expect(grenadeDamage(6)).toBeGreaterThan(0);
+    expect(grenadeDamage(5)).toBe(100);
+    expect(grenadeDamage(5.001)).toBeLessThan(100);
     expect(grenadeDamage(FRAG_GRENADE_CONFIG.radius)).toBe(0);
+  });
+
+  it("kills an unarmored full-health actor at five authoritative meters", () => {
+    const state = createState(["owner", "target", "outside"]);
+    positionActor(state.actors.owner, 100);
+    positionActor(state.actors.target, 5 + ACTOR_RADIUS);
+    positionActor(state.actors.outside, 5 + ACTOR_RADIUS + 0.001);
+    state.activeGrenades.grenade = grenade("grenade", "owner", 0);
+    state.activeGrenades.grenade.position.y = ACTOR_HEIGHT - ACTOR_RADIUS;
+    const target = state.actors.target;
+    if (!target) throw new Error("target missing");
+    expect(vectorDistanceForTest(
+      state.activeGrenades.grenade.position,
+      closestActorCapsulePoint(state.activeGrenades.grenade.position, target),
+    )).toBe(5);
+    const events: GameEvent[] = [];
+
+    new ThrowableSystem().update(state, 0.1, createWorld(), events);
+
+    expect(state.actors.target?.health).toBe(0);
+    expect(state.actors.target?.alive).toBe(false);
+    expect(events).toContainEqual({
+      type: "actor-damaged",
+      actorId: "target",
+      sourceId: "owner",
+      damage: 100,
+    });
+    expect(state.actors.outside?.health).toBeGreaterThan(0);
+    expect(state.actors.outside?.alive).toBe(true);
   });
 
   it("measures ground blasts against the authoritative actor capsule", () => {

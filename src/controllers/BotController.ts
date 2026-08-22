@@ -19,7 +19,7 @@ import {
 import { WEAPONS } from "../config/weapons";
 import type { ActorCommand } from "../game/commands/ActorCommand";
 import { createIdleCommand } from "../game/commands/ActorCommand";
-import { ACTOR_EYE_HEIGHT, ACTOR_HEIGHT } from "../game/rules/actorGeometry";
+import { ACTOR_EYE_HEIGHT, ACTOR_HEIGHT, ACTOR_RADIUS } from "../game/rules/actorGeometry";
 import { LOOT_INTERACTION_DISTANCE } from "../game/rules/loot";
 import { pointInsideObstacle2D } from "../game/rules/obstacleGeometry";
 import {
@@ -73,7 +73,7 @@ const SNIPER_WEAPON_ITEM_ID = "weapon.sniper";
 const SNIPER_AMMO_ITEM_ID = "ammo.sniper";
 const GRENADE_MINIMUM_TARGET_DISTANCE = 8;
 const GRENADE_MAXIMUM_TARGET_DISTANCE = 32;
-const GRENADE_MINIMUM_SELF_DISTANCE = 10;
+const GRENADE_MINIMUM_SELF_DISTANCE = FRAG_GRENADE_CONFIG.radius + ACTOR_RADIUS;
 const GRENADE_MAXIMUM_LANDING_ERROR = 4.5;
 type LootPurpose = "general" | "medical" | "compatible-ammo" | "combat-weapon";
 type LootZoneScope = "target" | "current" | "unbounded";
@@ -293,7 +293,7 @@ export class BotController {
         throwGrenade: null,
       };
       if (this.navigationPath.length > 0) {
-        this.updateNavigationMovement(actor, command);
+        this.updateNavigationMovement(actor, command, false);
       }
       return this.issueGroundedCommand(command);
     }
@@ -1135,7 +1135,11 @@ export class BotController {
     return command;
   }
 
-  private updateNavigationMovement(actor: ActorState, command: ActorCommand): void {
+  private updateNavigationMovement(
+    actor: ActorState,
+    command: ActorCommand,
+    trackProgress = true,
+  ): void {
     while (
       this.waypointIndex < this.navigationPath.length &&
       spatialDistance(actor.position, this.navigationPath[this.waypointIndex] as Vector3State) < WAYPOINT_REACHED_DISTANCE
@@ -1155,7 +1159,7 @@ export class BotController {
       this.navigationProgressKey = waypointKey;
       this.navigationProgressDistance = waypointDistance;
       this.navigationNoProgressDecisions = 0;
-    } else {
+    } else if (trackProgress) {
       this.navigationNoProgressDecisions = waypointDistance < this.navigationProgressDistance - 0.08
         ? 0
         : this.navigationNoProgressDecisions + 1;

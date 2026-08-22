@@ -171,8 +171,8 @@ describe("map layouts", () => {
 
   it.each([
     ["island", 0, 1],
-    ["island", 19, 2],
-    ["island", 4, 3],
+    ["island", 19, 1],
+    ["island", 4, 1],
     ["town", 0, 1],
     ["town", 3, 2],
     ["town", 15, 3],
@@ -584,6 +584,12 @@ describe("map layouts", () => {
     }
   });
 
+  it("keeps island locations distributed through the center and special buildings away from edges", () => {
+    for (const seed of [62, 64, 109, 144, 168, 328]) {
+      expectIslandLocationDistribution(createMapLayout("island", seed), seed);
+    }
+  }, 60_000);
+
   it("keeps generated roads connected and avoids kilometer-scale building gaps", () => {
     for (const seed of [0, 33, 237, 358]) {
       const layout = createMapLayout(seed);
@@ -823,6 +829,7 @@ describe("map layouts", () => {
   it("keeps buildings and ramps inside the map and above terrain across seeds", () => {
     for (let seed = 0; seed <= 400; seed += 1) {
       const layout = createMapLayout(seed);
+      expectIslandLocationDistribution(layout, seed);
       let maximumGap = 0;
       let maximumEnvironmentGap = 0;
       for (let x = -1_100; x <= 1_100; x += 220) {
@@ -901,6 +908,75 @@ describe("map layouts", () => {
     }
   });
 });
+
+function expectMinimumPointDistance(
+  points: readonly { position: { x: number; z: number } }[],
+  minimumDistance: number,
+  label: string,
+): void {
+  let actualMinimum = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < points.length; index += 1) {
+    const point = points[index];
+    if (!point) continue;
+    for (const other of points.slice(index + 1)) {
+      actualMinimum = Math.min(
+        actualMinimum,
+        Math.hypot(point.position.x - other.position.x, point.position.z - other.position.z),
+      );
+    }
+  }
+  expect(actualMinimum, label).toBeGreaterThanOrEqual(minimumDistance - 0.001);
+}
+
+function expectIslandLocationDistribution(
+  layout: ReturnType<typeof createMapLayout>,
+  seed: number,
+): void {
+  const centralPoiDistance = Math.min(...layout.mapPoints.map((point) =>
+    Math.hypot(point.position.x, point.position.z)
+  ));
+  expect(centralPoiDistance, `${seed}:central-poi`).toBeLessThanOrEqual(360);
+  expectMinimumPointDistance(layout.mapPoints, 420, `${seed}:major`);
+  expectMinimumPointDistance(layout.landingZones, 300, `${seed}:landing`);
+
+  const edgeCount = layout.landingZones.filter((point) =>
+    Math.max(Math.abs(point.position.x), Math.abs(point.position.z)) >= 800
+  ).length;
+  const cornerCount = layout.landingZones.filter((point) =>
+    Math.abs(point.position.x) >= 700 && Math.abs(point.position.z) >= 700
+  ).length;
+  expect(edgeCount, `${seed}:edge-count`).toBeLessThanOrEqual(6);
+  expect(cornerCount, `${seed}:corner-count`).toBeLessThanOrEqual(1);
+
+  let maximumCentralGap = 0;
+  for (let x = -600; x <= 600; x += 100) {
+    for (let z = -600; z <= 600; z += 100) {
+      maximumCentralGap = Math.max(maximumCentralGap, Math.min(...layout.landingZones.map((point) =>
+        Math.hypot(x - point.position.x, z - point.position.z)
+      )));
+    }
+  }
+  expect(maximumCentralGap, `${seed}:central-gap`).toBeLessThanOrEqual(450);
+
+  for (const [kind, buildingId] of [
+    ["hospital", layout.hospital.buildingId],
+    ["ammunition-depot", layout.ammunitionDepot.buildingId],
+  ] as const) {
+    const building = layout.obstacles.find((candidate) => candidate.id === buildingId);
+    if (!building) throw new Error(`${seed}:${kind}:building missing`);
+    const boundaryClearance = MAP_HALF_SIZE - Math.max(
+      Math.abs(building.center.x) + building.width / 2,
+      Math.abs(building.center.z) + building.depth / 2,
+    );
+    expect(boundaryClearance, `${seed}:${kind}:boundary`).toBeGreaterThanOrEqual(200);
+    expect(Math.hypot(building.center.x, building.center.z), `${seed}:${kind}:center`)
+      .toBeLessThanOrEqual(1_000);
+    expect(
+      Math.abs(building.center.x) >= 700 && Math.abs(building.center.z) >= 700,
+      `${seed}:${kind}:corner`,
+    ).toBe(false);
+  }
+}
 
 function segmentDistance(
   x: number,

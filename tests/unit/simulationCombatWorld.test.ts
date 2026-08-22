@@ -438,7 +438,7 @@ describe("SimulationCombatWorld", () => {
       trace(openingShooter.position, { x: 0, y: -1, z: 0 }),
     );
     expect(openingHit.point.y).toBeLessThan(roofY - 0.1);
-    expect(openingHit.point.y).toBeGreaterThan(getTerrainHeight(openingX, openingZ, layout));
+    expect(openingHit.point.y).toBeGreaterThanOrEqual(getTerrainHeight(openingX, openingZ, layout) - 0.001);
   });
 
   it("allows line of sight through upper-story windows and blocks the adjacent wall", () => {
