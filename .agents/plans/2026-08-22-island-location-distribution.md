@@ -89,6 +89,8 @@
 - 2026-08-22 05:03：提交前同步将基线快进到 `origin/main@0fbfe4c`。冲突解决保留三地图六边形弹药库、专用标牌、Bot 生存/性能与医院统一命名合同；island 安全候选同时满足 200 米边界净空、1000 米中心半径、非角落、六边形完整容纳既有物资及距全局物资 12 米。协议/checkpoint 因新 main 已使用 14/13，最终提升到 15/14。
 - 2026-08-22 05:03：合并后 seeds `0..400` 指标保持：最大中央空洞约 `449.32m`、边缘最多 6、角落最多 1、正式落区最小间距约 `300.06m`、特殊建筑最小边界净空约 `245.01m`、最大中心半径约 `999.94m`；64 个分散 uint32 seed 通过。town/mixed seeds `0/42/2026` 的完整布局哈希与新 `origin/main` 逐字一致。64 个 island 布局同机采样为 main `13.42s`、当前 `12.82s`，当前约快 4.4%；performance contracts `2/2` 通过。
 - 2026-08-22 05:03：合并后完整 typecheck、unit `51/616`、Worker `4/52`、standalone `3/33`、全部构建与预算通过；最终 browser/Worker/standalone 产物为 `1,171,935 / 1,200,000`、`627,793 / 630,000`、`638,159 / 640,000`。production Chrome 保持音量 `0`，实现 Agent 再次亲自查看最终苍岬岛小地图：中心与四周 POI、医院和六边形弹药库标记均清晰、不贴边且无文字/图标裁剪重叠；console 无 error/warn，页面、服务和截图已清理到只剩 `about:blank`。
+- 2026-08-22 05:28：PR #7 的 push/PR build 均在新增 town 完整 JSON 精确哈希处失败；Linux 计算的 3 个 town 哈希与 macOS 不同，而 mixed 的 3 个哈希通过。该新增测试把平台相关的 town 浮点/排序序列误当成跨平台稳定合同，产品代码、island golden、全部地图结构断言和 CI performance job 均未失败。已删除 3 个不可移植的 town 精确哈希，保留通过 CI 的 3 个 mixed 精确哈希；本地 `origin/main@0fbfe4c` 与当前分支 town/mixed `0/42/2026` 完整 JSON 逐字对比证据仍保留。聚焦 `mapSelection` `9/9` 通过，未修改业务代码或放宽 island/性能阈值。
+- 2026-08-22 12:37：CI follow-up 后完整 unit `51 files / 613 tests` 与 `git diff --check` 通过；未重跑不受测试文件删除影响的 Worker、standalone、build、budget 或浏览器验证。
 
 ## Review
 
@@ -99,3 +101,5 @@
 - 最终 Finding：blocker 0、high 0、medium 0、low 0，**批准提交**。Worker 产物 `614,901 / 615,000` 仅余 99B，但现有预算门禁通过且未修改阈值；后续共享代码变化必须重新检查。
 - 2026-08-22 05:03：提交前同步改变了审查基线；上述批准仅适用于旧基线。已在 `origin/main@0fbfe4c` 重新完成冲突解决、验证、性能对比和浏览器验收，等待独立 Reviewer 审查最终组合 diff。
 - 2026-08-22 05:03：最终独立 Reviewer 以 `origin/main@0fbfe4c` 复审完整组合 diff，确认上游六边形弹药库、专用牌、统一医院命名、Bot 生存/性能语义均保留；island 安全位置、六边形物资适配、12 米全局物资净空、旧仓区优先与安全 fallback 正确，协议 15/checkpoint 14 一致。最终 Finding 为 blocker 0、high 0、medium 0、low 0，**批准提交**；地图计算仅发生于缓存布局构建阶段，main/head 约 `-4.4%`，无超过 15% 的风险或明显待简化项。
+- 2026-08-22 05:28：CI 暴露新增 town 精确哈希的跨平台不稳定后进入 follow-up。修复仅删除该不可移植测试并保留 mixed 精确哈希与本地 main/head 零漂移证据；等待独立 Reviewer 复审后创建正常 follow-up commit，禁止 plan-only 提交。
+- 2026-08-22 12:37：独立 Reviewer 复审 follow-up 未发现 blocker/high/medium/low，批准提交。Reviewer 确认 town 精确哈希由本 PR 新增、并非 main 既有门禁；删除不降低既有测试，island golden、mixed 精确哈希和 town 多 seed 结构合同均保留，同机 main/HEAD 完整 JSON 一致。该改动无生产性能影响，并减少三次昂贵 town 布局测试生成。

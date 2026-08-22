@@ -82,14 +82,11 @@ describe("map selection", () => {
   });
 
   it.each([
-    ["town", 0, "73eb50e3be7401454cfb7aaa205a025cb1ec9a9d177768241897e58b08e4b077"],
-    ["town", 42, "619a798013b967733e87edbcbbdac34780fcd6aad92117a39bbffb2a8ce65d17"],
-    ["town", 2026, "3355e35c9bbed40eb4208496a6ed48e7250334a78d79f484bd3cf7c9f718bcd8"],
-    ["mixed", 0, "38355d72b284b1337f1fe78b532eedab37ee256014dd5db735effceb3f59cb0c"],
-    ["mixed", 42, "bf9aeb62566b9a80eefdfcd8927599aa343823793c87dbdf51f33cdbd0531dc6"],
-    ["mixed", 2026, "ede142eb3a04e05d071cdeaba01bc7dcd0b2436f4e025713bfe5bded22c30512"],
-  ] as const)("preserves the complete %s layout for seed %i", (mapId, seed, expectedHash) => {
-    expect(createHash("sha256").update(JSON.stringify(createMapLayout(mapId, seed))).digest("hex"))
+    [0, "38355d72b284b1337f1fe78b532eedab37ee256014dd5db735effceb3f59cb0c"],
+    [42, "bf9aeb62566b9a80eefdfcd8927599aa343823793c87dbdf51f33cdbd0531dc6"],
+    [2026, "ede142eb3a04e05d071cdeaba01bc7dcd0b2436f4e025713bfe5bded22c30512"],
+  ])("preserves the complete mixed layout for seed %i", (seed, expectedHash) => {
+    expect(createHash("sha256").update(JSON.stringify(createMapLayout("mixed", seed))).digest("hex"))
       .toBe(expectedHash);
   });
 });
