@@ -38,7 +38,7 @@ const TAKEOVER_TICKS = SIMULATION_TICK_RATE * 5;
 const ACTOR_REPLICATION_RANGE = 400;
 const LOOT_REPLICATION_RANGE = 60;
 const AIRBORNE_LOOT_REPLICATION_RANGE = ACTOR_REPLICATION_RANGE;
-export const MATCH_CHECKPOINT_VERSION = 15;
+export const MATCH_CHECKPOINT_VERSION = 16;
 const MINIMUM_CLOSED_SAFE_ZONE_SECONDS = BATTLE_ROYALE_CONFIG.safeZoneStages.reduce(
   (total, stage) => total + stage.waitSeconds + stage.shrinkSeconds / 2,
   0,
@@ -359,7 +359,9 @@ export class MatchRuntime {
         lootChanges: [...new Map(
           [...newlyVisibleLoot, ...dirtyVisibleLoot, ...hiddenLoot].map((loot) => [loot.id, loot]),
         ).values()],
-        damageChanges: frame.damageChanges.filter((change) => change.sourceId === viewer.id),
+        damageChanges: frame.damageChanges.filter((change) =>
+          change.sourceId === viewer.id || change.targetId === viewer.id
+        ),
         events: frame.events.filter((entry) => eventVisibleTo(entry.event, viewer, this.state.actors)),
       },
       visibleLootIds,
@@ -445,7 +447,6 @@ function isRecoverableDamageTotals(
   for (const [sourceId, targets] of Object.entries(value)) {
     if (
       !Object.hasOwn(actors, sourceId) ||
-      actors[sourceId]?.kind !== "player" ||
       !isRecord(targets) ||
       Object.keys(targets).length === 0
     ) {

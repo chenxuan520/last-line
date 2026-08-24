@@ -222,13 +222,13 @@ describe("minimap projection", () => {
     expect(createLeaderboardSignature([player, bot1, bot2])).not.toBe(signature);
   });
 
-  it("returns only weapons that damaged the corresponding leaderboard actor", () => {
+  it("returns only weapons for the requested leaderboard damage direction", () => {
     const damageTotals = {
       player: {
         "bot-1": { rifle: 34, smg: 0, shotgun: 26 },
       },
       "human-2": {
-        "bot-1": { sniper: 105 },
+        player: { sniper: 105 },
       },
     };
 
@@ -237,9 +237,12 @@ describe("minimap projection", () => {
       { causeId: "shotgun", itemId: "weapon.shotgun", label: "K-12 霰弹枪", total: 26 },
     ]);
     expect(leaderboardDamageEntries(damageTotals, "player", "bot-2")).toEqual([]);
+    expect(leaderboardDamageEntries(damageTotals, "human-2", "player")).toEqual([
+      { causeId: "sniper", itemId: "weapon.sniper", label: "M-24 狙击枪", total: 105 },
+    ]);
   });
 
-  it("invalidates the leaderboard only when the local player's damage changes", () => {
+  it("invalidates the leaderboard only when damage involving the local player changes", () => {
     const state = createBattleRoyaleState("player", undefined, () => 0.5);
     const actors = Object.values(state.actors);
     const damageTotals = { player: { "bot-1": { rifle: 34 } } };
@@ -247,10 +250,17 @@ describe("minimap projection", () => {
 
     damageTotals.player["bot-1"].rifle = 68;
     expect(createLeaderboardSignature(actors, damageTotals, "player")).not.toBe(signature);
-    expect(createLeaderboardSignature(actors, {
+    const incomingDamageTotals = {
       ...damageTotals,
-      "human-2": { "bot-1": { rifle: 102 } },
-    }, "player")).toBe(createLeaderboardSignature(actors, damageTotals, "player"));
+      "human-2": { player: { rifle: 102 } },
+    };
+    expect(createLeaderboardSignature(actors, incomingDamageTotals, "player")).not.toBe(
+      createLeaderboardSignature(actors, damageTotals, "player"),
+    );
+    expect(createLeaderboardSignature(actors, {
+      ...incomingDamageTotals,
+      "human-2": { ...incomingDamageTotals["human-2"], "bot-1": { rifle: 102 } },
+    }, "player")).toBe(createLeaderboardSignature(actors, incomingDamageTotals, "player"));
   });
 
   it("switches the flight counter to kills as soon as the player lands", () => {

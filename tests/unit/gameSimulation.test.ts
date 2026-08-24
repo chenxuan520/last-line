@@ -114,17 +114,56 @@ describe("GameSimulation combat", () => {
     }]);
   });
 
-  it("does not attribute takeover AI damage to the human player", () => {
-    const simulation = createSimulation();
-
-    simulation.step(
+  it("tracks damage by actor identity regardless of player, bot, or takeover control", () => {
+    const takeoverSimulation = createSimulation();
+    takeoverSimulation.step(
       1 / 30,
       new Map([["player", fireCommand]]),
       hit("bot-1"),
       new Set(["player"]),
     );
+    expect(takeoverSimulation.damageTotals.player?.["bot-1"]?.rifle).toBe(WEAPONS.rifle?.damage);
 
-    expect(simulation.damageTotals).toEqual({});
+    const botSimulation = createSimulation();
+    const secondBot = createActorState("bot-2", "bot", { x: 10, y: 1.76, z: 0 }, "rifle");
+    botSimulation.state.actors[secondBot.id] = secondBot;
+    botSimulation.step(
+      1 / 30,
+      new Map([
+        ["bot-1", { ...fireCommand, aimDirection: { x: 0, y: 0, z: -1 } }],
+        [secondBot.id, { ...fireCommand, aimDirection: { x: -1, y: 0, z: 0 } }],
+      ]),
+      {
+        traceShot: ({ shooterId }) => shooterId === "bot-1" ? "player" : "bot-1",
+      },
+      new Set(["bot-1", secondBot.id]),
+    );
+
+    expect(botSimulation.damageTotals["bot-1"]?.player?.rifle).toBe(WEAPONS.rifle?.damage);
+    expect(botSimulation.damageTotals[secondBot.id]?.["bot-1"]?.rifle).toBe(WEAPONS.rifle?.damage);
+    expect(botSimulation.drainDamageChanges()).toEqual([{
+      sourceId: "bot-1",
+      targetId: "player",
+      causeId: "rifle",
+      total: WEAPONS.rifle?.damage,
+    }]);
+
+    const grenadeSimulation = createSimulation();
+    const grenadeOwner = grenadeSimulation.state.actors["bot-1"];
+    const grenadeTarget = grenadeSimulation.state.actors.player;
+    if (!grenadeOwner || !grenadeTarget) throw new Error("grenade actors missing");
+    grenadeOwner.position = { x: 0, y: 1.76, z: 0 };
+    grenadeTarget.position = { x: 2, y: 1.76, z: 0 };
+    grenadeSimulation.state.activeGrenades.grenade = {
+      id: "grenade",
+      ownerId: grenadeOwner.id,
+      aiControlled: true,
+      position: { x: 0, y: 1.76, z: 0 },
+      velocity: { x: 0, y: 0, z: 0 },
+      fuseSeconds: 0.001,
+    };
+    grenadeSimulation.step(1 / 30, new Map(), miss);
+    expect(grenadeSimulation.damageTotals[grenadeOwner.id]?.[grenadeTarget.id]?.[FRAG_GRENADE_ITEM_ID]).toBe(140);
   });
 
   it("caps each damage total at the persisted upper bound", () => {

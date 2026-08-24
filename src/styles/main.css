@@ -1238,15 +1238,20 @@ h1 {
 }
 
 .leaderboard-actor,
-.leaderboard-damage-list,
+.leaderboard-damage-breakdown,
 .leaderboard-damage {
-  display: flex;
+  display: grid;
   align-items: center;
 }
 
 .leaderboard-actor {
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   gap: 10px;
+}
+
+.leaderboard-actor.has-damage {
+  grid-template-columns: minmax(32px, 0.8fr) minmax(0, 2.2fr);
 }
 
 .leaderboard-actor-name {
@@ -1257,16 +1262,35 @@ h1 {
   white-space: nowrap;
 }
 
+.leaderboard-damage-breakdown {
+  grid-template-columns: minmax(0, 1fr) 1px minmax(0, 1fr);
+  min-width: 0;
+  gap: 6px;
+}
+
 .leaderboard-damage-list {
-  flex: 0 1 auto;
-  flex-wrap: wrap;
-  gap: 3px 8px;
+  display: block;
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leaderboard-damage-divider {
+  width: 1px;
+  height: 17px;
+  background: rgb(183 197 139 / 38%);
 }
 
 .leaderboard-damage {
+  display: inline-flex;
   gap: 3px;
   color: var(--signal-bright);
   white-space: nowrap;
+}
+
+.leaderboard-damage + .leaderboard-damage {
+  margin-left: 8px;
 }
 
 .leaderboard-damage img {

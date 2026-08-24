@@ -19,7 +19,6 @@ export interface RawDamageContribution {
   targetId: EntityId;
   causeId: string;
   amount: number;
-  aiControlled: boolean;
 }
 
 export class DamageTotalsTracker {
@@ -34,8 +33,7 @@ export class DamageTotalsTracker {
     const source = state.actors[contribution.sourceId];
     const target = state.actors[contribution.targetId];
     if (
-      contribution.aiControlled ||
-      source?.kind !== "player" ||
+      !source ||
       !target?.alive ||
       target.deployment === "aircraft" ||
       source.id === target.id ||
@@ -53,6 +51,7 @@ export class DamageTotalsTracker {
     );
     byCause[contribution.causeId] = total;
 
+    if (source.kind !== "player" && target.kind !== "player") return;
     const changedTargets = this.changes[source.id] ??= {};
     const changedCauses = changedTargets[target.id] ??= {};
     changedCauses[contribution.causeId] = total;
@@ -105,11 +104,16 @@ export function unpackDamageTotals(totals: PackedDamageTotals): DamageTotals {
   ]));
 }
 
-export function projectDamageTotals(totals: DamageTotals, sourceId: EntityId): DamageTotals {
-  const targets = totals[sourceId];
-  return targets ? { [sourceId]: Object.fromEntries(
-    Object.entries(targets).map(([targetId, causes]) => [targetId, { ...causes }]),
-  ) } : {};
+export function projectDamageTotals(totals: DamageTotals, actorId: EntityId): DamageTotals {
+  return Object.fromEntries(Object.entries(totals).flatMap(([sourceId, targets]) => {
+    if (sourceId === actorId) {
+      return [[sourceId, Object.fromEntries(
+        Object.entries(targets).map(([targetId, causes]) => [targetId, { ...causes }]),
+      )]];
+    }
+    const incoming = targets[actorId];
+    return incoming ? [[sourceId, { [actorId]: { ...incoming } }]] : [];
+  }));
 }
 
 export function applyDamageTotalChanges(totals: DamageTotals, changes: readonly DamageTotalChange[]): void {

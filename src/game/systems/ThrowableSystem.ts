@@ -28,7 +28,6 @@ interface PendingExplosionDamage {
   sourceId: EntityId;
   amount: number;
   origin: Vector3State;
-  aiControlled: boolean;
 }
 
 export class ThrowableSystem {
@@ -146,7 +145,6 @@ export class ThrowableSystem {
           sourceId: grenade.ownerId,
           amount,
           origin: { ...grenade.position },
-          aiControlled: grenade.aiControlled,
         });
         pendingByTarget.set(actor.id, pending);
       }
@@ -159,14 +157,12 @@ export class ThrowableSystem {
     for (const [targetId, pending] of pendingByTarget) {
       rawDamageByTarget.set(targetId, pending.reduce((total, entry) => total + entry.amount, 0));
       for (const damage of pending) {
-        if (damage.aiControlled) continue;
         if (!this.damage.canApplyDamage(state, targetId, damage.amount)) continue;
         this.damageTotals?.record(state, {
           sourceId: damage.sourceId,
           targetId,
           causeId: FRAG_GRENADE_ITEM_ID,
           amount: damage.amount,
-          aiControlled: damage.aiControlled,
         });
       }
     }

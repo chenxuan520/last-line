@@ -69,6 +69,40 @@
 
 - 2026-08-24：记录用户确认的排行榜展示、仅显示实际造成伤害的武器、护甲/头盔减免前累计、自伤排除、重连保留和低性能影响要求；完成现有 UI 与权威伤害链路研究并确定稀疏增量投影方案。
 
+### Round 2 Follow-up
+
+#### Goal
+
+在同一排行榜角色行中增加“该角色对我”的累计原始伤害，并与既有“我对该角色”伤害组成无文字标题的左右双向对照。
+
+#### Contract
+
+- 继续直接在 `main` 上完成并复用本 Plan；排行榜排序、排名、角色名、存活状态和击杀数保持不变。
+- 左半区显示当前玩家对该角色的“武器图标 + 累计原始伤害”，右半区显示该角色对当前玩家的相同信息；伤害仍使用既有减免前权威定义和稳定武器顺序。
+- 双向伤害区域使用固定中线竖分隔；任一侧存在记录时都显示完整左右区域和分隔线，仅两侧均无记录时完全不渲染伤害区域。
+- 左右半区各自保持单行并独立在边界内以 `…` 截断，任何一侧都不得挤占另一侧、状态列或击杀列。
+- 统计绑定稳定角色身份，不依赖角色类型或当前控制器类型：真人、Bot 和真人角色被 AI 接管期间产生的全部有效伤害都按 `sourceId -> targetId -> causeId` 记录，包括 Bot 对 Bot；客户端只展示与当前玩家相连的双向关系。
+- 联机 full/delta 只向 viewer 发送 `sourceId === viewerId` 或 `targetId === viewerId` 的关系，禁止泄露其他角色之间的伤害矩阵；重连和 checkpoint 恢复后双向累计都必须保留。
+- 完整 50 人有向统计最多存在 2,450 个 source/target 对和 12,250 个固定 cause 槽。继续使用可严格校验的固定五槽 checkpoint 表示并提升 checkpoint 版本；标准 50 角色最大矩阵与完整合法背包/双武器高水位状态叠加后实测 `208,975B`，因此将这一确定性标准组合门禁有依据地调整为 `220,000B`。合法额外动态物资仍可增加 checkpoint 大小，不把该门禁描述为所有兼容状态的绝对上界。
+- 现有协议字段形状不变，旧客户端会安全忽略新增的入站投影，因此不提升联机协议版本。
+
+#### Tasks
+
+1. 先补单个失败回归，锁定 Bot 入站、Bot 对 Bot、AI takeover 出站、双向 viewer 投影、checkpoint 恢复和 HUD 双向读取。
+2. 扩展 `DamageTotalsTracker`，记录所有角色之间的非自伤有效贡献，并移除角色类型和控制器类型对归属的影响。
+3. 保持固定五槽 checkpoint 编码和严格数值校验，允许任意现有非自身角色作为来源/目标，提升版本并把标准 50 角色最大有向矩阵与完整合法装备状态的确定性组合锁在 `220,000B` 新门禁内。
+4. 在角色名后渲染固定中线的左右伤害半区，分别独立省略，并让排行榜签名同时响应本地出站和入站变化。
+5. 按本机单用例规则执行定向测试，并完成 typecheck、相关 build/budget、静音 production 浏览器验收和独立 Reviewer。
+6. Reviewer 闭环后提交并推送 `main`，等待 CI、Pages、Worker 和必要 production smoke 全部成功。
+
+#### Success Criteria
+
+- Bot 或其他真人角色伤害当前玩家时，记录显示在来源角色行右半区；当前玩家伤害该角色时仍显示在同一行左半区。
+- 真人角色由 AI 接管期间造成的伤害按角色身份累计；Bot 对 Bot 同样保存在完整权威矩阵中，自伤、安全区、miss、遮挡和零伤害仍不统计。
+- 仅左侧或仅右侧有记录时仍显示中线和空的另一半；两侧都为空时不创建伤害区域。
+- 多武器内容在各自半区内单行省略，不改变状态/击杀列，不产生横向溢出或重叠。
+- 联机只投影与 viewer 相连的双向关系；标准 50 角色最大矩阵与完整合法装备状态的确定性组合不超过有依据的新 `220,000B` 门禁，恢复后数值、方向和 cause 不变。
+
 ## Build
 
 ### Update Log
@@ -90,6 +124,12 @@
 - 2026-08-24：合并后的 GitHub main CI、performance、Docker smoke、GitHub Pages 和 Cloudflare Pages 均成功；Codex 对 `224d1cb` 未发现 major issue。Cloudflare Workers Build `fa3420fa-a93b-40db-b871-2c57d63274bb` 标红，但版本/部署历史证明它已于 05:46:08 创建并部署 `9256c30b-ba98-4048-947a-4abd045a6a39`；随后完整 fallback 部署 `39123e1a-fbf3-4f53-98ae-3fda532f0ab1` 并通过 protocol 16 production smoke。当前 OAuth token 缺少 Workers Builds Configuration 权限，Build logs API 返回 403；结合已部署版本、失败时间和历史同类记录，失败与单次新 `/health` marker 后有副作用 smoke 仍命中旧边缘版本的传播竞态一致，不是构建或部署失败。
 - 2026-08-24：CI follow-up 先新增连续稳定回归，旧实现 3 项按预期失败，证明第一次匹配协议即返回。`waitForProductionProtocol` 现要求连续 5 次预期协议；旧版本、缺失 marker、transport 和 502/503/504 都清零计数，仍共享 120 秒总上限，稳定后仍只创建 1 个 smoke 房间且不重试任何有副作用阶段。定向 readiness 10/10 与三套 typecheck 通过。
 - 2026-08-24：本机误启动完整 suite 后出现多个未修改地图测试的高负载 timeout，并由用户终止；检查确认本项目无残留 Vitest/Node/workerd 进程。按用户要求，`AGENTS.md` 与完成检查表已改为本机每次只运行单个测试名过滤用例，完整 unit/Worker/standalone suite 只由 CI 执行。本 follow-up 不再本机复跑全套。
+- 2026-08-25：Round 2 先把 AI takeover、Bot 入站和 Bot 对 Bot 归属合并为一个精确回归；旧实现因 `aiControlled`/`kind` 过滤按预期得到 `undefined`，实现改为稳定角色 ID 归属后通过。Bot 对 Bot 累计进入完整 ledger，但不进入任何真人 viewer 的 frame change 集。
+- 2026-08-25：`projectDamageTotals` 和普通 frame 现只保留 `sourceId === viewerId || targetId === viewerId` 的双向关系。checkpoint 提升至 16，恢复校验允许任意现有非自身角色作为来源/目标；联机协议字段形状保持版本 16 不变。单个精确用例分别验证 checkpoint 16、真人双向投影、HUD 双向 helper/signature，均通过；完整 suite 留给 CI。
+- 2026-08-25：完整 50 人矩阵包含 2,450 个有向关系和 12,250 个固定 cause 槽。标准最大矩阵与每名角色双武器、6 个合法满 stack、二级护甲/头盔和使用中物品组合后，checkpoint 兼容校验通过且序列化为 `208,975B`；该确定性标准组合门禁为 `220,000B`，不覆盖允许额外动态物资的任意兼容状态。单个高水位测试通过；最大 viewer 双向 full 包含 98 个关系，量测为 `35,795B`，继续低于既有 `50,000B` full 门禁。
+- 2026-08-25：排行榜角色区仅在任一方向有记录时创建固定三列伤害区：左侧出站、中间 1px 分隔线、右侧入站。两侧分别使用单行 `text-overflow: ellipsis`，不互相挤占；两侧均空时不生成区域。排行榜 signature 只响应与当前玩家相连的双向变化，Bot 对 Bot 等无关矩阵变化不重建 DOM。
+- 2026-08-25：三套 typecheck 通过；`npm run build`、Worker dry-run、server、same-origin standalone、恢复普通 production build 和 budgets 通过。最终原始产物为 browser entry `1,175,858 / 1,200,000`、Worker `634,655 / 636,000`、standalone `644,705 / 646,000`，未调整任何产物预算。
+- 2026-08-25：实现 Agent 在音量 `0` 的 production build 中通过真实 `GameHud` 临时注入并检查双侧长内容、仅左和仅右三种行态。桌面 `1440×900` 中每侧约 138.7px，移动横屏 `844×390` 中每侧约 116.1px；长内容均显示 `…`，中线固定，状态/击杀列不重叠，body 无横向溢出，console 无 warning/error。截图已亲自打开检查字体、颜色、间距、对齐、裁剪和相邻行；临时注入、截图、日志、页面和 preview 服务均已清理，最终干净 production build 已重建。
 
 ## Review
 
@@ -188,3 +228,38 @@
 - 审查结论：通过；未发现 blocker、high、medium 或 low Finding，批准提交 `main`。
 - Reviewer 确认固定连续 5 次不可配置覆盖，全部允许重试的旧/缺失 marker、transport 和 gateway 失败都会重置计数，120 秒总界与唯一一次副作用 smoke 保持；本机单用例/CI 完整 suite 规则在 AGENTS 和 README 中一致。
 - 性能结论：只增加 4 次无副作用健康检查和约 8 秒部署等待，无产品运行时影响或明显优化空间。Reviewer 未重复外层测试、typecheck 或构建。
+
+### Round 2 Review
+
+- Review 时间：2026-08-25。
+- 审查范围：当前 `main@2aa12a8` 相对 `origin/main@2aa12a8` 的完整未提交 diff；对照本 Plan 的 `Round 2 Follow-up`、用户原始双向伤害要求、`AGENTS.md`、`README.md` 及 Build 记录，静态追踪枪械/手雷累计、viewer full/delta、客户端 coalescing、checkpoint 16、HUD 与性能路径。Reviewer 未重复外层测试、typecheck、build、budget 或浏览器命令。
+- 审查结论：**不通过**。无 blocker/high；存在 3 项 Medium 和 1 项 Low。
+- Medium：`tests/unit/matchRuntime.test.ts:380-415` 的 `220000B` 用例不是当前兼容校验器所接受数据的真实高水位。`src/server/MatchRuntime.ts:547-570` 不限制 `maxBackpackStacks` 为权威值 6，允许任意数量的合法重复 stack；`src/server/MatchRuntime.ts:583-606` 还允许任意数量的额外 loot。因此可构造通过 `isMatchCheckpointCompatible`、却任意超过 220000B 的版本 16 checkpoint，文档所称“硬门禁”不能成立。Builder 必须收紧可恢复状态边界并覆盖全部兼容数据，或明确缩窄并更名该预算合同，不能继续称当前 fixture 为最大合法 checkpoint；Writer 随实现同步修正文档数值/措辞。
+- Medium：`src/client/ui/GameHud.ts:763-770` 在排行榜可见时每 100ms 用嵌套 `Object.entries(...).flatMap(...)` 扫描完整 damage matrix，单机路径又由 `src/app/BattleRoyaleSession.ts:274-288` 直接传入包含 Bot→Bot 的完整 ledger。最大情况下每次扫描 2,450 个 relation 并分配各层中间数组，其中最多 2,352 条与 viewer 无关，违反 Plan 中只读取当前玩家相关记录的性能合同。Builder 应直接读取 `damageTotals[playerId]`，并仅对各 source 做 `targets[playerId]` 查询，使签名工作量与 50 个 source 加 98 条 viewer 关系相关，而不是与完整矩阵相关。
+- Medium：本轮把伤害记录从非 AI 真人扩展到全部 Bot 命中，并把 1Hz checkpoint pack 从最多 490 个关系/2,450 槽扩大到 2,450 个关系/12,250 槽，记录的最大序列化体积也从不足 100KB 增至 208,975B；但 Build 只有功能、构建和产物预算证据，现有 `tests/performance/runtimePerformance.test.ts` 也不覆盖伤害热路径或 populated checkpoint。按仓库 15% 性能规则，当前不足以排除 Bot 战斗、同步 checkpoint clone/pack、存储 I/O 与 GC 的明显回归。Builder 需提供同条件 main/head 的伤害密集运行与高水位 checkpoint 时间/分配证据，或先简化实现后重新验证。
+- Low：`src/game/systems/CombatSystem.ts:44-50,213-220` 和 `src/game/systems/ThrowableSystem.ts:27-32,144-150` 在移除 AI 过滤后仍把 `aiControlled` 复制进每个 pending damage 对象，但后续已无读取；这是本轮直接产生的热路径冗余字段，应删除以满足最小改动和分配要求。
+- 已确认项：枪械、霰弹 pellet、手雷 owner、Bot→真人、Bot→Bot 与 AI takeover 均按稳定 actor ID 在实际扣血前累计；自伤、圈伤、miss、遮挡和非正伤害未进入 ledger。`projectDamageTotals`、frame filter、绝对累计 coalescing 和重连 full 的方向及 viewer 隔离未见功能错误；checkpoint 版本、五槽 ABI、own-key 和数值校验保持一致；HUD 的任一侧有值即创建等宽左右区与 1px 中线、两侧独立 ellipsis、均空不建区域符合需求。
+- 残余风险：真实 Worker/standalone 非空双向 ledger 重连仍缺端到端证据；现有 standalone 用例只断言空 `damageTotals`。业务改动未出现 `context.Background()`，也未发现与需求无关的历史语义修改或新增不必要文件/抽象。
+- 待处理：以上 3 项 Medium 必须由 Builder 闭环并重新请求 Review；Low 应随热路径性能收敛一并处理。Writer 需在 checkpoint 边界确定后同步 `AGENTS.md`、架构和部署文档。
+
+### Round 2 Builder Disposition
+
+- Medium 1：确认门禁措辞有误，不改动与本需求无关的动态物资兼容边界。测试、Plan、`AGENTS.md`、架构和部署文档现统一把 `220,000B` 定义为“标准 50 角色 + 完整合法装备 + 最大伤害矩阵”的确定性组合门禁；额外合法动态物资仍允许存在且明确不属于该固定 fixture，禁止再称其为所有兼容 checkpoint 的绝对上界。
+- Medium 2：已修复。排行榜签名不再嵌套扫描完整矩阵；只遍历 `damageTotals[playerId]` 的最多 49 个出站目标，再对最多 50 个 source 做一次 `targets[playerId]` 入站查询。最大相关关系为 98，Bot 对 Bot 矩阵不进入 HUD 扫描或中间数组；原精确 signature 用例继续通过。
+- Medium 3：已补同一 Node 24 环境、同一进程、交替 9 轮 main/head 定向量测。标准高水位 checkpoint 在 `main` 为版本 15、490 个关系、`118,295B`、创建并 JSON 序列化中位数 `1.076ms`；HEAD 为版本 16、2,450 个关系、`208,975B`、`1.945ms`。相对增长约 80.7%，但绝对新增 `0.869ms` 且只在 1Hz checkpoint 执行；这是用户明确批准的完整矩阵/存储取舍。伤害累计微基准中位数由每贡献 `0.0217µs` 增至 `0.0699µs`，绝对增加约 `0.0482µs`；即使每秒 1,000 个贡献，新增 CPU 约 `0.048ms/s`。证据明确保留相对退化，不以其他指标掩盖，等待 Reviewer 判断该架构/资源调整是否可接受。
+- Low：已修复。`CombatSystem.PendingDamage` 和 `ThrowableSystem.PendingExplosionDamage` 不再复制无人读取的 `aiControlled` 字段；活动手雷自身的 AI 来源字段仍按玩法/并发/checkpoint 合同保留。
+- 修复验证：三个单个精确用例分别覆盖角色身份归属、viewer 相关 signature 和标准组合 checkpoint，均通过；三套 typecheck、Worker dry-run、same-origin standalone、server、恢复普通 production build 和 budgets 通过。最终 browser entry `1,175,903 / 1,200,000`、Worker `634,585 / 636,000`、standalone `644,635 / 646,000`。浏览器可见结构与样式未在本轮修复中改变，沿用已完成的静音桌面/移动横屏验收。
+
+### Round 2 Re-review
+
+- Review 时间：2026-08-25。
+- 审查范围：重新完整阅读本 Plan 与 `Round 2 Builder Disposition`，以当前 `main@2aa12a8`、`origin/main@2aa12a8` 为基线复审完整未提交 diff，重点核对上一轮 3 项 Medium、1 项 Low，以及功能、viewer 隐私、checkpoint 16、性能、最小改动和长期文档。Reviewer 未重复外层测试、typecheck、build、budget 或浏览器命令。
+- 审查结论：**通过；本次审查未发现 blocker、high、medium 或新的 low Finding，批准提交 `main`。** 上一轮 3 项 Medium 和 1 项 Low 均已闭环。
+- Medium 1 闭环：Plan、测试名称、`AGENTS.md`、架构和部署文档均把 `220000B` 准确限定为“标准 50 角色完整合法装备状态 + 2,450 个有向关系/12,250 个固定槽最大矩阵”的确定性组合门禁，并明确额外合法动态物资可继续增加 checkpoint、且不属于该固定门禁；不再声称覆盖全部兼容 checkpoint。
+- Medium 2 闭环：`createLeaderboardSignature` 只遍历 viewer 的最多 49 个出站目标，并对最多 50 个 source 各做一次 `targets[playerId]` 直接入站查询；不会展开其他 source 的 target map。最大处理 98 条 viewer 关系，Bot→Bot 矩阵不再进入 HUD 的关系扫描或中间数组。
+- Medium 3 闭环：接受本轮有依据的架构/资源取舍。Node 24 同进程交替 9 轮证据保留了 checkpoint 相对退化：`1.076ms/118295B/490` 关系增至 `1.945ms/208975B/2450` 关系；绝对新增 `0.869ms` 且仅 1Hz 执行。每贡献新增约 `0.0482µs`，即使 1,000 contribution/s 也只增加约 `0.048ms/s`。结合确定性关系/字节上界、既有产物预算、viewer full `35795B` 和 10Hz 稀疏 delta，未见产品规则循环、网络或 HUD 存在超过 15% 的明确风险；checkpoint 相对增长是用户明确批准且文档化的完整矩阵持久化成本。
+- Low 闭环：两个 pending damage 结构已删除无人读取的 `aiControlled`；`CombatSystem` 的 AI 参数仍只服务于必要的轨迹表现压缩，`ActiveGrenadeState.aiControlled` 仍服务于 AI 活动手雷并发上限及 checkpoint 合同，没有误删。
+- 功能与隐私：枪械、逐 pellet 霰弹枪、按 owner 分账手雷、Bot、Bot→Bot、Bot→真人和 AI takeover 均按稳定 actor ID 在实际扣血前累计；自伤、圈伤、miss、遮挡和非正伤害继续排除。full/delta 只保留 `sourceId === viewerId || targetId === viewerId`，客户端绝对累计 coalescing 与 full 替换保持幂等，未见无关关系泄露。
+- checkpoint 与 UI：版本 16、固定五槽 ABI、own-key、非自身 actor、整数范围、恢复方向保持一致。HUD 任一侧有记录即生成等宽左右区和 1px 中线，两侧独立单行省略，均空时不生成区域；签名只响应 viewer 相关变化。
+- 最小改动：新增 tracker 范围、双向投影、checkpoint 版本、HUD/CSS、回归和文档均直接对应 Round 2；未见无关历史语义修改、新增不必要抽象/缓存/锁或剩余调用放大，业务代码未出现 `context.Background()`。
+- 残余风险：真实 Worker/standalone 非空双向 ledger 重连仍未新增端到端 fixture，继续由真实空 ledger 重连与 MatchRuntime 非空 pack/unpack、full/delta 投影的分层证据覆盖；生产 checkpoint 存储延迟继续可由既有 `checkpoint_duration_ms` 观测。该验证缺口不阻止本轮批准。

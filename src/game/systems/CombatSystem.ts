@@ -46,7 +46,6 @@ interface PendingDamage {
   sourceId: EntityId;
   amount: number;
   weaponId: string;
-  aiControlled: boolean;
 }
 
 const TIMER_EPSILON_SECONDS = 1e-9;
@@ -216,7 +215,6 @@ export class CombatSystem {
           sourceId: actor.id,
           amount: config.damage,
           weaponId: config.id,
-          aiControlled,
         });
       }
     }
@@ -229,14 +227,12 @@ export class CombatSystem {
   private applyPendingDamage(state: MatchState, pendingDamage: readonly PendingDamage[], events: GameEvent[]): void {
     if (pendingDamage.length === 0) return;
     for (const damage of pendingDamage) {
-      if (damage.aiControlled) continue;
       if (!this.damage.canApplyDamage(state, damage.targetId, damage.amount)) continue;
       this.damageTotals?.record(state, {
         sourceId: damage.sourceId,
         targetId: damage.targetId,
         causeId: damage.weaponId,
         amount: damage.amount,
-        aiControlled: damage.aiControlled,
       });
     }
     const living = Object.values(state.actors)

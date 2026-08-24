@@ -397,23 +397,40 @@ export class GameHud {
       actorName.className = "leaderboard-actor-name";
       actorName.textContent = this.actorLabel(actor.id, playerId);
       actorDetails.append(actorName);
-      const damageEntries = leaderboardDamageEntries(damageTotals, playerId, actor.id);
-      if (damageEntries.length > 0) {
-        const damageList = document.createElement("span");
-        damageList.className = "leaderboard-damage-list";
-        for (const entry of damageEntries) {
-          const damage = document.createElement("span");
-          damage.className = "leaderboard-damage";
-          damage.setAttribute("aria-label", `${entry.label}，原始伤害 ${formatDamageTotal(entry.total)}`);
-          const icon = document.createElement("img");
-          icon.src = this.resolveIconUrl(getItemIconAssetId(entry.itemId));
-          icon.alt = "";
-          const total = document.createElement("b");
-          total.textContent = formatDamageTotal(entry.total);
-          damage.append(icon, total);
-          damageList.append(damage);
+      const outgoingEntries = leaderboardDamageEntries(damageTotals, playerId, actor.id);
+      const incomingEntries = leaderboardDamageEntries(damageTotals, actor.id, playerId);
+      if (outgoingEntries.length > 0 || incomingEntries.length > 0) {
+        actorDetails.classList.add("has-damage");
+        const breakdown = document.createElement("span");
+        breakdown.className = "leaderboard-damage-breakdown";
+        for (const [direction, entries] of [
+          ["outgoing", outgoingEntries],
+          ["incoming", incomingEntries],
+        ] as const) {
+          const damageList = document.createElement("span");
+          damageList.classList.add("leaderboard-damage-list", `is-${direction}`);
+          for (const entry of entries) {
+            const damage = document.createElement("span");
+            damage.className = "leaderboard-damage";
+            damage.setAttribute(
+              "aria-label",
+              `${direction === "outgoing" ? "我对该角色" : "该角色对我"}使用${entry.label}造成原始伤害 ${formatDamageTotal(entry.total)}`,
+            );
+            const icon = document.createElement("img");
+            icon.src = this.resolveIconUrl(getItemIconAssetId(entry.itemId));
+            icon.alt = "";
+            const total = document.createElement("b");
+            total.textContent = formatDamageTotal(entry.total);
+            damage.append(icon, total);
+            damageList.append(damage);
+          }
+          breakdown.append(damageList);
         }
-        actorDetails.append(damageList);
+        const divider = document.createElement("i");
+        divider.className = "leaderboard-damage-divider";
+        divider.setAttribute("aria-hidden", "true");
+        breakdown.insertBefore(divider, breakdown.lastElementChild);
+        actorDetails.append(breakdown);
       }
       const status = document.createElement("em");
       status.textContent = actor.alive ? "存活" : "淘汰";
@@ -743,9 +760,19 @@ export function createLeaderboardSignature(
     .map((actor) => `${actor.id}:${actor.alive ? 1 : 0}:${actor.kills}`)
     .sort()
     .join("|");
-  const damageSignature = Object.entries(damageTotals[playerId] ?? {}).flatMap(([targetId, causes]) =>
-    Object.entries(causes).map(([causeId, total]) => `${targetId}:${causeId}:${total}`)
-  ).sort().join("|");
+  const damageParts: string[] = [];
+  for (const [targetId, causes] of Object.entries(damageTotals[playerId] ?? {})) {
+    for (const [causeId, total] of Object.entries(causes)) {
+      damageParts.push(`${playerId}:${targetId}:${causeId}:${total}`);
+    }
+  }
+  for (const [sourceId, targets] of Object.entries(damageTotals)) {
+    if (sourceId === playerId) continue;
+    for (const [causeId, total] of Object.entries(targets[playerId] ?? {})) {
+      damageParts.push(`${sourceId}:${playerId}:${causeId}:${total}`);
+    }
+  }
+  const damageSignature = damageParts.sort().join("|");
   return `${actorSignature}#${damageSignature}`;
 }
 
@@ -758,10 +785,10 @@ export interface LeaderboardDamageEntry {
 
 export function leaderboardDamageEntries(
   damageTotals: DamageTotals,
-  playerId: EntityId,
+  sourceId: EntityId,
   targetId: EntityId,
 ): LeaderboardDamageEntry[] {
-  const causes = damageTotals[playerId]?.[targetId];
+  const causes = damageTotals[sourceId]?.[targetId];
   if (!causes) return [];
   const causeOrder = [...Object.keys(WEAPONS), FRAG_GRENADE_ITEM_ID];
   return Object.entries(causes)
