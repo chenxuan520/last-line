@@ -24,6 +24,11 @@ import { WEAPONS } from "../config/weapons";
 import { HumanController } from "../controllers/HumanController";
 import { requestDesktopPointerLockSafely } from "../controllers/pointerLock";
 import { FixedStepClock } from "../game/FixedStepClock";
+import {
+  applyDamageTotalChanges,
+  type DamageTotalChange,
+  type DamageTotals,
+} from "../game/DamageTotals";
 import { SIMULATION_STEP_SECONDS } from "../game/simulationTiming";
 import {
   getActiveWeapon,
@@ -98,6 +103,7 @@ export class MultiplayerSession implements GameSession {
   private readonly jumpVisualStates = new Map<EntityId, JumpVisualState>();
   private readonly remotePoses = new Map<EntityId, PositionTransition>();
   private state: MatchState;
+  private damageTotals: DamageTotals;
   private displayNames: Record<EntityId, string>;
   private hud: GameHud | null = null;
   private active = false;
@@ -131,6 +137,7 @@ export class MultiplayerSession implements GameSession {
     initial: FullMessage,
   ) {
     this.state = initial.state;
+    this.damageTotals = initial.damageTotals;
     this.displayNames = initial.displayNames;
     this.scene = bundle.scene;
     this.camera = bundle.camera;
@@ -279,6 +286,7 @@ export class MultiplayerSession implements GameSession {
       this.humanController.isGrenadeSelected(),
       this.humanController.isGrenadePreparing(),
       this.humanController.getGrenadeThrowMode(),
+      this.damageTotals,
     );
   }
 
@@ -324,6 +332,7 @@ export class MultiplayerSession implements GameSession {
   private applyFull(message: FullMessage): void {
     if (message.localActorId !== this.localActorId) return;
     this.state = message.state;
+    this.damageTotals = message.damageTotals;
     this.grenadePreviewWorld = new SimulationCombatWorld(
       this.state,
       true,
@@ -383,6 +392,7 @@ export class MultiplayerSession implements GameSession {
       groundLoot: { ...this.state.groundLoot },
     });
     for (const loot of frame.lootChanges) this.state.groundLoot[loot.id] = loot;
+    applyDamageTotalChanges(this.damageTotals, frame.damageChanges);
     this.visibleActorIds = new Set(frame.visibleActorIds);
     const player = this.state.actors[this.localActorId];
     const firstUnacknowledged = this.pendingInputs.findIndex((input) => input.sequence > message.ackSequence);
@@ -496,12 +506,17 @@ export class MultiplayerSession implements GameSession {
     const previous = this.queuedMessages[previousIndex] as SnapshotMessage;
     const eventMap = new Map([...previous.frame.events, ...message.frame.events].map((entry) => [entry.sequence, entry]));
     const lootMap = new Map([...previous.frame.lootChanges, ...message.frame.lootChanges].map((loot) => [loot.id, loot]));
+    const damageMap = new Map(
+      [...previous.frame.damageChanges, ...message.frame.damageChanges]
+        .map((change) => [damageTotalChangeKey(change), change]),
+    );
     this.queuedMessages[previousIndex] = {
       ...message,
       frame: {
         ...message.frame,
         events: [...eventMap.values()].sort((left, right) => left.sequence - right.sequence),
         lootChanges: [...lootMap.values()],
+        damageChanges: [...damageMap.values()],
       },
     };
   }
@@ -802,4 +817,8 @@ export class MultiplayerSession implements GameSession {
       document.pointerLockElement,
     );
   }
+}
+
+function damageTotalChangeKey(change: DamageTotalChange): string {
+  return JSON.stringify([change.sourceId, change.targetId, change.causeId]);
 }

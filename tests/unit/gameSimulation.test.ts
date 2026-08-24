@@ -3,6 +3,7 @@ import { WEAPONS } from "../../src/config/weapons";
 import { FRAG_GRENADE_ITEM_ID } from "../../src/config/throwables";
 import { getTerrainHeight } from "../../src/config/map";
 import { createIdleCommand, type ActorCommand } from "../../src/game/commands/ActorCommand";
+import { MAX_DAMAGE_TOTAL } from "../../src/game/DamageTotals";
 import { GameSimulation } from "../../src/game/GameSimulation";
 import { compareActorTurns } from "../../src/game/rules/resolveSimultaneous";
 import {
@@ -69,6 +70,122 @@ describe("GameSimulation combat", () => {
     expect(getActiveWeapon(simulation.state.actors.player)?.ammoInMagazine).toBe(44);
     expect(simulation.state.actors["bot-1"]?.armor).toBeCloseTo(34.7);
     expect(simulation.state.actors["bot-1"]?.health).toBeCloseTo(81.3);
+  });
+
+  it("tracks player weapon damage before protection and health clipping", () => {
+    const simulation = createSimulation();
+    const target = simulation.state.actors["bot-1"];
+    if (!target) throw new Error("target missing");
+    target.health = 5;
+    target.inventory.helmetLevel = 2;
+    target.inventory.armorLevel = 2;
+    target.armor = 50;
+
+    simulation.step(1 / 30, new Map([["player", fireCommand]]), hit(target.id));
+
+    expect(target.health).toBe(0);
+    expect(simulation.damageTotals).toEqual({
+      player: { [target.id]: { rifle: WEAPONS.rifle?.damage } },
+    });
+    expect(simulation.drainDamageChanges()).toEqual([
+      { sourceId: "player", targetId: target.id, causeId: "rifle", total: WEAPONS.rifle?.damage },
+    ]);
+  });
+
+  it("adds every player shotgun pellet before applying simultaneous lethal damage", () => {
+    const simulation = createSimulation("shotgun");
+    const target = simulation.state.actors["bot-1"];
+    if (!target) throw new Error("target missing");
+    target.inventory.armorLevel = 0;
+    target.inventory.helmetLevel = 0;
+    target.armor = 0;
+
+    simulation.step(1 / 30, new Map([["player", fireCommand]]), hit(target.id));
+
+    expect(target.health).toBe(0);
+    expect(simulation.damageTotals.player?.[target.id]?.shotgun).toBe(
+      (WEAPONS.shotgun?.damage ?? 0) * (WEAPONS.shotgun?.pellets ?? 0),
+    );
+    expect(simulation.drainDamageChanges()).toEqual([{
+      sourceId: "player",
+      targetId: target.id,
+      causeId: "shotgun",
+      total: (WEAPONS.shotgun?.damage ?? 0) * (WEAPONS.shotgun?.pellets ?? 0),
+    }]);
+  });
+
+  it("does not attribute takeover AI damage to the human player", () => {
+    const simulation = createSimulation();
+
+    simulation.step(
+      1 / 30,
+      new Map([["player", fireCommand]]),
+      hit("bot-1"),
+      new Set(["player"]),
+    );
+
+    expect(simulation.damageTotals).toEqual({});
+  });
+
+  it("caps each damage total at the persisted upper bound", () => {
+    const simulation = createSimulation();
+    simulation.damageTotals.player = { "bot-1": { rifle: MAX_DAMAGE_TOTAL - 1 } };
+
+    simulation.step(1 / 30, new Map([["player", fireCommand]]), hit("bot-1"));
+
+    expect(simulation.damageTotals.player?.["bot-1"]?.rifle).toBe(MAX_DAMAGE_TOTAL);
+  });
+
+  it("tracks grenade damage by owner while excluding self-damage", () => {
+    const simulation = createSimulation();
+    const player = simulation.state.actors.player;
+    const target = simulation.state.actors["bot-1"];
+    if (!player || !target) throw new Error("grenade actors missing");
+    player.position = { x: 0, y: 1.76, z: 0 };
+    target.position = { x: 2, y: 1.76, z: 0 };
+    simulation.state.activeGrenades.grenade = {
+      id: "grenade",
+      ownerId: player.id,
+      aiControlled: false,
+      position: { x: 0, y: 1.76, z: 0 },
+      velocity: { x: 0, y: 0, z: 0 },
+      fuseSeconds: 0.001,
+    };
+
+    simulation.step(1 / 30, new Map(), miss);
+
+    expect(simulation.damageTotals.player?.player).toBeUndefined();
+    expect(simulation.damageTotals.player?.[target.id]?.[FRAG_GRENADE_ITEM_ID]).toBe(140);
+  });
+
+  it("keeps simultaneous grenade raw damage attributed to each human owner", () => {
+    const simulation = createSimulation();
+    const first = simulation.state.actors.player;
+    const second = simulation.state.actors["bot-1"];
+    if (!first || !second) throw new Error("grenade owners missing");
+    second.kind = "player";
+    first.position = { x: 50, y: 1.76, z: 0 };
+    second.position = { x: -50, y: 1.76, z: 0 };
+    const target = createActorState("bot-2", "bot", { x: 0, y: 1.76, z: 0 });
+    target.armor = 0;
+    target.inventory.armorLevel = 0;
+    simulation.state.actors[target.id] = target;
+    simulation.state.activeGrenades = Object.fromEntries([first, second].map((owner, index) => [
+      `grenade-${index + 1}`,
+      {
+        id: `grenade-${index + 1}`,
+        ownerId: owner.id,
+        aiControlled: false,
+        position: { x: 0, y: 1.76, z: 0 },
+        velocity: { x: 0, y: 0, z: 0 },
+        fuseSeconds: 0.001,
+      },
+    ]));
+
+    simulation.step(1 / 30, new Map(), miss);
+
+    expect(simulation.damageTotals.player?.[target.id]?.[FRAG_GRENADE_ITEM_ID]).toBe(140);
+    expect(simulation.damageTotals[second.id]?.[target.id]?.[FRAG_GRENADE_ITEM_ID]).toBe(140);
   });
 
   it("emits authoritative shot trace details for presentation", () => {

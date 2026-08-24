@@ -3,6 +3,7 @@ import { BATTLE_ROYALE_CONFIG } from "../../src/config/battleRoyale";
 import { createMapLayout, getTerrainHeight } from "../../src/config/map";
 import { FRAG_GRENADE_CONFIG } from "../../src/config/throwables";
 import { createIdleCommand } from "../../src/game/commands/ActorCommand";
+import { DAMAGE_CAUSE_IDS, MAX_DAMAGE_TOTAL, packDamageTotals } from "../../src/game/DamageTotals";
 import { SIMULATION_TICK_RATE } from "../../src/game/simulationTiming";
 import { createWeaponState } from "../../src/game/state/types";
 import type { SequencedGameEvent, ServerMessage } from "../../src/network/protocol";
@@ -34,13 +35,15 @@ describe("MatchRuntime", () => {
     expect(mixed.state.mapId).toBe("mixed");
     const mixedCheckpoint = mixed.checkpoint();
     expect(mixedCheckpoint.version).toBe(MATCH_CHECKPOINT_VERSION);
-    expect(new MatchRuntime({
+    const restoredMixed = new MatchRuntime({
       humanActorIds: ["human-1", "human-2"],
       seed: 2026,
       startWithBandage: true,
       disableAiSnipers: true,
       ...mixedCheckpoint,
-    }).state).toEqual(mixedCheckpoint.state);
+    });
+    expect(restoredMixed.state).toEqual(mixedCheckpoint.state);
+    expect(restoredMixed.damageTotals).toEqual(mixedCheckpoint.damageTotals);
 
     const legacyState = JSON.parse(JSON.stringify(town.state)) as Record<string, unknown>;
     delete legacyState.mapId;
@@ -95,7 +98,7 @@ describe("MatchRuntime", () => {
     expect(restored.state).toEqual(checkpoint.state);
   });
 
-  it("accepts only complete version 14 checkpoints for explicit map identities", () => {
+  it("accepts only complete version 15 checkpoints with valid damage totals", () => {
     const runtime = new MatchRuntime({
       humanActorIds: ["human-1", "human-2"],
       seed: 1,
@@ -106,7 +109,8 @@ describe("MatchRuntime", () => {
     const checkpoint = runtime.checkpoint();
     const checkpointLayout = createMapLayout(checkpoint.state.mapId, checkpoint.state.mapSeed);
 
-    expect(MATCH_CHECKPOINT_VERSION).toBe(14);
+    expect(MATCH_CHECKPOINT_VERSION).toBe(15);
+    expect(checkpoint.damageTotals).toEqual({});
     expect(checkpointLayout.ammunitionDepot.levels).toHaveLength(1);
     expect(isMatchCheckpointCompatible(checkpoint)).toBe(true);
     expect(isMatchCheckpointCompatible({
@@ -163,6 +167,69 @@ describe("MatchRuntime", () => {
       ...checkpoint,
       state: { ...checkpoint.state, actors: undefined },
     } as never)).toBe(false);
+    const missingDamageTotals = { ...checkpoint } as Partial<typeof checkpoint>;
+    delete missingDamageTotals.damageTotals;
+    expect(isMatchCheckpointCompatible(missingDamageTotals)).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      damageTotals: { "human-1": { "bot-1": [10, 0, 0, 0, 0, 0] } },
+    })).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      damageTotals: { "human-1": { "human-1": [10, 0, 0, 0, 0] } },
+    })).toBe(false);
+    expect(Object.hasOwn(checkpoint.state.actors, "constructor")).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      damageTotals: { "human-1": { constructor: [10, 0, 0, 0, 0] } },
+    })).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      damageTotals: { "bot-1": { "human-1": [10, 0, 0, 0, 0] } },
+    })).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      damageTotals: { "human-1": { "bot-1": [-1, 0, 0, 0, 0] } },
+    })).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      damageTotals: { "human-1": { "bot-1": [Number.MAX_VALUE, 0, 0, 0, 0] } },
+    })).toBe(false);
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      damageTotals: { "human-1": { "bot-1": [1.5, 0, 0, 0, 0] } },
+    })).toBe(false);
+    const sparseTotals = new Array<number>(5);
+    sparseTotals[0] = 10;
+    expect(isMatchCheckpointCompatible({
+      ...checkpoint,
+      damageTotals: { "human-1": { "bot-1": sparseTotals } },
+    })).toBe(false);
+    const validDamageTotals = {
+      "human-1": {
+        "bot-1": { rifle: 34, smg: 22.3, "grenade.frag": 140 },
+      },
+      "human-2": {
+        "bot-2": { shotgun: 26 },
+      },
+    };
+    const packedDamageTotals = packDamageTotals(validDamageTotals);
+    expect(DAMAGE_CAUSE_IDS).toEqual(["rifle", "smg", "shotgun", "sniper", "grenade.frag"]);
+    expect(packedDamageTotals["human-1"]?.["bot-1"]).toEqual([340, 223, 0, 0, 1_400]);
+    expect(isMatchCheckpointCompatible({ ...checkpoint, damageTotals: packedDamageTotals })).toBe(true);
+    const restoredDamage = new MatchRuntime({
+      humanActorIds: ["human-1", "human-2"],
+      seed: 1,
+      startWithBandage: false,
+      disableAiSnipers: true,
+      ...checkpoint,
+      damageTotals: packedDamageTotals,
+    });
+    expect(restoredDamage.damageTotals).toEqual(validDamageTotals);
+    const projected = restoredDamage.projectDamageTotals("human-1");
+    expect(projected).toEqual({ "human-1": validDamageTotals["human-1"] });
+    projected["human-1"]!["bot-1"]!.rifle = 999;
+    expect(restoredDamage.damageTotals["human-1"]?.["bot-1"]?.rifle).toBe(34);
     expect(isMatchCheckpointCompatible({
       ...checkpoint,
       state: {
@@ -301,6 +368,29 @@ describe("MatchRuntime", () => {
       checkpoint,
       ["human-1", "human-1"],
     )).toBe(false);
+  });
+
+  it("keeps a maximum valid human damage ledger within the checkpoint budget", () => {
+    const humanActorIds = Array.from({ length: 10 }, (_, index) => `human-${index + 1}`);
+    const runtime = new MatchRuntime({
+      humanActorIds,
+      seed: 2026,
+      startWithBandage: false,
+      disableAiSnipers: true,
+    });
+    const causes = ["rifle", "smg", "shotgun", "sniper", "grenade.frag"];
+    Object.assign(runtime.damageTotals, Object.fromEntries(humanActorIds.map((sourceId) => [
+      sourceId,
+      Object.fromEntries(Object.keys(runtime.state.actors)
+        .filter((targetId) => targetId !== sourceId)
+        .map((targetId) => [targetId, Object.fromEntries(
+          causes.map((causeId) => [causeId, MAX_DAMAGE_TOTAL]),
+        )])),
+    ])));
+
+    const checkpoint = runtime.checkpoint();
+    expect(isMatchCheckpointCompatible(checkpoint, humanActorIds)).toBe(true);
+    expect(jsonBytes(checkpoint)).toBeLessThanOrEqual(100_000);
   });
 
   it("requires complete serializable grenade and closed-zone state in current checkpoints", () => {
@@ -851,7 +941,8 @@ describe("MatchRuntime", () => {
     )).toBe(true);
     runtime.step();
 
-    const events = runtime.takeFrame(0).events;
+    const frame = runtime.takeFrame(0);
+    const events = frame.events;
     expect(events).toContainEqual(expect.objectContaining({
       shotSequence: 77,
       event: expect.objectContaining({ type: "shot-fired", actorId: shooter.id }),
@@ -861,6 +952,15 @@ describe("MatchRuntime", () => {
       actorId: target.id,
       sourceId: shooter.id,
     }));
+    expect(frame.damageChanges).toEqual([
+      { sourceId: shooter.id, targetId: target.id, causeId: "rifle", total: 34 },
+    ]);
+    expect(runtime.projectFrame(frame, shooter.id, new Set()).frame.damageChanges).toEqual(frame.damageChanges);
+    expect(runtime.projectFrame(frame, target.id, new Set()).frame.damageChanges).toEqual([]);
+    expect(runtime.projectDamageTotals(shooter.id)).toEqual({
+      [shooter.id]: { [target.id]: { rifle: 34 } },
+    });
+    expect(runtime.projectDamageTotals(target.id)).toEqual({});
     expect(target.health).toBeLessThan(target.maxHealth);
   });
 
@@ -903,6 +1003,7 @@ describe("MatchRuntime", () => {
       tick: runtime.tick,
       localActorId,
       state: runtime.projectState(localActorId),
+      damageTotals: runtime.projectDamageTotals(localActorId),
       displayNames: Object.fromEntries(humanActorIds.map((actorId, index) => [actorId, `Human ${index + 1}`])),
       events: [],
     } satisfies ServerMessage;

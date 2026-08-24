@@ -285,6 +285,7 @@ export class BattleRoyaleSession {
       this.humanController.isGrenadeSelected(),
       this.humanController.isGrenadePreparing(),
       this.humanController.getGrenadeThrowMode(),
+      this.simulation.damageTotals,
     );
     this.debugPanel?.update(this.simulation.state, player, frameSeconds);
   }

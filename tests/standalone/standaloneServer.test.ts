@@ -185,6 +185,7 @@ describe("standalone multiplayer server", () => {
     const secondFull = await second.waitFor("match.full", 6_000);
     expect(firstFull.type === "match.full" && firstFull.state.phase).toBe("flight");
     expect(firstFull.type === "match.full" && firstFull.state.mapId).toBe("mixed");
+    expect(firstFull.type === "match.full" && firstFull.damageTotals).toEqual({});
     expect(secondFull.type === "match.full" && secondFull.state.mapId).toBe("mixed");
     await delay(150);
 
@@ -204,7 +205,8 @@ describe("standalone multiplayer server", () => {
       admissionToken: secondReconnectToken,
     });
     await secondReconnected.waitFor("welcome");
-    await secondReconnected.waitFor("match.full");
+    const secondRestored = await secondReconnected.waitFor("match.full");
+    expect(secondRestored.type === "match.full" && secondRestored.damageTotals).toEqual({});
     const reconnectedEvent = await first.waitForMatching(
       (message) => message.type === "match.snapshot" && message.frame.events.some((entry) =>
         entry.event.type === "human-connection"
@@ -237,6 +239,7 @@ describe("standalone multiplayer server", () => {
     expect(restoredWelcome.type === "welcome" && restoredWelcome.roomId).toBe(roomId);
     expect(restored.type === "match.full" && restored.tick).toBeGreaterThanOrEqual(previousTick);
     expect(restored.type === "match.full" && restored.state.mapId).toBe("mixed");
+    expect(restored.type === "match.full" && restored.damageTotals).toEqual({});
     reconnected.socket.close(1000, "done");
     await reconnected.waitForClose();
     expect(secondWelcome.type).toBe("welcome");

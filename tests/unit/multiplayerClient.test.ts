@@ -40,8 +40,8 @@ describe("MultiplayerConnection lifecycle", () => {
     expect(sockets[0]?.closeCalls).toBe(1);
   });
 
-  it("accepts only the island-layout, grenade-range, and hexagonal-depot protocol version", async () => {
-    expect(MULTIPLAYER_PROTOCOL_VERSION).toBe(15);
+  it("accepts only the damage-total protocol version", async () => {
+    expect(MULTIPLAYER_PROTOCOL_VERSION).toBe(16);
     const sockets: FakeWebSocket[] = [];
     const connection = new MultiplayerConnection(
       "https://example.test",

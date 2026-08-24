@@ -11,6 +11,7 @@ import {
   combatCounterLabel,
   createLeaderboardSignature,
   createMinimapSignature,
+  leaderboardDamageEntries,
   pickupPromptSignature,
   pickupPromptText,
   sortLeaderboardActors,
@@ -219,6 +220,37 @@ describe("minimap projection", () => {
     expect(createLeaderboardSignature([bot2, player, bot1])).toBe(signature);
     player.kills += 1;
     expect(createLeaderboardSignature([player, bot1, bot2])).not.toBe(signature);
+  });
+
+  it("returns only weapons that damaged the corresponding leaderboard actor", () => {
+    const damageTotals = {
+      player: {
+        "bot-1": { rifle: 34, smg: 0, shotgun: 26 },
+      },
+      "human-2": {
+        "bot-1": { sniper: 105 },
+      },
+    };
+
+    expect(leaderboardDamageEntries(damageTotals, "player", "bot-1")).toEqual([
+      { causeId: "rifle", itemId: "weapon.rifle", label: "R-7 步枪", total: 34 },
+      { causeId: "shotgun", itemId: "weapon.shotgun", label: "K-12 霰弹枪", total: 26 },
+    ]);
+    expect(leaderboardDamageEntries(damageTotals, "player", "bot-2")).toEqual([]);
+  });
+
+  it("invalidates the leaderboard only when the local player's damage changes", () => {
+    const state = createBattleRoyaleState("player", undefined, () => 0.5);
+    const actors = Object.values(state.actors);
+    const damageTotals = { player: { "bot-1": { rifle: 34 } } };
+    const signature = createLeaderboardSignature(actors, damageTotals, "player");
+
+    damageTotals.player["bot-1"].rifle = 68;
+    expect(createLeaderboardSignature(actors, damageTotals, "player")).not.toBe(signature);
+    expect(createLeaderboardSignature(actors, {
+      ...damageTotals,
+      "human-2": { "bot-1": { rifle: 102 } },
+    }, "player")).toBe(createLeaderboardSignature(actors, damageTotals, "player"));
   });
 
   it("switches the flight counter to kills as soon as the player lands", () => {

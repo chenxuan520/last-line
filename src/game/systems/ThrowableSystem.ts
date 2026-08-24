@@ -5,6 +5,7 @@ import {
   type FragGrenadeConfig,
 } from "../../config/throwables";
 import type { ActorCommand } from "../commands/ActorCommand";
+import type { DamageTotalsTracker } from "../DamageTotals";
 import { selectSimultaneousSurvivor } from "../rules/resolveSimultaneous";
 import type {
   ActiveGrenadeState,
@@ -27,12 +28,14 @@ interface PendingExplosionDamage {
   sourceId: EntityId;
   amount: number;
   origin: Vector3State;
+  aiControlled: boolean;
 }
 
 export class ThrowableSystem {
   public constructor(
     private readonly config: FragGrenadeConfig = FRAG_GRENADE_CONFIG,
     private readonly damage = new DamageSystem(),
+    private readonly damageTotals?: DamageTotalsTracker,
   ) {}
 
   public processCommands(
@@ -139,7 +142,12 @@ export class ThrowableSystem {
         const amount = grenadeDamage(distance, this.config);
         if (amount <= 0) continue;
         const pending = pendingByTarget.get(actor.id) ?? [];
-        pending.push({ sourceId: grenade.ownerId, amount, origin: { ...grenade.position } });
+        pending.push({
+          sourceId: grenade.ownerId,
+          amount,
+          origin: { ...grenade.position },
+          aiControlled: grenade.aiControlled,
+        });
         pendingByTarget.set(actor.id, pending);
       }
     }
@@ -150,6 +158,17 @@ export class ThrowableSystem {
     const rawDamageByTarget = new Map<EntityId, number>();
     for (const [targetId, pending] of pendingByTarget) {
       rawDamageByTarget.set(targetId, pending.reduce((total, entry) => total + entry.amount, 0));
+      for (const damage of pending) {
+        if (damage.aiControlled) continue;
+        if (!this.damage.canApplyDamage(state, targetId, damage.amount)) continue;
+        this.damageTotals?.record(state, {
+          sourceId: damage.sourceId,
+          targetId,
+          causeId: FRAG_GRENADE_ITEM_ID,
+          amount: damage.amount,
+          aiControlled: damage.aiControlled,
+        });
+      }
     }
     const allWouldDie =
       living.length > 0 &&

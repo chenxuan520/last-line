@@ -700,6 +700,7 @@ export class GameRoom extends DurableService<WorkerEnv> {
       startWithBandage: data.options.startWithBandage,
       disableAiSnipers: data.options.disableAiSnipers,
       state: data.checkpoint.state,
+      damageTotals: data.checkpoint.damageTotals,
       tick: data.checkpoint.tick,
       snapshotSequence: data.checkpoint.snapshotSequence,
       eventSequence: data.checkpoint.eventSequence,
@@ -721,6 +722,7 @@ export class GameRoom extends DurableService<WorkerEnv> {
       tick: runtime.tick,
       localActorId: member.actorId,
       state: projectedState,
+      damageTotals: runtime.projectDamageTotals(member.actorId),
       displayNames: Object.fromEntries(Object.values(this.data?.members ?? {}).flatMap((entry) =>
         entry.actorId ? [[entry.actorId, entry.displayName]] : []
       )),
