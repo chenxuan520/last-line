@@ -40,6 +40,8 @@ export class GameHud {
   private healingSignature = "";
   private promptSignature = "";
   private leaderboardSignature = "";
+  private readonly playerVictimIds = new Set<EntityId>();
+  private playerKillerId: EntityId | null = null;
   private leaderboardVisible = false;
   private mobileInventoryVisible = false;
   private refreshSeconds = 0.1;
@@ -191,6 +193,13 @@ export class GameHud {
         <div class="result-card" data-hud="result" hidden></div>
         <aside class="leaderboard" data-hud="leaderboard" hidden aria-label="本局排行榜">
           <header><strong>本局排行榜</strong><span>存活优先 · 击杀排序</span></header>
+          <div class="leaderboard-column-labels">
+            <span class="leaderboard-column-actor">
+              <span class="leaderboard-damage-breakdown leaderboard-damage-headings">
+                <b>造成伤害</b><i class="leaderboard-damage-divider" aria-hidden="true"></i><b>受到伤害</b>
+              </span>
+            </span>
+          </div>
           <div data-hud="leaderboard-rows"></div>
         </aside>
       </section>
@@ -396,6 +405,21 @@ export class GameHud {
       const actorName = document.createElement("span");
       actorName.className = "leaderboard-actor-name";
       actorName.textContent = this.actorLabel(actor.id, playerId);
+      const relationshipClass = leaderboardActorNameClass(
+        actor.id,
+        playerId,
+        this.playerVictimIds,
+        this.playerKillerId,
+      );
+      if (relationshipClass) {
+        actorName.classList.add(relationshipClass);
+        const relationshipLabel = document.createElement("span");
+        relationshipLabel.className = "sr-only";
+        relationshipLabel.textContent = relationshipClass === "is-player-killer"
+          ? "（击杀你的角色）"
+          : "（你击杀的角色）";
+        actorName.append(relationshipLabel);
+      }
       actorDetails.append(actorName);
       const outgoingEntries = leaderboardDamageEntries(damageTotals, playerId, actor.id);
       const incomingEntries = leaderboardDamageEntries(damageTotals, actor.id, playerId);
@@ -451,6 +475,14 @@ export class GameHud {
         replayAnimation(this.damageFlash);
       }
       if (event.type === "actor-died") {
+        if (event.sourceId === playerId && event.actorId !== playerId) {
+          this.playerVictimIds.add(event.actorId);
+          this.leaderboardSignature = "";
+        }
+        if (event.actorId === playerId && event.sourceId && event.sourceId !== playerId) {
+          this.playerKillerId = event.sourceId;
+          this.leaderboardSignature = "";
+        }
         const weaponLabel = event.weaponId
           ? WEAPONS[event.weaponId]?.label ?? ITEMS[event.weaponId]?.label ?? event.weaponId
           : null;
@@ -781,6 +813,17 @@ export interface LeaderboardDamageEntry {
   itemId: string;
   label: string;
   total: number;
+}
+
+export function leaderboardActorNameClass(
+  actorId: EntityId,
+  playerId: EntityId,
+  playerVictimIds: ReadonlySet<EntityId>,
+  playerKillerId: EntityId | null,
+): "is-player-victim" | "is-player-killer" | null {
+  if (actorId === playerId) return null;
+  if (actorId === playerKillerId) return "is-player-killer";
+  return playerVictimIds.has(actorId) ? "is-player-victim" : null;
 }
 
 export function leaderboardDamageEntries(

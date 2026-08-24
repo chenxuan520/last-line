@@ -1183,6 +1183,7 @@ h1 {
 }
 
 .leaderboard header,
+.leaderboard-column-labels,
 .leaderboard [data-hud="leaderboard-rows"] > div {
   display: grid;
   grid-template-columns: 54px minmax(0, 1fr) 100px 90px;
@@ -1198,8 +1199,38 @@ h1 {
   color: var(--signal-bright);
 }
 
+.leaderboard-column-labels {
+  padding-block: 5px;
+  border-bottom: 1px solid rgb(183 197 139 / 16%);
+}
+
+.leaderboard-column-actor {
+  display: grid;
+  grid-column: 2;
+  grid-template-columns: minmax(32px, 0.8fr) minmax(0, 2.2fr);
+  min-width: 0;
+  gap: 10px;
+}
+
+.leaderboard-damage-headings {
+  grid-column: 2;
+}
+
+.leaderboard-damage-headings b {
+  overflow: hidden;
+  color: rgb(183 197 139 / 78%);
+  font: 700 10px/1 var(--tactical-font);
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leaderboard-damage-headings .leaderboard-damage-divider {
+  height: 11px;
+}
+
 .leaderboard [data-hud="leaderboard-rows"] {
-  max-height: 68vh;
+  max-height: calc(68vh - 23px);
   overflow: auto;
 }
 
@@ -1230,6 +1261,14 @@ h1 {
   box-shadow: inset 3px 0 0 var(--signal-bright);
   background: rgb(188 204 140 / 18%);
   color: var(--signal-bright);
+}
+
+.leaderboard-actor-name.is-player-victim {
+  color: #ed6659;
+}
+
+.leaderboard-actor-name.is-player-killer {
+  color: #55cbdc;
 }
 
 .leaderboard em {

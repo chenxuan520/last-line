@@ -11,6 +11,7 @@ import {
   combatCounterLabel,
   createLeaderboardSignature,
   createMinimapSignature,
+  leaderboardActorNameClass,
   leaderboardDamageEntries,
   pickupPromptSignature,
   pickupPromptText,
@@ -261,6 +262,16 @@ describe("minimap projection", () => {
       ...incomingDamageTotals,
       "human-2": { ...incomingDamageTotals["human-2"], "bot-1": { rifle: 102 } },
     }, "player")).toBe(createLeaderboardSignature(actors, incomingDamageTotals, "player"));
+  });
+
+  it("colors victims red and prioritizes the cyan killer color", () => {
+    const victims = new Set(["victim", "both"]);
+
+    expect(leaderboardActorNameClass("victim", "player", victims, "killer")).toBe("is-player-victim");
+    expect(leaderboardActorNameClass("killer", "player", victims, "killer")).toBe("is-player-killer");
+    expect(leaderboardActorNameClass("both", "player", victims, "both")).toBe("is-player-killer");
+    expect(leaderboardActorNameClass("player", "player", victims, "player")).toBeNull();
+    expect(leaderboardActorNameClass("unrelated", "player", victims, "killer")).toBeNull();
   });
 
   it("switches the flight counter to kills as soon as the player lands", () => {
