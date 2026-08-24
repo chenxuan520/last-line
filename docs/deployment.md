@@ -112,7 +112,7 @@ npm run build:worker
 npm run test:multiplayer:production
 ```
 
-`test:multiplayer:production` 先在最多 120 秒内轮询公共 Worker 无副作用 `/health` 协议 header，让新部署版本传播到自定义域。Transport error 和 Cloudflare 502/503/504 只能在同一有界时间内重试；无效响应和持续失败仍使部署失败。Marker 匹配源码 `MULTIPLAYER_PROTOCOL_VERSION` 后，smoke 只创建 1 个私有 production 房间，打开返回的 WebSocket，要求匹配的 `welcome` 和等待房成员状态，然后确认并离开。禁止重试访客创建、房间创建、WebSocket、大厅或离开失败。每次 production Worker 或 Pages 部署后都运行。`MULTIPLAYER_SMOKE_URL` 和 `MULTIPLAYER_SMOKE_ORIGIN` 可覆盖默认值。有界定时 GitHub Actions 用于发现持续漂移，只是告警，不是部署顺序门禁。
+`test:multiplayer:production` 先在最多 120 秒内轮询公共 Worker 无副作用 `/health` 协议 header，让新部署版本传播到自定义域。协议标记必须连续 5 次匹配源码 `MULTIPLAYER_PROTOCOL_VERSION`；任一次旧版本、缺失标记、transport error 或 Cloudflare 502/503/504 都会清零连续计数并继续有界等待。稳定后 smoke 只创建 1 个私有 production 房间，打开返回的 WebSocket，要求匹配的 `welcome` 和等待房成员状态，然后确认并离开。无效响应和持续失败仍使部署失败，禁止重试访客创建、房间创建、WebSocket、大厅或 leave 失败。每次 production Worker 或 Pages 部署后都运行。`MULTIPLAYER_SMOKE_URL` 和 `MULTIPLAYER_SMOKE_ORIGIN` 可覆盖默认值。有界定时 GitHub Actions 用于发现持续漂移，只是告警，不是部署顺序门禁。
 
 Worker 和 Pages 独立部署，严格协议不支持混合滚动发布。协议变化必须使用维护发布：
 

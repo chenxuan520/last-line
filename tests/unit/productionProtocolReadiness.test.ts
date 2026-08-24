@@ -16,14 +16,37 @@ describe("production protocol readiness", () => {
       healthResponse(),
       healthResponse(String(MULTIPLAYER_PROTOCOL_VERSION - 1)),
       healthResponse(String(MULTIPLAYER_PROTOCOL_VERSION)),
+      healthResponse(String(MULTIPLAYER_PROTOCOL_VERSION)),
+      healthResponse(String(MULTIPLAYER_PROTOCOL_VERSION)),
+      healthResponse(String(MULTIPLAYER_PROTOCOL_VERSION)),
+      healthResponse(String(MULTIPLAYER_PROTOCOL_VERSION)),
     ];
     const fetchImpl = vi.fn(async () => responses.shift() ?? healthResponse());
     const clock = fakeClock();
 
     await waitForProductionProtocol(options(fetchImpl, clock));
 
-    expect(fetchImpl).toHaveBeenCalledTimes(3);
-    expect(clock.sleep).toHaveBeenCalledTimes(2);
+    expect(fetchImpl).toHaveBeenCalledTimes(7);
+    expect(clock.sleep).toHaveBeenCalledTimes(6);
+  });
+
+  it("resets readiness when an old edge responds after the expected protocol", async () => {
+    const responses = [
+      healthResponse(String(MULTIPLAYER_PROTOCOL_VERSION)),
+      healthResponse(String(MULTIPLAYER_PROTOCOL_VERSION - 1)),
+      healthResponse(String(MULTIPLAYER_PROTOCOL_VERSION)),
+      healthResponse(String(MULTIPLAYER_PROTOCOL_VERSION)),
+      healthResponse(String(MULTIPLAYER_PROTOCOL_VERSION)),
+      healthResponse(String(MULTIPLAYER_PROTOCOL_VERSION)),
+      healthResponse(String(MULTIPLAYER_PROTOCOL_VERSION)),
+    ];
+    const fetchImpl = vi.fn(async () => responses.shift() ?? healthResponse());
+    const clock = fakeClock();
+
+    await waitForProductionProtocol(options(fetchImpl, clock));
+
+    expect(fetchImpl).toHaveBeenCalledTimes(7);
+    expect(clock.sleep).toHaveBeenCalledTimes(6);
   });
 
   it("fails after the bounded propagation window stays on an old protocol", async () => {
@@ -42,6 +65,10 @@ describe("production protocol readiness", () => {
       new Error("connection reset"),
       new Response("unavailable", { status: 503 }),
       healthResponse(String(MULTIPLAYER_PROTOCOL_VERSION)),
+      healthResponse(String(MULTIPLAYER_PROTOCOL_VERSION)),
+      healthResponse(String(MULTIPLAYER_PROTOCOL_VERSION)),
+      healthResponse(String(MULTIPLAYER_PROTOCOL_VERSION)),
+      healthResponse(String(MULTIPLAYER_PROTOCOL_VERSION)),
     ];
     const fetchImpl = vi.fn(async () => {
       const value = responses.shift() ?? healthResponse();
@@ -52,8 +79,8 @@ describe("production protocol readiness", () => {
 
     await waitForProductionProtocol(options(fetchImpl, clock));
 
-    expect(fetchImpl).toHaveBeenCalledTimes(3);
-    expect(clock.sleep).toHaveBeenCalledTimes(2);
+    expect(fetchImpl).toHaveBeenCalledTimes(7);
+    expect(clock.sleep).toHaveBeenCalledTimes(6);
   });
 
   it("fails after the bounded window stays on a transient gateway error", async () => {
@@ -100,7 +127,7 @@ function options(
     now: clock.now,
     sleep: clock.sleep,
     pollIntervalMs: 10_000,
-    timeoutMs: 60_000,
+    timeoutMs: 80_000,
     ...overrides,
   };
 }

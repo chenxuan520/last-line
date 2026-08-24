@@ -87,6 +87,9 @@
 - 2026-08-24：Re-review 2 后把累计持久化精度固定为一位小数：运行时封顶 `99999`，checkpoint 五槽保存放大 10 倍的安全整数并拒绝小数，彻底消除长小数字符串突破体积门禁的路径。定向 65/65、三套 typecheck、browser/Worker/server build 与 budgets 通过；最终 browser entry `1,175,459 / 1,200,000`、Worker `634,589 / 636,000`、standalone `644,639 / 646,000`。
 - 2026-08-24：提交前最终验证使用 Node 24。完整 unit 51 files / 622 tests 中 620 项一次通过，只有两个未修改 `townMapLayout` 用例在全套高负载下超过既有 5 秒墙钟；保持测试和 timeout 不变后，两项按原配置隔离重跑分别约 1.32 秒和 2.34 秒通过。standalone 3 files / 33 tests 通过；Worker 与 standalone 并行时 51/52 通过，唯一未修改大厅用例出现瞬态 `room is not initialized`，随后 Worker 单独完整重跑 4 files / 52 tests 全部通过。
 - 2026-08-24：最终完整三套 typecheck、browser build、Worker dry-run、server build、same-origin standalone build、恢复后的普通 browser build、budgets 和 `git diff --check` 通过。最终产物保持 browser entry `1,175,459 / 1,200,000`、all JavaScript `3,858,230 / 4,000,000`、CSS `45,759 / 50,000`、dist `4,681,929 / 5,000,000`、Worker `634,589 / 636,000`、standalone `644,639 / 646,000`。
+- 2026-08-24：合并后的 GitHub main CI、performance、Docker smoke、GitHub Pages 和 Cloudflare Pages 均成功；Codex 对 `224d1cb` 未发现 major issue。Cloudflare Workers Build `fa3420fa-a93b-40db-b871-2c57d63274bb` 标红，但版本/部署历史证明它已于 05:46:08 创建并部署 `9256c30b-ba98-4048-947a-4abd045a6a39`；随后完整 fallback 部署 `39123e1a-fbf3-4f53-98ae-3fda532f0ab1` 并通过 protocol 16 production smoke。当前 OAuth token 缺少 Workers Builds Configuration 权限，Build logs API 返回 403；结合已部署版本、失败时间和历史同类记录，失败与单次新 `/health` marker 后有副作用 smoke 仍命中旧边缘版本的传播竞态一致，不是构建或部署失败。
+- 2026-08-24：CI follow-up 先新增连续稳定回归，旧实现 3 项按预期失败，证明第一次匹配协议即返回。`waitForProductionProtocol` 现要求连续 5 次预期协议；旧版本、缺失 marker、transport 和 502/503/504 都清零计数，仍共享 120 秒总上限，稳定后仍只创建 1 个 smoke 房间且不重试任何有副作用阶段。定向 readiness 10/10 与三套 typecheck 通过。
+- 2026-08-24：本机误启动完整 suite 后出现多个未修改地图测试的高负载 timeout，并由用户终止；检查确认本项目无残留 Vitest/Node/workerd 进程。按用户要求，`AGENTS.md` 与完成检查表已改为本机每次只运行单个测试名过滤用例，完整 unit/Worker/standalone suite 只由 CI 执行。本 follow-up 不再本机复跑全套。
 
 ## Review
 
@@ -164,3 +167,24 @@
 - 性能与最小改动：真人贡献热路径只新增常数级舍入/封顶；1Hz checkpoint 最多扫描 490 个 source/target 对和 2,450 固定槽，unpack 仅恢复时执行，HUD 与 snapshot 工作量未放大。Worker/server 相对 main 增量 `1.07%/1.01%` 已获独立资源复审批准，当前预算余量分别 `1,411B/1,361B`；未见超过 15% 的风险、无关业务改动、可删除抽象或禁止的 `context.Background()`。
 - Low/残余风险：真实 standalone 非空 ledger 重连仍未直接覆盖；现有真实空 ledger 重连与 MatchRuntime 非空 pack/unpack、恢复、viewer projection 的分层证据足以支持本轮批准，但后续可补端到端回归。
 - 已参考验证：沿用 Builder 记录的三套 typecheck、GameSimulation + MatchRuntime 65/65、browser/Worker/server builds、budgets 和独立资源复审；Reviewer 未重复外层验证，仅完成静态 diff、合同和现有证据复核。
+
+### CI Follow-up Review Round 1
+
+- Review 时间：2026-08-24。
+- 审查结论：不通过；无 blocker/high，存在 1 项 Medium 和 1 项 Low。
+- Medium：`AGENTS.md` 已要求本机每次只运行一个测试名过滤用例，但 README 仍把 `npm run test`、`test:performance` 和 `test:coverage` 列为普通开发验证命令，且“本机自动化验证”措辞可能误伤 typecheck/build/smoke，长期规则存在冲突。
+- Low：连续 5 次稳定要求被暴露为无人使用的 `requiredConsecutiveMatches` 选项，未来可传入 0、负数或 1 绕过固定合同。
+- 其余结论：旧/缺失 marker、transport 和 502/503/504 的连续计数重置正确，120 秒总界保持；稳定后仍只执行一次 guest/room/WebSocket/leave 链。性能只增加 4 次 `/health` 和约 8 秒部署等待，无产品运行时影响。
+
+### CI Follow-up Builder Disposition
+
+- Medium：已修复。`AGENTS.md` 将规则限定为“本机测试执行”，明确不限制 typecheck/build/budget/部署 smoke；常用命令区和 README 同步标注完整 `npm run test`、完整文件/suite、performance/coverage 只由 CI 执行，本机示例只保留测试名过滤的单用例。
+- Low：已修复。删除 `requiredConsecutiveMatches` 选项，生产就绪门禁只能使用固定连续 5 次合同。
+- 验证：只按新规则运行一个“新版本后命中旧 edge 会重新累计”的定向用例，1/1 通过；完整三套 typecheck 通过，`git diff --check` 通过。等待独立 Re-review；完整测试由 push 后 CI 执行。
+
+### CI Follow-up Re-review
+
+- Review 时间：2026-08-24。
+- 审查结论：通过；未发现 blocker、high、medium 或 low Finding，批准提交 `main`。
+- Reviewer 确认固定连续 5 次不可配置覆盖，全部允许重试的旧/缺失 marker、transport 和 gateway 失败都会重置计数，120 秒总界与唯一一次副作用 smoke 保持；本机单用例/CI 完整 suite 规则在 AGENTS 和 README 中一致。
+- 性能结论：只增加 4 次无副作用健康检查和约 8 秒部署等待，无产品运行时影响或明显优化空间。Reviewer 未重复外层测试、typecheck 或构建。

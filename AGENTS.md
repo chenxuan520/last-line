@@ -35,6 +35,8 @@ npm run check:budgets
 npm run preview
 ```
 
+`npm run test`、完整测试文件、完整 suite、`test:performance` 和 `test:coverage` 只允许由 CI 运行。本机测试必须使用测试名过滤且每次只执行 1 个明确用例；typecheck、build、budget 和部署 smoke 继续按对应流程执行。
+
 `npm run test` 只运行 Vitest。禁止为本项目添加 Playwright、安装 Playwright 浏览器或下载 Chromium。浏览器检查必须使用本机已经安装的 Chrome/Edge。任何浏览器测试开始前都必须把游戏音量设为 `0`。
 
 ## 架构规则
@@ -99,6 +101,7 @@ npm run preview
 
 ## 测试规则
 
+- 本机测试执行每次只能运行 1 个明确的定向测试用例，并使用测试名过滤；禁止在本机运行 `npm run test`、完整测试文件、完整 suite 或并行测试。完整 unit、Worker 和 standalone 测试套件只允许交给 CI 运行，禁止为了提交前“完整验证”在用户机器复跑。此限制不禁止按流程执行 typecheck、build、budget 或部署 smoke。
 - 实际可行时，修复规则回归前先添加一个会失败的 Vitest。
 - 通过注入随机源保持测试确定性。
 - 同时冲突必须覆盖两种命令插入顺序。
@@ -129,7 +132,10 @@ npm run preview
 - 两套流程都必须先确认需求并建立或更新当前 Plan，再依次完成实现、定向测试、必要的完整验证、production 浏览器验收和独立 `code-reviewer` 审查。所有 blocker、high、medium Finding 必须闭环后才能提交。
 - 直接 `main` 流程只在用户明确要求时使用：先同步最新 `origin/main`，直接在 `main` 完成改动与上述验证，审查通过后提交并推送 `main`，持续检查 CI、部署和必要的线上 smoke；部署及线上验证完成后任务才算完成。
 - 功能分支/MR 流程：从最新 `main` 创建命名清晰的功能分支，在分支完成改动与上述验证，审查通过后提交、推送并创建 MR/PR。必须在 MR 中 `@codex` 请求审查，并等待 Codex 完全通过；Codex 尚未回复、仍在检查、给出未解决反馈或 required checks 未通过时，任务都不得视为完成。
-- MR 中 Reviewer、Codex 或 CI 发现问题后，必须在同一分支和同一 Plan 中继续修复，按改动范围重跑验证并重新完成独立 Reviewer 审查，再推送正常 follow-up commit；持续处理到所有反馈解决、Codex 完全通过且 required checks 全部成功。随后才能合并，并继续确认部署及线上行为。
+- MR 中 Reviewer、Codex 或 CI 发现问题后，必须在同一分支和同一 Plan 中继续修复，按改动范围重跑验证并重新完成独立 Reviewer 审查，再推送正常 follow-up commit；持续处理到所有反馈解决、Codex 完全通过且 required checks 全部成功。
+- 功能分支/MR 流程的自动执行边界止于 Codex 完全通过且 required checks 全部成功。达到该状态后必须向用户报告并停止，由用户亲自在 GitHub/GitLab 中手动合并；Agent 在功能分支/MR 流程中绝对禁止执行 `gh pr merge`、网页合并、合并到 `main` 或删除分支。用户要求“走完整流程”“做完”“持续到完成”“上线”或要求 Agent 合并，均不得改变这条人工合并边界。
+- 上述人工合并门禁只适用于功能分支/MR 流程。直接 `main` 流程没有 MR 合并步骤；用户明确选择直接 `main` 后，Agent 在实现、验证和 Reviewer 通过后可以按该流程自主提交、推送、监控 CI、部署并完成线上验证，无需等待额外的合并确认。
+- 用户手动合并 MR/PR 后，只有在用户明确要求继续部署或原任务已明确包含上线时，Agent 才继续执行生产部署和线上验证。
 
 ## 审查与交付规则
 
@@ -154,7 +160,7 @@ npm run preview
 ## 完成检查表
 
 1. 运行 `npm run typecheck`。
-2. 运行 `npm run test`。
+2. 本机只运行与改动直接相关的单个定向测试用例；完整 `npm run test` 由 CI 运行并等待结果。
 3. 运行 `npm run build`。
 4. 修改联机/共享服务端代码时运行 `npm run build:worker` 和 `npm run build:server`；修改自托管产物或 same-origin 客户端选择时运行 `npm run build:standalone`。
 5. 生成浏览器、Worker 和 standalone 产物后运行 `npm run check:budgets`。
@@ -164,13 +170,14 @@ npm run preview
 
 ## 部署规则
 
+- Cloudflare 构建、部署、状态和故障诊断禁止使用浏览器或 Cloudflare Dashboard；当前执行环境无法登录 Dashboard。必须使用 Wrangler、Cloudflare API、GitHub checks 和仓库脚本完成查询、部署与验证。API 未暴露完整日志时，应结合公开 check 元数据和本地可复现命令定位，不得再次尝试网页登录。
 - `.github/workflows/ci.yml` 必须使用 Node.js 24 和 lockfile 安装。
 - 所有 PR/MR 和每次分支 push 都运行核心 CI；只有 `main` 可以把验证通过的 `dist/` 部署到 GitHub Pages。
 - Cloudflare Pages 使用 dashboard Git integration，跟踪 `main`，构建命令为 `npm run build`，输出目录为 `dist`。
 - Cloudflare Workers Builds 也必须跟踪 `main` 并运行文档规定的 Worker 构建与部署命令。仓库 push 或 Pages 部署成功绝不代表 Worker 已部署。
 - 修改 `worker/`、共享联机服务端代码或 `MULTIPLAYER_PROTOCOL_VERSION` 后，必须等 `wrangler deployments status` 显示该版本创建了新的 production Worker，并且 `npm run test:multiplayer:production` 对公共端点通过，任务才算完成。部署事实写在中文用户报告中；若部署或 smoke finding 需要真实 follow-up 修复，则在同一 plan 追加 finding 与修复，并和非 plan 交付物一起提交。禁止仅为回填部署事实创建纯文档或 plan-only commit。自动 Worker 部署未发生时必须报告 blocker，并使用已验证的 `npm run deploy:worker` fallback；禁止静默让 Pages 与 Worker 停留在不同 revision。
 - `npm run deploy:worker` 必须保持为验证过的 fallback 链：Worker typecheck、Worker tests、dry-run bundle、部署、真实 production HTTP/WebSocket smoke。正常发布禁止替换成裸 `wrangler deploy`。
-- Worker 部署验证只允许重试无副作用的 `/health` 协议标记，以及新版本向公共自定义域传播时的临时 transport/gateway 失败。等待必须有界；标记匹配后只能创建 1 个 smoke 房间，禁止重试 guest、room、WebSocket 或 leave 失败。
+- Worker 部署验证只允许重试无副作用的 `/health` 协议标记，以及新版本向公共自定义域传播时的临时 transport/gateway 失败。等待必须有界；协议标记必须连续 5 次匹配后才能创建唯一 1 个 smoke 房间，期间任何旧版本、缺失标记或临时失败都要重新累计稳定次数。禁止重试 guest、room、WebSocket 或 leave 失败。
 - Worker 与 Pages 部署不是原子的。协议版本变化必须使用有文档的维护发布：禁用新联机入口、排空或关闭房间、部署并 smoke Worker、部署匹配的 Pages 客户端、重新启用入口并再次 smoke。禁止独立滚动严格协议版本并假设 CI 顺序能保证兼容。
 - Git integration 可用时禁止把 Cloudflare 长期凭据加入仓库。
 - Vite 资源 URL 必须同时兼容 GitHub `/last-line/` 子路径和 Cloudflare 根域名。

@@ -2,6 +2,7 @@ import { MULTIPLAYER_PROTOCOL_HEADER } from "../src/network/protocol";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_POLL_INTERVAL_MS = 2_000;
+const DEFAULT_REQUIRED_CONSECUTIVE_MATCHES = 5;
 
 export interface ProductionProtocolReadinessOptions {
   readonly apiUrl: URL;
@@ -23,6 +24,7 @@ export async function waitForProductionProtocol(
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const startedAt = now();
   let lastObservedProtocol: number | null = null;
+  let consecutiveMatches = 0;
 
   while (true) {
     const elapsedBeforeRequestMs = now() - startedAt;
@@ -36,6 +38,7 @@ export async function waitForProductionProtocol(
         signal: AbortSignal.timeout(Math.min(15_000, timeoutMs - elapsedBeforeRequestMs)),
       });
     } catch {
+      consecutiveMatches = 0;
       await waitForNextAttempt(startedAt, now, sleep, pollIntervalMs, timeoutMs, lastObservedProtocol,
         options.expectedProtocolVersion);
       continue;
@@ -44,6 +47,7 @@ export async function waitForProductionProtocol(
       if (!isTransientGatewayStatus(response.status)) {
         throw new Error(`Production health returned ${response.status}`);
       }
+      consecutiveMatches = 0;
       await waitForNextAttempt(startedAt, now, sleep, pollIntervalMs, timeoutMs, lastObservedProtocol,
         options.expectedProtocolVersion);
       continue;
@@ -66,13 +70,20 @@ export async function waitForProductionProtocol(
       if (!Number.isSafeInteger(observedProtocol)) {
         throw new Error(`Production returned an invalid protocol header (${protocolHeader})`);
       }
-      if (observedProtocol === options.expectedProtocolVersion) return;
+      if (observedProtocol === options.expectedProtocolVersion) {
+        consecutiveMatches += 1;
+        if (consecutiveMatches >= DEFAULT_REQUIRED_CONSECUTIVE_MATCHES) return;
+      } else {
+        consecutiveMatches = 0;
+      }
       if (observedProtocol > options.expectedProtocolVersion) {
         throw new Error(
           `Production protocol ${observedProtocol} is newer than client protocol ${options.expectedProtocolVersion}`,
         );
       }
       lastObservedProtocol = observedProtocol;
+    } else {
+      consecutiveMatches = 0;
     }
 
     await waitForNextAttempt(startedAt, now, sleep, pollIntervalMs, timeoutMs, lastObservedProtocol,
