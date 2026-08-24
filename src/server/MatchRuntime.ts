@@ -7,6 +7,16 @@ import { FRAG_GRENADE_CONFIG } from "../config/throwables";
 import { GridNavigator } from "../ai/navigation/GridNavigator";
 import { BotController } from "../controllers/BotController";
 import { createIdleCommand, type ActorCommand } from "../game/commands/ActorCommand";
+import {
+  DAMAGE_CAUSE_IDS,
+  DAMAGE_TOTAL_SCALE,
+  MAX_DAMAGE_TOTAL,
+  packDamageTotals,
+  projectDamageTotals,
+  type DamageTotals,
+  type PackedDamageTotals,
+  unpackDamageTotals,
+} from "../game/DamageTotals";
 import { GameSimulation } from "../game/GameSimulation";
 import { BattleRoyaleMode, createBattleRoyaleStateForHumans } from "../game/modes/BattleRoyaleMode";
 import { SIMULATION_STEP_SECONDS, SIMULATION_TICK_RATE } from "../game/simulationTiming";
@@ -28,7 +38,7 @@ const TAKEOVER_TICKS = SIMULATION_TICK_RATE * 5;
 const ACTOR_REPLICATION_RANGE = 400;
 const LOOT_REPLICATION_RANGE = 60;
 const AIRBORNE_LOOT_REPLICATION_RANGE = ACTOR_REPLICATION_RANGE;
-export const MATCH_CHECKPOINT_VERSION = 14;
+export const MATCH_CHECKPOINT_VERSION = 15;
 const MINIMUM_CLOSED_SAFE_ZONE_SECONDS = BATTLE_ROYALE_CONFIG.safeZoneStages.reduce(
   (total, stage) => total + stage.waitSeconds + stage.shrinkSeconds / 2,
   0,
@@ -48,6 +58,7 @@ export interface MatchRuntimeOptions {
   tick?: number;
   snapshotSequence?: number;
   eventSequence?: number;
+  damageTotals?: PackedDamageTotals;
 }
 
 export interface MatchCheckpoint {
@@ -56,6 +67,7 @@ export interface MatchCheckpoint {
   tick: number;
   snapshotSequence: number;
   eventSequence: number;
+  damageTotals: PackedDamageTotals;
 }
 
 export class MatchRuntime {
@@ -91,7 +103,14 @@ export class MatchRuntime {
       );
     this.layout = createMapLayout(this.state.mapId, this.state.mapSeed);
     this.botNavigator = options.createBotNavigator?.(this.layout) ?? new GridNavigator(this.layout);
-    this.simulation = new GameSimulation(this.state, new BattleRoyaleMode(BATTLE_ROYALE_CONFIG, random), WEAPONS, this.layout);
+    this.simulation = new GameSimulation(
+      this.state,
+      new BattleRoyaleMode(BATTLE_ROYALE_CONFIG, random),
+      WEAPONS,
+      this.layout,
+      undefined,
+      unpackDamageTotals(options.damageTotals ?? {}),
+    );
     this.tickValue = options.tick ?? 0;
     this.snapshotSequenceValue = options.snapshotSequence ?? 0;
     this.eventSequenceValue = options.eventSequence ?? 0;
@@ -119,6 +138,10 @@ export class MatchRuntime {
 
   public get tick(): number {
     return this.tickValue;
+  }
+
+  public get damageTotals(): DamageTotals {
+    return this.simulation.damageTotals;
   }
 
   public submitInput(
@@ -264,6 +287,7 @@ export class MatchRuntime {
         const loot = this.state.groundLoot[id];
         return loot ? [loot] : [];
       }),
+      damageChanges: this.simulation.drainDamageChanges(),
       events: [...this.pendingEvents],
     };
     this.pendingEvents.length = 0;
@@ -278,7 +302,12 @@ export class MatchRuntime {
       tick: this.tickValue,
       snapshotSequence: this.snapshotSequenceValue,
       eventSequence: this.eventSequenceValue,
+      damageTotals: packDamageTotals(this.simulation.damageTotals),
     };
+  }
+
+  public projectDamageTotals(viewerId: EntityId): DamageTotals {
+    return projectDamageTotals(this.simulation.damageTotals, viewerId);
   }
 
   public projectState(viewerId: EntityId): MatchState {
@@ -330,6 +359,7 @@ export class MatchRuntime {
         lootChanges: [...new Map(
           [...newlyVisibleLoot, ...dirtyVisibleLoot, ...hiddenLoot].map((loot) => [loot.id, loot]),
         ).values()],
+        damageChanges: frame.damageChanges.filter((change) => change.sourceId === viewer.id),
         events: frame.events.filter((entry) => eventVisibleTo(entry.event, viewer, this.state.actors)),
       },
       visibleLootIds,
@@ -402,8 +432,50 @@ export function isMatchCheckpointCompatible(
   ) return false;
   if (checkpoint.version !== MATCH_CHECKPOINT_VERSION) return false;
   if (!isRecoverableMatchState(checkpoint.state, checkpoint.tick, requiredActorIds)) return false;
+  if (!isRecoverableDamageTotals(checkpoint.damageTotals, checkpoint.state.actors)) return false;
   const mapId: unknown = checkpoint.state.mapId;
   return mapId === "island" || mapId === "town" || mapId === "mixed";
+}
+
+function isRecoverableDamageTotals(
+  value: unknown,
+  actors: Record<EntityId, ActorState>,
+): value is PackedDamageTotals {
+  if (!isRecord(value)) return false;
+  for (const [sourceId, targets] of Object.entries(value)) {
+    if (
+      !Object.hasOwn(actors, sourceId) ||
+      actors[sourceId]?.kind !== "player" ||
+      !isRecord(targets) ||
+      Object.keys(targets).length === 0
+    ) {
+      return false;
+    }
+    for (const [targetId, totals] of Object.entries(targets)) {
+      if (
+        !Object.hasOwn(actors, targetId) ||
+        targetId === sourceId ||
+        !Array.isArray(totals) ||
+        totals.length !== DAMAGE_CAUSE_IDS.length
+      ) {
+        return false;
+      }
+      let hasPositiveTotal = false;
+      for (let index = 0; index < DAMAGE_CAUSE_IDS.length; index += 1) {
+        const total = totals[index];
+        if (
+          !Object.hasOwn(totals, index) ||
+          !isNonNegativeInteger(total) ||
+          Number(total) > MAX_DAMAGE_TOTAL * DAMAGE_TOTAL_SCALE
+        ) {
+          return false;
+        }
+        if (total > 0) hasPositiveTotal = true;
+      }
+      if (!hasPositiveTotal) return false;
+    }
+  }
+  return true;
 }
 
 function isRecoverableMatchState(

@@ -1185,7 +1185,7 @@ h1 {
 .leaderboard header,
 .leaderboard [data-hud="leaderboard-rows"] > div {
   display: grid;
-  grid-template-columns: 54px 1fr 100px 90px;
+  grid-template-columns: 54px minmax(0, 1fr) 100px 90px;
   align-items: center;
   gap: 12px;
   padding: 8px 16px;
@@ -1217,7 +1217,7 @@ h1 {
   background: rgb(70 22 19 / 12%);
 }
 
-.leaderboard [data-hud="leaderboard-rows"] > div.is-eliminated span {
+.leaderboard [data-hud="leaderboard-rows"] > div.is-eliminated .leaderboard-actor-name {
   text-decoration: line-through;
   text-decoration-color: rgb(221 93 73 / 70%);
 }
@@ -1235,6 +1235,48 @@ h1 {
 .leaderboard em {
   color: var(--ink-dim);
   font-style: normal;
+}
+
+.leaderboard-actor,
+.leaderboard-damage-list,
+.leaderboard-damage {
+  display: flex;
+  align-items: center;
+}
+
+.leaderboard-actor {
+  min-width: 0;
+  gap: 10px;
+}
+
+.leaderboard-actor-name {
+  overflow: hidden;
+  flex: 0 1 auto;
+  min-width: 32px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leaderboard-damage-list {
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  gap: 3px 8px;
+}
+
+.leaderboard-damage {
+  gap: 3px;
+  color: var(--signal-bright);
+  white-space: nowrap;
+}
+
+.leaderboard-damage img {
+  width: 26px;
+  height: 15px;
+  object-fit: contain;
+}
+
+.leaderboard-damage b {
+  font-variant-numeric: tabular-nums;
 }
 
 .hit-marker {

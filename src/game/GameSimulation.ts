@@ -1,6 +1,7 @@
 import type { WeaponConfig } from "../config/weapons";
 import { createMapLayout, type MapLayout } from "../config/map";
 import type { ActorCommand } from "./commands/ActorCommand";
+import { DamageTotalsTracker, type DamageTotalChange, type DamageTotals } from "./DamageTotals";
 import type { GameMode } from "./modes/GameMode";
 import { compareActorTurns } from "./rules/resolveSimultaneous";
 import type { CombatWorld } from "./systems/CombatSystem";
@@ -16,6 +17,7 @@ export class GameSimulation {
   private readonly inventory: InventorySystem;
   private readonly movement: MovementSystem;
   private readonly throwables: ThrowableSystem;
+  private readonly damageTotalsTracker: DamageTotalsTracker;
   private events: GameEvent[] = [];
 
   public constructor(
@@ -24,11 +26,17 @@ export class GameSimulation {
     weapons: Readonly<Record<string, WeaponConfig>>,
     layout: MapLayout = createMapLayout(state.mapId, state.mapSeed),
     damage: DamageSystem = new DamageSystem(),
+    damageTotals: DamageTotals = {},
   ) {
-    this.combat = new CombatSystem(weapons, damage);
+    this.damageTotalsTracker = new DamageTotalsTracker(damageTotals);
+    this.combat = new CombatSystem(weapons, damage, undefined, this.damageTotalsTracker);
     this.inventory = new InventorySystem(layout);
     this.movement = new MovementSystem(layout);
-    this.throwables = new ThrowableSystem(undefined, damage);
+    this.throwables = new ThrowableSystem(undefined, damage, this.damageTotalsTracker);
+  }
+
+  public get damageTotals(): DamageTotals {
+    return this.damageTotalsTracker.totals;
   }
 
   public start(): void {
@@ -73,6 +81,10 @@ export class GameSimulation {
     const events = this.events;
     this.events = [];
     return events;
+  }
+
+  public drainDamageChanges(): DamageTotalChange[] {
+    return this.damageTotalsTracker.drainChanges();
   }
 }
 

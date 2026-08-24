@@ -1,5 +1,6 @@
 import type { WeaponConfig } from "../../config/weapons";
 import type { ActorCommand } from "../commands/ActorCommand";
+import type { DamageTotalsTracker } from "../DamageTotals";
 import { selectSimultaneousSurvivor } from "../rules/resolveSimultaneous";
 import {
   getActiveWeapon,
@@ -45,6 +46,7 @@ interface PendingDamage {
   sourceId: EntityId;
   amount: number;
   weaponId: string;
+  aiControlled: boolean;
 }
 
 const TIMER_EPSILON_SECONDS = 1e-9;
@@ -55,6 +57,7 @@ export class CombatSystem {
     private readonly weapons: Readonly<Record<string, WeaponConfig>>,
     private readonly damage = new DamageSystem(),
     private readonly random: () => number = Math.random,
+    private readonly damageTotals?: DamageTotalsTracker,
   ) {}
 
   public update(state: MatchState, deltaSeconds: number, events: GameEvent[]): void {
@@ -208,7 +211,13 @@ export class CombatSystem {
         }
       }
       if (targetId && targetId !== actor.id) {
-        pendingDamage.push({ targetId, sourceId: actor.id, amount: config.damage, weaponId: config.id });
+        pendingDamage.push({
+          targetId,
+          sourceId: actor.id,
+          amount: config.damage,
+          weaponId: config.id,
+          aiControlled,
+        });
       }
     }
     if (aiPresentationTrace) emitShotTrace(events, actor.id, origin, aiPresentationTrace);
@@ -219,6 +228,17 @@ export class CombatSystem {
 
   private applyPendingDamage(state: MatchState, pendingDamage: readonly PendingDamage[], events: GameEvent[]): void {
     if (pendingDamage.length === 0) return;
+    for (const damage of pendingDamage) {
+      if (damage.aiControlled) continue;
+      if (!this.damage.canApplyDamage(state, damage.targetId, damage.amount)) continue;
+      this.damageTotals?.record(state, {
+        sourceId: damage.sourceId,
+        targetId: damage.targetId,
+        causeId: damage.weaponId,
+        amount: damage.amount,
+        aiControlled: damage.aiControlled,
+      });
+    }
     const living = Object.values(state.actors)
       .filter((actor) => actor.alive)
       .sort((left, right) => compareIds(left.id, right.id));

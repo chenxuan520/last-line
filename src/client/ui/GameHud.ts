@@ -11,11 +11,13 @@ import {
   type GrenadeThrowMode,
 } from "../../config/throwables";
 import { getItemIconAssetId } from "../itemIcon";
+import type { DamageTotals } from "../../game/DamageTotals";
 import {
   getActiveWeapon,
   getItemLabel,
   getReserveAmmo,
   type ActorState,
+  type EntityId,
   type GameEvent,
   type MatchResult,
   type MatchState,
@@ -246,6 +248,7 @@ export class GameHud {
     grenadeSelected = false,
     grenadePreparing = false,
     grenadeThrowMode: GrenadeThrowMode = "high",
+    damageTotals: DamageTotals = {},
   ): void {
     const weapon = getActiveWeapon(viewedActor);
     const config = weapon ? WEAPONS[weapon.weaponId] : undefined;
@@ -297,7 +300,7 @@ export class GameHud {
     const refresh = this.refreshSeconds >= 0.1;
     if (refresh) this.refreshSeconds %= 0.1;
     if (leaderboardVisible && (leaderboardBecameVisible || refresh)) {
-      this.updateLeaderboard(state, player.id);
+      this.updateLeaderboard(state, player.id, damageTotals);
     }
     if (!refresh) return;
 
@@ -375,9 +378,9 @@ export class GameHud {
     while (this.connectionFeed.childElementCount > 3) this.connectionFeed.lastElementChild?.remove();
   }
 
-  private updateLeaderboard(state: MatchState, playerId: string): void {
+  private updateLeaderboard(state: MatchState, playerId: string, damageTotals: DamageTotals): void {
     const actorValues = Object.values(state.actors);
-    const signature = createLeaderboardSignature(actorValues);
+    const signature = createLeaderboardSignature(actorValues, damageTotals, playerId);
     if (signature === this.leaderboardSignature) return;
     this.leaderboardSignature = signature;
     const actors = sortLeaderboardActors(actorValues);
@@ -386,16 +389,37 @@ export class GameHud {
       const row = document.createElement("div");
       row.classList.add(actor.alive ? "is-alive" : "is-eliminated");
       if (actor.id === playerId) row.classList.add("is-player");
-      for (const [tagName, text] of [
-        ["b", `${index + 1}`],
-        ["span", this.actorLabel(actor.id, playerId)],
-        ["em", actor.alive ? "存活" : "淘汰"],
-        ["strong", `${actor.kills} 击杀`],
-      ] as const) {
-        const element = document.createElement(tagName);
-        element.textContent = text;
-        row.append(element);
+      const rank = document.createElement("b");
+      rank.textContent = `${index + 1}`;
+      const actorDetails = document.createElement("span");
+      actorDetails.className = "leaderboard-actor";
+      const actorName = document.createElement("span");
+      actorName.className = "leaderboard-actor-name";
+      actorName.textContent = this.actorLabel(actor.id, playerId);
+      actorDetails.append(actorName);
+      const damageEntries = leaderboardDamageEntries(damageTotals, playerId, actor.id);
+      if (damageEntries.length > 0) {
+        const damageList = document.createElement("span");
+        damageList.className = "leaderboard-damage-list";
+        for (const entry of damageEntries) {
+          const damage = document.createElement("span");
+          damage.className = "leaderboard-damage";
+          damage.setAttribute("aria-label", `${entry.label}，原始伤害 ${formatDamageTotal(entry.total)}`);
+          const icon = document.createElement("img");
+          icon.src = this.resolveIconUrl(getItemIconAssetId(entry.itemId));
+          icon.alt = "";
+          const total = document.createElement("b");
+          total.textContent = formatDamageTotal(entry.total);
+          damage.append(icon, total);
+          damageList.append(damage);
+        }
+        actorDetails.append(damageList);
       }
+      const status = document.createElement("em");
+      status.textContent = actor.alive ? "存活" : "淘汰";
+      const kills = document.createElement("strong");
+      kills.textContent = `${actor.kills} 击杀`;
+      row.append(rank, actorDetails, status, kills);
       fragment.append(row);
     });
     this.requireElement("leaderboard-rows").replaceChildren(fragment);
@@ -710,11 +734,55 @@ export function sortLeaderboardActors(actors: readonly ActorState[]): ActorState
   );
 }
 
-export function createLeaderboardSignature(actors: readonly ActorState[]): string {
-  return actors
+export function createLeaderboardSignature(
+  actors: readonly ActorState[],
+  damageTotals: DamageTotals = {},
+  playerId = "",
+): string {
+  const actorSignature = actors
     .map((actor) => `${actor.id}:${actor.alive ? 1 : 0}:${actor.kills}`)
     .sort()
     .join("|");
+  const damageSignature = Object.entries(damageTotals[playerId] ?? {}).flatMap(([targetId, causes]) =>
+    Object.entries(causes).map(([causeId, total]) => `${targetId}:${causeId}:${total}`)
+  ).sort().join("|");
+  return `${actorSignature}#${damageSignature}`;
+}
+
+export interface LeaderboardDamageEntry {
+  causeId: string;
+  itemId: string;
+  label: string;
+  total: number;
+}
+
+export function leaderboardDamageEntries(
+  damageTotals: DamageTotals,
+  playerId: EntityId,
+  targetId: EntityId,
+): LeaderboardDamageEntry[] {
+  const causes = damageTotals[playerId]?.[targetId];
+  if (!causes) return [];
+  const causeOrder = [...Object.keys(WEAPONS), FRAG_GRENADE_ITEM_ID];
+  return Object.entries(causes)
+    .filter(([, total]) => Number.isFinite(total) && total > 0)
+    .sort(([left], [right]) => {
+      const leftIndex = causeOrder.indexOf(left);
+      const rightIndex = causeOrder.indexOf(right);
+      return (leftIndex < 0 ? causeOrder.length : leftIndex) -
+        (rightIndex < 0 ? causeOrder.length : rightIndex) || left.localeCompare(right);
+    })
+    .map(([causeId, total]) => ({
+      causeId,
+      itemId: WEAPONS[causeId] ? `weapon.${causeId}` : causeId,
+      label: WEAPONS[causeId]?.label ?? ITEMS[causeId]?.label ?? causeId,
+      total,
+    }));
+}
+
+function formatDamageTotal(total: number): string {
+  const rounded = Math.round(total * 10) / 10;
+  return Number.isInteger(rounded) ? rounded.toString() : rounded.toFixed(1);
 }
 
 export function createMinimapSignature(state: MatchState, actor: ActorState): string {

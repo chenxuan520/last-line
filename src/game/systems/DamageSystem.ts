@@ -6,6 +6,16 @@ export type DamageImmunity = (targetId: EntityId) => boolean;
 export class DamageSystem {
   public constructor(private readonly immune: DamageImmunity = () => false) {}
 
+  public canApplyDamage(state: MatchState, targetId: EntityId, amount: number): boolean {
+    const target = state.actors[targetId];
+    return Boolean(
+      target?.alive &&
+      target.deployment !== "aircraft" &&
+      amount > 0 &&
+      !this.immune(targetId)
+    );
+  }
+
   public wouldBeLethal(
     state: MatchState,
     targetId: EntityId,
@@ -13,12 +23,7 @@ export class DamageSystem {
     bypassArmor = false,
   ): boolean {
     const target = state.actors[targetId];
-    if (
-      !target?.alive ||
-      target.deployment === "aircraft" ||
-      amount <= 0 ||
-      this.immune(targetId)
-    ) {
+    if (!target || !this.canApplyDamage(state, targetId, amount)) {
       return false;
     }
     const healthDamage = bypassArmor
@@ -39,7 +44,7 @@ export class DamageSystem {
     damageOrigin?: Vector3State,
   ): number {
     const target = state.actors[targetId];
-    if (!target?.alive || target.deployment === "aircraft" || amount <= 0 || this.immune(targetId)) {
+    if (!target || !this.canApplyDamage(state, targetId, amount)) {
       return 0;
     }
 
