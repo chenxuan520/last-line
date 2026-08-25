@@ -325,3 +325,47 @@
 - 根因是 Builder 为复用数据行 Grid 新建 `.leaderboard-column-labels`，并在截图已经明显显示两行时仍错误验收；Reviewer 未亲自查看截图，只依据静态 diff 和错误的 Plan 记录批准。
 - 修复必须删除 `.leaderboard-column-labels` 独立行，把两个伤害标题嵌入原 `<header>`；现有 4 个数据列、列表高度、排序、颜色和伤害内容保持不变。
 - 本轮桌面与移动横屏截图必须由实现 Agent 和 Reviewer 分别亲自打开检查；截图保留到 Re-review 完成后再清理。
+
+### Round 4 Retrospective
+
+#### What Happened
+
+用户明确要求把 `造成伤害 | 受到伤害` 加到排行榜“最上面那一行”，并反复强调现有列已经足够、不得新增列。Builder 却新增了独立 `.leaderboard-column-labels`，形成“总标题第一行 + 伤害标题第二行”的错误结构，并把它发布到了生产环境。
+
+#### Wrong Reasoning
+
+1. Builder 先注意到伤害标题需要与下方两个半区精确对齐，于是优先选择复用数据行 Grid。这个实现方便性被错误地放在用户明确的单行结构之前。
+2. 在发现现有顶部只有“本局排行榜”和“存活优先 · 击杀排序”时，Builder 没有把两个新标题嵌入原 header，而是把“标题对齐”偷换成“允许新增一行”。这是对需求的错误改写，不是需求不清楚。
+3. 用户追问“表头之前就有了吧，只是再加两个”后，Builder 已经知道用户预期是在现有顶部增加内容，却仍保留第二行方案，说明实现过程中没有重新以用户原话作为最高优先级。
+4. production 截图清楚显示了两条横向表头区域。Builder 只检查了标题与伤害半区的横向坐标、颜色和窄屏裁剪，却没有检查用户最核心的“只能一行”结构，并错误地把截图判定为通过。
+5. Builder 在 Review 前清理了截图，Reviewer 只能依据静态 diff、DOM 数量和 Builder 写入 Plan 的错误验收结论。Reviewer 没有亲眼看到图片，因此重复认可了“未新增数据列”，却漏掉了“新增第二表头行”这一直接可见回归。
+
+#### Root Cause
+
+根因不是技术难度，而是 Builder 用局部技术指标替代了用户验收标准：把“对齐正确、仍为 4 个数据列”误当成“布局正确”，忽略了“最顶部同一行”才是决定是否完成的首要条件。随后又把自己的错误判断写入 Plan，导致 Reviewer 在缺少图片证据时沿着错误前提继续审查。
+
+#### Corrective Rules
+
+- 用户指定行列结构时，截图验收必须先逐字核对行数、列数和所在区域，再检查字体、颜色和像素对齐；局部对齐正确不能抵消整体结构错误。
+- 本功能的两个伤害标题必须位于原排行榜 `<header>` 的同一行，禁止创建独立第二表头行；现有 4 个数据列继续保持不变。
+- UI 截图在 Reviewer 完成图片审查前不得清理。Builder 与 Reviewer 都必须亲自打开桌面和受影响移动端截图，任何一方只看 DOM、computed style、Plan 或文字描述都不能批准。
+- Builder 在 Plan 中记录的浏览器结论必须描述用户指定结构是否满足，不能只记录便于量化的宽度、坐标和 overflow。
+
+#### Accountability
+
+本次生产回归由 Builder 的错误实现和错误视觉验收直接造成；Reviewer 未查看图片又使问题未能在提交前被拦截。修复不归因于需求歧义，也不以“技术上仍是四列”作为辩解。
+
+### Round 4 Build
+
+- 按用户要求先发布紧急修复提交 `0ccaf16`：删除独立 `.leaderboard-column-labels`，把总标题、`造成伤害 | 受到伤害` 和排序提示全部放进原 `<header>` 的同一 `grid-row: 1`；列表 `max-height` 恢复原 `68vh`。
+- 单个颜色优先级用例 1/1、三套 typecheck、production build 和 budgets 通过。最终 browser entry `1,176,881 / 1,200,000`、CSS `46,781 / 50,000`、dist `4,684,373 / 5,000,000`。
+- 实现 Agent 在音量 `0` 的 production build 中亲自打开并检查桌面 `/var/folders/5j/qh0z08fj3r9f86g_2tb6x9hm0000gn/T/opencode/tab-single-row-desktop.png` 和移动横屏 `/var/folders/5j/qh0z08fj3r9f86g_2tb6x9hm0000gn/T/opencode/tab-single-row-mobile.png`。两张图都只有一条 39px 顶部 header；标题、两个伤害子标题和排序提示处于同一水平行，第一条数据行从 header 底边立即开始。DOM 中直属结构只有 `HEADER + leaderboard-rows DIV`，`.leaderboard-column-labels` 数量为 0。
+- 桌面 header 为 `718×39px`，伤害标题区域 `290.4×11px`；移动横屏 header 为 `656.3×39px`，伤害标题区域 `245.2×11px`。页面无横向溢出，console 无 warning/error。截图保留到 Reviewer 完成亲自图片审查后再清理。
+
+### Round 4 Review
+
+- Review 时间：2026-08-26。
+- Reviewer 已亲自使用图片查看工具打开桌面和移动横屏最终 production build 截图，而不是仅依据静态 diff、DOM、computed style 或 Builder 描述。
+- 桌面图确认只有 1 行顶部 header，随后立即进入数据行；移动横屏图同样只有 1 行顶部 header。两图中的 `本局排行榜`、`造成伤害 | 受到伤害`、`存活优先 · 击杀排序` 均处于同一水平行，字体层级、字重、颜色、间距和左右边距正常，无裁剪、重叠或第二表头。
+- 静态复核确认 header 后直接是 `leaderboard-rows`，`.leaderboard-column-labels` 已从源码和 CSS 删除，三个 header 子项均显式使用 `grid-row: 1`，四个数据列和 `68vh` 列表高度保持原合同。
+- 审查结论：通过；无 blocker/high/medium/low Finding。改动只删除错误包装行并重排静态 header DOM/CSS，无运行时调用放大或明显性能风险。
