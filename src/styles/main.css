@@ -1207,7 +1207,7 @@ h1 {
   display: grid;
   grid-column: 2;
   grid-row: 1;
-  grid-template-columns: minmax(32px, 0.8fr) minmax(0, 2.2fr);
+  grid-template-columns: 32px minmax(0, 1fr);
   min-width: 0;
   gap: 10px;
 }
@@ -1225,7 +1225,8 @@ h1 {
 .leaderboard-damage-headings b {
   overflow: hidden;
   color: rgb(183 197 139 / 78%);
-  font: 700 10px/1 var(--tactical-font);
+  font-size: inherit;
+  line-height: inherit;
   text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1296,7 +1297,11 @@ h1 {
 }
 
 .leaderboard-actor.has-damage {
-  grid-template-columns: minmax(32px, 0.8fr) minmax(0, 2.2fr);
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.leaderboard-actor.has-damage .leaderboard-actor-name {
+  max-width: 100px;
 }
 
 .leaderboard-actor-name {
