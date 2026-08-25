@@ -192,14 +192,15 @@ export class GameHud {
         ${options.onRequestFullscreen ? '<button class="fullscreen-action" data-hud="fullscreen-action" type="button" hidden>进入全屏</button>' : ""}
         <div class="result-card" data-hud="result" hidden></div>
         <aside class="leaderboard" data-hud="leaderboard" hidden aria-label="本局排行榜">
-          <header><strong>本局排行榜</strong><span>存活优先 · 击杀排序</span></header>
-          <div class="leaderboard-column-labels">
-            <span class="leaderboard-column-actor">
+          <header>
+            <strong class="leaderboard-title">本局排行榜</strong>
+            <span class="leaderboard-header-actor">
               <span class="leaderboard-damage-breakdown leaderboard-damage-headings">
                 <b>造成伤害</b><i class="leaderboard-damage-divider" aria-hidden="true"></i><b>受到伤害</b>
               </span>
             </span>
-          </div>
+            <span class="leaderboard-sort-hint">存活优先 · 击杀排序</span>
+          </header>
           <div data-hud="leaderboard-rows"></div>
         </aside>
       </section>

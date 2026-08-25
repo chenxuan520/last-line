@@ -318,3 +318,10 @@
 - Reviewer 确认每行仍由 `rank / actorDetails / status / kills` 4 个直接子节点组成，两个标题只嵌套在角色列既有伤害半区；协议、checkpoint、权威规则和服务端均未修改。
 - Low 接受且不阻塞：未直接测试私有 `handleEvents` 状态，但两个 ID 条件经静态检查正确排除 self、zone 和无关死亡，纯 helper 已锁定颜色与青蓝优先级。
 - 性能结论：新增状态最多 49 个 victim ID 和 1 个 killer ID，仅相关死亡时清空一次 signature；未发现调用放大或可进一步删除的实现。
+
+### Round 4 Follow-up
+
+- 用户报告正式实现错误地把伤害标题放成独立第二行；需求始终是把 `造成伤害 | 受到伤害` 放入原有最顶部同一行。
+- 根因是 Builder 为复用数据行 Grid 新建 `.leaderboard-column-labels`，并在截图已经明显显示两行时仍错误验收；Reviewer 未亲自查看截图，只依据静态 diff 和错误的 Plan 记录批准。
+- 修复必须删除 `.leaderboard-column-labels` 独立行，把两个伤害标题嵌入原 `<header>`；现有 4 个数据列、列表高度、排序、颜色和伤害内容保持不变。
+- 本轮桌面与移动横屏截图必须由实现 Agent 和 Reviewer 分别亲自打开检查；截图保留到 Re-review 完成后再清理。

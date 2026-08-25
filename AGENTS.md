@@ -110,6 +110,7 @@ npm run preview
 - 禁止降低多种子 AI 阈值来掩盖导航或拾取失败。
 - 自动化或人工验证期间禁止播放音频。
 - 每个新增或修改的可见功能都必须在 production build 中使用 Chrome/Edge MCP 浏览器打开，音量必须为 `0`。实现 Agent 必须用 MCP 截取受影响区域，并在完成前亲自使用图片查看工具打开检查；只截图不查看不算完成。DOM 存在、computed style、单元测试、console 检查和其他 Agent 的描述只能作为辅助证据，不能替代实现 Agent 亲眼查看渲染截图。必须把变更元素与相邻同类元素比较，并明确检查字体、字号、字重、颜色、间距、对齐、位置、裁剪和重叠；功能存在但视觉不一致仍视为未完成。
+- 任何涉及可见 UI 的 Review，Reviewer 也必须亲自使用图片查看工具打开实现 Agent 在最终 production build 中截取的桌面和受影响移动端截图，并逐项检查字体、字号、字重、颜色、间距、对齐、位置、裁剪、重叠和用户指定的行列结构。截图必须保留到 Reviewer 明确完成图片审查后才能清理。Reviewer 禁止仅依据静态 diff、Plan、DOM、computed style、测试、console 或实现 Agent 的描述批准 UI 改动；未亲自查看截图必须作为阻塞 Finding。
 - 移动端全屏和方向锁定必须来自真实用户激活。禁止在 `orientationchange` 中调用 `requestFullscreen()`；不支持或拒绝全屏的浏览器必须仍可手动横屏游玩并提供可用的重试入口。
 - 修改共享联机类后必须同时运行 Worker 和 standalone 合同测试。Standalone 回归必须覆盖真实 HTTP/WebSocket、持久化/重启、进程锁、alarm generation、重连宽限、房间淘汰和有界关闭；竞态测试使用确定性 barrier，禁止只依赖时间等待。
 - `test:multiplayer:production` 必须保持为真实公共 HTTP/WebSocket smoke，并与覆盖率分离。它必须创建私有房、验证已部署的 welcome 协议和大厅状态，然后离开；每次生产 Worker 或 Pages 部署后都要运行。定时 production-smoke workflow 只用于漂移检测，不是原子部署门禁。
