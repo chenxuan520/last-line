@@ -17,7 +17,8 @@ it("samples new ultra explicitly and preserves strict gates once a matching base
   const baseline = {
     "island-high": { ...runtime }, "town-high": { ...runtime }, "mixed-high": { ...runtime },
     browser: { ...browser }, "town-ultra": { ...runtime },
-    "browser-ultra": { ...browser, gpuTexturesCreated: 100, gpuTexturesDeleted: 0, gpuTexturesLive: 100 },
+    "browser-ultra": { ...browser, gpuTexturesCreated: 100, gpuTexturesDeleted: 0, gpuTexturesLive: 100,
+      sceneMeshes: 100, sceneMaterials: 100, sceneGeometries: 100, sceneVertices: 100, sceneIndices: 100 },
   };
   const mixedRounds = [{ ...runtime }, { ...runtime, textures: undefined }, { ...runtime }];
   expect(() => mixedRounds.forEach((sample) => comparison.validatePerformanceSample("round", sample, Object.keys(runtime))))
@@ -28,6 +29,7 @@ it("samples new ultra explicitly and preserves strict gates once a matching base
   const head = structuredClone(baseline);
   head["town-ultra"].textures = 150;
   head["browser-ultra"].gpuTexturesLive = 150;
+  head["browser-ultra"].sceneVertices = 150;
   expect(comparison.ultraBaselineQuality(false, true)).toBe("high");
   expect(comparison.ultraBaselineQuality(true, true)).toBe("ultra");
   expect(() => comparison.ultraBaselineQuality(true, false)).toThrow(/HEAD must support/);
@@ -37,7 +39,10 @@ it("samples new ultra explicitly and preserves strict gates once a matching base
   expect(bootstrap.find((row: { section: string; metric: string }) => row.section === "town-ultra" && row.metric === "textures"))
     .toMatchObject({ referenceQuality: "high", gated: false, baseline: 100, candidate: 150 });
   const strict = comparison.compareCollectedPerformance(baseline, head, true);
-  expect(strict.filter((row: { passed: boolean }) => !row.passed)).toHaveLength(2);
+  expect(strict.filter((row: { passed: boolean }) => !row.passed)).toHaveLength(3);
+  const missingScene = structuredClone(head);
+  Reflect.deleteProperty(missingScene["browser-ultra"], "sceneVertices");
+  expect(() => comparison.compareCollectedPerformance(baseline, missingScene, false)).toThrow(/metrics mismatch/);
   head["town-high"].meshAdds = 116;
   expect(comparison.compareCollectedPerformance(baseline, head, false).some((row: { passed: boolean }) => !row.passed)).toBe(true);
   expect(() => comparison.compareCollectedPerformance(baseline, { ...head, "town-ultra": undefined }, false)).toThrow();

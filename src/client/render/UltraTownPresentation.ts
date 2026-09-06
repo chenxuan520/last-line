@@ -1,5 +1,7 @@
 import { enhanceViewEquipment } from "./UltraEquipmentPresentation";
+import { enhanceVegetation } from "./UltraVegetationPresentation";
 export { colorEquipmentPart } from "./UltraEquipmentPresentation";
+export { enhanceCharacterContainer } from "./UltraCharacterPresentation";
 import { VertexBuffer } from "@babylonjs/core/Buffers/buffer";
 import type { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
 import type { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
@@ -42,6 +44,7 @@ export function enhanceTownPresentation(
 
   createTownSampleDetails(scene, layout);
   enhanceViewEquipment(scene);
+  enhanceVegetation(scene);
 
   for (const mesh of scene.meshes) {
     if (mesh.name.startsWith("building-walls-") || /^building-(floor|roof)-slabs-batch/.test(mesh.name)) {

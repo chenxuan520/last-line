@@ -255,6 +255,9 @@ export async function createIslandScene(
   const viewWeaponRoot = createViewWeapon(scene, camera, materials);
   setActorWeaponVisual(viewWeaponRoot, getActiveWeapon(player)?.weaponId ?? null);
   viewWeaponRoot.setEnabled(Boolean(getActiveWeapon(player)));
+  const ultraPresentation = quality === "ultra" && mapId === "town"
+    ? await import("../UltraTownPresentation")
+    : undefined;
   if (quality !== "low") {
     await replaceCatalogModels(
       scene,
@@ -266,12 +269,10 @@ export async function createIslandScene(
       materials,
       player.id,
       qualityProfile.modelLodDistance,
+      ultraPresentation?.enhanceCharacterContainer,
     );
   }
 
-  const ultraPresentation = quality === "ultra" && mapId === "town"
-    ? await import("../UltraTownPresentation")
-    : undefined;
   const { lootMeshes, syncLootMeshes } = createLootMeshes(
     scene,
     groundLoot,
@@ -350,6 +351,7 @@ async function replaceCatalogModels(
   materials: IslandMaterials,
   localActorId: EntityId,
   modelLodDistance: number,
+  enhanceCharacter?: (container: LoadedCatalogModel["container"]) => void,
 ): Promise<void> {
   const weaponIds = ["rifle", "smg", "shotgun", "sniper"] as const;
   const characterIds = ["player", "enemy"] as const;
@@ -375,6 +377,18 @@ async function replaceCatalogModels(
   for (const models of characterModels.values()) {
     if (models.base) applyCharacterPalette(models.base);
     if (models.lod1) applyCharacterPalette(models.lod1);
+    if (models.base) enhanceCharacter?.(models.base.container);
+    if (models.base?.container.meshes.some((mesh) => mesh.metadata?.ultraCharacter) && models.lod1) {
+      for (const material of models.lod1.container.materials) {
+        const source = models.base.container.materials.find((candidate) => candidate.name === material.name);
+        if (material.getClassName() === "PBRMaterial" && source?.getClassName() === "PBRMaterial") {
+          const targetPbr = material as PBRMaterial, sourcePbr = source as PBRMaterial;
+          targetPbr.albedoColor.copyFrom(sourcePbr.albedoColor);
+          targetPbr.metallic = sourcePbr.metallic;
+          targetPbr.roughness = sourcePbr.roughness;
+        }
+      }
+    }
   }
   const loadedContainers = loadedCharacters
     .flatMap((loaded) => loaded ? [loaded.container] : []);
@@ -398,6 +412,11 @@ async function replaceCatalogModels(
       ? instantiateCharacterModel(scene, character.lod1, actor, visualRoot, "lod1")
       : null;
     suppressProceduralCharacter(actorRoot);
+    if (character.base.container.meshes.some((mesh) => mesh.metadata?.ultraCharacter)) {
+      for (const mesh of actorRoot.getChildMeshes(false)) {
+        if (mesh.metadata?.actorVisual === "high-detail-gear") mesh.setEnabled(false);
+      }
+    }
     const visuals = [base, lod1].filter((visual): visual is ImportedCharacterVisual => visual !== null);
     suppressProceduralEquipment(actorRoot, visuals);
     for (const weaponId of weaponIds) suppressProceduralWeapon(actorRoot, weaponId);
@@ -411,6 +430,7 @@ async function replaceCatalogModels(
           materials,
           false,
           true,
+          character.base.container.meshes.some((mesh) => mesh.metadata?.ultraCharacter),
         );
       }
     }
@@ -3227,6 +3247,7 @@ function createWeaponModel(
   materials: IslandMaterials,
   viewModel: boolean,
   socketModel = false,
+  connectedParts = false,
 ): void {
   const scale = viewModel ? 1 : socketModel ? 0.48 : 0.62;
   const offset = viewModel
@@ -3235,7 +3256,14 @@ function createWeaponModel(
       ? { x: 0, y: 0, z: 0 }
       : { x: 0.28, y: -0.43, z: 0.32 };
   const pieces = weaponPieces(weaponId, viewModel);
+  const receiver = connectedParts ? pieces.find(([name]) => name === "receiver") : undefined;
   pieces.forEach(([name, kind, x, y, z, width, height, depth, rotationX = 0]) => {
+    if (receiver) {
+      if (kind === "barrel") {
+        const gap = z - depth / 2 - (receiver[4] + receiver[7] / 2);
+        if (gap > 0) { depth += gap; z -= gap / 2; }
+      } else if (name === "scope") y = Math.min(y, receiver[3] + receiver[6] / 2 + height / 2);
+    }
     const mesh = kind === "barrel"
       ? CreateCylinder(`${prefix}-${weaponId}-${name}`, { diameter: width * scale, height: depth * scale, tessellation: 8 }, scene)
       : CreateBox(`${prefix}-${weaponId}-${name}`, { width: width * scale, height: height * scale, depth: depth * scale }, scene);
@@ -3339,7 +3367,8 @@ const GROUND_LOOT_WEAPON_MODEL_SCALE = 2;
 const GROUND_LOOT_MODEL_CLEARANCE = 0.04;
 const GROUND_LOOT_SPAWN_COLOR = "#e2c66d";
 
-function groundLootModelScale(modelId: string): number {
+function groundLootModelScale(modelId: string, natural = false): number {
+  if (natural) return ITEMS[modelId]?.kind === "weapon" ? 1.15 : 0.85;
   return ITEMS[modelId]?.kind === "weapon" ? GROUND_LOOT_WEAPON_MODEL_SCALE : GROUND_LOOT_MODEL_SCALE;
 }
 
@@ -3351,7 +3380,8 @@ function createLootModelMaterial(scene: Scene, itemId: string, death = false, na
   );
   material.diffuseColor = color;
   material.emissiveColor = natural ? new Color3(0.025, 0.025, 0.025) : color.scale(death ? 0.22 : 0.12);
-  material.specularColor = Color3.Black();
+  material.specularColor = natural ? new Color3(.15, .15, .15) : Color3.Black();
+  if (natural) material.specularPower = 80;
   return material;
 }
 
@@ -3398,7 +3428,7 @@ function createLootModelTemplate(scene: Scene, itemId: string, modelMaterial: St
   ): Mesh => {
     const mesh = CreateCylinder(
       `${itemId}-${name}`,
-      { height, diameterTop, diameterBottom, tessellation },
+      { height, diameterTop, diameterBottom, tessellation: colorPart ? Math.max(16, tessellation) : tessellation },
       scene,
     );
     mesh.position.set(x, y, z);
@@ -3501,13 +3531,46 @@ function createLootModelTemplate(scene: Scene, itemId: string, modelMaterial: St
     addBox("fallback", CLASSIC_LOOT_MARKER_SIZE, CLASSIC_LOOT_MARKER_SIZE, CLASSIC_LOOT_MARKER_SIZE);
   }
 
-  if (colorPart) for (const part of parts) colorPart(part, itemId);
+  if (colorPart) {
+    if (item?.kind === "weapon") {
+      addBox("ejection-recess", .18, .058, .012, .07, .155, -.115);
+      addBox("charging-latch", .045, .035, .08, -.05, .135, -.14);
+      addBox("trigger-guard", .18, .025, .065, -.06, -.045, 0);
+      if (item.weaponId === "rifle" || item.weaponId === "smg") {
+        for (let i = 0; i < 7; i += 1) addBox(`rail-${i}`, .02, .025, .13, -.15 + i * .055, .28, 0);
+      }
+    } else if (item?.kind === "ammo") {
+      for (const x of [-.25, .25]) addBox("latch", .06, .13, .025, x, .06, -.32);
+      addBox("label", .27, .10, .015, 0, -.065, -.30);
+    } else if (item?.kind === "armor") {
+      for (const x of [-.22, 0, .22]) {
+        addBox("front-pouch", .18, .22, .12, x, -.12, -.23);
+        addBox("buckle", .07, .035, .02, x, -.04, -.298);
+      }
+      for (const y of [.12, .21]) addBox("seam", .50, .016, .02, 0, y, -.22);
+    } else if (itemId === "medkit") {
+      for (const x of [-.27, .27]) {
+        addBox("latch", .075, .045, .05, x, .25, -.20);
+        addBox("case-foot", .12, .06, .28, x, -.31, 0);
+      }
+      addBox("case-seam", .77, .017, .017, 0, .18, -.185);
+    } else if (itemId === "bandage") {
+      for (const x of [-.37, .37]) addCylinder("roll-recess", .012, .08, .08, x, 0, x < 0 ? .08 : -.08).rotation.z = Math.PI / 2;
+    } else if (item?.kind === "helmet") {
+      for (const x of [-.4, .4]) addBox("side-rail", .06, .06, .30, x, 0, 0);
+      addBox("mount", .12, .12, .045, 0, .05, -.41);
+    }
+    for (const part of parts) colorPart(part, itemId);
+  }
   const merged = Mesh.MergeMeshes(parts, true, true);
   if (!merged) throw new Error(`Unable to create loot model ${itemId}`);
   merged.name = `loot-model-template-${itemId.replaceAll(".", "-")}`;
   merged.material = modelMaterial;
   merged.isVisible = false;
   merged.isPickable = false;
+  if (colorPart && (item?.kind === "weapon" || item?.kind === "armor" || itemId === "medkit")) {
+    merged.rotation.x = Math.PI / 2;
+  }
   return merged;
 }
 
@@ -3534,7 +3597,7 @@ function createLootMeshes(
     const minimumY = template.getBoundingInfo().boundingBox.minimumWorld.y;
     modelGroundOffsets.set(
       modelId,
-      -minimumY * groundLootModelScale(modelId) + GROUND_LOOT_MODEL_CLEARANCE,
+      -minimumY * groundLootModelScale(modelId, Boolean(colorPart)) + (colorPart ? 0.008 : GROUND_LOOT_MODEL_CLEARANCE),
     );
   }
   const deathMaterials = new Map<string, StandardMaterial>();
@@ -3584,7 +3647,7 @@ function createLootMeshes(
         marker.material = showGroundLootModels
           ? getModelMaterial(modelId, loot.source === "death")
           : (loot.source === "death" ? deathLootMaterial : lootMaterial);
-        const modelScale = showGroundLootModels ? groundLootModelScale(modelId) : 1;
+        const modelScale = showGroundLootModels ? groundLootModelScale(modelId, Boolean(colorPart)) : 1;
         if (!marker.scaling.equalsToFloats(modelScale, modelScale, modelScale)) marker.scaling.setAll(modelScale);
         const y = loot.position.y + (showGroundLootModels
           ? (modelGroundOffsets.get(modelId) ?? 0) - GROUND_LOOT_POSITION_HEIGHT

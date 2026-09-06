@@ -10,6 +10,10 @@ import type { Scene } from "@babylonjs/core/scene";
 // 顶点色保留物品模板的单材质合批与掉落记录复用。
 export function colorEquipmentPart(mesh: Mesh, itemId: string): void {
   const part = mesh.name.slice(itemId.length + 1);
+  if (mesh.getTotalVertices() === 24) {
+    const half = mesh.getBoundingInfo().boundingBox.extendSize;
+    if (Math.min(half.x, half.y, half.z) >= 0.025) chamferBox(mesh, half.x * 2, half.y * 2, half.z * 2);
+  }
   let color = "#444d43";
   if (itemId.startsWith("weapon.")) color = /stock|grip|pump|mag/.test(part) ? "#33352f" : "#727c80";
   else if (itemId.startsWith("ammo.")) color = /cartridge/.test(part) ? (itemId === "ammo.shell" ? "#ad5145" : "#b8a16c") : /lid/.test(part) ? "#777b62" : "#494f3d";
@@ -18,13 +22,15 @@ export function colorEquipmentPart(mesh: Mesh, itemId: string): void {
   else if (itemId.startsWith("armor.")) color = /plate|pouch/.test(part) ? "#626451" : "#343e36";
   else if (itemId.startsWith("helmet.")) color = /visor|rim/.test(part) ? "#303c3e" : "#727661";
   else if (itemId === "grenade.frag") color = /fuse|lever/.test(part) ? "#9c9f94" : "#4e5940";
+  if (/latch|zipper|buckle|pin/.test(part)) color = "#a1a6a1";
+  if (/seam|recess|rail|strap|guard/.test(part)) color = "#303931";
   const rgb = Color3.FromHexString(color);
   const colors = new Float32Array(mesh.getTotalVertices() * 4);
   for (let i = 0; i < colors.length; i += 4) colors.set([rgb.r, rgb.g, rgb.b, 1], i);
   mesh.setVerticesData(VertexBuffer.ColorKind, colors);
 }
 
-function chamferBox(mesh: Mesh, width: number, height: number, depth: number): void {
+export function chamferBox(mesh: Mesh, width: number, height: number, depth: number): void {
   const b = Math.min(width, height, depth) * 0.12;
   const x = width / 2, y = height / 2, z = depth / 2;
   const ring = (inset: number, at: number): number[][] => [

@@ -327,6 +327,31 @@ async function main(): Promise<void> {
       textures: window.__texturePerformance,
       fpsText: document.querySelector('[data-hud="performance"]')?.textContent ?? ""
     })`);
+    // 帧数组已按值取回；此后的只读场景扫描不进入既有 FPS／长帧窗口。
+    const sceneMetrics = textureMetrics ? await evaluate<Record<string, number>>(client, `(async () => {
+      const urls = [...new Set(performance.getEntriesByType("resource").map(entry => entry.name)
+        .filter(url => /\\/engineStore-[^/]+\\.js(?:\\?.*)?$/.test(url)))];
+      if (urls.length !== 1) throw new Error("Expected one loaded production EngineStore module");
+      const module = await import(urls[0]);
+      const stores = Object.values(module).filter(value => typeof value === "function" && "LastCreatedScene" in value);
+      if (stores.length !== 1) throw new Error("Production EngineStore export missing");
+      const scene = stores[0].LastCreatedScene;
+      if (!scene || scene.isDisposed || !scene.activeCamera) throw new Error("Active production scene missing");
+      const actorRoots = scene.transformNodes.filter(node => node.metadata?.actorId && node.metadata?.actorKind);
+      const models = scene.transformNodes.filter(node => node.metadata?.modelLod === "base" &&
+        String(node.metadata?.visualModel).startsWith("model.character."));
+      if (actorRoots.length < 2 || models.length !== actorRoots.length - 1 ||
+        models.some(node => !node.getChildMeshes(false).some(mesh => mesh.getTotalVertices() > 0))) {
+        throw new Error("Production character GLB coverage incomplete");
+      }
+      return {
+        sceneMeshes: scene.meshes.length,
+        sceneMaterials: scene.materials.length,
+        sceneGeometries: scene.geometries.length,
+        sceneVertices: scene.meshes.reduce((total, mesh) => total + mesh.getTotalVertices(), 0),
+        sceneIndices: scene.meshes.reduce((total, mesh) => total + mesh.getTotalIndices(), 0)
+      };
+    })()`) : {};
     await client.send("HeapProfiler.collectGarbage");
     const metrics = await client.send<{
       metrics: Array<{ name: string; value: number }>;
@@ -368,6 +393,7 @@ async function main(): Promise<void> {
       jsHeapUsedBytes: metric("JSHeapUsedSize"),
       nodes: metric("Nodes"),
       ...(textureMetrics ? {
+        ...sceneMetrics,
         gpuTexturesCreated: browser.textures?.created,
         gpuTexturesDeleted: browser.textures?.deleted,
         gpuTexturesLive: browser.textures ? browser.textures.created - browser.textures.deleted : undefined,

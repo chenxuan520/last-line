@@ -119,6 +119,8 @@ describe("IslandScene lifecycle", () => {
     const walls = baseline.scene.meshes.filter((mesh) => mesh.name.startsWith("building-walls-"))
       .map((mesh) => ({ name: mesh.name, positions: mesh.getVerticesData("position"), indices: mesh.getIndices() }));
     const meshCount = baseline.scene.meshes.length - baseline.viewWeaponRoot.getChildMeshes(false).length;
+    const trunks = baseline.scene.meshes.filter((mesh) => mesh instanceof InstancedMesh && mesh.sourceMesh.name === "tree-trunk-template")
+      .map((mesh) => ({ name: mesh.name, position: mesh.position.asArray(), scaling: mesh.scaling.asArray() }));
     expect(baseline.scene.textures.some((texture) => texture.name === "ultra-town-static-shadows")).toBe(false);
     baseline.scene.dispose();
     const ultra = await createIslandScene(engine, assets, state.actors, state.groundLoot, state.mapSeed, true, "player", "ultra", "town");
@@ -129,6 +131,17 @@ describe("IslandScene lifecycle", () => {
       expect(mesh.receiveShadows).toBe(true);
     }
     expect(ultra.scene.meshes.length - ultra.viewWeaponRoot.getChildMeshes(false).length).toBe(meshCount + 4);
+    for (const trunk of trunks) {
+      const mesh = ultra.scene.getMeshByName(trunk.name)!;
+      expect(mesh.position.asArray()).toEqual(trunk.position);
+      expect(mesh.scaling.asArray()).toEqual(trunk.scaling);
+    }
+    const crown = ultra.scene.getMeshByName("tree-foliage-template")!;
+    expect(crown.getTotalVertices()).toBeGreaterThan(800);
+    expect((crown.material as StandardMaterial).needAlphaTesting()).toBe(true);
+    expect((crown.material as StandardMaterial).needAlphaBlending()).toBe(false);
+    expect(ultra.scene.textures.filter((texture) => texture.name === "ultra-tree-needles")).toHaveLength(1);
+    expect(ultra.scene.textures.filter((texture) => texture.name === "ultra-tree-bark")).toHaveLength(1);
     const viewParts = ultra.viewWeaponRoot.getChildMeshes(false);
     expect(viewParts.length).toBeLessThan(20);
     for (const weaponId of ["rifle", "smg", "shotgun", "sniper", "grenade.frag"]) {
@@ -1016,6 +1029,50 @@ describe("IslandScene lifecycle", () => {
     bundle.scene.dispose();
     engine.dispose();
   }, 30_000);
+
+  it("shares detailed ultra character geometry while preserving equipment, LOD and authoritative state", async () => {
+    const assets = createProductionGlbAssets();
+    const state = createBattleRoyaleState("player", {
+      participantCount: 4,
+      flightSeconds: 1,
+      safeZoneStages: [{ waitSeconds: 1, shrinkSeconds: 1, radius: 100, damagePerSecond: 1 }],
+    }, () => .5, { mapId: "town" });
+    state.actors["bot-3"]!.kind = "player";
+    for (const actor of Object.values(state.actors)) actor.deployment = "grounded";
+    const before = JSON.stringify(state);
+    const engine = new NullEngine();
+    const bundle = await createIslandScene(engine, assets, state.actors, state.groundLoot, state.mapSeed, true, "player", "ultra", "town");
+    const first = bundle.actorRoots.get("bot-1")!;
+    const body = bundle.scene.getMeshByName("bot-1-base-character-merged-uniform")!;
+    const sibling = bundle.scene.getMeshByName("bot-2-base-character-merged-uniform")!;
+    expect((body as Mesh | InstancedMesh).geometry).toBe((sibling as Mesh | InstancedMesh).geometry);
+    expect(body.getTotalVertices()).toBeGreaterThan(400);
+    expect(bundle.scene.getMeshByName("bot-3-base-character-merged-uniform")!.getTotalVertices()).toBe(body.getTotalVertices());
+    const detailed = first.getChildMeshes(false).filter((mesh) => mesh.name.includes("base-character-merged"));
+    expect(detailed).toHaveLength(8);
+    expect(detailed.every((mesh) => !mesh.isPickable && !mesh.checkCollisions)).toBe(true);
+    expect(detailed.every((mesh) => mesh.getVerticesData("position")!.every(Number.isFinite))).toBe(true);
+    expect(first.getChildMeshes(false).filter((mesh) => mesh.metadata?.actorVisual === "high-detail-gear").every((mesh) => !mesh.isEnabled(false))).toBe(true);
+    for (const level of [0, 1, 2, 0] as const) {
+      setActorEquipmentVisual(first, level, level);
+      expect(detailed.filter((mesh) => mesh.metadata?.actorVisual === "vest" || mesh.metadata?.actorVisual === "helmet")
+        .every((mesh) => mesh.isEnabled(false) === (level > 0))).toBe(true);
+      expect(body.isEnabled(false)).toBe(true);
+    }
+    bundle.camera.position.copyFrom(first.position);
+    bundle.scene.render();
+    expect(bundle.scene.getTransformNodeByName("bot-1-character-base")!.isEnabled(false)).toBe(true);
+    bundle.camera.position.x += QUALITY_PROFILES.ultra.modelLodDistance + 20;
+    bundle.scene.render();
+    expect(bundle.scene.getTransformNodeByName("bot-1-character-base")!.isEnabled(false)).toBe(false);
+    expect(bundle.scene.getTransformNodeByName("bot-1-character-lod1")!.isEnabled(false)).toBe(true);
+    expect(bundle.scene.textures.filter((texture) => texture.name === "ultra-character-fabric")).toHaveLength(1);
+    expect(JSON.stringify(state)).toBe(before);
+    bundle.scene.dispose();
+    expect(bundle.scene.textures).toHaveLength(0);
+    expect(bundle.scene.onBeforeRenderObservable.hasObservers()).toBe(false);
+    engine.dispose();
+  }, 60_000);
 
   it("keeps a medium production 50-actor scene within resource budgets", async () => {
     const assets = createProductionGlbAssets();

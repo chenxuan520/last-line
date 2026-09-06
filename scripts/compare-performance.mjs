@@ -131,6 +131,11 @@ const lowerIsBetter = new Set([
   "gpuTexturesCreated",
   "gpuTexturesDeleted",
   "gpuTexturesLive",
+  "sceneMeshes",
+  "sceneMaterials",
+  "sceneGeometries",
+  "sceneVertices",
+  "sceneIndices",
 ]);
 const higherIsBetter = new Set(["startupFps", "stableFps"]);
 const observationalMetrics = new Set([
@@ -191,7 +196,8 @@ const requiredSections = {
 
 const ultraSections = {
   "town-ultra": runtimeMetrics,
-  "browser-ultra": [...browserMetrics, "gpuTexturesCreated", "gpuTexturesDeleted", "gpuTexturesLive"],
+  "browser-ultra": [...browserMetrics, "gpuTexturesCreated", "gpuTexturesDeleted", "gpuTexturesLive",
+    "sceneMeshes", "sceneMaterials", "sceneGeometries", "sceneVertices", "sceneIndices"],
 };
 
 export function validatePerformanceMetrics(label, sections, includeUltra = false) {
