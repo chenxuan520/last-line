@@ -48,8 +48,8 @@ function lastJsonLine(output) {
   return JSON.parse(line);
 }
 
-async function captureRuntime(repository, mapId, seed, quality) {
-  return lastJsonLine(await run(
+async function captureRuntime(repository, mapId, seed, quality, probeQuality = false) {
+  const sample = lastJsonLine(await run(
     process.execPath,
     [
       "--expose-gc",
@@ -59,13 +59,18 @@ async function captureRuntime(repository, mapId, seed, quality) {
       "--map", mapId,
       "--seed", String(seed),
       "--quality", quality,
+      "--probe-quality", String(probeQuality),
     ],
     { cwd: projectRoot },
   ));
+  if (probeQuality) {
+    if (typeof sample.supported !== "boolean") throw new Error("Invalid quality capability response");
+  } else validatePerformanceSample(`${mapId}-${quality}`, sample, runtimeMetrics);
+  return sample;
 }
 
-async function captureBrowser(repository, mapId, seed, quality) {
-  return lastJsonLine(await run(
+async function captureBrowser(repository, mapId, seed, quality, textureMetrics = false) {
+  const sample = lastJsonLine(await run(
     process.execPath,
     [
       path.join(projectRoot, "node_modules/tsx/dist/cli.mjs"),
@@ -74,9 +79,12 @@ async function captureBrowser(repository, mapId, seed, quality) {
       "--map", mapId,
       "--seed", String(seed),
       "--quality", quality,
+      "--texture-metrics", String(textureMetrics),
     ],
     { cwd: projectRoot },
   ));
+  validatePerformanceSample(`browser-${quality}`, sample, textureMetrics ? ultraSections["browser-ultra"] : browserMetrics);
+  return sample;
 }
 
 function median(values) {
@@ -120,6 +128,9 @@ const lowerIsBetter = new Set([
   "stableLongFrames100",
   "jsHeapUsedBytes",
   "nodes",
+  "gpuTexturesCreated",
+  "gpuTexturesDeleted",
+  "gpuTexturesLive",
 ]);
 const higherIsBetter = new Set(["startupFps", "stableFps"]);
 const observationalMetrics = new Set([
@@ -178,34 +189,35 @@ const requiredSections = {
   browser: browserMetrics,
 };
 
-export function validatePerformanceMetrics(label, sections) {
+const ultraSections = {
+  "town-ultra": runtimeMetrics,
+  "browser-ultra": [...browserMetrics, "gpuTexturesCreated", "gpuTexturesDeleted", "gpuTexturesLive"],
+};
+
+export function validatePerformanceMetrics(label, sections, includeUltra = false) {
+  const expected = includeUltra ? { ...requiredSections, ...ultraSections } : requiredSections;
   const sectionNames = Object.keys(sections).sort();
-  const expectedSections = Object.keys(requiredSections).sort();
+  const expectedSections = Object.keys(expected).sort();
   if (JSON.stringify(sectionNames) !== JSON.stringify(expectedSections)) {
     throw new Error(
       `${label} performance sections mismatch: expected ${expectedSections.join(", ")}, got ${sectionNames.join(", ")}`,
     );
   }
-  for (const [section, requiredMetrics] of Object.entries(requiredSections)) {
-    const metrics = sections[section];
-    if (!metrics || typeof metrics !== "object") {
-      throw new Error(`${label} performance section missing: ${section}`);
-    }
-    const actualMetrics = Object.keys(metrics)
-      .filter((metric) => !informational.has(metric))
-      .sort();
-    const expectedMetrics = [...requiredMetrics].sort();
-    if (JSON.stringify(actualMetrics) !== JSON.stringify(expectedMetrics)) {
-      throw new Error(
-        `${label} ${section} metrics mismatch: expected ${expectedMetrics.join(", ")}, got ${actualMetrics.join(", ")}`,
-      );
-    }
-    for (const metric of requiredMetrics) {
-      const value = metrics[metric];
-      if (typeof value !== "number" || !Number.isFinite(value)) {
-        throw new Error(`${label} ${section}.${metric} must be finite`);
-      }
-    }
+  for (const [section, requiredMetrics] of Object.entries(expected)) {
+    validatePerformanceSample(`${label} ${section}`, sections[section], requiredMetrics);
+  }
+}
+
+export function validatePerformanceSample(label, metrics, requiredMetrics) {
+  if (!metrics || typeof metrics !== "object") throw new Error(`${label} performance section missing`);
+  const actualMetrics = Object.keys(metrics).filter((metric) => !informational.has(metric)).sort();
+  const expectedMetrics = [...requiredMetrics].sort();
+  if (JSON.stringify(actualMetrics) !== JSON.stringify(expectedMetrics)) {
+    throw new Error(`${label} metrics mismatch: expected ${expectedMetrics.join(", ")}, got ${actualMetrics.join(", ")}`);
+  }
+  for (const metric of requiredMetrics) {
+    const value = metrics[metric];
+    if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`${label}.${metric} must be finite`);
   }
 }
 
@@ -241,6 +253,24 @@ export function comparePerformanceSection(
   return comparisons;
 }
 
+export function compareCollectedPerformance(baseline, candidate, baselineSupportsUltra) {
+  validatePerformanceMetrics("main", baseline, true);
+  validatePerformanceMetrics("head", candidate, true);
+  return Object.keys(baseline).flatMap((section) =>
+    comparePerformanceSection(section, baseline[section], candidate[section]).map((row) =>
+      !baselineSupportsUltra && Object.hasOwn(ultraSections, section)
+        ? { ...row, referenceQuality: "high", gated: false, passed: true }
+        : row
+    )
+  );
+}
+
+export function ultraBaselineQuality(baselineSupported, candidateSupported) {
+  if (candidateSupported !== true) throw new Error("HEAD must support ultra quality");
+  if (typeof baselineSupported !== "boolean") throw new Error("Invalid baseline quality capability");
+  return baselineSupported ? "ultra" : "high";
+}
+
 export function markdownReport(report) {
   const lines = [
     "# Runtime Performance Comparison",
@@ -256,8 +286,11 @@ export function markdownReport(report) {
       : "infinite";
     const result = row.gated ? (row.passed ? "PASS" : "FAIL") : "INFO";
     lines.push(
-      `| ${row.section} | ${row.metric} | ${row.baseline.toFixed(2)} | ${row.candidate.toFixed(2)} | ${degradation} | ${result} |`,
+      `| ${row.section}${row.referenceQuality ? " (main high reference)" : ""} | ${row.metric} | ${row.baseline.toFixed(2)} | ${row.candidate.toFixed(2)} | ${degradation} | ${result} |`,
     );
+  }
+  if (report.ultraBaselineQuality === "high") {
+    lines.push("", "main has no ultra profile. New ultra rows compare against a high-quality reference for INFO only; existing gates remain active. Once main supports ultra, the same-quality 15% gate applies automatically.");
   }
   lines.push("", report.passed ? "**PASS**" : "**FAIL**");
   return `${lines.join("\n")}\n`;
@@ -268,16 +301,19 @@ async function captureRepository(repository, rounds) {
     { mapId: "island", seed: 7, quality: "high" },
     { mapId: "town", seed: 7, quality: "high" },
     { mapId: "mixed", seed: 395, quality: "high" },
+    { mapId: "town", seed: 7, quality: "ultra" },
   ];
   for (const scenario of scenarios) {
     await captureRuntime(repository, scenario.mapId, scenario.seed, scenario.quality);
   }
   await captureBrowser(repository, "town", 7, "high");
+  await captureBrowser(repository, "town", 7, "ultra", true);
   const samples = Object.fromEntries(scenarios.map((scenario) => [
     `${scenario.mapId}-${scenario.quality}`,
     [],
   ]));
   samples.browser = [];
+  samples["browser-ultra"] = [];
   for (let round = 0; round < rounds; round += 1) {
     for (const scenario of scenarios) {
       samples[`${scenario.mapId}-${scenario.quality}`].push(await captureRuntime(
@@ -288,15 +324,21 @@ async function captureRepository(repository, rounds) {
       ));
     }
     samples.browser.push(await captureBrowser(repository, "town", 7, "high"));
+    samples["browser-ultra"].push(await captureBrowser(repository, "town", 7, "ultra", true));
   }
   return Object.fromEntries(Object.entries(samples).map(([key, values]) => [key, aggregate(values)]));
 }
 
 async function main() {
   const args = parseArguments();
+  const candidateCapability = await captureRuntime(args.candidate, "town", 7, "ultra", true);
+  const baselineCapability = args.mode === "baseline"
+    ? candidateCapability
+    : await captureRuntime(args.baseline, "town", 7, "ultra", true);
+  const baselineQuality = ultraBaselineQuality(baselineCapability.supported, candidateCapability.supported);
   if (args.mode === "baseline") {
     const metrics = await captureRepository(args.candidate, args.rounds);
-    validatePerformanceMetrics("main", metrics);
+    validatePerformanceMetrics("main", metrics, true);
     const report = {
       mode: "baseline",
       rounds: args.rounds,
@@ -325,6 +367,7 @@ async function main() {
     { mapId: "island", seed: 7, quality: "high" },
     { mapId: "town", seed: 7, quality: "high" },
     { mapId: "mixed", seed: 395, quality: "high" },
+    { mapId: "town", seed: 7, quality: "ultra" },
   ];
   const samples = { baseline: {}, candidate: {} };
   for (const scenario of scenarios) {
@@ -334,6 +377,8 @@ async function main() {
   }
   samples.baseline.browser = [];
   samples.candidate.browser = [];
+  samples.baseline["browser-ultra"] = [];
+  samples.candidate["browser-ultra"] = [];
 
   for (const [label, repository] of [[
     "baseline",
@@ -343,9 +388,11 @@ async function main() {
     args.candidate,
   ]]) {
     for (const scenario of scenarios) {
-      await captureRuntime(repository, scenario.mapId, scenario.seed, scenario.quality);
+      const quality = label === "baseline" && scenario.quality === "ultra" ? baselineQuality : scenario.quality;
+      await captureRuntime(repository, scenario.mapId, scenario.seed, quality);
     }
     await captureBrowser(repository, "town", 7, "high");
+    await captureBrowser(repository, "town", 7, label === "baseline" ? baselineQuality : "ultra", true);
     console.log(`Performance warm-up complete: ${label}`);
   }
 
@@ -356,14 +403,18 @@ async function main() {
     for (const [label, repository] of order) {
       for (const scenario of scenarios) {
         const key = `${scenario.mapId}-${scenario.quality}`;
+        const quality = label === "baseline" && scenario.quality === "ultra" ? baselineQuality : scenario.quality;
         samples[label][key].push(await captureRuntime(
           repository,
           scenario.mapId,
           scenario.seed,
-          scenario.quality,
+          quality,
         ));
       }
       samples[label].browser.push(await captureBrowser(repository, "town", 7, "high"));
+      samples[label]["browser-ultra"].push(await captureBrowser(
+        repository, "town", 7, label === "baseline" ? baselineQuality : "ultra", true,
+      ));
     }
   }
 
@@ -373,13 +424,10 @@ async function main() {
     baseline[key] = aggregate(samples.baseline[key]);
     candidate[key] = aggregate(samples.candidate[key]);
   }
-  validatePerformanceMetrics("main", baseline);
-  validatePerformanceMetrics("head", candidate);
-  const comparisons = Object.keys(baseline).flatMap((key) =>
-    comparePerformanceSection(key, baseline[key], candidate[key])
-  );
+  const comparisons = compareCollectedPerformance(baseline, candidate, baselineQuality === "ultra");
   const report = {
     threshold: PERFORMANCE_REGRESSION_THRESHOLD,
+    ultraBaselineQuality: baselineQuality,
     rounds: args.rounds,
     baseline,
     candidate,

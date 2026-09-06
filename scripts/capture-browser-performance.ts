@@ -8,9 +8,10 @@ import WebSocket from "ws";
 
 interface Arguments {
   repository: string;
+  textureMetrics: boolean;
   mapId: "island" | "town" | "mixed";
   seed: number;
-  quality: "low" | "medium" | "high";
+  quality: "low" | "medium" | "high" | "ultra";
 }
 
 function parseArguments(): Arguments {
@@ -28,13 +29,13 @@ function parseArguments(): Arguments {
   if (!repository || !mapId || !["island", "town", "mixed"].includes(mapId)) {
     throw new Error("Expected --repository and --map island|town|mixed");
   }
-  if (!quality || !["low", "medium", "high"].includes(quality)) {
-    throw new Error("Expected --quality low|medium|high");
+  if (!quality || !["low", "medium", "high", "ultra"].includes(quality)) {
+    throw new Error("Expected --quality low|medium|high|ultra");
   }
   if (!Number.isInteger(seed) || seed < 0 || seed > 0xffff_ffff) {
     throw new Error("Expected --seed uint32");
   }
-  return { repository, mapId, seed, quality };
+  return { repository, mapId, seed, quality, textureMetrics: values.get("texture-metrics") === "true" };
 }
 
 function mimeType(filePath: string): string {
@@ -207,7 +208,7 @@ function percentile(values: readonly number[], fraction: number): number {
 }
 
 async function main(): Promise<void> {
-  const { repository, mapId, seed, quality } = parseArguments();
+  const { repository, mapId, seed, quality, textureMetrics } = parseArguments();
   const { server, url } = await startServer(repository);
   const profileDirectory = await mkdtemp(path.join(tmpdir(), "last-line-performance-chrome-"));
   let chrome: ChildProcess | null = null;
@@ -258,6 +259,27 @@ async function main(): Promise<void> {
       30_000,
     );
     await evaluate(client, `(() => {
+      if (document.querySelector('[data-setting="quality"]')?.value !== ${JSON.stringify(quality)}) {
+        throw new Error("Requested quality was not selected");
+      }
+      if (${textureMetrics}) {
+        const probe = window.__texturePerformance = { created: 0, deleted: 0 };
+        const live = new WeakSet();
+        for (const Context of [window.WebGLRenderingContext, window.WebGL2RenderingContext]) {
+          if (!Context) continue;
+          const create = Context.prototype.createTexture;
+          const remove = Context.prototype.deleteTexture;
+          Context.prototype.createTexture = function() {
+            const texture = create.call(this);
+            if (texture && !live.has(texture)) { live.add(texture); probe.created += 1; }
+            return texture;
+          };
+          Context.prototype.deleteTexture = function(texture) {
+            remove.call(this, texture);
+            if (texture && live.delete(texture)) probe.deleted += 1;
+          };
+        }
+      }
       let first = true;
       let value = (${seed} ^ 0x9e3779b9) >>> 0;
       Math.random = () => {
@@ -280,7 +302,7 @@ async function main(): Promise<void> {
       requestAnimationFrame(frame);
       document.querySelector('[data-action="start"]').click();
     })()`);
-    const hudAt = await waitFor<number | null>(
+    const hudAt = await waitFor<number>(
       client,
       `(() => {
         if (document.querySelector('[data-hud="performance"]')) {
@@ -297,10 +319,12 @@ async function main(): Promise<void> {
       hudAt: number;
       frames: number[];
       fpsText: string;
+      textures?: { created: number; deleted: number };
     }>(client, `({
       clickStarted: window.__runtimePerformance.clickStarted,
       hudAt: window.__runtimePerformance.hudAt,
       frames: window.__runtimePerformance.frames,
+      textures: window.__texturePerformance,
       fpsText: document.querySelector('[data-hud="performance"]')?.textContent ?? ""
     })`);
     await client.send("HeapProfiler.collectGarbage");
@@ -343,6 +367,11 @@ async function main(): Promise<void> {
       stableLongFrames100: stableFrameDeltas.filter((delta) => delta > 100).length,
       jsHeapUsedBytes: metric("JSHeapUsedSize"),
       nodes: metric("Nodes"),
+      ...(textureMetrics ? {
+        gpuTexturesCreated: browser.textures?.created,
+        gpuTexturesDeleted: browser.textures?.deleted,
+        gpuTexturesLive: browser.textures ? browser.textures.created - browser.textures.deleted : undefined,
+      } : {}),
     }));
   } finally {
     socket?.close();
