@@ -1,6 +1,6 @@
 import { DEFAULT_MAP_ID, type MapId } from "./maps";
 
-export type QualityLevel = "low" | "medium" | "high";
+export type QualityLevel = "low" | "medium" | "high" | "ultra";
 
 export interface QualityProfile {
   hardwareScalingLevel: number;
@@ -52,6 +52,15 @@ export const QUALITY_PROFILES: Readonly<Record<QualityLevel, QualityProfile>> = 
     modelLodDistance: 50,
   },
   high: {
+    hardwareScalingLevel: 1,
+    maxFps: 120,
+    foliageTessellation: 7,
+    decorativeRockCount: 96,
+    mountainRockCount: 48,
+    shrubCount: 180,
+    modelLodDistance: 65,
+  },
+  ultra: {
     hardwareScalingLevel: 1,
     maxFps: 120,
     foliageTessellation: 7,

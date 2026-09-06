@@ -1,5 +1,6 @@
 import { NullEngine } from "@babylonjs/core/Engines/nullEngine";
 import { Scene } from "@babylonjs/core/scene";
+import type { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
 import { BackgroundMaterial } from "@babylonjs/core/Materials/Background/backgroundMaterial";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { MultiMaterial } from "@babylonjs/core/Materials/multiMaterial";
@@ -108,6 +109,90 @@ describe("IslandScene lifecycle", () => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
+
+  it("isolates ultra town surfaces and cached shadows without changing authoritative geometry", async () => {
+    const engine = new NullEngine();
+    const assets = createAssets();
+    const state = createBattleRoyaleState("player", undefined, () => 0, { mapId: "town" });
+    const before = JSON.stringify(state);
+    const baseline = await createIslandScene(engine, assets, state.actors, state.groundLoot, state.mapSeed, true, "player", "high", "town");
+    const walls = baseline.scene.meshes.filter((mesh) => mesh.name.startsWith("building-walls-"))
+      .map((mesh) => ({ name: mesh.name, positions: mesh.getVerticesData("position"), indices: mesh.getIndices() }));
+    const meshCount = baseline.scene.meshes.length - baseline.viewWeaponRoot.getChildMeshes(false).length;
+    expect(baseline.scene.textures.some((texture) => texture.name === "ultra-town-static-shadows")).toBe(false);
+    baseline.scene.dispose();
+    const ultra = await createIslandScene(engine, assets, state.actors, state.groundLoot, state.mapSeed, true, "player", "ultra", "town");
+    for (const wall of walls) {
+      const mesh = ultra.scene.getMeshByName(wall.name)!;
+      expect(mesh.getVerticesData("position")).toEqual(wall.positions);
+      expect(mesh.getIndices()).toEqual(wall.indices);
+      expect(mesh.receiveShadows).toBe(true);
+    }
+    expect(ultra.scene.meshes.length - ultra.viewWeaponRoot.getChildMeshes(false).length).toBe(meshCount + 4);
+    const viewParts = ultra.viewWeaponRoot.getChildMeshes(false);
+    expect(viewParts.length).toBeLessThan(20);
+    for (const weaponId of ["rifle", "smg", "shotgun", "sniper", "grenade.frag"]) {
+      const parts = viewParts.filter((mesh) => mesh.metadata?.weaponId === weaponId);
+      expect(parts.length).toBeGreaterThan(0);
+      expect(parts.every((mesh) => !mesh.isPickable && !mesh.isEnabled(false))).toBe(true);
+      expect(parts.every((mesh) => mesh.getVerticesData("position")?.every(Number.isFinite))).toBe(true);
+    }
+    for (const weaponId of ["rifle", "smg", "shotgun", "sniper", "grenade.frag", null]) {
+      setActorWeaponVisual(ultra.viewWeaponRoot, weaponId);
+      expect(viewParts.every((mesh) => mesh.isEnabled(false) === (mesh.metadata?.weaponId === weaponId))).toBe(true);
+    }
+    const steelReceiver = ultra.scene.getMeshByName("ultra-view-rifle-ultra-equipment-steel")!;
+    expect(steelReceiver.getVerticesData("normal")![2]).toBe(-1);
+    const rifle = Object.values(state.groundLoot).find((loot) => loot.itemId === "weapon.rifle")!;
+    const marker = ultra.lootMeshes.get(rifle.id)!;
+    expect(marker.getVerticesData("color")?.length).toBe(marker.getTotalVertices() * 4);
+    const originalGeometry = marker.geometry;
+    const originalSource = rifle.source;
+    rifle.itemId = "medkit";
+    rifle.source = "death";
+    ultra.syncLootMeshes(state.groundLoot);
+    expect(ultra.lootMeshes.get(rifle.id)).toBe(marker);
+    expect(marker.geometry).not.toBe(originalGeometry);
+    expect(marker.geometry).toBe(ultra.scene.getMeshByName("loot-model-template-medkit")?.geometry);
+    expect(marker.getVerticesData("color")?.length).toBe(marker.getTotalVertices() * 4);
+    const deathMaterial = marker.material;
+    ultra.syncLootMeshes(state.groundLoot);
+    expect(marker.material).toBe(deathMaterial);
+    rifle.itemId = "weapon.rifle";
+    if (originalSource === undefined) delete rifle.source;
+    else rifle.source = originalSource;
+    ultra.syncLootMeshes(state.groundLoot);
+    expect(marker.geometry).toBe(originalGeometry);
+    expect(ultra.scene.getMeshByName("island-ground")?.receiveShadows).toBe(true);
+    const details = ultra.scene.meshes.filter((mesh) => mesh.metadata?.decoration === "ultra-town-detail");
+    expect(details).toHaveLength(4);
+    expect(details.every((mesh) => !mesh.isPickable && !mesh.checkCollisions)).toBe(true);
+    expect(ultra.scene.getMaterialByName("hospital-surface-material")).toMatchObject({ diffuseColor: Color3.White(), diffuseTexture: null });
+    const sun = ultra.scene.getLightByName("island-sun") as DirectionalLight;
+    const shadowMap = sun.getShadowGenerator()!.getShadowMap()!;
+    expect(shadowMap.getSize()).toEqual({ width: 2048, height: 2048 });
+    expect(shadowMap.refreshRate).toBe(0);
+    expect(shadowMap.renderList?.some((mesh) => mesh.name === "building-walls-texture-building-brick-masonry")).toBe(true);
+    expect(shadowMap.renderList?.every((mesh) => !mesh.metadata?.actorId && mesh.metadata?.decoration !== "ultra-town-detail")).toBe(true);
+    const reset = vi.spyOn(shadowMap, "resetRefreshCounter");
+    ultra.camera.getViewMatrix(true);
+    ultra.scene.onBeforeRenderObservable.notifyObservers(ultra.scene);
+    ultra.scene.onBeforeRenderObservable.notifyObservers(ultra.scene);
+    expect(reset).toHaveBeenCalledTimes(1);
+    const sunPosition = sun.position.clone();
+    ultra.camera.position.x += 16;
+    ultra.camera.getViewMatrix(true);
+    ultra.scene.onBeforeRenderObservable.notifyObservers(ultra.scene);
+    expect(reset).toHaveBeenCalledTimes(2);
+    expect(sun.position.x - sunPosition.x).toBe(16);
+    expect(JSON.stringify(state)).toBe(before);
+    ultra.scene.dispose();
+    expect(engine.scenes).toHaveLength(0);
+    expect(ultra.scene.textures).toHaveLength(0);
+    expect(shadowMap.getInternalTexture()).toBeNull();
+    expect(ultra.scene.onBeforeRenderObservable.hasObservers()).toBe(false);
+    engine.dispose();
+  }, 60_000);
 
   it("releases scenes and loot marker references across restarts", async () => {
     const engine = new NullEngine();

@@ -52,9 +52,11 @@ describe("GameHud actions", () => {
     expect(leaderboardScrollPixels(-1, 2, 400)).toBe(-400);
   });
 
-  it("adds the high-quality HUD layer only for high quality", () => {
+  it("adds the high-quality HUD layer for high and ultra quality", () => {
     expect(hudRootClassName(false, "high")).toBe("is-playing is-high-quality-hud");
     expect(hudRootClassName(true, "high")).toBe("is-playing is-touch-input is-high-quality-hud");
+    expect(hudRootClassName(false, "ultra")).toBe("is-playing is-high-quality-hud");
+    expect(hudRootClassName(true, "ultra")).toBe("is-playing is-touch-input is-high-quality-hud");
     expect(hudRootClassName(false, "medium")).toBe("is-playing");
     expect(hudRootClassName(true, "low")).toBe("is-playing is-touch-input");
   });

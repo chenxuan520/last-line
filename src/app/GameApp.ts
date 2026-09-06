@@ -159,7 +159,7 @@ export class GameApp {
         <p class="menu-description">穿越随机航线空降${MAP_DISPLAY_NAMES[this.settings.mapId]}，搜集武器和补给，在不断收缩的安全区内成为最后一名幸存者。</p>
         <div class="settings-grid" aria-label="游戏设置">
           <label>地图选择<select name="map-id" data-setting="map-id"><option value="island">${MAP_DISPLAY_NAMES.island}</option><option value="town">${MAP_DISPLAY_NAMES.town}</option><option value="mixed">${MAP_DISPLAY_NAMES.mixed}</option></select></label>
-          <label>画面质量<select name="quality" data-setting="quality"><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></label>
+          <label>画面质量<select name="quality" data-setting="quality"><option value="low">低</option><option value="medium">中</option><option value="high">高</option><option value="ultra">极高 · 灰炉城试做</option></select></label>
           <label class="volume-setting"><span>主音量 <output data-volume-output></output></span><input aria-label="主音量" data-setting="volume" type="range" min="0" max="1" step="0.1" value="${this.settings.volume}" /></label>
           <label class="sensitivity-setting"><span>视角灵敏度 <output data-sensitivity-output></output></span><input data-setting="sensitivity" type="range" min="0.4" max="2" step="0.1" value="${this.settings.sensitivity}" /></label>
           <label class="starter-setting"><span>初始补给</span><span class="starter-option"><input data-setting="start-with-bandage" type="checkbox" ${this.settings.startWithBandage ? "checked" : ""} /><i></i><b>携带 1 条绷带</b></span></label>
@@ -875,7 +875,7 @@ function loadSettings(): GameSettings {
 }
 
 function isQuality(value: unknown): value is QualityLevel {
-  return value === "low" || value === "medium" || value === "high";
+  return value === "low" || value === "medium" || value === "high" || value === "ultra";
 }
 
 function normalizeVolume(value: number): number {

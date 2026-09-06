@@ -756,7 +756,7 @@ export function hudRootClassName(touchInput: boolean, quality?: QualityLevel): s
   return [
     "is-playing",
     touchInput ? "is-touch-input" : "",
-    quality === "high" ? "is-high-quality-hud" : "",
+    quality === "high" || quality === "ultra" ? "is-high-quality-hud" : "",
   ].filter(Boolean).join(" ");
 }
 

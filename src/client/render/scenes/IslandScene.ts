@@ -211,7 +211,7 @@ export async function createIslandScene(
   }
   const layout = createMapLayout(mapId, mapSeed);
 
-  const highPresentation = quality === "high";
+  const highPresentation = quality === "high" || quality === "ultra";
   const scene = new Scene(engine);
   scene.collisionsEnabled = true;
   scene.skipPointerMovePicking = true;
@@ -269,14 +269,20 @@ export async function createIslandScene(
     );
   }
 
+  const ultraPresentation = quality === "ultra" && mapId === "town"
+    ? await import("../UltraTownPresentation")
+    : undefined;
   const { lootMeshes, syncLootMeshes } = createLootMeshes(
     scene,
     groundLoot,
     materials.loot,
     materials.deathLoot,
     showGroundLootModels,
+    ultraPresentation?.colorEquipmentPart,
   );
   const { mesh: safeZoneRing, sync: syncSafeZoneRing } = createSafeZoneRing(scene, materials.safeZone, layout);
+
+  ultraPresentation?.enhanceTownPresentation(scene, assets, sun, ambient, layout);
 
   return {
     scene,
@@ -967,7 +973,7 @@ function createIslandEnvironment(
 
   createBuildingDetails(scene, materials, layout, buildingTextureAssignments);
   createRooftopRailings(scene, materials, layout);
-  if (qualityLevel === "high") {
+  if (qualityLevel === "high" || qualityLevel === "ultra") {
     createIslandHighQualityDetails(scene, materials, layout);
     createTownRoadDetails(scene, materials, layout);
     createTownFacadeDetail(scene, materials, layout);
@@ -3337,22 +3343,22 @@ function groundLootModelScale(modelId: string): number {
   return ITEMS[modelId]?.kind === "weapon" ? GROUND_LOOT_WEAPON_MODEL_SCALE : GROUND_LOOT_MODEL_SCALE;
 }
 
-function createLootModelMaterial(scene: Scene, itemId: string, death = false): StandardMaterial {
-  const color = Color3.FromHexString(death ? "#c85e50" : GROUND_LOOT_SPAWN_COLOR);
+function createLootModelMaterial(scene: Scene, itemId: string, death = false, natural = false): StandardMaterial {
+  const color = Color3.FromHexString(natural ? (death ? "#edc3b9" : "#ffffff") : death ? "#c85e50" : GROUND_LOOT_SPAWN_COLOR);
   const material = new StandardMaterial(
     `${death ? "loot-model-death-material" : "loot-model-material"}-${itemId.replaceAll(".", "-")}`,
     scene,
   );
   material.diffuseColor = color;
-  material.emissiveColor = color.scale(death ? 0.22 : 0.12);
+  material.emissiveColor = natural ? new Color3(0.025, 0.025, 0.025) : color.scale(death ? 0.22 : 0.12);
   material.specularColor = Color3.Black();
   return material;
 }
 
-function createLootModelTemplates(scene: Scene, fallbackMaterial: StandardMaterial): Map<string, Mesh> {
+function createLootModelTemplates(scene: Scene, fallbackMaterial: StandardMaterial, colorPart?: (mesh: Mesh, itemId: string) => void): Map<string, Mesh> {
   const templates = new Map<string, Mesh>();
   for (const itemId of Object.keys(ITEMS)) {
-    templates.set(itemId, createLootModelTemplate(scene, itemId, createLootModelMaterial(scene, itemId)));
+    templates.set(itemId, createLootModelTemplate(scene, itemId, createLootModelMaterial(scene, itemId, false, Boolean(colorPart)), colorPart));
   }
   const fallback = CreateBox("loot-model-template-fallback", { size: CLASSIC_LOOT_MARKER_SIZE }, scene);
   fallback.rotation.set(0, Math.PI / 4, Math.PI / 4);
@@ -3363,7 +3369,7 @@ function createLootModelTemplates(scene: Scene, fallbackMaterial: StandardMateri
   return templates;
 }
 
-function createLootModelTemplate(scene: Scene, itemId: string, modelMaterial: StandardMaterial): Mesh {
+function createLootModelTemplate(scene: Scene, itemId: string, modelMaterial: StandardMaterial, colorPart?: (mesh: Mesh, itemId: string) => void): Mesh {
   const parts: Mesh[] = [];
   const addBox = (
     name: string,
@@ -3405,7 +3411,7 @@ function createLootModelTemplate(scene: Scene, itemId: string, modelMaterial: St
   if (item?.kind === "weapon" && item.weaponId) {
     const weaponId = item.weaponId as WeaponVisualId;
     const scale = 0.95;
-    const pieces = weaponPieces(weaponId, false);
+    const pieces = weaponPieces(weaponId, Boolean(colorPart));
     for (const [name, kind, x, y, z, width, height, depth, rotationX = 0] of pieces) {
       const mesh = kind === "barrel"
         ? addCylinder(name, depth * scale, width * scale, width * scale)
@@ -3495,6 +3501,7 @@ function createLootModelTemplate(scene: Scene, itemId: string, modelMaterial: St
     addBox("fallback", CLASSIC_LOOT_MARKER_SIZE, CLASSIC_LOOT_MARKER_SIZE, CLASSIC_LOOT_MARKER_SIZE);
   }
 
+  if (colorPart) for (const part of parts) colorPart(part, itemId);
   const merged = Mesh.MergeMeshes(parts, true, true);
   if (!merged) throw new Error(`Unable to create loot model ${itemId}`);
   merged.name = `loot-model-template-${itemId.replaceAll(".", "-")}`;
@@ -3510,6 +3517,7 @@ function createLootMeshes(
   lootMaterial: StandardMaterial,
   deathLootMaterial: StandardMaterial,
   showGroundLootModels: boolean,
+  colorPart?: (mesh: Mesh, itemId: string) => void,
 ): {
   lootMeshes: Map<EntityId, Mesh>;
   syncLootMeshes: (groundLoot: Readonly<Record<EntityId, GroundLootState>>) => void;
@@ -3519,7 +3527,7 @@ function createLootMeshes(
   boxTemplate.material = lootMaterial;
   boxTemplate.isVisible = false;
   boxTemplate.isPickable = false;
-  const modelTemplates = showGroundLootModels ? createLootModelTemplates(scene, lootMaterial) : new Map<string, Mesh>();
+  const modelTemplates = showGroundLootModels ? createLootModelTemplates(scene, lootMaterial, colorPart) : new Map<string, Mesh>();
   const modelGroundOffsets = new Map<string, number>();
   for (const [modelId, template] of modelTemplates) {
     template.computeWorldMatrix(true);
@@ -3536,7 +3544,7 @@ function createLootMeshes(
     if (modelId === "fallback") return deathLootMaterial;
     let modelDeathMaterial = deathMaterials.get(modelId);
     if (!modelDeathMaterial) {
-      modelDeathMaterial = createLootModelMaterial(scene, modelId, true);
+      modelDeathMaterial = createLootModelMaterial(scene, modelId, true, Boolean(colorPart));
       deathMaterials.set(modelId, modelDeathMaterial);
     }
     return modelDeathMaterial;
