@@ -26,9 +26,17 @@ const WORLD_TEXTURE_IDS = new Set([
   "texture.building.flat-roof-membrane",
   "texture.industrial.metal-roof-rusted",
   "texture.industrial.metal",
+  "texture.terrain.dry-soil",
+  "texture.terrain.forest-humus",
+  "texture.terrain.forest-moss-wet",
+  "texture.terrain.gravel",
+  "texture.terrain.mud-sparse-grass",
+  "texture.building.wall-plaster-aged",
+  "texture.building.roof-tile-gray",
+  "texture.building.roof-tile-red-brown",
 ]);
 
-export function enhanceTownPresentation(
+export function enhanceScenePresentation(
   scene: Scene,
   assets: AssetCatalog,
   sun: DirectionalLight,
@@ -41,8 +49,13 @@ export function enhanceTownPresentation(
   sun.intensity = 1.28;
   sun.diffuse = new Color3(1, 0.95, 0.86);
   sun.direction.set(-0.65, -1, 0.45);
+  if (layout.mapId !== "town") {
+    ambient.diffuse.set(0.88, 0.92, 0.87);
+    ambient.groundColor.set(0.22, 0.25, 0.20);
+    sun.intensity = 1.20;
+  }
 
-  createTownSampleDetails(scene, layout);
+  createSampleDetails(scene, layout);
   enhanceViewEquipment(scene);
   enhanceVegetation(scene);
 
@@ -200,7 +213,7 @@ function createCachedTownShadows(scene: Scene, sun: DirectionalLight): void {
   });
 }
 
-function createTownSampleDetails(scene: Scene, layout: MapLayout): void {
+function createSampleDetails(scene: Scene, layout: MapLayout): void {
   const buildings = [...layout.obstacles]
     .filter((building) => (building.footprint ?? "rectangle") === "rectangle" &&
       building.id !== layout.hospital.buildingId && building.id !== layout.ammunitionDepot.buildingId)
@@ -242,6 +255,9 @@ function createTownSampleDetails(scene: Scene, layout: MapLayout): void {
   };
   addBatch("ultra-town-facade-trim", trimTransforms, "#777b77");
   addBatch("ultra-town-facade-joints", jointTransforms, "#474b49");
+
+  // 城市长条铺装只适用于灰炉城；山坡与乡村继续使用贴合地形的原道路。
+  if (layout.mapId !== "town") return;
 
   const pavement = new StandardMaterial("ultra-town-pavement-material", scene);
   pavement.diffuseColor = Color3.FromHexString("#92938b");

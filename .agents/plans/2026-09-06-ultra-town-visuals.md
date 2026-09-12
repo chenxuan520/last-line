@@ -41,6 +41,16 @@
 - 验证包含 production 人物装备／LOD／生命周期定向用例，场景隔离与物品复用用例，桌面／移动人物、物资和树木实景截图，并延续现有 CI 性能采样及独立 Reviewer。
 - 独立 Reviewer 已明确同意追加资源覆盖：仅在 `browser-ultra` 冻结帧时间样本之后，从已加载 production EngineStore 读取真实 mesh／material／geometry／vertices／indices，并确认全部外部角色 GLB base 已加载。原 NullEngine 会使用程序化模型，不能代表人物升级；保留其原采样和全部既有门禁，新字段遵循现有首次 INFO／未来同档位 15% 政策。顶点／索引是逐 mesh 求和，不能当作唯一显存或实际绘制量。
 
+### Round 4 Scope
+
+- 2026-09-12：用户要求苍岬岛、烬岚郡也加入类似效果，并明确选择完整效果，包括人物、武器物品、树木、按地图适配的材质和局部静态阴影。沿用未合并 PR #9 与 `feat/ultra-town-visuals`，当前工作区干净，远端 main 仍为 `e1a542c`。此前灰炉城专属约束在本轮扩展为三地图极高，旧 Build／Review 保留为历史事实。
+- 将现有极高模块作为三地图共同入口，人物／装备／树木共享模板、LOD 和生命周期保持不变；补齐岛屿与混合地图已有泥土、碎石、森林地表、灰泥和瓦屋顶的缓存法线，并保留自然地貌配色。建筑收边仍限制于已有真实墙段；平直城市铺装继续只用于灰炉城，避免在山坡和乡村道路上产生悬空长板。
+- 每张地图使用一张既有规格的局部缓存静态阴影图；不增加角色动态阴影、权威树木、碰撞、玩法、网络或 checkpoint 变化。默认中画质和低／中／高保持原样，菜单改为三地图通用的「极高」。
+- 接入与文档落点：`IslandScene`、极高表现模块、菜单及其既有用例、README、架构／资源说明与当前 AGENTS 极高范围；不扩展其他玩法文档或重写历史 Plan。
+- 验证：按地图分别运行单个场景隔离和真实人物 GLB 定向用例；production 桌面与移动截图覆盖两张新增地图的完整人物、物品、植被、地表／建筑和菜单／HUD上下文。同步追加两地图 runtime／browser 极高性能场景，保留原样本、预热、轮次、窗口、指标、首次基线政策与 15% 门禁；追加采样须经独立架构／资源 Review。
+- 独立 Reviewer 已明确批准新增 island seed 7、mixed seed 395 的 runtime／browser 极高采样，要求 compare 与 baseline 两路径均覆盖，新增场景逐个验证缺失／非法指标失败，保留全局能力探测与首次 INFO／未来同档位 15% 政策。每轮从 6 次增加至 10 次采样会延长 CI，但不影响游戏运行成本；不得预先缩短窗口。
+- 完成标准：本轮 typecheck、production build、原预算和定向用例通过；Builder／Reviewer 分别亲自 MCP 截图并查看；全部 Finding 闭环后同分支提交推送，CI 与 Codex 全通过，用户手动合并。
+
 ## Build
 
 - 2026-09-06：已完成需求与渲染调用链、材质合批、画质菜单／样式、测试、资源预算和历史视觉 Plan 的上下文检查；实现前分析时间超过 10 秒。
@@ -71,6 +81,16 @@
 - 同机 seed 0／桌面最终实际 production 场景：4,351 mesh、100 material、2,833 geometry、1,819,977 vertex、3,682,758 index、28 texture。顶点／索引按 mesh 求和包含共享重复计数，不能当作显存或实际绘制量。固定树冠相机暂停权威循环、仅调用渲染的 3×2 秒观察为 118.48／120.27／120.52 FPS、p95 9.2／9.0／9.4ms，均无大于 50ms 帧；仅为渲染 INFO，不能代表完整比赛或移动设备性能，严格同 runner main/head 证据仍等待 CI。
 - 按独立架构／资源审查追加 `browser-ultra` 真实 production 场景资源字段；冻结帧样本后从实际已加载 EngineStore 获取场景，并要求全部外部角色 base GLB 可见于资源记录。保留原运行时采样、预热／轮次／时间窗口、指标与阈值，缺失数据不能聚合成通过。
 - 本轮是程序化战术人物与植被的写实方向样板，仍存在块面感；没有声称达到 CS:GO 成品资产精度。
+
+### Round 4 Build Evidence
+
+- 三地图已接入 `UltraPresentation`；追加自然地表、灰泥与瓦屋顶的缓存法线，岛屿／混合使用自然环境光。中央真实墙段保留收边与分缝两批，灰炉城继续既有四批装饰；其他地图没有平直城市铺装。人物、武器物资、树木及静态阴影共享原有增强路径与生命周期，权威代码没有修改。
+- 完整 typecheck、production build、budget 通过；性能用例修改后 app typecheck、浏览器采样脚本单独 TypeScript 检查及比较脚本语法检查通过。逐次仅运行一个定向用例，岛屿／混合的场景隔离与真实人物 GLB、灰炉城场景隔离、性能新增场景与严格失败传播均通过。日志为 `node_modules/.cache/ultra-visuals/round4-*-test.log`、`round4-typecheck.log`、`round4-typecheck-app-final.log`、`round4-build.log`；未运行本机完整测试或性能采样。
+- 最终浏览器原始产物 4,778,959B、JavaScript 3,953,362B、266 个 chunk，入口 895,297B，既有预算全部保留并通过。Worker／standalone 源码未改，当前预算读取现有产物，CI 将重建并完整验证。
+- Builder 使用 Chrome DevTools MCP 静音打开 production，桌面 1440×900、移动菜单 390×844@2、移动游戏 844×390@2。亲自截图并用 `view_image` 查看两地图人物、15 类物品、建筑／地表与树群，额外检查混合地图森林与农村、移动四枪及手雷。菜单与完整 HUD 上下文一起检查字体、字号、字重、颜色、间距、对齐、位置、裁剪和重叠，没有新增异常。图片为缓存下 `round4-menu-*.jpg`、`round4-island-*.jpg`、`round4-mixed-*.jpg`，验收后已释放场景并退至空白页。
+- 展示截图使用 seed 0，暂停循环并临时移动渲染节点、相机或切换武器网格；人物／物品陈列与武器图仅用于视觉验收，没有修改权威生成或背包。HUD 的空中状态、未装备及暂停前 FPS 不能作为玩法或性能结论。人物依然存在程序化块面感，未声称达到 CS:GO 成品资产精度。
+- 实际 production 场景资源：岛屿 4,966 mesh／101 material／2,824 geometry／1,306,798 vertex／2,864,250 index／32 texture；混合 4,763 mesh／106 material／2,821 geometry／1,210,158 vertex／2,738,154 index／42 texture。顶点与索引逐 mesh 求和包含共享重复，不能等同显存或绘制量。新增地表与屋顶法线已检查实际绑定。
+- 按已批准的架构／资源 Review，在 compare 和 baseline 路径均追加 island seed 7、mixed seed 395 的 runtime 与真实浏览器 ultra 采样，实际地图／画质选择均检查。原场景、指标、预热、轮数、窗口、交替顺序与 15% 门禁保留；首次 main 无 ultra 仍只采用同地图同 seed 的 high INFO 参考。完整 CI 性能与 Codex 审查尚待本轮提交后执行。
 
 ## Review
 
@@ -110,3 +130,11 @@
 - 模板启动增强、8 分组共享几何、树木实例和物资模板复用有界，没有新增逐帧构建。共享不能消除人物顶点和树叶 alpha-test 重叠的绘制成本；最终须审查同一 CI 的真实 scene／纹理／FPS／长帧证据，不能用本地 120 FPS 上限免除。可优化空间为更紧凑枝片、远景树冠与人物细部密度，本轮不在缺少实测证据时扩大修改。
 - Reviewer 独立核验采样入口实际得到 50 个角色根节点和 49 个有效 base GLB；新增字段在帧样本冻结后读取真实 EngineStore，严格单轮与聚合校验保留。未重复 Builder 的测试、typecheck、build 或 budget。
 - 下一步正常提交至 PR #9，等待本轮完整 CI／性能 Review 与 Codex 审查；禁止自动合并或删除分支。
+
+### Round 4
+
+- 独立 `code_reviewer` 的提交前 Review 通过，无 blocker／high／medium Finding；完整检查未提交 diff、新模块与当前 Plan，并回看用户明确选择两张地图完整效果的原始需求。
+- Reviewer 自行使用 Chrome DevTools MCP 静音打开 production，桌面 1440×900、移动菜单 390×844@2、移动游戏 844×390@2，截图并逐张亲自 `view_image` 查看两图人物、15 类物资、树木、建筑地表及完整菜单／HUD。字体、字号、字重、颜色、间距、对齐、裁剪与触控布局保持一致，未见新增接合、开口遮挡或悬空铺装；已释放场景、关闭页面并删除自己的 26 张临时图，Builder 服务随后停止。
+- 混合地图屋顶宽条带疑点经临时关闭阴影、关闭凹凸及同种子同视点 high 对照，确认原 high 已有完全相同表现，不属于本轮回归，不额外扩大修改。
+- 性能 Review：入口仅扩展 ultra，人物共享几何／LOD、装备合批和物资模板保持不变；新法线属于启动时有界工作，单张 256²、消费缓存 payload 并随场景释放。两图各两批建筑装饰，一张 2048²／8m 分区刷新阴影，没有新增权威状态或逐帧对象创建。森林 alpha-test 过度绘制与阴影刷新成本必须由本轮 CI 继续审查，不能用 mesh 数或展示图 FPS 代替；优化空间为减少无用纹理派生与材质扫描。
+- Reviewer 确认 compare／baseline 新增采样完整，原逐样本校验、首次 INFO 与未来同档位 15% 门禁保留；未重复 Builder 的测试、typecheck、build 或 budget。允许提交启动 CI，最终三地图同 runner 性能报告与 Codex 尚待本轮提交后审查。

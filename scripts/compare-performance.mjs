@@ -194,11 +194,21 @@ const requiredSections = {
   browser: browserMetrics,
 };
 
+const ultraBrowserMetrics = [...browserMetrics, "gpuTexturesCreated", "gpuTexturesDeleted", "gpuTexturesLive",
+  "sceneMeshes", "sceneMaterials", "sceneGeometries", "sceneVertices", "sceneIndices"];
 const ultraSections = {
   "town-ultra": runtimeMetrics,
-  "browser-ultra": [...browserMetrics, "gpuTexturesCreated", "gpuTexturesDeleted", "gpuTexturesLive",
-    "sceneMeshes", "sceneMaterials", "sceneGeometries", "sceneVertices", "sceneIndices"],
+  "island-ultra": runtimeMetrics,
+  "mixed-ultra": runtimeMetrics,
+  "browser-ultra": ultraBrowserMetrics,
+  "browser-island-ultra": ultraBrowserMetrics,
+  "browser-mixed-ultra": ultraBrowserMetrics,
 };
+const ultraBrowserScenarios = [
+  { section: "browser-ultra", mapId: "town", seed: 7 },
+  { section: "browser-island-ultra", mapId: "island", seed: 7 },
+  { section: "browser-mixed-ultra", mapId: "mixed", seed: 395 },
+];
 
 export function validatePerformanceMetrics(label, sections, includeUltra = false) {
   const expected = includeUltra ? { ...requiredSections, ...ultraSections } : requiredSections;
@@ -308,18 +318,22 @@ async function captureRepository(repository, rounds) {
     { mapId: "town", seed: 7, quality: "high" },
     { mapId: "mixed", seed: 395, quality: "high" },
     { mapId: "town", seed: 7, quality: "ultra" },
+    { mapId: "island", seed: 7, quality: "ultra" },
+    { mapId: "mixed", seed: 395, quality: "ultra" },
   ];
   for (const scenario of scenarios) {
     await captureRuntime(repository, scenario.mapId, scenario.seed, scenario.quality);
   }
   await captureBrowser(repository, "town", 7, "high");
-  await captureBrowser(repository, "town", 7, "ultra", true);
+  for (const scenario of ultraBrowserScenarios) {
+    await captureBrowser(repository, scenario.mapId, scenario.seed, "ultra", true);
+  }
   const samples = Object.fromEntries(scenarios.map((scenario) => [
     `${scenario.mapId}-${scenario.quality}`,
     [],
   ]));
   samples.browser = [];
-  samples["browser-ultra"] = [];
+  for (const { section } of ultraBrowserScenarios) samples[section] = [];
   for (let round = 0; round < rounds; round += 1) {
     for (const scenario of scenarios) {
       samples[`${scenario.mapId}-${scenario.quality}`].push(await captureRuntime(
@@ -330,7 +344,9 @@ async function captureRepository(repository, rounds) {
       ));
     }
     samples.browser.push(await captureBrowser(repository, "town", 7, "high"));
-    samples["browser-ultra"].push(await captureBrowser(repository, "town", 7, "ultra", true));
+    for (const { section, mapId, seed } of ultraBrowserScenarios) {
+      samples[section].push(await captureBrowser(repository, mapId, seed, "ultra", true));
+    }
   }
   return Object.fromEntries(Object.entries(samples).map(([key, values]) => [key, aggregate(values)]));
 }
@@ -374,6 +390,8 @@ async function main() {
     { mapId: "town", seed: 7, quality: "high" },
     { mapId: "mixed", seed: 395, quality: "high" },
     { mapId: "town", seed: 7, quality: "ultra" },
+    { mapId: "island", seed: 7, quality: "ultra" },
+    { mapId: "mixed", seed: 395, quality: "ultra" },
   ];
   const samples = { baseline: {}, candidate: {} };
   for (const scenario of scenarios) {
@@ -383,8 +401,10 @@ async function main() {
   }
   samples.baseline.browser = [];
   samples.candidate.browser = [];
-  samples.baseline["browser-ultra"] = [];
-  samples.candidate["browser-ultra"] = [];
+  for (const { section } of ultraBrowserScenarios) {
+    samples.baseline[section] = [];
+    samples.candidate[section] = [];
+  }
 
   for (const [label, repository] of [[
     "baseline",
@@ -398,7 +418,9 @@ async function main() {
       await captureRuntime(repository, scenario.mapId, scenario.seed, quality);
     }
     await captureBrowser(repository, "town", 7, "high");
-    await captureBrowser(repository, "town", 7, label === "baseline" ? baselineQuality : "ultra", true);
+    for (const { mapId, seed } of ultraBrowserScenarios) {
+      await captureBrowser(repository, mapId, seed, label === "baseline" ? baselineQuality : "ultra", true);
+    }
     console.log(`Performance warm-up complete: ${label}`);
   }
 
@@ -418,9 +440,11 @@ async function main() {
         ));
       }
       samples[label].browser.push(await captureBrowser(repository, "town", 7, "high"));
-      samples[label]["browser-ultra"].push(await captureBrowser(
-        repository, "town", 7, label === "baseline" ? baselineQuality : "ultra", true,
-      ));
+      for (const { section, mapId, seed } of ultraBrowserScenarios) {
+        samples[label][section].push(await captureBrowser(
+          repository, mapId, seed, label === "baseline" ? baselineQuality : "ultra", true,
+        ));
+      }
     }
   }
 

@@ -259,6 +259,9 @@ async function main(): Promise<void> {
       30_000,
     );
     await evaluate(client, `(() => {
+      if (document.querySelector('[data-setting="map-id"]')?.value !== ${JSON.stringify(mapId)}) {
+        throw new Error("Requested map was not selected");
+      }
       if (document.querySelector('[data-setting="quality"]')?.value !== ${JSON.stringify(quality)}) {
         throw new Error("Requested quality was not selected");
       }

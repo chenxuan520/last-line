@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { surfaceNormalPixels } from "../../src/client/render/UltraTownPresentation";
+import { surfaceNormalPixels } from "../../src/client/render/UltraPresentation";
 
 describe("ultra town surface normals", () => {
   it("keeps flat surfaces flat and derives finite wrapped normals without mutating source pixels", () => {

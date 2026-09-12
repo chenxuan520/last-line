@@ -110,12 +110,12 @@ describe("IslandScene lifecycle", () => {
     vi.restoreAllMocks();
   });
 
-  it("isolates ultra town surfaces and cached shadows without changing authoritative geometry", async () => {
+  it.each(["town", "island", "mixed"] as const)("isolates ultra %s surfaces and cached shadows without changing authoritative geometry", async (mapId) => {
     const engine = new NullEngine();
     const assets = createAssets();
-    const state = createBattleRoyaleState("player", undefined, () => 0, { mapId: "town" });
+    const state = createBattleRoyaleState("player", undefined, () => 0, { mapId });
     const before = JSON.stringify(state);
-    const baseline = await createIslandScene(engine, assets, state.actors, state.groundLoot, state.mapSeed, true, "player", "high", "town");
+    const baseline = await createIslandScene(engine, assets, state.actors, state.groundLoot, state.mapSeed, true, "player", "high", mapId);
     const walls = baseline.scene.meshes.filter((mesh) => mesh.name.startsWith("building-walls-"))
       .map((mesh) => ({ name: mesh.name, positions: mesh.getVerticesData("position"), indices: mesh.getIndices() }));
     const meshCount = baseline.scene.meshes.length - baseline.viewWeaponRoot.getChildMeshes(false).length;
@@ -123,14 +123,14 @@ describe("IslandScene lifecycle", () => {
       .map((mesh) => ({ name: mesh.name, position: mesh.position.asArray(), scaling: mesh.scaling.asArray() }));
     expect(baseline.scene.textures.some((texture) => texture.name === "ultra-town-static-shadows")).toBe(false);
     baseline.scene.dispose();
-    const ultra = await createIslandScene(engine, assets, state.actors, state.groundLoot, state.mapSeed, true, "player", "ultra", "town");
+    const ultra = await createIslandScene(engine, assets, state.actors, state.groundLoot, state.mapSeed, true, "player", "ultra", mapId);
     for (const wall of walls) {
       const mesh = ultra.scene.getMeshByName(wall.name)!;
       expect(mesh.getVerticesData("position")).toEqual(wall.positions);
       expect(mesh.getIndices()).toEqual(wall.indices);
       expect(mesh.receiveShadows).toBe(true);
     }
-    expect(ultra.scene.meshes.length - ultra.viewWeaponRoot.getChildMeshes(false).length).toBe(meshCount + 4);
+    expect(ultra.scene.meshes.length - ultra.viewWeaponRoot.getChildMeshes(false).length).toBe(meshCount + (mapId === "town" ? 4 : 2));
     for (const trunk of trunks) {
       const mesh = ultra.scene.getMeshByName(trunk.name)!;
       expect(mesh.position.asArray()).toEqual(trunk.position);
@@ -178,7 +178,8 @@ describe("IslandScene lifecycle", () => {
     expect(marker.geometry).toBe(originalGeometry);
     expect(ultra.scene.getMeshByName("island-ground")?.receiveShadows).toBe(true);
     const details = ultra.scene.meshes.filter((mesh) => mesh.metadata?.decoration === "ultra-town-detail");
-    expect(details).toHaveLength(4);
+    expect(details).toHaveLength(mapId === "town" ? 4 : 2);
+    expect(ultra.scene.getMeshByName("ultra-town-pavement") !== null).toBe(mapId === "town");
     expect(details.every((mesh) => !mesh.isPickable && !mesh.checkCollisions)).toBe(true);
     expect(ultra.scene.getMaterialByName("hospital-surface-material")).toMatchObject({ diffuseColor: Color3.White(), diffuseTexture: null });
     const sun = ultra.scene.getLightByName("island-sun") as DirectionalLight;
@@ -1030,18 +1031,18 @@ describe("IslandScene lifecycle", () => {
     engine.dispose();
   }, 30_000);
 
-  it("shares detailed ultra character geometry while preserving equipment, LOD and authoritative state", async () => {
+  it.each(["town", "island", "mixed"] as const)("shares detailed ultra %s character geometry while preserving equipment, LOD and authoritative state", async (mapId) => {
     const assets = createProductionGlbAssets();
     const state = createBattleRoyaleState("player", {
       participantCount: 4,
       flightSeconds: 1,
       safeZoneStages: [{ waitSeconds: 1, shrinkSeconds: 1, radius: 100, damagePerSecond: 1 }],
-    }, () => .5, { mapId: "town" });
+    }, () => .5, { mapId });
     state.actors["bot-3"]!.kind = "player";
     for (const actor of Object.values(state.actors)) actor.deployment = "grounded";
     const before = JSON.stringify(state);
     const engine = new NullEngine();
-    const bundle = await createIslandScene(engine, assets, state.actors, state.groundLoot, state.mapSeed, true, "player", "ultra", "town");
+    const bundle = await createIslandScene(engine, assets, state.actors, state.groundLoot, state.mapSeed, true, "player", "ultra", mapId);
     const first = bundle.actorRoots.get("bot-1")!;
     const body = bundle.scene.getMeshByName("bot-1-base-character-merged-uniform")!;
     const sibling = bundle.scene.getMeshByName("bot-2-base-character-merged-uniform")!;

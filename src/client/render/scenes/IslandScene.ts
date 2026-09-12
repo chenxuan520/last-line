@@ -255,8 +255,8 @@ export async function createIslandScene(
   const viewWeaponRoot = createViewWeapon(scene, camera, materials);
   setActorWeaponVisual(viewWeaponRoot, getActiveWeapon(player)?.weaponId ?? null);
   viewWeaponRoot.setEnabled(Boolean(getActiveWeapon(player)));
-  const ultraPresentation = quality === "ultra" && mapId === "town"
-    ? await import("../UltraTownPresentation")
+  const ultraPresentation = quality === "ultra"
+    ? await import("../UltraPresentation")
     : undefined;
   if (quality !== "low") {
     await replaceCatalogModels(
@@ -283,7 +283,7 @@ export async function createIslandScene(
   );
   const { mesh: safeZoneRing, sync: syncSafeZoneRing } = createSafeZoneRing(scene, materials.safeZone, layout);
 
-  ultraPresentation?.enhanceTownPresentation(scene, assets, sun, ambient, layout);
+  ultraPresentation?.enhanceScenePresentation(scene, assets, sun, ambient, layout);
 
   return {
     scene,
