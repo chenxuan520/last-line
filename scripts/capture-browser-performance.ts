@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import WebSocket from "ws";
+import { assertUltraPresentation } from "./performance-presentation.js";
 
 interface Arguments {
   repository: string;
@@ -331,7 +332,7 @@ async function main(): Promise<void> {
       fpsText: document.querySelector('[data-hud="performance"]')?.textContent ?? ""
     })`);
     // 帧数组已按值取回；此后的只读场景扫描不进入既有 FPS／长帧窗口。
-    const sceneMetrics = textureMetrics ? await evaluate<Record<string, number>>(client, `(async () => {
+    const sceneMetrics = textureMetrics || quality === "ultra" ? await evaluate<Record<string, number>>(client, `(async () => {
       const urls = [...new Set(performance.getEntriesByType("resource").map(entry => entry.name)
         .filter(url => /\\/engineStore-[^/]+\\.js(?:\\?.*)?$/.test(url)))];
       if (urls.length !== 1) throw new Error("Expected one loaded production EngineStore module");
@@ -340,6 +341,8 @@ async function main(): Promise<void> {
       if (stores.length !== 1) throw new Error("Production EngineStore export missing");
       const scene = stores[0].LastCreatedScene;
       if (!scene || scene.isDisposed || !scene.activeCamera) throw new Error("Active production scene missing");
+      (${assertUltraPresentation.toString()})(${JSON.stringify(mapId)}, ${JSON.stringify(quality)},
+        scene.textures.map(texture => texture.name));
       const actorRoots = scene.transformNodes.filter(node => node.metadata?.actorId && node.metadata?.actorKind);
       const models = scene.transformNodes.filter(node => node.metadata?.modelLod === "base" &&
         String(node.metadata?.visualModel).startsWith("model.character."));

@@ -51,6 +51,12 @@
 - 独立 Reviewer 已明确批准新增 island seed 7、mixed seed 395 的 runtime／browser 极高采样，要求 compare 与 baseline 两路径均覆盖，新增场景逐个验证缺失／非法指标失败，保留全局能力探测与首次 INFO／未来同档位 15% 政策。每轮从 6 次增加至 10 次采样会延长 CI，但不影响游戏运行成本；不得预先缩短窗口。
 - 完成标准：本轮 typecheck、production build、原预算和定向用例通过；Builder／Reviewer 分别亲自 MCP 截图并查看；全部 Finding 闭环后同分支提交推送，CI 与 Codex 全通过，用户手动合并。
 
+### Round 5 Scope
+
+- Codex 在 `3b2ff07` 提出两项采样器问题：runtime 仅对 town 检查极高实际构建，browser 仅检查所选档位，其他地图退回 high 时可能仍得到合法样本；`gpuTexturesDeleted` 被视为越少越好的硬门禁，会误判正确清理为回归。已重读当前 Plan、完整相关采样路径和定向用例，确认两项均成立。
+- 仅修改性能采样器、回归与工程说明：runtime／browser 共用自包含的极高构建断言，三地图必须存在实际静态阴影标记；browser 断言在冻结帧窗口后执行，high 参考无需极高标记。保留纹理删除指标与严格字段检查，改为 INFO；纹理创建／存活数量及其余确定性指标继续原 15% 门禁。独立 Reviewer 已明确批准指标语义纠错：删除次数增加或减少均无法单独判断优劣，必须保留绝对值与变化且标注 INFO；创建／存活仍按原门禁。
+- 验证为单用例红／绿回归、脚本 TypeScript／语法检查与独立 Reviewer；不修改 production 代码或视觉，沿用 Round 4 最终截图。继续同分支正常提交并重新等待完整 CI、性能报告与 Codex，通过后由用户手动合并。
+
 ## Build
 
 - 2026-09-06：已完成需求与渲染调用链、材质合批、画质菜单／样式、测试、资源预算和历史视觉 Plan 的上下文检查；实现前分析时间超过 10 秒。
@@ -91,6 +97,13 @@
 - 展示截图使用 seed 0，暂停循环并临时移动渲染节点、相机或切换武器网格；人物／物品陈列与武器图仅用于视觉验收，没有修改权威生成或背包。HUD 的空中状态、未装备及暂停前 FPS 不能作为玩法或性能结论。人物依然存在程序化块面感，未声称达到 CS:GO 成品资产精度。
 - 实际 production 场景资源：岛屿 4,966 mesh／101 material／2,824 geometry／1,306,798 vertex／2,864,250 index／32 texture；混合 4,763 mesh／106 material／2,821 geometry／1,210,158 vertex／2,738,154 index／42 texture。顶点与索引逐 mesh 求和包含共享重复，不能等同显存或绘制量。新增地表与屋顶法线已检查实际绑定。
 - 按已批准的架构／资源 Review，在 compare 和 baseline 路径均追加 island seed 7、mixed seed 395 的 runtime 与真实浏览器 ultra 采样，实际地图／画质选择均检查。原场景、指标、预热、轮数、窗口、交替顺序与 15% 门禁保留；首次 main 无 ultra 仍只采用同地图同 seed 的 high INFO 参考。完整 CI 性能与 Codex 审查尚待本轮提交后执行。
+
+### Round 5 Build Evidence
+
+- runtime 与 browser 共用有类型、自包含的 `assertUltraPresentation`；移除 town 限制，三图均必须存在实际静态阴影标记。browser 在冻结帧样本后调用，单独 ultra 命令即使不要求纹理统计也执行验证；high 参考继续正常采样。
+- `gpuTexturesDeleted` 保留必需字段、严格合法性校验、绝对数及变化报告，仅将其分类改为 INFO，并在报告和工程合同中说明百分比不表示优劣；创建／存活数量及其他原门禁不变。无需修改生产代码或重新拍摄相同画面。
+- 定向单用例先复现缺少岛屿极高标记未失败，再复现删除计数 0→1 被错误硬判失败；修复后同一用例通过。覆盖 Node／序列化浏览器函数三地图缺标记失败、有标记通过、high 无标记通过，以及三种 browser section 删除 0→1／1→0 均 INFO、创建／存活超过 15% 仍失败、删除字段缺失／NaN 仍失败。日志为 `round5-red-test.log`、`round5-deletions-red-test.log`、`round5-green-test.log`。
+- 完整 typecheck、两份采样脚本的独立 TypeScript 检查、比较脚本语法与 diff 检查通过。新 helper 保持 TypeScript 源与 NodeNext `.js` 引用，已由定向测试验证 Node 导入及浏览器自包含函数执行。脚本类型检查初次发现无声明 JavaScript 模块，已改为类型化共享函数并再次通过。生产构建和预算沿用 Round 4；最终完整 CI 将重新验证。
 
 ## Review
 
@@ -138,3 +151,11 @@
 - 混合地图屋顶宽条带疑点经临时关闭阴影、关闭凹凸及同种子同视点 high 对照，确认原 high 已有完全相同表现，不属于本轮回归，不额外扩大修改。
 - 性能 Review：入口仅扩展 ultra，人物共享几何／LOD、装备合批和物资模板保持不变；新法线属于启动时有界工作，单张 256²、消费缓存 payload 并随场景释放。两图各两批建筑装饰，一张 2048²／8m 分区刷新阴影，没有新增权威状态或逐帧对象创建。森林 alpha-test 过度绘制与阴影刷新成本必须由本轮 CI 继续审查，不能用 mesh 数或展示图 FPS 代替；优化空间为减少无用纹理派生与材质扫描。
 - Reviewer 确认 compare／baseline 新增采样完整，原逐样本校验、首次 INFO 与未来同档位 15% 门禁保留；未重复 Builder 的测试、typecheck、build 或 budget。允许提交启动 CI，最终三地图同 runner 性能报告与 Codex 尚待本轮提交后审查。
+
+- Round 4 提交后证据：两条 CI build、性能与预览全部通过，633 个应用、52 个 Worker、33 个 standalone 和 2 个性能用例、原预算及 Docker smoke 通过。独立 Reviewer 审查同 run `34677797156` 的三轮聚合报告，接受显式 ultra 的有界新增成本；high 确定性资源不变。岛屿／混合真实 scene 顶点约增加 64万／70万，heap 约增加 24.4MB／25.9MB；稳定帧 p95 增加 25.91%／41.38%，不能用长帧数量减少或 SwiftShader 绝对 FPS 宣称设备流畅。优先优化空间为森林远景 LOD、alpha-test 与阴影裁剪，本轮不构成必须修复 Finding。Codex 后续行评论触发 Round 5，旧通过结论不代表整个 PR 完成。
+
+### Round 5
+
+- 独立 `code_reviewer` 完成最小静态 Re-review，P1／P2 闭环，无新增 blocker／high／medium Finding。共享断言自包含，三地图 runtime／browser 都检查实际标记；浏览器冻结帧后检查，未开启纹理统计的独立 ultra 命令也无法绕过。high 参考保持正常。
+- 删除计数保留必需字段、绝对值与变化，只改为 INFO；报告明确不据增减判断优劣，创建／存活硬门禁不变。Reviewer 核对三地图、函数序列化、缺标记、删除双向／非法字段及创建／存活超限回归；没有重复 Builder 的测试、构建或浏览器验收。
+- 性能影响仅为采样时一次有界纹理名称扫描，browser 不计入原 FPS 窗口，没有生产成本或预算／窗口变化，无需新增抽象。允许正常提交并启动最终 CI，Round 4 production 视觉证据继续有效，新的性能报告与 Codex 仍需明确通过。

@@ -139,6 +139,8 @@ const lowerIsBetter = new Set([
 ]);
 const higherIsBetter = new Set(["startupFps", "stableFps"]);
 const observationalMetrics = new Set([
+  // 释放次数不能单独判定优劣；保留变化报告，创建和存活数量继续硬门禁。
+  "gpuTexturesDeleted",
   "startupMilliseconds",
   "heapUsedBytes",
   "entryMilliseconds",
@@ -308,6 +310,7 @@ export function markdownReport(report) {
   if (report.ultraBaselineQuality === "high") {
     lines.push("", "main has no ultra profile. New ultra rows compare against a high-quality reference for INFO only; existing gates remain active. Once main supports ultra, the same-quality 15% gate applies automatically.");
   }
+  lines.push("", "Texture deletion counts are INFO only: their percentage changes do not indicate improvement or regression. Texture creation and live counts retain their gates.");
   lines.push("", report.passed ? "**PASS**" : "**FAIL**");
   return `${lines.join("\n")}\n`;
 }

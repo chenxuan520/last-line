@@ -5,6 +5,16 @@ import { expect, it } from "vitest";
 
 it("samples new ultra explicitly and preserves strict gates once a matching baseline exists", async () => {
   const comparison = await import(pathToFileURL(resolve("scripts/compare-performance.mjs")).href);
+  const { assertUltraPresentation } = await import(pathToFileURL(resolve("scripts/performance-presentation.ts")).href);
+  // 浏览器执行同一自包含函数，缺少实际增强时不得把 high 当作 ultra。
+  const browserAssertion = new Function(`return (${assertUltraPresentation.toString()})`)();
+  for (const assertion of [assertUltraPresentation, browserAssertion]) {
+    for (const mapId of ["town", "island", "mixed"]) {
+      expect(() => assertion(mapId, "ultra", [])).toThrow(`Ultra ${mapId} presentation was not constructed`);
+      expect(() => assertion(mapId, "ultra", ["ultra-town-static-shadows"])).not.toThrow();
+      expect(() => assertion(mapId, "high", [])).not.toThrow();
+    }
+  }
   const runtime = Object.fromEntries([
     "startupMilliseconds", "heapUsedBytes", "meshAdds", "meshRemoves", "meshes", "materials",
     "textures", "geometries", "thinInstances", "vertices", "indices",
@@ -23,6 +33,26 @@ it("samples new ultra explicitly and preserves strict gates once a matching base
   for (const mapId of ["island", "mixed"]) {
     baseline[`${mapId}-ultra`] = { ...runtime };
     baseline[`browser-${mapId}-ultra`] = { ...baseline["browser-ultra"] };
+  }
+  for (const section of ["browser-ultra", "browser-island-ultra", "browser-mixed-ultra"]) {
+    const cleaned = structuredClone(baseline);
+    cleaned[section]!.gpuTexturesDeleted = 1;
+    for (const [before, after] of [[baseline, cleaned], [cleaned, baseline]]) {
+      expect(comparison.compareCollectedPerformance(before, after, true)
+        .find((row: { section: string; metric: string }) => row.section === section && row.metric === "gpuTexturesDeleted"))
+        .toMatchObject({ gated: false, passed: true });
+    }
+    for (const metric of ["gpuTexturesCreated", "gpuTexturesLive"]) {
+      const increased = structuredClone(cleaned);
+      increased[section]![metric] = 116;
+      expect(comparison.compareCollectedPerformance(baseline, increased, true)
+        .find((row: { section: string; metric: string }) => row.section === section && row.metric === metric))
+        .toMatchObject({ gated: true, passed: false });
+    }
+    delete cleaned[section]!.gpuTexturesDeleted;
+    expect(() => comparison.compareCollectedPerformance(baseline, cleaned, true)).toThrow(/metrics mismatch/);
+    cleaned[section]!.gpuTexturesDeleted = Number.NaN;
+    expect(() => comparison.compareCollectedPerformance(baseline, cleaned, true)).toThrow(/must be finite/);
   }
   for (const section of ["island-ultra", "mixed-ultra", "browser-island-ultra", "browser-mixed-ultra"]) {
     const missing = structuredClone(baseline);

@@ -138,8 +138,8 @@ Standalone 把访客、房间 metadata、入场、重连凭据、账号/管理�
 - 低/中/高/极高画质保持树干、墙、开口、楼板、坡道、连桥等权威几何在同一种子位置。画质只改变树叶细分、装饰石/灌木密度、hardware scaling 和 60/90/120 FPS 上限；昂贵岛屿/城镇表现批次、程序化角色装备和增强 HUD 在高画质及其继承档位启用。粗指针设备把画质 scaling 与最多 2 倍 DPR 结合，提高高 DPI 清晰度且不改变桌面或无限增长 render target。低画质不用 GLB；中/高/极高按需加载角色 GLB 并按距离使用 LOD；手持武器所有画质都保持程序化。
 - HUD 重状态工作按 10 Hz，瞄准、暂停、方向和触摸反馈保持逐渲染帧响应；排行榜只有排名字段或与当前玩家相连的双向伤害累计变化时重建 DOM。
 - 安全区几何复用一个可更新位置 buffer，缩圈时不重新分配顶点/法线数组。
-- 性能 CI 保留三地图 high 与原浏览器采样，并追加 town／island seed 7、mixed seed 395 的 ultra 运行时和浏览器采样，预热、轮数、稳定窗口与交替顺序不变。仅当 main 的 `QUALITY_PROFILES` 明确无 ultra 时，将 main high 标为首次 INFO 参考，完整报告新档位成本；main 支持后自动启用同档位 15% 确定性资源门禁。HEAD 不支持、导入／采样失败或指标缺失均失败。浏览器开始前校验实际所选地图和档位，新档位同时统计入场以来 WebGL 纹理创建／删除／存活数量；NullEngine 的纹理数不含浏览器派生法线，不能单独代表生产纹理成本。
-- `browser-ultra`、`browser-island-ultra` 与 `browser-mixed-ultra` 在冻结帧样本后，从已加载的 production EngineStore 模块读取真实场景的 mesh／material／geometry／vertex／index 数，并确认全部外部角色的 GLB base 已加载。逐 mesh 顶点／索引总和描述模型规模，包含共享几何的重复计数，不代表唯一 GPU buffer 大小或每帧绘制量；模块、场景、模型或指标缺失时失败。原 NullEngine 场景继续使用程序化模型，不能独立代表人物升级成本。
+- 性能 CI 保留三地图 high 与原浏览器采样，并追加 town／island seed 7、mixed seed 395 的 ultra 运行时和浏览器采样，预热、轮数、稳定窗口与交替顺序不变。仅当 main 的 `QUALITY_PROFILES` 明确无 ultra 时，将 main high 标为首次 INFO 参考，完整报告新档位成本；main 支持后自动启用同档位 15% 确定性资源门禁。HEAD 不支持、导入／采样失败或指标缺失均失败。浏览器开始前校验实际所选地图和档位，新档位同时统计入场以来 WebGL 纹理创建／删除／存活数量；删除次数仅为 INFO，变化百分比不代表改善或恶化，创建与存活数量仍受同档位 15% 门禁约束；NullEngine 的纹理数不含浏览器派生法线，不能单独代表生产纹理成本。
+- `browser-ultra`、`browser-island-ultra` 与 `browser-mixed-ultra` 在冻结帧样本后，从已加载的 production EngineStore 模块读取真实场景的 mesh／material／geometry／vertex／index 数，并确认全部外部角色的 GLB base 已加载。runtime 和 browser 的每个 ultra 采样都必须检查实际场景的极高静态阴影标记；high 参考无需标记，缺少增强时直接失败。逐 mesh 顶点／索引总和描述模型规模，包含共享几何的重复计数，不代表唯一 GPU buffer 大小或每帧绘制量；模块、场景、模型或指标缺失时失败。原 NullEngine 场景继续使用程序化模型，不能独立代表人物升级成本。
 - 不使用角色／投掷物动态阴影或完整刚体模拟；极高允许上述局部缓存静态阴影。
 - 只有资源清单真实使用 GLB 时才加载动态 GLTF loader chunk。
 - 活动联机房间只有单线程权威：1 个 Durable Object 或 1 个 standalone 进程内服务，规则 30 Hz、快照 10 Hz、checkpoint 1 秒。

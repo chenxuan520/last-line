@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
+import { assertUltraPresentation } from "./performance-presentation.js";
 
 interface Arguments {
   repository: string;
@@ -124,9 +125,7 @@ async function main(): Promise<void> {
       mapId,
     );
     const sceneMilliseconds = performance.now() - sceneStarted;
-    if (quality === "ultra" && mapId === "town" && !bundle.scene.textures.some(
-      (texture: { name: string }) => texture.name === "ultra-town-static-shadows",
-    )) throw new Error("Ultra town presentation was not constructed");
+    assertUltraPresentation(mapId, quality, bundle.scene.textures.map((texture: { name: string }) => texture.name));
     global.gc?.();
     const heapUsedBytes = process.memoryUsage().heapUsed;
     const meshes = bundle.scene.meshes;
