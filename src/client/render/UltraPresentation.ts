@@ -1,11 +1,13 @@
 import { enhanceViewEquipment } from "./UltraEquipmentPresentation";
+import { enhanceLighting, type UltraMaterialAdapter } from "./UltraLightingPresentation";
 import { enhanceVegetation } from "./UltraVegetationPresentation";
 export { colorEquipmentPart } from "./UltraEquipmentPresentation";
 export { enhanceCharacterContainer } from "./UltraCharacterPresentation";
+export { createUltraMaterialAdapter } from "./UltraLightingPresentation";
 import { VertexBuffer } from "@babylonjs/core/Buffers/buffer";
 import type { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
 import type { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
-import { ShadowGenerator } from "@babylonjs/core/Lights/Shadows/shadowGenerator";
+import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { RawTexture } from "@babylonjs/core/Materials/Textures/rawTexture";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
@@ -14,9 +16,11 @@ import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { InstancedMesh } from "@babylonjs/core/Meshes/instancedMesh";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
+import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
 import type { AssetCatalog } from "../../assets/AssetCatalog";
 import { getTerrainHeight, type MapLayout } from "../../config/map";
+import type { EntityId } from "../../game/state/types";
 
 const WORLD_TEXTURE_IDS = new Set([
   "texture.terrain.concrete-urban",
@@ -36,13 +40,20 @@ const WORLD_TEXTURE_IDS = new Set([
   "texture.building.roof-tile-red-brown",
 ]);
 
-export function enhanceScenePresentation(
+export interface UltraSceneActors {
+  actorVisualRoots: ReadonlyMap<EntityId, TransformNode>;
+  localActorId: EntityId;
+}
+
+export async function enhanceScenePresentation(
   scene: Scene,
   assets: AssetCatalog,
   sun: DirectionalLight,
   ambient: HemisphericLight,
   layout: MapLayout,
-): void {
+  actors: UltraSceneActors,
+  materials: UltraMaterialAdapter,
+): Promise<void> {
   ambient.intensity = 0.72;
   ambient.diffuse = new Color3(0.82, 0.88, 1);
   ambient.groundColor = new Color3(0.24, 0.23, 0.21);
@@ -91,7 +102,7 @@ export function enhanceScenePresentation(
     const payload = assets.getPayload(texture.name);
     if (payload) void addSurfaceNormal(scene, texture, payload);
   }
-  createCachedTownShadows(scene, sun);
+  await enhanceLighting(scene, { sun, ambient, ...actors, materials });
 }
 
 function applyWorldSurfaceUvs(mesh: Mesh): void {
@@ -142,10 +153,7 @@ async function addSurfaceNormal(scene: Scene, source: Texture, payload: ArrayBuf
     const bind = (): void => {
       if (scene.isDisposed || source.loadingError) return;
       for (const material of scene.materials) {
-        if (!(material instanceof StandardMaterial) || material.diffuseTexture !== source) continue;
-        material.bumpTexture = normal;
-        material.specularColor.setAll(source.name.includes("metal") ? 0.24 : 0.09);
-        material.specularPower = source.name.includes("metal") ? 72 : 24;
+        if (material instanceof PBRMaterial && material.albedoTexture === source) material.bumpTexture = normal;
       }
     };
     if (source.isReady()) bind();
@@ -174,43 +182,6 @@ export function surfaceNormalPixels(pixels: Uint8ClampedArray, size: number): Ui
     }
   }
   return result;
-}
-
-function createCachedTownShadows(scene: Scene, sun: DirectionalLight): void {
-  sun.shadowFrustumSize = 192;
-  sun.shadowMinZ = 1;
-  sun.shadowMaxZ = 400;
-  const shadows = new ShadowGenerator(2048, sun);
-  shadows.usePercentageCloserFiltering = true;
-  shadows.filteringQuality = ShadowGenerator.QUALITY_LOW;
-  shadows.bias = 0.0004;
-  shadows.normalBias = 0.06;
-  shadows.setDarkness(0.08);
-  const shadowMap = shadows.getShadowMap()!;
-  shadowMap.name = "ultra-town-static-shadows";
-  shadowMap.refreshRate = 0;
-  // 建筑包含真实开口；不使用整栋盒状代理，避免把门窗和楼梯投成实心阴影。
-  shadowMap.renderList = scene.meshes.filter((mesh) =>
-    mesh.name.startsWith("building-walls-") ||
-    ["floor-slabs", "roof-slabs", "hospital-surfaces", "ammunition-depot-surfaces"].includes(mesh.metadata?.detailType) ||
-    mesh.metadata?.decoration === "roof-ramp" || mesh.metadata?.decoration === "vegetation",
-  );
-  let tileX = Number.NaN;
-  let tileY = Number.NaN;
-  let tileZ = Number.NaN;
-  scene.onBeforeRenderObservable.add(() => {
-    const position = scene.activeCamera?.globalPosition;
-    if (!position) return;
-    const x = Math.floor(position.x / 8) * 8;
-    const y = Math.floor(position.y / 8) * 8;
-    const z = Math.floor(position.z / 8) * 8;
-    if (x === tileX && y === tileY && z === tileZ) return;
-    tileX = x;
-    tileY = y;
-    tileZ = z;
-    sun.position.set(x - sun.direction.x * 160, y - sun.direction.y * 160, z - sun.direction.z * 160);
-    shadowMap.resetRefreshCounter();
-  });
 }
 
 function createSampleDetails(scene: Scene, layout: MapLayout): void {

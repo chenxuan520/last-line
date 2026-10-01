@@ -4,6 +4,7 @@ import type { Engine } from "@babylonjs/core/Engines/engine";
 import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { BackgroundMaterial } from "@babylonjs/core/Materials/Background/backgroundMaterial";
+import type { Material } from "@babylonjs/core/Materials/material";
 import type { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { MultiMaterial } from "@babylonjs/core/Materials/multiMaterial";
@@ -273,6 +274,7 @@ export async function createIslandScene(
     );
   }
 
+  const ultraMaterials = ultraPresentation?.createUltraMaterialAdapter(scene);
   const { lootMeshes, syncLootMeshes } = createLootMeshes(
     scene,
     groundLoot,
@@ -280,10 +282,21 @@ export async function createIslandScene(
     materials.deathLoot,
     showGroundLootModels,
     ultraPresentation?.colorEquipmentPart,
+    ultraMaterials?.adapt,
   );
   const { mesh: safeZoneRing, sync: syncSafeZoneRing } = createSafeZoneRing(scene, materials.safeZone, layout);
 
-  ultraPresentation?.enhanceScenePresentation(scene, assets, sun, ambient, layout);
+  if (ultraPresentation && ultraMaterials) {
+    await ultraPresentation.enhanceScenePresentation(
+      scene,
+      assets,
+      sun,
+      ambient,
+      layout,
+      { actorVisualRoots, localActorId: player.id },
+      ultraMaterials,
+    );
+  }
 
   return {
     scene,
@@ -3581,6 +3594,7 @@ function createLootMeshes(
   deathLootMaterial: StandardMaterial,
   showGroundLootModels: boolean,
   colorPart?: (mesh: Mesh, itemId: string) => void,
+  adaptMaterial: (material: Material) => Material = (material) => material,
 ): {
   lootMeshes: Map<EntityId, Mesh>;
   syncLootMeshes: (groundLoot: Readonly<Record<EntityId, GroundLootState>>) => void;
@@ -3644,9 +3658,9 @@ function createLootMeshes(
             marker.rotationQuaternion = modelTemplate.rotationQuaternion?.clone() ?? null;
           }
         }
-        marker.material = showGroundLootModels
+        marker.material = adaptMaterial(showGroundLootModels
           ? getModelMaterial(modelId, loot.source === "death")
-          : (loot.source === "death" ? deathLootMaterial : lootMaterial);
+          : (loot.source === "death" ? deathLootMaterial : lootMaterial));
         const modelScale = showGroundLootModels ? groundLootModelScale(modelId, Boolean(colorPart)) : 1;
         if (!marker.scaling.equalsToFloats(modelScale, modelScale, modelScale)) marker.scaling.setAll(modelScale);
         const y = loot.position.y + (showGroundLootModels

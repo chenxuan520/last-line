@@ -24,6 +24,10 @@ export default defineConfig(({ command }) => {
               name: "ultra-shadow-shaders",
               test: /[\\/]Shaders(?:WGSL)?[\\/](?:ShadersInclude[\\/])?(?:shadowMap|depthBoxBlur|kernelBlur|packingFunctions|sceneVertexDeclaration|instancesDeclaration)/,
               includeDependenciesRecursively: false,
+            }, {
+              name: "ultra-post-shaders",
+              test: /[\\/]Shaders(?:WGSL)?[\\/](?:ssao2|ssaoCombine|bloomMerge|extractHighlights|imageProcessing|pass|passCube)\.fragment\.js$/,
+              includeDependenciesRecursively: false,
             }],
           },
         },

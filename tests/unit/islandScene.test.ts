@@ -2,6 +2,8 @@ import { NullEngine } from "@babylonjs/core/Engines/nullEngine";
 import { Scene } from "@babylonjs/core/scene";
 import type { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
 import { BackgroundMaterial } from "@babylonjs/core/Materials/Background/backgroundMaterial";
+import { ImageProcessingConfiguration } from "@babylonjs/core/Materials/imageProcessingConfiguration";
+import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { MultiMaterial } from "@babylonjs/core/Materials/multiMaterial";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
@@ -138,8 +140,41 @@ describe("IslandScene lifecycle", () => {
     }
     const crown = ultra.scene.getMeshByName("tree-foliage-template")!;
     expect(crown.getTotalVertices()).toBeGreaterThan(800);
-    expect((crown.material as StandardMaterial).needAlphaTesting()).toBe(true);
-    expect((crown.material as StandardMaterial).needAlphaBlending()).toBe(false);
+    expect(crown.material).toBeInstanceOf(PBRMaterial);
+    expect((crown.material as PBRMaterial).albedoTexture?.name).toBe("ultra-tree-needles");
+    expect(crown.material!.needAlphaTesting()).toBe(true);
+    expect(crown.material!.needAlphaBlending()).toBe(false);
+    const litStandard = ultra.scene.meshes.filter((mesh) =>
+      !(mesh instanceof InstancedMesh) &&
+      mesh.material instanceof StandardMaterial &&
+      !mesh.material.disableLighting &&
+      mesh.material.alpha >= 0.01 &&
+      !["loot-marker-material", "death-loot-marker-material"].includes(mesh.material.name));
+    expect(litStandard.map((mesh) => mesh.name)).toEqual([]);
+    const ground = ultra.scene.getMeshByName("island-ground")!.material as MultiMaterial;
+    expect(ground.subMaterials.every((material) => material instanceof PBRMaterial)).toBe(true);
+    expect(ultra.scene.materials.some((material) => material instanceof StandardMaterial && material.name === "building-floor-material")).toBe(false);
+    expect(ultra.scene.fogMode).toBe(Scene.FOGMODE_EXP2);
+    expect(ultra.scene.imageProcessingConfiguration).toMatchObject({
+      isEnabled: true,
+      toneMappingEnabled: true,
+      toneMappingType: ImageProcessingConfiguration.TONEMAPPING_ACES,
+      vignetteEnabled: false,
+      applyByPostProcess: true,
+    });
+    expect(ultra.camera._postProcesses.map((postProcess) => postProcess?.name)).toEqual(expect.arrayContaining(["bloomMerge", "ultra-image-processing"]));
+    expect(ultra.scene.getLightByName("island-ambient")!.isEnabled()).toBe(true);
+    const skyLight = ultra.scene.getLightByName("ultra-sky-occlusion") as DirectionalLight;
+    expect(skyLight.intensity).toBe(0);
+    expect(ultra.scene.lights.at(-1)).toBe(skyLight);
+    const skyMap = skyLight.getShadowGenerator()!.getShadowMap()!;
+    expect(skyMap.renderList!.length).toBeGreaterThan(0);
+    expect(skyMap.renderList!.every((mesh) =>
+      ["floor-slabs", "roof-slabs", "hospital-surfaces", "ammunition-depot-surfaces"].includes(mesh.metadata?.detailType) ||
+      mesh.metadata?.decoration === "roof-ramp")).toBe(true);
+    expect(ultra.scene.materials.filter((material) => material instanceof PBRMaterial)
+      .every((material) => material.pluginManager?.getPlugin("UltraSkyOcclusion"))).toBe(true);
+    const skyReset = vi.spyOn(skyMap, "resetRefreshCounter");
     expect(ultra.scene.textures.filter((texture) => texture.name === "ultra-tree-needles")).toHaveLength(1);
     expect(ultra.scene.textures.filter((texture) => texture.name === "ultra-tree-bark")).toHaveLength(1);
     const viewParts = ultra.viewWeaponRoot.getChildMeshes(false);
@@ -169,6 +204,8 @@ describe("IslandScene lifecycle", () => {
     expect(marker.geometry).toBe(ultra.scene.getMeshByName("loot-model-template-medkit")?.geometry);
     expect(marker.getVerticesData("color")?.length).toBe(marker.getTotalVertices() * 4);
     const deathMaterial = marker.material;
+    expect(deathMaterial).toBeInstanceOf(PBRMaterial);
+    expect(ultra.scene.materials.some((material) => material instanceof StandardMaterial && material.name === deathMaterial?.name)).toBe(false);
     ultra.syncLootMeshes(state.groundLoot);
     expect(marker.material).toBe(deathMaterial);
     rifle.itemId = "weapon.rifle";
@@ -181,10 +218,11 @@ describe("IslandScene lifecycle", () => {
     expect(details).toHaveLength(mapId === "town" ? 4 : 2);
     expect(ultra.scene.getMeshByName("ultra-town-pavement") !== null).toBe(mapId === "town");
     expect(details.every((mesh) => !mesh.isPickable && !mesh.checkCollisions)).toBe(true);
-    expect(ultra.scene.getMaterialByName("hospital-surface-material")).toMatchObject({ diffuseColor: Color3.White(), diffuseTexture: null });
+    expect(ultra.scene.getMaterialByName("hospital-surface-material")).toMatchObject({ albedoColor: Color3.White(), albedoTexture: null });
     const sun = ultra.scene.getLightByName("island-sun") as DirectionalLight;
     const shadowMap = sun.getShadowGenerator()!.getShadowMap()!;
-    expect(shadowMap.getSize()).toEqual({ width: 2048, height: 2048 });
+    expect(shadowMap.getSize()).toEqual({ width: 4096, height: 4096 });
+    expect(sun.shadowFrustumSize).toBe(384);
     expect(shadowMap.refreshRate).toBe(0);
     expect(shadowMap.renderList?.some((mesh) => mesh.name === "building-walls-texture-building-brick-masonry")).toBe(true);
     expect(shadowMap.renderList?.every((mesh) => !mesh.metadata?.actorId && mesh.metadata?.decoration !== "ultra-town-detail")).toBe(true);
@@ -198,6 +236,7 @@ describe("IslandScene lifecycle", () => {
     ultra.camera.getViewMatrix(true);
     ultra.scene.onBeforeRenderObservable.notifyObservers(ultra.scene);
     expect(reset).toHaveBeenCalledTimes(2);
+    expect(skyReset).toHaveBeenCalledTimes(2);
     expect(sun.position.x - sunPosition.x).toBe(16);
     expect(JSON.stringify(state)).toBe(before);
     ultra.scene.dispose();
@@ -205,6 +244,48 @@ describe("IslandScene lifecycle", () => {
     expect(ultra.scene.textures).toHaveLength(0);
     expect(shadowMap.getInternalTexture()).toBeNull();
     expect(ultra.scene.onBeforeRenderObservable.hasObservers()).toBe(false);
+    engine.dispose();
+  }, 60_000);
+
+  it.each([false, true])("limits ultra actor shadows to nearby desktop actors (touch %s)", async (touch) => {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: touch && query === "(pointer: coarse)" }));
+    const engine = new NullEngine();
+    const state = createBattleRoyaleState("player", {
+      participantCount: 3,
+      flightSeconds: 1,
+      safeZoneStages: [{ waitSeconds: 1, shrinkSeconds: 1, radius: 100, damagePerSecond: 1 }],
+    }, () => 0.5, { mapId: "town" });
+    for (const actor of Object.values(state.actors)) actor.deployment = "grounded";
+    const before = JSON.stringify(state);
+    const bundle = await createIslandScene(engine, createAssets(), state.actors, state.groundLoot, state.mapSeed, true, "player", "ultra", "town");
+    const shadowMap = (bundle.scene.getLightByName("island-sun") as DirectionalLight).getShadowGenerator()!.getShadowMap()!;
+    expect(shadowMap.getSize()).toEqual(touch ? { width: 2048, height: 2048 } : { width: 4096, height: 4096 });
+    const postProcesses = bundle.camera._postProcesses.map((postProcess) => postProcess?.name);
+    expect(postProcesses.includes("bloomMerge")).toBe(!touch);
+    expect(postProcesses).toContain("ultra-image-processing");
+    const near = bundle.actorRoots.get("bot-1")!;
+    bundle.actorRoots.get("bot-2")!.position.x += 1_000;
+    near.position.copyFrom(bundle.camera.position).addInPlaceFromFloats(6, 0, 0);
+    const actorMeshes = bundle.actorVisualRoots.get("bot-1")!.getChildMeshes(false);
+    expect(actorMeshes.length).toBeGreaterThan(0);
+    expect(actorMeshes.every((mesh) => (mesh instanceof InstancedMesh ? mesh.sourceMesh : mesh).receiveShadows)).toBe(true);
+    const staticCasters = [...shadowMap.renderList!];
+    const reset = vi.spyOn(shadowMap, "resetRefreshCounter");
+    const frame = (): void => {
+      bundle.scene.onBeforeRenderObservable.notifyObservers(bundle.scene);
+    };
+    frame();
+    frame();
+    expect(shadowMap.renderList!.some((mesh) => actorMeshes.includes(mesh))).toBe(!touch);
+    expect(reset).toHaveBeenCalledTimes(touch ? 1 : 2);
+    near.position.x += 200;
+    frame();
+    frame();
+    expect([...shadowMap.renderList!]).toEqual(staticCasters);
+    expect(reset).toHaveBeenCalledTimes(touch ? 1 : 3);
+    expect(JSON.stringify(state)).toBe(before);
+    bundle.scene.dispose();
+    expect(bundle.scene.textures).toHaveLength(0);
     engine.dispose();
   }, 60_000);
 

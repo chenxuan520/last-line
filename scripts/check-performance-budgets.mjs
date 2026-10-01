@@ -7,8 +7,8 @@ const distDirectory = path.join(projectRoot, "dist");
 const budgets = {
   browserEntry: 1_200_000,
   browserLargestNonEntry: 700_000,
-  browserJavaScript: 4_000_000,
-  browserJavaScriptChunks: 270,
+  browserJavaScript: 4_110_000,
+  browserJavaScriptChunks: 277,
   browserCss: 50_000,
   browserDist: 5_000_000,
   worker: 636_000,
