@@ -8,7 +8,7 @@ import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import { Scene } from "@babylonjs/core/scene";
 import { describe, expect, it } from "vitest";
 import { createUltraMaterialAdapter } from "../../src/client/render/UltraLightingPresentation";
-import { surfaceNormalPixels } from "../../src/client/render/UltraPresentation";
+import { bindGeneratedSurfaceNormal, surfaceNormalPixels } from "../../src/client/render/UltraPresentation";
 
 describe("ultra town surface normals", () => {
   it("keeps flat surfaces flat and derives finite wrapped normals without mutating source pixels", () => {
@@ -29,6 +29,36 @@ describe("ultra town surface normals", () => {
     expect(slope[0]).toBeGreaterThan(128);
     expect(slope[5]).toBe(128);
     expect(slope).toEqual(surfaceNormalPixels(pixels, 4));
+  });
+
+  it("binds generated normals onto standard materials before PBR conversion", () => {
+    const engine = new NullEngine();
+    const scene = new Scene(engine);
+    const source = new Texture(null, scene);
+    const normal = new Texture(null, scene);
+    const wall = new StandardMaterial("building-material", scene);
+    wall.diffuseTexture = source;
+    const mesh = CreateBox("wall", {}, scene);
+    mesh.material = wall;
+
+    bindGeneratedSurfaceNormal(scene, source, normal);
+    expect(wall.bumpTexture).toBe(normal);
+
+    const adapter = createUltraMaterialAdapter(scene);
+    adapter.convertScene();
+    const converted = mesh.material as PBRMaterial;
+    expect(converted).toBeInstanceOf(PBRMaterial);
+    expect(converted.bumpTexture).toBe(normal);
+
+    const later = new Texture(null, scene);
+    const lateNormal = new Texture(null, scene);
+    const already = new PBRMaterial("already-converted", scene);
+    already.albedoTexture = later;
+    bindGeneratedSurfaceNormal(scene, later, lateNormal);
+    expect(already.bumpTexture).toBe(lateNormal);
+
+    scene.dispose();
+    engine.dispose();
   });
 });
 

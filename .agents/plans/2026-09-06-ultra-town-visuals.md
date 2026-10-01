@@ -196,3 +196,5 @@
 - 低优先级：室内衰减读取光照循环最后一盏灯的 `shadow`。当前灯序由定向测试锁定遮挡光在末尾，本轮不改。
 - 性能：桌面极高稳定成本为 PBR、半分辨率 SSAO2、轻度泛光、色调映射和 4096² 阴影图；40m 内有非本地角色时整张阴影图逐帧刷新，这是已确认行为，也是相对高画质最可能超过 15% 帧时间的部分，同档位硬门禁交 CI。可优化空间为近处角色只重绘动态部分、降低 SSAO 采样、遮挡不再依赖最后一盏灯。本轮不扩大实现。
 - Re-review：同一只读 Reviewer 复核后通过，F1／F2 闭环，无未解决 blocker／high／medium。允许提交。未重跑测试、构建或浏览器验收。
+- 2026-10-02：提交 `6247f2c` 后 Codex 在该提交上提出 P2：生成法线的 `createImageBitmap` 可能在动态加载 SSAO、执行 `convertScene()` 之前完成，绑定只查找 `PBRMaterial`，因此不会重试，凹凸贴图被分配但用不上。对照 `addSurfaceNormal` 与 `convertStandardMaterial` 确认成立：转换会拷贝当时的 `bumpTexture`。已导出 `bindGeneratedSurfaceNormal`，转换前写入仍在场的 Standard 材质，转换后继续写入 PBR。定向单用例 `binds generated normals onto standard materials before PBR conversion` 通过，`npm run typecheck:app` 通过。画面意图不变，不重拍三地图；`6247f2c` 的两条 CI build 已通过，性能作业仍在跑，本修复会另起检查。
+- Re-review：同一只读 Reviewer 确认 P2 闭环，转换前写入 Standard、转换后写入 PBR，无新增 blocker／high／medium。允许提交。未重跑测试或浏览器。

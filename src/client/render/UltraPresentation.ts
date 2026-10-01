@@ -150,16 +150,20 @@ async function addSurfaceNormal(scene: Scene, source: Texture, payload: ArrayBuf
     normal.vScale = source.vScale;
     normal.anisotropicFilteringLevel = 8;
     normal.level = 0.65;
-    const bind = (): void => {
-      if (scene.isDisposed || source.loadingError) return;
-      for (const material of scene.materials) {
-        if (material instanceof PBRMaterial && material.albedoTexture === source) material.bumpTexture = normal;
-      }
-    };
+    const bind = (): void => bindGeneratedSurfaceNormal(scene, source, normal);
     if (source.isReady()) bind();
     else source.onLoadObservable.addOnce(bind);
   } catch {
     // 图片解码或凹凸增强不可用时保留原材质，权威几何始终可见。
+  }
+}
+
+// 法线在 PBR 转换前后都可能就绪。转换前必须写到仍在场的 Standard 材质，转换才会把 bumpTexture 拷过去。
+export function bindGeneratedSurfaceNormal(scene: Scene, source: Texture, normal: Texture): void {
+  if (scene.isDisposed || source.loadingError) return;
+  for (const material of scene.materials) {
+    if (material instanceof StandardMaterial && material.diffuseTexture === source) material.bumpTexture = normal;
+    else if (material instanceof PBRMaterial && material.albedoTexture === source) material.bumpTexture = normal;
   }
 }
 
