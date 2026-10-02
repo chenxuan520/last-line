@@ -1,7 +1,7 @@
 import { enhanceViewEquipment } from "./UltraEquipmentPresentation";
 import { enhanceLighting, type UltraMaterialAdapter } from "./UltraLightingPresentation";
 import { enhanceVegetation } from "./UltraVegetationPresentation";
-import { enhanceTerrainPresentation } from "./UltraTerrainPresentation";
+import { createTerrainPavement, enhanceTerrainPresentation } from "./UltraTerrainPresentation";
 export { colorEquipmentPart } from "./UltraEquipmentPresentation";
 export { enhanceCharacterContainer } from "./UltraCharacterPresentation";
 export { createUltraMaterialAdapter } from "./UltraLightingPresentation";
@@ -21,7 +21,7 @@ import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
 import type { AssetCatalog } from "../../assets/AssetCatalog";
 import { ULTRA_PRESENTATION } from "../../config/ultraPresentation";
-import { getTerrainHeight, type MapLayout } from "../../config/map";
+import type { MapLayout } from "../../config/map";
 import type { EntityId } from "../../game/state/types";
 
 const WORLD_TEXTURE_IDS = new Set([
@@ -199,8 +199,8 @@ function createBuildingAndStreetDetails(scene: Scene, layout: MapLayout): void {
   const buildingIds = new Set(buildings.map((building) => building.id));
   const trimTransforms: number[] = [];
   const jointTransforms: number[] = [];
-  const add = (target: number[], x: number, y: number, z: number, width: number, height: number, depth: number, yaw = 0): void => {
-    Matrix.Compose(new Vector3(width, height, depth), Quaternion.FromEulerAngles(0, yaw, 0), new Vector3(x, y, z)).copyToArray(target, target.length);
+  const add = (target: number[], x: number, y: number, z: number, width: number, height: number, depth: number, yaw = 0, pitch = 0, roll = 0): void => {
+    Matrix.Compose(new Vector3(width, height, depth), Quaternion.FromEulerAngles(pitch, yaw, roll), new Vector3(x, y, z)).copyToArray(target, target.length);
   };
   for (const wall of layout.wallSegments) {
     if (!buildingIds.has(wall.obstacleId) || wall.role !== "facade" || wall.height < 1) continue;
@@ -265,7 +265,8 @@ function createBuildingAndStreetDetails(scene: Scene, layout: MapLayout): void {
   const roads = layout.roadSegments.map((road) => ({
     road, length: Math.hypot(road[2] - road[0], road[3] - road[1]),
   })).filter(({ length }) => length > 0);
-  const pavements: Mesh[] = [];
+  const { mesh: pavementMesh, heightAt } = createTerrainPavement(scene, layout, pavement);
+  applyWorldSurfaceUvs(pavementMesh);
   const pavingJoints: number[] = [];
   for (const { road: [x1, z1, x2, z2], length } of roads) {
     const from = 0;
@@ -274,28 +275,15 @@ function createBuildingAndStreetDetails(scene: Scene, layout: MapLayout): void {
     const dz = (z2 - z1) / length;
     const yaw = Math.atan2(dx, dz);
     for (const side of [-1, 1]) {
-      const x = x1 + dx * (from + to) / 2 + dz * side * 4.85;
-      const z = z1 + dz * (from + to) / 2 - dx * side * 4.85;
-      const mesh = CreateBox("ultra-town-pavement", { width: 2.1, height: 0.025, depth: to - from }, scene);
-      mesh.position.set(x, getTerrainHeight(x, z, layout) + 0.03, z);
-      mesh.rotation.y = yaw;
-      mesh.material = pavement;
-      applyWorldSurfaceUvs(mesh);
-      pavements.push(mesh);
       for (let offset = from + 1.5; offset < to; offset += 3) {
         const jointX = x1 + dx * offset + dz * side * 4.85;
         const jointZ = z1 + dz * offset - dx * side * 4.85;
-        add(pavingJoints, jointX, getTerrainHeight(jointX, jointZ, layout) + 0.046, jointZ, 2.1, 0.005, 0.018, yaw);
+        const acrossRise = heightAt(jointX + dz * 1.05, jointZ - dx * 1.05) - heightAt(jointX - dz * 1.05, jointZ + dx * 1.05);
+        const alongRise = heightAt(jointX + dx * 0.1, jointZ + dz * 0.1) - heightAt(jointX - dx * 0.1, jointZ - dz * 0.1);
+        add(pavingJoints, jointX, heightAt(jointX, jointZ) + 0.046, jointZ, 2.1, 0.005, 0.018,
+          yaw, -Math.atan2(alongRise, 0.2), Math.atan2(acrossRise, 2.1));
       }
     }
-  }
-  const merged = Mesh.MergeMeshes(pavements, true, true);
-  if (merged) {
-    merged.name = "ultra-town-pavement";
-    merged.isPickable = false;
-    merged.checkCollisions = false;
-    merged.metadata = { decoration: "ultra-town-detail", sourceCount: pavements.length };
-    merged.freezeWorldMatrix();
   }
   addBatch("ultra-town-paving-joints", pavingJoints, "#555952");
 }

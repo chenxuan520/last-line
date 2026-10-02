@@ -112,6 +112,38 @@ describe("IslandScene lifecycle", () => {
     vi.restoreAllMocks();
   });
 
+  it("keeps complete outer town pavement on the rendered terrain slope", async () => {
+    const engine = new NullEngine();
+    const state = createBattleRoyaleState("player", undefined, () => 7 / 0x100000000, { mapId: "town" });
+    expect(state.mapSeed).toBe(7);
+    const before = JSON.stringify(state);
+    const bundle = await createIslandScene(engine, createAssets(), state.actors, state.groundLoot, 7, true, "player", "ultra", "town");
+    const layout = createMapLayout("town", 7);
+    const [ax, az, bx, bz] = layout.roadSegments[78]!;
+    const length = Math.hypot(bx - ax, bz - az), dx = (bx - ax) / length, dz = (bz - az) / length;
+    const pavement = bundle.scene.getMeshByName("ultra-town-pavement")!;
+    const ground = bundle.scene.getMeshByName("island-ground")!;
+    const heights: number[] = [];
+    for (const side of [-1, 1]) {
+      for (const along of [0.7, length / 4, length / 2, length * 3 / 4, length - 0.7]) {
+        for (const across of [-0.8, 0, 0.8]) {
+          const x = ax + dx * along + dz * (side * 4.85 + across);
+          const z = az + dz * along - dx * (side * 4.85 + across);
+          const ray = new Ray(new Vector3(x, 100, z), new Vector3(0, -1, 0), 200);
+          const groundHit = ground.intersects(ray, false), pavementHit = pavement.intersects(ray, false);
+          expect(groundHit.hit).toBe(true); expect(pavementHit.hit).toBe(true);
+          expect(groundHit.distance - pavementHit.distance).toBeCloseTo(0.0425, 4);
+          heights.push(groundHit.pickedPoint!.y);
+        }
+      }
+    }
+    expect(Math.max(...heights) - Math.min(...heights)).toBeGreaterThan(0.5);
+    expect(pavement.metadata.sourceCount).toBe(layout.roadSegments.length * 2);
+    expect(pavement.isPickable).toBe(false); expect(pavement.checkCollisions).toBe(false);
+    expect(JSON.stringify(state)).toBe(before);
+    bundle.scene.dispose(); engine.dispose();
+  }, 60_000);
+
   it.each(["town", "island", "mixed"] as const)("isolates ultra %s surfaces and cached shadows without changing authoritative geometry", async (mapId) => {
     const engine = new NullEngine();
     const assets = createAssets();

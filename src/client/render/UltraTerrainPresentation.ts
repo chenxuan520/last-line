@@ -1,4 +1,8 @@
 import { Constants } from "@babylonjs/core/Engines/constants";
+import { VertexBuffer } from "@babylonjs/core/Buffers/buffer";
+import type { Material } from "@babylonjs/core/Materials/material";
+import { Mesh } from "@babylonjs/core/Meshes/mesh";
+import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
 import { MaterialPluginBase } from "@babylonjs/core/Materials/materialPluginBase";
 import { MultiMaterial } from "@babylonjs/core/Materials/multiMaterial";
 import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
@@ -13,6 +17,105 @@ import { ULTRA_PRESENTATION } from "../../config/ultraPresentation";
 import { getPoiVisualType } from "../poiVisuals";
 
 export const ULTRA_ROAD_MASK_NAME = "ultra-road-surface-mask";
+
+// 裁切真实地面三角面，而非在长路中点放平板；地面仍只用于表现，不参与权威碰撞。
+export function createTerrainPavement(scene: Scene, layout: MapLayout, material: Material): {
+  mesh: Mesh; heightAt(x: number, z: number): number;
+} {
+  const ground = scene.getMeshByName("island-ground")!;
+  const groundPositions = ground.getVerticesData(VertexBuffer.PositionKind)!;
+  const groundIndices = ground.getIndices()!;
+  const cells = Math.round(Math.sqrt(groundPositions.length / 3)) - 1;
+  const scale = cells / MAP_SIZE;
+  const cellAt = (value: number): number => Math.max(0, Math.min(cells - 1, Math.floor((value + MAP_SIZE / 2) * scale)));
+  const triangles = new Int32Array(cells * cells * 2).fill(-1);
+  for (let offset = 0; offset < groundIndices.length; offset += 3) {
+    const a = groundIndices[offset]! * 3, b = groundIndices[offset + 1]! * 3, c = groundIndices[offset + 2]! * 3;
+    const x = cellAt(Math.min(groundPositions[a]!, groundPositions[b]!, groundPositions[c]!));
+    const z = cellAt(Math.min(groundPositions[a + 2]!, groundPositions[b + 2]!, groundPositions[c + 2]!));
+    const slot = (z * cells + x) * 2;
+    triangles[slot + (triangles[slot] === -1 ? 0 : 1)] = offset;
+  }
+  const heightAt = (x: number, z: number): number => {
+    const slot = (cellAt(z) * cells + cellAt(x)) * 2;
+    for (let triangle = 0; triangle < 2; triangle += 1) {
+      const offset = triangles[slot + triangle]!;
+      const a = groundIndices[offset]! * 3, b = groundIndices[offset + 1]! * 3, c = groundIndices[offset + 2]! * 3;
+      const ax = groundPositions[a]!, az = groundPositions[a + 2]!;
+      const bx = groundPositions[b]! - ax, bz = groundPositions[b + 2]! - az;
+      const cx = groundPositions[c]! - ax, cz = groundPositions[c + 2]! - az;
+      const determinant = bx * cz - bz * cx;
+      const u = ((x - ax) * cz - (z - az) * cx) / determinant;
+      const v = (bx * (z - az) - bz * (x - ax)) / determinant;
+      if (u >= -1e-6 && v >= -1e-6 && u + v <= 1 + 1e-6) {
+        return groundPositions[a + 1]! * (1 - u - v) + groundPositions[b + 1]! * u + groundPositions[c + 1]! * v;
+      }
+    }
+    throw new Error("Pavement sample outside rendered terrain");
+  };
+  type Point = { x: number; y: number; z: number };
+  const clip = (polygon: Point[], distance: (point: Point) => number): Point[] => {
+    const result: Point[] = [];
+    let previous = polygon.at(-1)!;
+    let previousDistance = distance(previous);
+    for (const point of polygon) {
+      const currentDistance = distance(point);
+      if ((currentDistance >= 0) !== (previousDistance >= 0)) {
+        const t = previousDistance / (previousDistance - currentDistance);
+        result.push({ x: previous.x + (point.x - previous.x) * t,
+          y: previous.y + (point.y - previous.y) * t, z: previous.z + (point.z - previous.z) * t });
+      }
+      if (currentDistance >= 0) result.push(point);
+      previous = point; previousDistance = currentDistance;
+    }
+    return result;
+  };
+  const positions: number[] = [], indices: number[] = [];
+  let sourceCount = 0;
+  for (const [ax, az, bx, bz] of layout.roadSegments) {
+    const length = Math.hypot(bx - ax, bz - az);
+    if (!length) continue;
+    const dx = (bx - ax) / length, dz = (bz - az) / length;
+    for (const side of [-1, 1]) {
+      const near = side * 4.85 - 1.05, far = side * 4.85 + 1.05;
+      const xs = [ax + dz * near, ax + dz * far, bx + dz * near, bx + dz * far];
+      const zs = [az - dx * near, az - dx * far, bz - dx * near, bz - dx * far];
+      const along = (point: Point): number => (point.x - ax) * dx + (point.z - az) * dz;
+      const across = (point: Point): number => (point.x - ax) * dz - (point.z - az) * dx;
+      const boundaries = [(point: Point) => along(point), (point: Point) => length - along(point),
+        (point: Point) => across(point) - near, (point: Point) => far - across(point)];
+      sourceCount += 1;
+      for (let z = cellAt(Math.min(...zs)); z <= cellAt(Math.max(...zs)); z += 1) {
+        for (let x = cellAt(Math.min(...xs)); x <= cellAt(Math.max(...xs)); x += 1) {
+          for (let triangle = 0; triangle < 2; triangle += 1) {
+            const offset = triangles[(z * cells + x) * 2 + triangle]!;
+            let polygon = Array.from({ length: 3 }, (_, corner): Point => {
+              const index = groundIndices[offset + corner]! * 3;
+              return { x: groundPositions[index]!, y: groundPositions[index + 1]!, z: groundPositions[index + 2]! };
+            });
+            for (const distance of boundaries) {
+              polygon = clip(polygon, distance);
+              if (polygon.length < 3) break;
+            }
+            if (polygon.length < 3) continue;
+            const start = positions.length / 3;
+            for (const point of polygon) positions.push(point.x, point.y + 0.0425, point.z);
+            for (let corner = 1; corner < polygon.length - 1; corner += 1) indices.push(start, start + corner, start + corner + 1);
+          }
+        }
+      }
+    }
+  }
+  const data = new VertexData();
+  data.positions = positions; data.indices = indices;
+  data.normals = []; VertexData.ComputeNormals(positions, indices, data.normals);
+  const mesh = new Mesh("ultra-town-pavement", scene);
+  data.applyToMesh(mesh); mesh.material = material;
+  mesh.isPickable = false; mesh.checkCollisions = false;
+  mesh.metadata = { decoration: "ultra-town-detail", sourceCount };
+  mesh.freezeWorldMatrix();
+  return { mesh, heightAt };
+}
 
 // 只在道路包围盒内栅格化，交叉口取最大覆盖；不按每个像素扫描整张路网。
 export function createRoadSurfacePixels(layout: MapLayout, size = ULTRA_PRESENTATION.roadMaskSize): Uint8Array {
