@@ -118,7 +118,7 @@ npm run build:server
 npm run check:budgets
 ```
 
-本机测试每次必须通过测试名过滤只运行 1 个明确用例。禁止在本机运行 `npm run test`、完整测试文件、完整 suite、`test:performance` 或 `test:coverage`；这些完整测试只由 CI 执行。测试仅使用 Vitest，不会下载浏览器。CI 的 `test:performance` 检查共享导航等确定性性能合同；每个 PR/MR 的独立 performance job 会在同一 runner 上交替采样 `origin/main` 与 PR HEAD 的三张地图场景构建、Mesh churn、场景资源、heap，以及 production Chrome 的进场延迟、稳定 FPS 和长帧，任一运行时指标劣化超过 15% 即失败。部署流程中的 `test:multiplayer:production` 会在正式 Worker 创建一个私人房间，验证真实 HTTP/WebSocket welcome 协议与大厅状态后立即退出；CI 的 `test:coverage` 会分别检查应用、Cloudflare Worker 和 standalone 的覆盖率基线并输出加权总值；`check:budgets` 会检查三套产物的原始体积和分块预算，压缩大小不属于运行时性能门禁。GitHub Actions 定时运行正式联机 smoke；主 CI 还会实际构建 Docker 镜像并启动容器验证 `/health`。手动验收前请将游戏音量设为 `0`。
+本机测试每次必须通过测试名过滤只运行 1 个明确用例。禁止在本机运行 `npm run test`、完整测试文件、完整 suite、`test:performance` 或 `test:coverage`；这些完整测试只由 CI 执行。测试仅使用 Vitest，不会下载浏览器。CI 的 `test:performance` 检查共享导航等确定性性能合同；每个 PR/MR 的独立 performance job 会在同一 runner 上交替采样 `origin/main` 与 PR HEAD 的三张地图场景构建、Mesh churn、场景资源、heap，以及 production Chrome 的进场延迟、稳定 FPS 和长帧，确定性运行时／资源指标劣化超过 15% 即失败，wall-clock、FPS、长帧与 heap 保留为 `INFO` 审查证据。部署流程中的 `test:multiplayer:production` 会在正式 Worker 创建一个私人房间，验证真实 HTTP/WebSocket welcome 协议与大厅状态后立即退出；CI 的 `test:coverage` 会分别检查应用、Cloudflare Worker 和 standalone 的覆盖率基线并输出加权总值；`check:budgets` 会检查三套产物的原始体积和分块预算，压缩大小不属于运行时性能门禁。GitHub Actions 定时运行正式联机 smoke；主 CI 还会实际构建 Docker 镜像并启动容器验证 `/health`。浏览器性能采样在新文档初始化前注入目标设置，并在进场前严格校验地图和画质。手动验收前请将游戏音量设为 `0`。
 
 - [架构说明](docs/architecture.md)
 - [素材替换](docs/asset-manifest.md)

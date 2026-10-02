@@ -99,8 +99,15 @@
 
 ### Round 10 Scope
 
-- `530a4e3` 的 Codex 已明确通过、公开 Pages 版本及桌面／触屏 smoke 已验证，但两条 CI build 的 Test 均失败。已完成超过 10 秒的日志／配置／完整相关 fixture、场景构建、材质缓存与 Babylon 强制编译上下文检查：push 日志显示 `islandScene.test.ts` 测试子进程在后续大场景构建时耗尽既有 6144MB V8 heap，612／641 个已完成断言通过，没有断言失败；新增物资用例本身已在 CI 完成。
+- `530a4e3` 的 Codex 已明确通过、公开 Pages 版本及桌面／触屏 smoke 已验证，但两条 CI build 的 Test 均失败。已完成超过 10 秒的日志／配置／完整相关 fixture、场景构建、材质缓存与 Babylon 强制编译上下文检查：push 日志显示 `islandScene.test.ts` 测试子进程在后续大场景构建时耗尽既有 6144MB V8 heap，612／641 个测试通过，没有断言失败；新增物资用例本身已在 CI 完成。
 - 将新增完整物资回归移到独立 `ultraLootPresentation.test.ts`，保持真实场景、原 fixture 和全部断言，利用已有每文件隔离释放测试进程，不向原重型场景文件额外叠加一张整图。不放宽 heap／采样／门禁，不跳过测试，不改 production。用例只迁移，本机只指定该单用例、完整 typecheck 与 diff 检查；已有画面／构建证据继续有效，独立 Reviewer 复审后正常 follow-up，等待新 HEAD 的完整 CI、性能及 Codex。
+
+
+### Round 11 Scope
+
+- `530a4e3` 旧PR性能任务日志现已完整取得：main／HEAD预热完成，随后town-ultra在采样器第262行菜单选择核验抛出泛化的 `Uncaught`，没有完整报告，不是性能数值门禁失败。读取完整采样器、GameApp初始化／设置保存和既有性能合同，并分析超过10秒：只等document.complete写设置不足，旧异步菜单随后初始化volume／sensitivity会把构造时默认settings写回，可能覆盖请求档位。旧日志缺少具体异常，不能据推断宣称已完全证明此次CI的根因。
+- 先用真实 production MCP 延迟manifest验证旧菜单晚写竞态和新文档前注入机制，再修复采样准备：保留原两次导航、预热、地图／seed／质量、3轮、click开始时间、HUD及8s观察窗、全部指标／15%门禁。在第二次导航前登记相同设置的document-start注入，新GameApp构造前恢复所需值；保留原手动写入，第一次等待明确目标URL，异常保留CDP真实description。只改CI采样准备，不改production。
+- 独立Reviewer已明确架构／资源预审通过：新增操作仅在点击采样前O(1)存储写入和CDP注册，main／HEAD使用同采样器，无已识别>15%生产回归风险；所有原条件必须保持。完整typecheck、独立脚本类型检查、diff检查和MCP定向竞态验证；不在本机运行性能套件。独立Reviewer最终复审后正常follow-up，同HEAD完整CI／性能／Codex和Pages仍须通过。
 
 ## Build
 
@@ -203,9 +210,16 @@
 - 独立文件指定单用例通过1／1，测试4.42s；完整 `npm run typecheck` 和 diff 检查通过。因 production 与530a4e3逐字相同，Round9最终build／budget／本地及公开桌面／触屏图继续有效，未重复构建或浏览器。
 - Reviewer 预审核对 Vitest4.1.10默认文件隔离和 scheduler 的 isolated runner.stop，确认迁移提供真实子进程释放边界，接受方案；日志只能证明OOM且没有断言失败，不能据612个已通过宣称其余用例通过，完整新HEAD CI必须重跑。此调整仅降低测试进程累计内存，不能宣称修复了生产内存泄漏。
 
+
+### Round 11 Build Evidence
+
+- Chrome DevTools MCP／本机已有Chromium／静音0，真实公开production延迟manifest返回，确认document.complete但菜单尚未出现。旧路径先写town／ultra再放行manifest后，实际菜单及storage变回island／medium；新文档启动时先注入同样settings，则菜单及storage均保留town／ultra。两图亲自看过完整菜单，console0，页面全关仅剩blank，自己的MCP／Chromium进程树已停止。此证据证明竞态缺陷存在，不伪称旧CI泛化Uncaught已完全定因。
+- 第二次导航前登记document-start设置脚本，保留旧手动写入；首次就绪要求真实目标href，CDP异常保留exception.description。原两次导航、预热、3轮、场景／seed／质量、click采样时点、HUD及8s窗口、全部指标／门禁和预算未改变。production零diff，现有Round9最终画面／build仍适用，没有本机性能采样。
+- 完整 `npm run typecheck`、采样器独立TypeScript检查和diff检查通过。TypeScript7对命令行文件要求显式 `--ignoreConfig`，首次检查因TS5112未执行，添加该编译器要求后通过；未修改项目配置。工程指南、README及架构说明同步记录初始化与严格选择核验。
+
 ## Review
 
-- 当前 Round 10 测试隔离、单用例验证与独立 Re-review 已完成，无未解决 blocker／high／medium；Round9最终production画面继续有效，新HEAD完整CI／性能／Codex仍待完成。
+- 当前 Round 11 采样初始化修复、定向竞态验证与独立 Re-review 已完成，无未解决 blocker／high／medium；Round9最终production画面继续有效，新HEAD完整CI／性能／Codex仍待完成。
 
 ### Round 1
 
@@ -305,3 +319,9 @@
 - 独立 Reviewer 最终迁移审查通过，无未解决 blocker／high／medium，完整类型检查通过后允许正常 follow-up 提交。独立提取比较确认用例及整个 fixture 逐字保留，新文件被既有 include 覆盖，原文件只移除这一个用例。未改变其他测试、runner、heap、预算、权威或画面；新用例没有 stubGlobal，独立 afterEach 的 restoreAllMocks 保留清理语义。
 - 性能 Review：production零变化，场景资源和片元成本与Round9相同；测试总构建／断言工作量保持，文件隔离以进程释放限制累计内存，增加一次测试文件初始化但不是生产开销。新HEAD完整CI必须通过才能认定OOM解决。暂保留原样局部 fixture，抽共享 helper 会扩大本轮影响，复制维护成本是低优先级优化空间。
 - 未重复测试、构建或浏览器，未修改Git；保留变更后分支 `git pull --rebase` 显示远端未变化、无冲突。本记录与测试迁移同提交，不单独提交Plan；新HEAD仍需完整CI／性能／Codex及Pages，Round9公开画面仅代表相同production代码。
+
+### Round 11 Re-review
+
+- 独立 Reviewer 最终只读 Review 通过，无未解决 blocker／high／medium，允许正常follow-up提交。核对完整diff、MCP延迟manifest脚本／日志与采样调用链，确认新文档注入在第二次导航前、manualwrite和严格地图／quality核验保留；main／HEAD消费同采样器，所有原预热、交替顺序、窗口、指标、阈值、预算保持。真实竞态已复现，仍不宣称旧Uncaught的唯一根因。
+- 性能 Review：固定CDP注册和localStorage写入只在click采样前，没有production差异、逐帧JS或图形资源新增，无必须提交前另采样的>15%风险。非阻塞文档准确性建议已处理：README性能说明改为确定性运行时／资源指标硬门禁，wall-clock／FPS／长帧／heap作为INFO，与既有合同一致，不改变实际门禁。
+- Reviewer未重复Builder命令／浏览器，未改Git或源码。`976f64f` 的push完整build已经成功，Test阶段全部通过并完成原产物预算与Docker smoke；PR build进入Docker阶段，这些属于前一HEAD证据，新采样修复仍需新HEAD完整CI／性能／Codex。页面／服务已清理，MCP9345以及preview4173／4174实际确认关闭。

@@ -177,13 +177,15 @@ async function connectPage(browserPort: number, url: string): Promise<{ socket: 
 async function evaluate<T>(client: CdpClient, expression: string): Promise<T> {
   const response = await client.send<{
     result?: { value?: T };
-    exceptionDetails?: { text?: string };
+    exceptionDetails?: { text?: string; exception?: { description?: string } };
   }>("Runtime.evaluate", {
     expression,
     awaitPromise: true,
     returnByValue: true,
   });
-  if (response.exceptionDetails) throw new Error(response.exceptionDetails.text ?? "Browser evaluation failed");
+  if (response.exceptionDetails) {
+    throw new Error(response.exceptionDetails.exception?.description ?? response.exceptionDetails.text ?? "Browser evaluation failed");
+  }
   return response.result?.value as T;
 }
 
@@ -237,8 +239,13 @@ async function main(): Promise<void> {
     const page = await connectPage(browserPort, url);
     socket = page.socket;
     const client = page.client;
-    await waitFor(client, "document.readyState", (value) => value === "complete", 30_000);
-    await evaluate(client, `(() => {
+    await waitFor(
+      client,
+      `location.href === ${JSON.stringify(url)} && document.readyState === "complete"`,
+      Boolean,
+      30_000,
+    );
+    const settingsScript = `(() => {
       localStorage.setItem("last-line.settings.v1", JSON.stringify({
         mapId: ${JSON.stringify(mapId)},
         quality: ${JSON.stringify(quality)},
@@ -248,7 +255,10 @@ async function main(): Promise<void> {
         disableAiSnipers: true,
         showGroundLootModels: true
       }));
-    })()`);
+    })()`;
+    // 旧菜单异步完成时可能回写旧设置；新文档必须在 GameApp 构造前重新注入。
+    await client.send("Page.addScriptToEvaluateOnNewDocument", { source: settingsScript });
+    await evaluate(client, settingsScript);
     const performanceUrl = `${url}?performance-sample=${Date.now()}`;
     await client.send("Page.navigate", { url: performanceUrl });
     await waitFor(
