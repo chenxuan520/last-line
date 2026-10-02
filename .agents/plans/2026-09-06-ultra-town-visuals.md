@@ -88,6 +88,14 @@
 - 继续用户要求「全部修复好」的当前分支流程，将铺装改成沿真实道路采样的连续地表网格，处理起伏与横向坡度，保持全路网范围、裁切、材质及非权威性质。必要时同步分缝坡度。不得改变实际地形、道路或其他画质。
 - 新增指定斜坡回归，复跑受影响城镇隔离单用例、typecheck、build、budget；Chrome DevTools MCP 静音检查该外围路段桌面与触屏并亲自看图。独立 Reviewer 完成新 diff 与自己截图的 Review 后正常 follow-up 提交，重跑 CI／性能并请求 Codex 复审。
 
+
+### Round 9 Scope
+
+- 用户反馈当前光影效果可以，但调高后地面物品比原来难辨认；继续同一功能分支／PR，恢复极高地面物资可读性并保留现有场景光影。只调整物资表现，不扩展拾取距离、生成、尺寸、碰撞、权威状态或 HUD。
+- 核对完整物资模板／复用／材质转换／顶点色和光影管线，分析超过 10 秒后再实现。深色顶点配色在线性 PBR 下变暗，原 0.025 的补光转换后约为 0.0003；需通过真实 production 对照确认。
+- 优先用仅作用于物资的有界材质补光恢复暗部和部件对比，不增加动态灯、透墙显示、逐帧集合扫描或 mesh／texture。检查生成、死亡掉落和同记录切换后的材质缓存／释放；低／中／高及世界／人物／手持武器不变。
+- 本机每次只运行一个明确用例，必要 typecheck／build／budget；Chrome DevTools MCP 静音检查同地图／同相机室外和真实室内物资，亲自查看桌面／触屏截图。独立 Reviewer 审查实际最终 build 与性能影响后，正常提交推送，等待本轮 CI、性能／Codex 和分支预览。保持手动合并。
+
 ## Build
 
 
@@ -166,9 +174,25 @@
 - 使用 Chrome DevTools MCP、本机 Chromium、音量 0，桌面 1440×900 与触屏 844×390@2 亲自截图并逐张用图片工具看完整空中／外围斜坡道路与 HUD。铺装／分缝贴地，没有长板悬空或埋入，两端过渡连续；控制台无 error／warn，字体、字号、颜色、间距、行列、裁剪和触控入口没有新增错位。图在 `/workspace/cloud-setup/round8-*`；页面全部关闭，确认只剩 about:blank，自己的 4173 服务已实际关闭。
 - `376b93f` 的两条 CI build、Cloudflare Pages 与三轮同 runner 性能门禁已通过，638／52／33／2 个应用／Worker／standalone／确定性性能用例通过。报告显式把 main high 与 HEAD ultra 作 INFO，三地图 high 的确定性资源完全相同。极高稳定 p95 相对该 run 的 main high 为 +170.30%／+270.44%／+307.71%，heap 为 +18.56%／+34.11%／+34.92%，不能宣称硬件流畅或跨 run 比较改进；该报告须独立审查，本轮新提交还必须重新跑 CI／Codex。
 
+
+### Round 9 Build Evidence
+
+- 暗部可读性回归成立：极高自然物资的 0.025 补光经线性转换变成约 0.0003。保留 PBR 受光，将物资补光底色强度设为 0.22，既有顶点色插件在最终合成前按 16% 底色与 84% 已有线性部件底色调制，抬起暗部并保留颜色差别。复用已经算好的 `surfaceAlbedo`，没有第二次颜色幂运算或新的插件／灯／mesh／material／texture；死亡掉落沿用偏红底色，运行时继续走原缓存。
+- 新指定单用例先红后绿，确认 15 类物资的受光材质、部件顶点色、构建不改状态、死亡偏红、拾取隐藏与连续 5 次回收复用，以及几何／位置和 mesh／geometry／texture／缓存材质数量不增长；场景销毁清空物资引用。原晚绑定／多材质／HUD 材质适配指定单用例也通过。本机未运行完整 suite 或性能采样。
+- 完整 `npm run typecheck`、最终 production build、原 budget 与 diff 检查通过。缓存隔离修复前 JavaScript 4,072,204B、273 chunk、入口 856,683B、dist 4,898,078B；CSS 46,822B、最大非入口 599,287B、Worker 634,585B、standalone 644,635B 均保持原预算内。没有修改服务端、采样或预算。
+- Chrome DevTools MCP、本机已有 Chromium、音量 0，修复前使用公开 `9a9a89b`，暗部补光第一版使用 production：灰炉城 1440×900 桌面及 844×390@2 触屏分别检查暗色建筑底层、医院真实楼层和街道路面；苍岬岛桌面、烬岚郡触屏分别检查医院室内与室外。缓存隔离修复前共 10 张图亲自逐张用图片工具看完整物资与相邻地面、墙面、HUD／触控布局，暗部轮廓更易识别，配色仍有区别，地板／墙面曝光、字体、字号、间距、行列、裁剪没有新变化，控制台无 error／warn。
+- 验收临时移动渲染标记和固定相机以陈列全部 15 类，不修改 Simulation／生成／拾取位置。医院使用真实楼层上表面，室外从实际地面三角面读高度；第一次辅助射线检查因 production 未导入 Ray 副作用失败，改成只读三角面插值，失败截图不作为验收证据。所有页面已关闭，仅剩 about:blank，每轮 preview 均实际停止并验证 4173 关闭。辅助脚本和最终图在 `/workspace/cloud-setup/round9-*`，不纳入产品。
+
+
+### Round 9 Final Build Evidence
+
+- 缓存 Finding 修复后，指定 Effect 隔离回归通过：有／无顶点色的世界与物资组合都实际编译并 `scene.render()`，两个 Effect 非空且不同，物资独有 `ULTRA_LOOT_FILL`；不把临时 subMesh 或 undefined 当证据。所有同类插件在构造注册时提供相同源码，编译前只写一个只读布尔 define，不新增逐帧扫描、JS 对象分配或资源构建。
+- 最终完整 typecheck、production build、budget 与 diff 检查通过：JavaScript 4,072,259B、273 chunk、入口 856,683B、dist 4,898,133B，其他原预算保持；缓存隔离仅增加必要 shader 变体，不增加 mesh／material／texture／灯光或更改采样与阈值。
+- 缓存隔离后的最终 production 使用 MCP 静音再次截桌面暗色底层／医院、触屏暗色底层／道路共 4 张，Builder 已逐张亲自看图，颜色与轮廓可辨，邻近曝光／HUD 未新增改变，console0。触屏实际 Effect 检查没有物资／世界 define 不匹配；图在 `/workspace/cloud-setup/round9-final-*`。页面全关仅剩 about:blank，4173 已实际停止并确认端口关闭。独立 Reviewer 仍需检查该最终版本并闭环 P2，禁止借第一版通过视觉替代。
+
 ## Review
 
-- 实现、单用例验证与 production 截图已完成。Round 7 独立审查见下方；新提交的 CI／性能／Codex 仍待完成。
+- 当前 Round 9 实现、单用例验证、最终 production 截图与独立 Re-review 已完成，无未解决 blocker／high／medium；新提交的 CI／性能／Codex 仍待完成。
 
 ### Round 1
 
@@ -249,3 +273,16 @@
 - Reviewer 自行使用 Chrome DevTools MCP、本机 Chromium、音量 0，在独立 context 查看 seed 7 道路 78 两侧桌面／触屏，共 4 张自己的截图逐张使用图片查看工具打开。铺装／分缝贴合坡面，无长平板悬空或埋入；HUD 及相邻控件的字体、字号、颜色、间距、行列、裁剪和触控布局没有本轮新增异常，每页 console error／warn 为 0。其页面已关闭，仅剩 about:blank，Vite PID 11754 已停止，TCP 实测 4174 关闭；其临时脚本／截图已清理，未重复 Builder 测试／类型检查／构建／预算，未修改源文件或 Git。
 - Reviewer 审查 `376b93f` 同 runner 三轮报告：high 确定性资源完全不变，全部原门禁通过；ultra 相对 main high 的启动／帧时间／heap 与额外几何／纹理成本完整披露，接受为首次显式 Ultra 的有界成本取舍，不构成新的必须修复 Finding。本轮新提交还需独立检查自己的 CI、性能和 Codex，禁止跨 run 直接比较时间或用绿灯宣称设备流畅。
 - 无近角色时 actorLight 仍启用，其 PCF 片元采样并非零成本。Reviewer 确认这是非阻塞优化空间；当前报告同时改变 PBR／IBL／后处理与全图细节，不能把总体 p95 成本归因于这一支路，也无证据表明该支路单独超过 15%。未来可在空列表禁灯，但必须处理实际灯源索引和 shader 变体首次编译。本轮不以猜测追加变体切换。
+
+### Round 9 Initial Review
+
+- 独立 Reviewer 首次审查不通过：P2／medium，`GammaVertexColorPlugin` 根据实例参数返回不同片元代码却没有区分 shader defines；Babylon Effect 缓存按 shader 名与 defines 复用，不按插件处理回调区分。Reviewer 用实际生产触屏把楼板材质临时挂到同一物资几何，取得两个真实 Effect，确认 `sameEffect`／`sameDefines` 均为 true，世界材质会串用物资补光，反向编译也可能让物资失去部件调制。
+- Disposition：重读当前 Scope、插件、ThinEngine 缓存与调用链确认成立。Builder 新指定单用例在真实 NullEngine 编译／渲染后同样复现两个材质共享同一 Effect，先红后绿；修复使用独立 `ULTRA_LOOT_FILL` define，所有同类插件提供统一的条件编译片元代码。覆盖有／无顶点色的相同世界／物资组合，检查两个实际 Effect 非空且不同、物资独有该 define。补光数值、顶点和权威状态不变。
+- Reviewer 首次自行静音打开最终生产版本，桌面／触屏暗色底层、医院与道路共 6 张自己的截图逐张看图；配色、轮廓与相邻 HUD 无新问题，console0。其页面已全部关、4174 实际进程17559已停止且端口确认关闭，临时资源已清理。此组图仅代表缓存修复前版本，修复后必须重新完成最小最终画面／实际缓存隔离复审，未放行提交。
+
+### Round 9 Re-review
+
+- 独立 `code_reviewer_round9` 最终复审通过，原 P2 已闭环，无未解决 blocker／high／medium，允许正常提交。统一片元源码配合 `ULTRA_LOOT_FILL` 隔离编译缓存；Reviewer 在最终 production 重走原同几何换材质路径，取得两个真实 Effect：`sameEffect=false`、物资 define 为 true、世界 define 为 false。
+- Reviewer 自行使用 Chrome DevTools MCP 静音查看桌面暗色底层／医院、触屏暗色底层／道路，共 4 张自己的最终图逐张亲自看过。15 类物资的轮廓和配色可辨，没有整体洗白；邻近世界曝光与 HUD 字体、间距、对齐、裁剪无本轮新问题。实际物资 279／世界 3218 个 submesh 的 define 不匹配为 0，console 无 error／warn。
+- 性能 Review：转换与 define 准备增加常数工作，复用原插件与缓存；物资片元增加固定补光运算及必要独立 shader 变体。没有新增逐帧集合扫描、JS 分配、灯光、mesh、material 或 texture，死亡掉落／记录回收继续缓存复用。不存在已识别的本轮必须在提交前追加采样的回归 Finding；整体 Ultra 成本仍须审查新 HEAD 的同 runner CI 报告，不能据此宣称性能改善。非阻塞优化空间为依据真实设备反馈校准补光系数。
+- Reviewer 未重复测试／类型检查／构建／budget，未改源文件或 Git；页面全关仅剩 2 个 about:blank，实际 Vite PID18935 停止并 TCP 确认4174关闭，自己的临时图／脚本／日志已清理。外层独立确认4173／4174均关闭。分支同步前保留变更后 `git pull --rebase` 显示远端未变化，无冲突；此记录与本轮实现同提交，后续 CI／Codex 结果不能单独回填提交。

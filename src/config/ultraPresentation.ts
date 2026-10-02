@@ -12,6 +12,8 @@ export const ULTRA_PRESENTATION = {
   foliageLodDistance: 100,
   detailBatchSpan: 128,
   detailLodDistance: 320,
+  lootFillIntensity: 0.22,
+  lootFillMinimum: 0.16,
 } as const;
 
 export const ULTRA_TERRAIN_TINTS: Readonly<Record<string, readonly [number, number, number]>> = {

@@ -6,6 +6,8 @@ import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import { Scene } from "@babylonjs/core/scene";
+import { FreeCamera } from "@babylonjs/core/Cameras/freeCamera";
+import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { createMapLayout } from "../../src/config/map";
 import { createRoadSurfacePixels } from "../../src/client/render/UltraTerrainPresentation";
 import { describe, expect, it } from "vitest";
@@ -65,6 +67,36 @@ describe("ultra town surface normals", () => {
 });
 
 describe("ultra PBR material adapter", () => {
+  it("isolates ground loot fill from matching world shader cache entries with and without vertex colors", async () => {
+    for (const vertexColors of [true, false]) {
+      const engine = new NullEngine();
+      const scene = new Scene(engine);
+      const camera = new FreeCamera("camera", new Vector3(0, 0, -4), scene);
+      camera.setTarget(Vector3.Zero());
+      const loot = CreateBox("loot", {}, scene);
+      const floor = CreateBox("floor", {}, scene);
+      for (const mesh of [loot, floor]) {
+        if (vertexColors) mesh.setVerticesData("color", new Float32Array(mesh.getTotalVertices() * 4).fill(0.5));
+        mesh.material = new StandardMaterial(mesh === loot ? "loot-model-material-armor-1" : "building-floor-material", scene);
+      }
+      const adapter = createUltraMaterialAdapter(scene);
+      adapter.convertScene();
+      const lootMaterial = loot.material as PBRMaterial;
+      const floorMaterial = floor.material as PBRMaterial;
+      await lootMaterial.forceCompilationAsync(loot);
+      await floorMaterial.forceCompilationAsync(floor);
+      scene.render();
+      const lootEffect = loot.subMeshes![0]!.effect;
+      const floorEffect = floor.subMeshes![0]!.effect;
+      expect(lootEffect).toBeTruthy();
+      expect(floorEffect).toBeTruthy();
+      expect(lootEffect).not.toBe(floorEffect);
+      expect(lootEffect!.defines).toContain("#define ULTRA_LOOT_FILL");
+      expect(floorEffect!.defines).not.toContain("#define ULTRA_LOOT_FILL");
+      scene.dispose(); engine.dispose();
+    }
+  });
+
   it("forwards late texture binds, converts shared and multi materials once, and keeps HUD-style materials", () => {
     const engine = new NullEngine();
     const scene = new Scene(engine);

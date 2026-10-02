@@ -4,6 +4,7 @@ import type { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { ShadowGenerator } from "@babylonjs/core/Lights/Shadows/shadowGenerator";
 import { ImageProcessingConfiguration } from "@babylonjs/core/Materials/imageProcessingConfiguration";
 import type { Material } from "@babylonjs/core/Materials/material";
+import type { MaterialDefines } from "@babylonjs/core/Materials/materialDefines";
 import { MaterialPluginBase } from "@babylonjs/core/Materials/materialPluginBase";
 import { MultiMaterial } from "@babylonjs/core/Materials/multiMaterial";
 import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
@@ -198,7 +199,10 @@ function convertStandardMaterial(scene: Scene, source: StandardMaterial): PBRMat
     target.useSpecularOverAlpha = false;
   }
   if (source.name.includes("industrial-light")) target.emissiveIntensity = 2.6;
-  new GammaVertexColorPlugin(target);
+  const groundLoot = /^loot-model-(?:death-material|material)-/.test(source.name);
+  // 拾取物保留受光材质，只给暗部补光；死亡色调沿用底色，不能把部件统一洗白。
+  if (groundLoot) target.albedoColor.scaleToRef(ULTRA_PRESENTATION.lootFillIntensity, target.emissiveColor);
+  new GammaVertexColorPlugin(target, groundLoot);
   addSkyOcclusion(target);
   // 贴图与透明度来源在场景建好后才异步绑定到原材质，这里同步转发到 PBR 材质。
   Object.defineProperty(source, "diffuseTexture", {
@@ -276,12 +280,16 @@ export function addSkyOcclusion(material: PBRMaterial): void {
 
 // Standard 材质把顶点色当作 gamma 空间乘数；PBR 在线性空间相乘，因此逐像素换算以保持原配色。
 class GammaVertexColorPlugin extends MaterialPluginBase {
-  public constructor(material: PBRMaterial) {
-    super(material, "UltraGammaVertexColor", 200, undefined, true, true);
+  public constructor(material: PBRMaterial, private readonly groundLoot = false) {
+    super(material, "UltraGammaVertexColor", 200, { ULTRA_LOOT_FILL: false }, true, true);
   }
 
   public override getClassName(): string {
     return "UltraGammaVertexColorPlugin";
+  }
+
+  public override prepareDefines(defines: MaterialDefines): void {
+    defines.ULTRA_LOOT_FILL = this.groundLoot;
   }
 
   public override getCustomCode(shaderType: string): Nullable<Record<string, string>> {
@@ -290,6 +298,12 @@ class GammaVertexColorPlugin extends MaterialPluginBase {
       CUSTOM_FRAGMENT_UPDATE_ALBEDO: `
 #if defined(VERTEXCOLOR)
 surfaceAlbedo *= toLinearSpace(max(vColor.rgb, vec3(0.0001))) / max(vColor.rgb, vec3(0.0001));
+#endif
+`,
+      // Effect 缓存只按 defines 区分；同类插件必须提供一致源码，再用 define 隔离补光。
+      CUSTOM_FRAGMENT_BEFORE_FINALCOLORCOMPOSITION: `
+#if defined(ULTRA_LOOT_FILL) && defined(VERTEXCOLOR)
+finalEmissive = mix(finalEmissive, surfaceAlbedo * ${ULTRA_PRESENTATION.lootFillIntensity.toFixed(2)}, ${(1 - ULTRA_PRESENTATION.lootFillMinimum).toFixed(2)});
 #endif
 `,
     };
