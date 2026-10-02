@@ -1,6 +1,7 @@
 import { enhanceViewEquipment } from "./UltraEquipmentPresentation";
 import { enhanceLighting, type UltraMaterialAdapter } from "./UltraLightingPresentation";
 import { enhanceVegetation } from "./UltraVegetationPresentation";
+import { enhanceTerrainPresentation } from "./UltraTerrainPresentation";
 export { colorEquipmentPart } from "./UltraEquipmentPresentation";
 export { enhanceCharacterContainer } from "./UltraCharacterPresentation";
 export { createUltraMaterialAdapter } from "./UltraLightingPresentation";
@@ -19,6 +20,7 @@ import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
 import type { AssetCatalog } from "../../assets/AssetCatalog";
+import { ULTRA_PRESENTATION } from "../../config/ultraPresentation";
 import { getTerrainHeight, type MapLayout } from "../../config/map";
 import type { EntityId } from "../../game/state/types";
 
@@ -66,7 +68,7 @@ export async function enhanceScenePresentation(
     sun.intensity = 1.20;
   }
 
-  createSampleDetails(scene, layout);
+  createBuildingAndStreetDetails(scene, layout);
   enhanceViewEquipment(scene);
   enhanceVegetation(scene);
 
@@ -103,6 +105,7 @@ export async function enhanceScenePresentation(
     if (payload) void addSurfaceNormal(scene, texture, payload);
   }
   await enhanceLighting(scene, { sun, ambient, ...actors, materials });
+  enhanceTerrainPresentation(scene, layout);
 }
 
 function applyWorldSurfaceUvs(mesh: Mesh): void {
@@ -188,20 +191,19 @@ export function surfaceNormalPixels(pixels: Uint8ClampedArray, size: number): Ui
   return result;
 }
 
-function createSampleDetails(scene: Scene, layout: MapLayout): void {
+function createBuildingAndStreetDetails(scene: Scene, layout: MapLayout): void {
   const buildings = [...layout.obstacles]
     .filter((building) => (building.footprint ?? "rectangle") === "rectangle" &&
       building.id !== layout.hospital.buildingId && building.id !== layout.ammunitionDepot.buildingId)
-    .sort((left, right) => Math.hypot(left.center.x, left.center.z) - Math.hypot(right.center.x, right.center.z))
-    .slice(0, 6);
-  const sampleIds = new Set(buildings.map((building) => building.id));
+    .sort((left, right) => left.id.localeCompare(right.id));
+  const buildingIds = new Set(buildings.map((building) => building.id));
   const trimTransforms: number[] = [];
   const jointTransforms: number[] = [];
   const add = (target: number[], x: number, y: number, z: number, width: number, height: number, depth: number, yaw = 0): void => {
     Matrix.Compose(new Vector3(width, height, depth), Quaternion.FromEulerAngles(0, yaw, 0), new Vector3(x, y, z)).copyToArray(target, target.length);
   };
   for (const wall of layout.wallSegments) {
-    if (!sampleIds.has(wall.obstacleId) || wall.role !== "facade" || wall.height < 1) continue;
+    if (!buildingIds.has(wall.obstacleId) || wall.role !== "facade" || wall.height < 1) continue;
     const alongX = wall.width > wall.depth;
     // 所有收边和分缝都限制在真实墙段内，绝不跨过门窗。
     for (const y of [wall.center.y - wall.height / 2 + 0.14, wall.center.y + wall.height / 2 - 0.10]) {
@@ -216,22 +218,37 @@ function createSampleDetails(scene: Scene, layout: MapLayout): void {
   }
   const addBatch = (name: string, transforms: number[], color: string): void => {
     if (!transforms.length) return;
-    const mesh = CreateBox(name, { size: 1 }, scene);
     const material = new StandardMaterial(`${name}-material`, scene);
     material.diffuseColor = Color3.FromHexString(color);
     material.specularColor.setAll(0.04);
-    mesh.material = material;
-    mesh.thinInstanceSetBuffer("matrix", new Float32Array(transforms), 16, true);
-    mesh.thinInstanceRefreshBoundingInfo(true);
-    mesh.isPickable = false;
-    mesh.checkCollisions = false;
-    mesh.metadata = { decoration: "ultra-town-detail", sourceCount: transforms.length / 16 };
-    mesh.freezeWorldMatrix();
+    const batches = new Map<string, number[]>();
+    for (let offset = 0; offset < transforms.length; offset += 16) {
+      const x = Math.floor(transforms[offset + 12]! / ULTRA_PRESENTATION.detailBatchSpan);
+      const z = Math.floor(transforms[offset + 14]! / ULTRA_PRESENTATION.detailBatchSpan);
+      const key = `${x}:${z}`;
+      let batch = batches.get(key);
+      if (!batch) { batch = []; batches.set(key, batch); }
+      for (let component = 0; component < 16; component += 1) batch.push(transforms[offset + component]!);
+    }
+    let batchIndex = 0;
+    for (const [tile, batch] of batches) {
+      // Babylon 薄实例把矩阵属性写进 Geometry，不同分区必须拥有独立几何缓冲。
+      const mesh = CreateBox(batchIndex++ === 0 ? name : `${name}-${tile}`, { size: 1 }, scene);
+      mesh.material = material;
+      mesh.thinInstanceSetBuffer("matrix", new Float32Array(batch), 16, true);
+      mesh.thinInstanceRefreshBoundingInfo(true);
+      mesh.isPickable = false;
+      mesh.checkCollisions = false;
+      mesh.metadata = { decoration: "ultra-town-detail", detailBatch: name, sourceCount: batch.length / 16 };
+      // 小型收边／分缝按分区进行视锥裁剪，远处无需提交整张地图的实例。
+      mesh.addLODLevel(ULTRA_PRESENTATION.detailLodDistance, null);
+      mesh.freezeWorldMatrix();
+    }
   };
   addBatch("ultra-town-facade-trim", trimTransforms, "#777b77");
   addBatch("ultra-town-facade-joints", jointTransforms, "#474b49");
 
-  // 城市长条铺装只适用于灰炉城；山坡与乡村继续使用贴合地形的原道路。
+  // 城市长条铺装只适用于灰炉城；山坡与乡村由地形材质绘制连续道路。
   if (layout.mapId !== "town") return;
 
   const pavement = new StandardMaterial("ultra-town-pavement-material", scene);
@@ -245,17 +262,14 @@ function createSampleDetails(scene: Scene, layout: MapLayout): void {
     if (texture.isReady()) pavement.diffuseTexture = texture;
     else texture.onLoadObservable.addOnce(() => { if (!scene.isDisposed && !texture.loadingError) pavement.diffuseTexture = texture; });
   }
-  const roads = [...layout.roadSegments].map((road) => {
-    const [x1, z1, x2, z2] = road;
-    const length = Math.hypot(x2 - x1, z2 - z1);
-    const progress = Math.max(0, Math.min(1, -(x1 * (x2 - x1) + z1 * (z2 - z1)) / (length * length)));
-    return { road, length, progress, distance: Math.hypot(x1 + (x2 - x1) * progress, z1 + (z2 - z1) * progress) };
-  }).sort((left, right) => left.distance - right.distance).slice(0, 4);
+  const roads = layout.roadSegments.map((road) => ({
+    road, length: Math.hypot(road[2] - road[0], road[3] - road[1]),
+  })).filter(({ length }) => length > 0);
   const pavements: Mesh[] = [];
   const pavingJoints: number[] = [];
-  for (const { road: [x1, z1, x2, z2], length, progress } of roads) {
-    const from = Math.max(0, progress * length - 48);
-    const to = Math.min(length, progress * length + 48);
+  for (const { road: [x1, z1, x2, z2], length } of roads) {
+    const from = 0;
+    const to = length;
     const dx = (x2 - x1) / length;
     const dz = (z2 - z1) / length;
     const yaw = Math.atan2(dx, dz);

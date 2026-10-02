@@ -6,6 +6,8 @@ import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import { Scene } from "@babylonjs/core/scene";
+import { createMapLayout } from "../../src/config/map";
+import { createRoadSurfacePixels } from "../../src/client/render/UltraTerrainPresentation";
 import { describe, expect, it } from "vitest";
 import { createUltraMaterialAdapter } from "../../src/client/render/UltraLightingPresentation";
 import { bindGeneratedSurfaceNormal, surfaceNormalPixels } from "../../src/client/render/UltraPresentation";
@@ -126,5 +128,30 @@ describe("ultra PBR material adapter", () => {
 
     scene.dispose();
     engine.dispose();
+  });
+});
+
+describe("ultra continuous roads", () => {
+  it("covers diagonal roads and junctions with filtered edges without changing the layout", () => {
+    const layout = { ...createMapLayout("town", 7),
+      roadSegments: [[-100, -100, 100, 100], [-100, 100, 100, -100], [200, 200, 200, 200]] as const,
+    };
+    const before = JSON.stringify(layout);
+    const size = 2_048;
+    const pixels = createRoadSurfacePixels(layout, size);
+    const sample = (x: number, z: number, channel = 0): number => {
+      const px = Math.floor((x / 2_400 + 0.5) * size);
+      const pz = Math.floor((z / 2_400 + 0.5) * size);
+      return pixels[(pz * size + px) * 2 + channel]!;
+    };
+    expect(sample(0, 0)).toBe(255);
+    expect(sample(50, 50)).toBe(255);
+    expect(sample(50, -50)).toBe(255);
+    expect(sample(0, 20)).toBe(0);
+    expect(sample(200, 200)).toBe(0);
+    expect(sample(50, 57, 1)).toBeGreaterThan(sample(50, 57));
+    expect(pixels.some((coverage) => coverage > 0 && coverage < 255)).toBe(true);
+    expect(JSON.stringify(layout)).toBe(before);
+    expect(Buffer.from(createRoadSurfacePixels(layout, size)).equals(Buffer.from(pixels))).toBe(true);
   });
 });

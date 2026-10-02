@@ -120,6 +120,7 @@ describe("IslandScene lifecycle", () => {
     const baseline = await createIslandScene(engine, assets, state.actors, state.groundLoot, state.mapSeed, true, "player", "high", mapId);
     const walls = baseline.scene.meshes.filter((mesh) => mesh.name.startsWith("building-walls-"))
       .map((mesh) => ({ name: mesh.name, positions: mesh.getVerticesData("position"), indices: mesh.getIndices() }));
+    const groundPositions = baseline.scene.getMeshByName("island-ground")!.getVerticesData("position")!;
     const meshCount = baseline.scene.meshes.length - baseline.viewWeaponRoot.getChildMeshes(false).length;
     const trunks = baseline.scene.meshes.filter((mesh) => mesh instanceof InstancedMesh && mesh.sourceMesh.name === "tree-trunk-template")
       .map((mesh) => ({ name: mesh.name, position: mesh.position.asArray(), scaling: mesh.scaling.asArray() }));
@@ -132,7 +133,7 @@ describe("IslandScene lifecycle", () => {
       expect(mesh.getIndices()).toEqual(wall.indices);
       expect(mesh.receiveShadows).toBe(true);
     }
-    expect(ultra.scene.meshes.length - ultra.viewWeaponRoot.getChildMeshes(false).length).toBe(meshCount + (mapId === "town" ? 4 : 2));
+    expect(ultra.scene.meshes.length - ultra.viewWeaponRoot.getChildMeshes(false).length).toBeGreaterThan(meshCount);
     for (const trunk of trunks) {
       const mesh = ultra.scene.getMeshByName(trunk.name)!;
       expect(mesh.position.asArray()).toEqual(trunk.position);
@@ -151,10 +152,19 @@ describe("IslandScene lifecycle", () => {
       mesh.material.alpha >= 0.01 &&
       !["loot-marker-material", "death-loot-marker-material"].includes(mesh.material.name));
     expect(litStandard.map((mesh) => mesh.name)).toEqual([]);
-    const ground = ultra.scene.getMeshByName("island-ground")!.material as MultiMaterial;
+    const ultraGround = ultra.scene.getMeshByName("island-ground")!;
+    expect(Buffer.from(new Float32Array(ultraGround.getVerticesData("position")!).buffer)
+      .equals(Buffer.from(new Float32Array(groundPositions).buffer))).toBe(true);
+    const ground = ultraGround.material as MultiMaterial;
     expect(ground.subMaterials.every((material) => material instanceof PBRMaterial)).toBe(true);
     expect(ultra.scene.materials.some((material) => material instanceof StandardMaterial && material.name === "building-floor-material")).toBe(false);
-    expect(ultra.scene.fogMode).toBe(Scene.FOGMODE_EXP2);
+    expect(ultra.scene.fogMode).toBe(Scene.FOGMODE_LINEAR);
+    expect(ultra.scene.fogStart).toBeGreaterThanOrEqual(1_200);
+    expect(ultra.scene.fogEnd).toBeGreaterThan(MAP_SIZE);
+    expect(ground.subMaterials.every((material) => material?.pluginManager?.getPlugin("UltraRoadSurface"))).toBe(true);
+    const distantCrown = ultra.scene.getMeshByName("ultra-tree-foliage-lod")!;
+    expect(distantCrown.getTotalVertices()).toBeLessThan(crown.getTotalVertices() / 3);
+    expect((crown as Mesh).getLODLevelAtDistance(100)).toBe(distantCrown);
     expect(ultra.scene.imageProcessingConfiguration).toMatchObject({
       isEnabled: true,
       toneMappingEnabled: true,
@@ -166,7 +176,6 @@ describe("IslandScene lifecycle", () => {
     expect(ultra.scene.getLightByName("island-ambient")!.isEnabled()).toBe(true);
     const skyLight = ultra.scene.getLightByName("ultra-sky-occlusion") as DirectionalLight;
     expect(skyLight.intensity).toBe(0);
-    expect(ultra.scene.lights.at(-1)).toBe(skyLight);
     const skyMap = skyLight.getShadowGenerator()!.getShadowMap()!;
     expect(skyMap.renderList!.length).toBeGreaterThan(0);
     expect(skyMap.renderList!.every((mesh) =>
@@ -215,14 +224,34 @@ describe("IslandScene lifecycle", () => {
     expect(marker.geometry).toBe(originalGeometry);
     expect(ultra.scene.getMeshByName("island-ground")?.receiveShadows).toBe(true);
     const details = ultra.scene.meshes.filter((mesh) => mesh.metadata?.decoration === "ultra-town-detail");
-    expect(details).toHaveLength(mapId === "town" ? 4 : 2);
+    expect(details.length).toBeGreaterThan(mapId === "town" ? 4 : 2);
+    expect(details.length).toBeLessThan((Math.ceil(MAP_SIZE / 128) + 1) ** 2 * (mapId === "town" ? 3 : 2) + 2);
+    expect(ultra.scene.meshes.length - ultra.viewWeaponRoot.getChildMeshes(false).length).toBe(meshCount + details.length + 1);
     expect(ultra.scene.getMeshByName("ultra-town-pavement") !== null).toBe(mapId === "town");
     expect(details.every((mesh) => !mesh.isPickable && !mesh.checkCollisions)).toBe(true);
+    const layout = createMapLayout(mapId, state.mapSeed);
+    const decoratedBuildings = new Set(layout.obstacles.filter((building) =>
+      (building.footprint ?? "rectangle") === "rectangle" &&
+      building.id !== layout.hospital.buildingId && building.id !== layout.ammunitionDepot.buildingId).map((building) => building.id));
+    expect(details.filter((mesh) => mesh.metadata?.detailBatch === "ultra-town-facade-trim")
+      .reduce((total, mesh) => total + mesh.metadata.sourceCount, 0)).toBe(
+      layout.wallSegments.filter((wall) => decoratedBuildings.has(wall.obstacleId) && wall.role === "facade" && wall.height >= 1).length * 2);
+    for (const name of ["ultra-town-facade-trim", "ultra-town-facade-joints", ...(mapId === "town" ? ["ultra-town-paving-joints"] : [])]) {
+      const batch = details.filter((mesh) => mesh.metadata?.detailBatch === name) as Mesh[];
+      expect(new Set(batch.map((mesh) => mesh.geometry)).size).toBe(batch.length);
+      expect(new Set(batch.map((mesh) => mesh.material)).size).toBe(1);
+      expect(new Set(batch.map((mesh) => mesh.getVertexBuffer("world0")?.getBuffer())).size).toBe(batch.length);
+      expect(batch.every((mesh) => mesh.getLODLevels().some((level) => level.distanceOrScreenCoverage === 320 && level.mesh === null))).toBe(true);
+    }
+    if (mapId === "town") {
+      expect(ultra.scene.getMeshByName("ultra-town-pavement")!.metadata.sourceCount).toBe(layout.roadSegments.length * 2);
+      expect(ultra.scene.getMaterialByName("ultra-town-pavement-material")?.pluginManager?.getPlugin("UltraPavementRoadCutout")).toBeTruthy();
+    }
     expect(ultra.scene.getMaterialByName("hospital-surface-material")).toMatchObject({ albedoColor: Color3.White(), albedoTexture: null });
     const sun = ultra.scene.getLightByName("island-sun") as DirectionalLight;
     const shadowMap = sun.getShadowGenerator()!.getShadowMap()!;
-    expect(shadowMap.getSize()).toEqual({ width: 4096, height: 4096 });
-    expect(sun.shadowFrustumSize).toBe(384);
+    expect(shadowMap.getSize()).toEqual({ width: 2048, height: 2048 });
+    expect(sun.shadowFrustumSize).toBe(256);
     expect(shadowMap.refreshRate).toBe(0);
     expect(shadowMap.renderList?.some((mesh) => mesh.name === "building-walls-texture-building-brick-masonry")).toBe(true);
     expect(shadowMap.renderList?.every((mesh) => !mesh.metadata?.actorId && mesh.metadata?.decoration !== "ultra-town-detail")).toBe(true);
@@ -259,7 +288,11 @@ describe("IslandScene lifecycle", () => {
     const before = JSON.stringify(state);
     const bundle = await createIslandScene(engine, createAssets(), state.actors, state.groundLoot, state.mapSeed, true, "player", "ultra", "town");
     const shadowMap = (bundle.scene.getLightByName("island-sun") as DirectionalLight).getShadowGenerator()!.getShadowMap()!;
-    expect(shadowMap.getSize()).toEqual(touch ? { width: 2048, height: 2048 } : { width: 4096, height: 4096 });
+    expect(shadowMap.getSize()).toEqual({ width: 2048, height: 2048 });
+    const actorMap = bundle.scene.getLightByName("ultra-actor-shadows")?.getShadowGenerator()?.getShadowMap();
+    expect(Boolean(actorMap)).toBe(!touch);
+    const actorReset = actorMap ? vi.spyOn(actorMap, "resetRefreshCounter") : null;
+    if (actorMap) expect(actorMap.getSize()).toEqual({ width: 1024, height: 1024 });
     const postProcesses = bundle.camera._postProcesses.map((postProcess) => postProcess?.name);
     expect(postProcesses.includes("bloomMerge")).toBe(!touch);
     expect(postProcesses).toContain("ultra-image-processing");
@@ -276,13 +309,17 @@ describe("IslandScene lifecycle", () => {
     };
     frame();
     frame();
-    expect(shadowMap.renderList!.some((mesh) => actorMeshes.includes(mesh))).toBe(!touch);
-    expect(reset).toHaveBeenCalledTimes(touch ? 1 : 2);
+    expect(shadowMap.renderList!.some((mesh) => actorMeshes.includes(mesh))).toBe(false);
+    expect(actorMap?.renderList?.some((mesh) => actorMeshes.includes(mesh)) ?? false).toBe(!touch);
+    expect(reset).toHaveBeenCalledTimes(1);
+    if (actorReset) expect(actorReset).toHaveBeenCalledTimes(2);
     near.position.x += 200;
     frame();
     frame();
     expect([...shadowMap.renderList!]).toEqual(staticCasters);
-    expect(reset).toHaveBeenCalledTimes(touch ? 1 : 3);
+    expect(reset).toHaveBeenCalledTimes(1);
+    if (actorMap) expect(actorMap.renderList).toHaveLength(0);
+    if (actorReset) expect(actorReset).toHaveBeenCalledTimes(3);
     expect(JSON.stringify(state)).toBe(before);
     bundle.scene.dispose();
     expect(bundle.scene.textures).toHaveLength(0);

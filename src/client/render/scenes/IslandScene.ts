@@ -48,6 +48,7 @@ import { getActiveWeapon, type ActorState, type EntityId, type FlightState, type
 import { ACTOR_EYE_HEIGHT, ACTOR_HEIGHT, ACTOR_RADIUS } from "../../../game/rules/actorGeometry";
 import { GROUND_LOOT_POSITION_HEIGHT } from "../../../game/rules/loot";
 import { QUALITY_PROFILES, type QualityLevel, type QualityProfile } from "../../../config/settings";
+import { ULTRA_TERRAIN_TINTS } from "../../../config/ultraPresentation";
 import type { MapId } from "../../../config/maps";
 import {
   createMixedRegionSpecs,
@@ -902,6 +903,7 @@ function createIslandEnvironment(
     materials.ground,
     materials.terrainMaterialIndexes,
     materials.terrainTextures,
+    qualityLevel === "ultra",
   );
   ground.material = materials.ground;
   markEnvironment(ground, "island-ground");
@@ -1284,12 +1286,14 @@ function applyTerrainSurface(
   groundMaterial: MultiMaterial,
   terrainMaterialIndexes: ReadonlyMap<TerrainTextureAssetId, number>,
   terrainTextures: ReadonlyMap<TerrainTextureAssetId, Texture | null>,
+  continuousRoads = false,
 ): void {
   const positions = ground.getVerticesData(VertexBuffer.PositionKind);
   if (!positions) return;
   const colors: number[] = [];
   const surfaceKinds: TerrainSurface[] = [];
-  const roadSegments = layout.roadSegments;
+  // 极高在片元上绘制道路，不再把12m地形三角形整片涂成沥青。
+  const roadSegments = continuousRoads ? [] : layout.roadSegments;
   const mixedRegions = layout.mapId === "mixed" ? createMixedRegionSpecs(layout.seed) : [];
   for (let index = 0; index < positions.length; index += 3) {
     const x = positions[index] ?? 0;
@@ -1301,10 +1305,12 @@ function applyTerrainSurface(
       height,
       layout.mapId,
       layout.seed,
-      layout.mapPoints,
+      continuousRoads ? [] : layout.mapPoints,
       roadSegments,
       mixedRegions,
     );
+    const tint = continuousRoads ? ULTRA_TERRAIN_TINTS[surface.assetId] : undefined;
+    if (tint) surface.textureTint.copyFromFloats(...tint).scaleInPlace(terrainSurfaceShade(x, z, height, layout.seed));
     positions[index + 1] = height;
     const materialIndex = terrainMaterialIndexes.get(surface.assetId);
     if (materialIndex === undefined) throw new Error(`Terrain material missing for ${surface.assetId}`);

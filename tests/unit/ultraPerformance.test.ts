@@ -11,7 +11,8 @@ it("samples new ultra explicitly and preserves strict gates once a matching base
   for (const assertion of [assertUltraPresentation, browserAssertion]) {
     for (const mapId of ["town", "island", "mixed"]) {
       expect(() => assertion(mapId, "ultra", [])).toThrow(`Ultra ${mapId} presentation was not constructed`);
-      expect(() => assertion(mapId, "ultra", ["ultra-town-static-shadows"])).not.toThrow();
+      expect(() => assertion(mapId, "ultra", ["ultra-town-static-shadows", "ultra-road-surface-mask"])).not.toThrow();
+      expect(() => assertion(mapId, "ultra", ["ultra-town-static-shadows"])).toThrow();
       expect(() => assertion(mapId, "high", [])).not.toThrow();
     }
   }

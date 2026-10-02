@@ -9,11 +9,14 @@ import { MultiMaterial } from "@babylonjs/core/Materials/multiMaterial";
 import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import type { BaseTexture } from "@babylonjs/core/Materials/Textures/baseTexture";
+import type { UniformBuffer } from "@babylonjs/core/Materials/uniformBuffer";
 import { RenderTargetTexture } from "@babylonjs/core/Materials/Textures/renderTargetTexture";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
 import { InstancedMesh } from "@babylonjs/core/Meshes/instancedMesh";
 import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
+import type { SubMesh } from "@babylonjs/core/Meshes/subMesh";
+import type { AbstractEngine } from "@babylonjs/core/Engines/abstractEngine";
 import { CubeMapToSphericalPolynomialTools } from "@babylonjs/core/Misc/HighDynamicRange/cubemapToSphericalPolynomial";
 import { ReflectionProbe } from "@babylonjs/core/Probes/reflectionProbe";
 import { BloomEffect } from "@babylonjs/core/PostProcesses/bloomEffect";
@@ -26,12 +29,14 @@ import { Scene } from "@babylonjs/core/scene";
 import type { Nullable } from "@babylonjs/core/types";
 import { usesMobileDevicePixels } from "../../config/settings";
 import type { EntityId } from "../../game/state/types";
+import { ULTRA_PRESENTATION } from "../../config/ultraPresentation";
 
 export const ULTRA_SHADOW_MAP_NAME = "ultra-town-static-shadows";
 export const ULTRA_ENVIRONMENT_NAME = "ultra-sky-environment";
 export const ULTRA_PIPELINE_NAME = "ultra-pipeline";
 export const ULTRA_SSAO_NAME = "ultra-ssao";
-export const ULTRA_ACTOR_SHADOW_DISTANCE = 40;
+export const ULTRA_ACTOR_SHADOW_DISTANCE = ULTRA_PRESENTATION.actorShadowDistance;
+export const ULTRA_ACTOR_SHADOW_NAME = "ultra-actor-shadows";
 export const ULTRA_SKY_OCCLUSION_NAME = "ultra-sky-occlusion";
 const ULTRA_INDOOR_SKY_LIGHT = 0.45;
 const SKY_OCCLUSION_DETAIL_TYPES = new Set(["floor-slabs", "roof-slabs", "hospital-surfaces", "ammunition-depot-surfaces"]);
@@ -214,7 +219,7 @@ function convertStandardMaterial(scene: Scene, source: StandardMaterial): PBRMat
   return target;
 }
 
-// 天空环境光本身不知道室内外；天空遮挡光排在最后，光照循环结束时的 shadow 即“头顶是否有楼板／屋顶”。
+// 按网格实际灯源索引读取两种遮挡，避免依赖灯光在循环中的最后一个位置。
 class SkyOcclusionPlugin extends MaterialPluginBase {
   public constructor(material: PBRMaterial) {
     super(material, "UltraSkyOcclusion", 210, undefined, true, true);
@@ -224,17 +229,44 @@ class SkyOcclusionPlugin extends MaterialPluginBase {
     return "UltraSkyOcclusionPlugin";
   }
 
+  public override getUniforms(): ReturnType<MaterialPluginBase["getUniforms"]> {
+    return { ubo: [{ name: "ultraShadowIndices", size: 2, type: "vec2" }], fragment: "uniform vec2 ultraShadowIndices;" };
+  }
+
+  public override bindForSubMesh(buffer: UniformBuffer, _scene: Scene, _engine: AbstractEngine, subMesh: SubMesh): void {
+    const lights = subMesh.getMesh().lightSources;
+    let actorIndex = -1, skyIndex = -1;
+    for (let index = 0; index < lights.length; index += 1) {
+      if (lights[index]!.name === ULTRA_ACTOR_SHADOW_NAME) actorIndex = index;
+      if (lights[index]!.name === ULTRA_SKY_OCCLUSION_NAME) skyIndex = index;
+    }
+    buffer.updateFloat2("ultraShadowIndices", actorIndex, skyIndex);
+  }
+
   public override getCustomCode(shaderType: string): Nullable<Record<string, string>> {
     if (shaderType !== "fragment") return null;
-    return {
+    const code: Record<string, string> = {
+      CUSTOM_FRAGMENT_BEFORE_LIGHTS: "float ultraActorVisibility = 1.0; float ultraSkyOcclusion = 1.0; float ultraLightIndex = -1.0;",
+      "!aggShadow\\+=shadow;numLights\\+=1\\.0;": `$0
+if (abs(ultraLightIndex - ultraShadowIndices.x) < 0.5) ultraActorVisibility = shadow;
+if (abs(ultraLightIndex - ultraShadowIndices.y) < 0.5) ultraSkyOcclusion = shadow;
+`,
       CUSTOM_FRAGMENT_BEFORE_FINALCOLORCOMPOSITION: `
+#if !defined(UNLIT)
+finalDiffuse *= ultraActorVisibility;
+#ifdef SPECULARTERM
+finalSpecularScaled *= ultraActorVisibility;
+#endif
+#endif
 #if !defined(UNLIT) && defined(REFLECTION)
-float ultraSkyVisibility = mix(${ULTRA_INDOOR_SKY_LIGHT.toFixed(2)}, 1.0, shadow);
+float ultraSkyVisibility = mix(${ULTRA_INDOOR_SKY_LIGHT.toFixed(2)}, 1.0, ultraSkyOcclusion);
 finalIrradiance *= ultraSkyVisibility;
 finalRadianceScaled *= ultraSkyVisibility;
 #endif
 `,
     };
+    for (let index = 0; index < 4; index += 1) code[`CUSTOM_LIGHT${index}_COLOR`] = `ultraLightIndex = ${index.toFixed(1)};`;
+    return code;
   }
 }
 
@@ -267,8 +299,9 @@ surfaceAlbedo *= toLinearSpace(max(vColor.rgb, vec3(0.0001))) / max(vColor.rgb, 
 function configureFog(scene: Scene): void {
   const skyAssetId = String(scene.getMeshByName("island-sky-dome")?.metadata?.skyAssetId);
   const [r, g, b] = SKY_FOG_COLORS[skyAssetId] ?? SKY_FOG_COLORS["texture.sky.overcast"]!;
-  scene.fogMode = Scene.FOGMODE_EXP2;
-  scene.fogDensity = 0.00072;
+  scene.fogMode = Scene.FOGMODE_LINEAR;
+  scene.fogStart = ULTRA_PRESENTATION.fogStart;
+  scene.fogEnd = ULTRA_PRESENTATION.fogEnd;
   scene.fogColor.set(r, g, b);
 }
 
@@ -292,9 +325,9 @@ function createPostProcessing(scene: Scene, touch: boolean, SSAO2: SSAO2Pipeline
     ssao.radius = 2;
     ssao.totalStrength = 2.2;
     ssao.base = 0.02;
-    ssao.samples = 16;
-    ssao.maxZ = 140;
-    ssao.expensiveBlur = true;
+    ssao.samples = 8;
+    ssao.maxZ = 90;
+    ssao.expensiveBlur = false;
     // 启用 SSAO 后场景先渲染到预渲染目标，多重采样由它承担。
     ssao.textureSamples = 4;
   }
@@ -302,7 +335,7 @@ function createPostProcessing(scene: Scene, touch: boolean, SSAO2: SSAO2Pipeline
     ? Constants.TEXTURETYPE_HALF_FLOAT
     : Constants.TEXTURETYPE_UNSIGNED_BYTE;
   const pipeline = new PostProcessRenderPipeline(engine, ULTRA_PIPELINE_NAME);
-  const bloom = touch ? null : new BloomEffect(scene, 0.5, 0.16, 48, textureType, false);
+  const bloom = touch ? null : new BloomEffect(scene, 0.25, 0.12, 24, textureType, false);
   if (bloom) {
     bloom.threshold = 0.9;
     pipeline.addEffect(bloom);
@@ -396,13 +429,13 @@ function isStaticShadowCaster(mesh: AbstractMesh): boolean {
     (mesh.metadata?.decoration === "natural-detail" && mesh.metadata?.detailType === "rock");
 }
 
-// 静态投影只在跨越 8m 分区时刷新；桌面端近距离有角色时逐帧刷新，角色离开后再刷新一次恢复缓存。
+// 静态图仅跨分区刷新；桌面角色使用独立小图，逐帧只绘制附近角色。
 function createShadows(scene: Scene, options: UltraLightingOptions, touch: boolean): void {
   const { sun, actorVisualRoots, localActorId } = options;
-  sun.shadowFrustumSize = touch ? 192 : 384;
+  sun.shadowFrustumSize = touch ? 192 : ULTRA_PRESENTATION.staticShadowSpan;
   sun.shadowMinZ = 1;
   sun.shadowMaxZ = touch ? 400 : 560;
-  const shadows = new ShadowGenerator(touch ? 2048 : 4096, sun);
+  const shadows = new ShadowGenerator(ULTRA_PRESENTATION.staticShadowSize, sun);
   shadows.usePercentageCloserFiltering = true;
   shadows.filteringQuality = touch ? ShadowGenerator.QUALITY_LOW : ShadowGenerator.QUALITY_MEDIUM;
   shadows.bias = touch ? 0.0004 : 0.0003;
@@ -446,6 +479,24 @@ function createShadows(scene: Scene, options: UltraLightingOptions, touch: boole
   const actorEntries = touch
     ? []
     : [...actorVisualRoots].filter(([actorId]) => actorId !== localActorId);
+  const actorLight = touch ? null : new DirectionalLight(ULTRA_ACTOR_SHADOW_NAME, sun.direction.clone(), scene);
+  const actorShadows = actorLight ? new ShadowGenerator(ULTRA_PRESENTATION.actorShadowSize, actorLight) : null;
+  const actorMap = actorShadows?.getShadowMap() ?? null;
+  if (actorLight && actorShadows && actorMap) {
+    actorLight.intensity = 0;
+    actorLight.renderPriority = 0;
+    actorLight.shadowFrustumSize = ULTRA_PRESENTATION.actorShadowSpan;
+    actorLight.shadowMinZ = 1;
+    actorLight.shadowMaxZ = 200;
+    actorShadows.usePercentageCloserFiltering = true;
+    actorShadows.filteringQuality = ShadowGenerator.QUALITY_LOW;
+    actorShadows.bias = 0.001;
+    actorShadows.normalBias = 0.04;
+    actorMap.name = ULTRA_ACTOR_SHADOW_NAME;
+    actorMap.refreshRate = RenderTargetTexture.REFRESHRATE_RENDER_ONCE;
+    actorMap.renderList = [];
+  }
+  const actorOffset = actorLight?.direction.scale(80);
   let casterIds: EntityId[] = [];
   const nearIds: EntityId[] = [];
   let tileX = Number.NaN;
@@ -480,9 +531,15 @@ function createShadows(scene: Scene, options: UltraLightingOptions, touch: boole
     }
     if (!sameIds(nearIds, casterIds)) {
       casterIds = [...nearIds];
-      shadowMap.renderList = staticCasters.concat(casterIds.flatMap((actorId) => actorVisualRoots.get(actorId)?.getChildMeshes(false) ?? []));
-      refresh = true;
+      if (actorMap) {
+        actorMap.renderList = casterIds.flatMap((actorId) => actorVisualRoots.get(actorId)?.getChildMeshes(false) ?? []);
+        if (casterIds.length === 0) actorMap.resetRefreshCounter();
+      }
     }
-    if (refresh || casterIds.length > 0) shadowMap.resetRefreshCounter();
+    if (refresh) shadowMap.resetRefreshCounter();
+    if (actorLight && actorMap && actorOffset && casterIds.length > 0) {
+      actorLight.position.copyFrom(position).subtractInPlace(actorOffset);
+      actorMap.resetRefreshCounter();
+    }
   });
 }
