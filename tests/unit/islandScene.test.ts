@@ -144,61 +144,6 @@ describe("IslandScene lifecycle", () => {
     bundle.scene.dispose(); engine.dispose();
   }, 60_000);
 
-  it("keeps ultra ground loot readable and reuses its fill after death and record recycling", async () => {
-    const engine = new NullEngine();
-    const state = createBattleRoyaleState("player", undefined, () => 7 / 0x100000000);
-    const before = JSON.stringify(state);
-    const bundle = await createIslandScene(engine, createAssets(), state.actors, state.groundLoot, 7, true, "player", "ultra");
-    expect(JSON.stringify(state)).toBe(before);
-    const materials = new Set<PBRMaterial>();
-    for (const marker of bundle.lootMeshes.values()) {
-      const material = marker.material as PBRMaterial;
-      expect(material).toBeInstanceOf(PBRMaterial);
-      expect(material.emissiveColor.r).toBeGreaterThan(0.1);
-      expect(material.unlit).toBe(false);
-      expect(marker.getVerticesData("color")).not.toBeNull();
-      materials.add(material);
-    }
-    expect(materials.size).toBe(15);
-    const wall = bundle.scene.materials.find((material) => material.name === "building-floor-material") as PBRMaterial;
-    expect(wall.emissiveColor.asArray()).toEqual([0, 0, 0]);
-    const rifle = Object.values(state.groundLoot).find((loot) => loot.itemId === "weapon.rifle")!;
-    const marker = bundle.lootMeshes.get(rifle.id)!;
-    const original = { material: marker.material, geometry: marker.geometry, position: marker.position.asArray(), colors: marker.getVerticesData("color")!.slice() };
-    const resources = { meshes: bundle.scene.meshes.length, geometries: bundle.scene.geometries.length, textures: bundle.scene.textures.length };
-    rifle.source = "death";
-    bundle.syncLootMeshes(state.groundLoot);
-    const deathMaterial = marker.material as PBRMaterial;
-    expect(deathMaterial.emissiveColor.r).toBeGreaterThan(0.1);
-    expect(deathMaterial.emissiveColor.r).toBeGreaterThan(deathMaterial.emissiveColor.g);
-    const materialCount = bundle.scene.materials.length;
-    for (let i = 0; i < 5; i += 1) {
-      rifle.available = false;
-      bundle.syncLootMeshes(state.groundLoot);
-      expect(marker.isEnabled()).toBe(false);
-      rifle.available = true;
-      rifle.generation = (rifle.generation ?? 0) + 1;
-      rifle.source = "spawn";
-      bundle.syncLootMeshes(state.groundLoot);
-      expect(marker.material).toBe(original.material);
-      rifle.source = "death";
-      bundle.syncLootMeshes(state.groundLoot);
-      expect(marker.material).toBe(deathMaterial);
-    }
-    expect(marker.geometry).toBe(original.geometry);
-    expect(marker.position.asArray()).toEqual(original.position);
-    expect(marker.getVerticesData("color")).toEqual(original.colors);
-    expect(bundle.scene.materials.length).toBe(materialCount);
-    expect({ meshes: bundle.scene.meshes.length, geometries: bundle.scene.geometries.length, textures: bundle.scene.textures.length }).toEqual(resources);
-    // 只有验收中的物资记录切换，构建与材质适配不得写入权威状态。
-    const restored = JSON.parse(before);
-    restored.groundLoot[rifle.id] = rifle;
-    expect(JSON.stringify(state)).toBe(JSON.stringify(restored));
-    bundle.scene.dispose();
-    expect(bundle.lootMeshes.size).toBe(0);
-    engine.dispose();
-  }, 60_000);
-
   it.each(["town", "island", "mixed"] as const)("isolates ultra %s surfaces and cached shadows without changing authoritative geometry", async (mapId) => {
     const engine = new NullEngine();
     const assets = createAssets();

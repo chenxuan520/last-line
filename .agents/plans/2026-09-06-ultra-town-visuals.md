@@ -96,6 +96,12 @@
 - 优先用仅作用于物资的有界材质补光恢复暗部和部件对比，不增加动态灯、透墙显示、逐帧集合扫描或 mesh／texture。检查生成、死亡掉落和同记录切换后的材质缓存／释放；低／中／高及世界／人物／手持武器不变。
 - 本机每次只运行一个明确用例，必要 typecheck／build／budget；Chrome DevTools MCP 静音检查同地图／同相机室外和真实室内物资，亲自查看桌面／触屏截图。独立 Reviewer 审查实际最终 build 与性能影响后，正常提交推送，等待本轮 CI、性能／Codex 和分支预览。保持手动合并。
 
+
+### Round 10 Scope
+
+- `530a4e3` 的 Codex 已明确通过、公开 Pages 版本及桌面／触屏 smoke 已验证，但两条 CI build 的 Test 均失败。已完成超过 10 秒的日志／配置／完整相关 fixture、场景构建、材质缓存与 Babylon 强制编译上下文检查：push 日志显示 `islandScene.test.ts` 测试子进程在后续大场景构建时耗尽既有 6144MB V8 heap，612／641 个已完成断言通过，没有断言失败；新增物资用例本身已在 CI 完成。
+- 将新增完整物资回归移到独立 `ultraLootPresentation.test.ts`，保持真实场景、原 fixture 和全部断言，利用已有每文件隔离释放测试进程，不向原重型场景文件额外叠加一张整图。不放宽 heap／采样／门禁，不跳过测试，不改 production。用例只迁移，本机只指定该单用例、完整 typecheck 与 diff 检查；已有画面／构建证据继续有效，独立 Reviewer 复审后正常 follow-up，等待新 HEAD 的完整 CI、性能及 Codex。
+
 ## Build
 
 
@@ -190,9 +196,16 @@
 - 最终完整 typecheck、production build、budget 与 diff 检查通过：JavaScript 4,072,259B、273 chunk、入口 856,683B、dist 4,898,133B，其他原预算保持；缓存隔离仅增加必要 shader 变体，不增加 mesh／material／texture／灯光或更改采样与阈值。
 - 缓存隔离后的最终 production 使用 MCP 静音再次截桌面暗色底层／医院、触屏暗色底层／道路共 4 张，Builder 已逐张亲自看图，颜色与轮廓可辨，邻近曝光／HUD 未新增改变，console0。触屏实际 Effect 检查没有物资／世界 define 不匹配；图在 `/workspace/cloud-setup/round9-final-*`。页面全关仅剩 about:blank，4173 已实际停止并确认端口关闭。独立 Reviewer 仍需检查该最终版本并闭环 P2，禁止借第一版通过视觉替代。
 
+
+### Round 10 Build Evidence
+
+- 新物资回归的 55 行用例与 `createAssets` fixture 原样迁至独立 `ultraLootPresentation.test.ts`，原文件仅移除同一用例；15 类、死亡色调、隐藏、5 次记录回收、材质／几何／位置／状态／资源／释放断言及 60s 超时完整保留。测试总数仍为641，未修改 production、Vitest配置、heap、预算或采样。
+- 独立文件指定单用例通过1／1，测试4.42s；完整 `npm run typecheck` 和 diff 检查通过。因 production 与530a4e3逐字相同，Round9最终build／budget／本地及公开桌面／触屏图继续有效，未重复构建或浏览器。
+- Reviewer 预审核对 Vitest4.1.10默认文件隔离和 scheduler 的 isolated runner.stop，确认迁移提供真实子进程释放边界，接受方案；日志只能证明OOM且没有断言失败，不能据612个已通过宣称其余用例通过，完整新HEAD CI必须重跑。此调整仅降低测试进程累计内存，不能宣称修复了生产内存泄漏。
+
 ## Review
 
-- 当前 Round 9 实现、单用例验证、最终 production 截图与独立 Re-review 已完成，无未解决 blocker／high／medium；新提交的 CI／性能／Codex 仍待完成。
+- 当前 Round 10 测试隔离、单用例验证与独立 Re-review 已完成，无未解决 blocker／high／medium；Round9最终production画面继续有效，新HEAD完整CI／性能／Codex仍待完成。
 
 ### Round 1
 
@@ -286,3 +299,9 @@
 - Reviewer 自行使用 Chrome DevTools MCP 静音查看桌面暗色底层／医院、触屏暗色底层／道路，共 4 张自己的最终图逐张亲自看过。15 类物资的轮廓和配色可辨，没有整体洗白；邻近世界曝光与 HUD 字体、间距、对齐、裁剪无本轮新问题。实际物资 279／世界 3218 个 submesh 的 define 不匹配为 0，console 无 error／warn。
 - 性能 Review：转换与 define 准备增加常数工作，复用原插件与缓存；物资片元增加固定补光运算及必要独立 shader 变体。没有新增逐帧集合扫描、JS 分配、灯光、mesh、material 或 texture，死亡掉落／记录回收继续缓存复用。不存在已识别的本轮必须在提交前追加采样的回归 Finding；整体 Ultra 成本仍须审查新 HEAD 的同 runner CI 报告，不能据此宣称性能改善。非阻塞优化空间为依据真实设备反馈校准补光系数。
 - Reviewer 未重复测试／类型检查／构建／budget，未改源文件或 Git；页面全关仅剩 2 个 about:blank，实际 Vite PID18935 停止并 TCP 确认4174关闭，自己的临时图／脚本／日志已清理。外层独立确认4173／4174均关闭。分支同步前保留变更后 `git pull --rebase` 显示远端未变化，无冲突；此记录与本轮实现同提交，后续 CI／Codex 结果不能单独回填提交。
+
+### Round 10 Re-review
+
+- 独立 Reviewer 最终迁移审查通过，无未解决 blocker／high／medium，完整类型检查通过后允许正常 follow-up 提交。独立提取比较确认用例及整个 fixture 逐字保留，新文件被既有 include 覆盖，原文件只移除这一个用例。未改变其他测试、runner、heap、预算、权威或画面；新用例没有 stubGlobal，独立 afterEach 的 restoreAllMocks 保留清理语义。
+- 性能 Review：production零变化，场景资源和片元成本与Round9相同；测试总构建／断言工作量保持，文件隔离以进程释放限制累计内存，增加一次测试文件初始化但不是生产开销。新HEAD完整CI必须通过才能认定OOM解决。暂保留原样局部 fixture，抽共享 helper 会扩大本轮影响，复制维护成本是低优先级优化空间。
+- 未重复测试、构建或浏览器，未修改Git；保留变更后分支 `git pull --rebase` 显示远端未变化、无冲突。本记录与测试迁移同提交，不单独提交Plan；新HEAD仍需完整CI／性能／Codex及Pages，Round9公开画面仅代表相同production代码。
