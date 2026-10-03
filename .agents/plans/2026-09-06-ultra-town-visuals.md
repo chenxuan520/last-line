@@ -131,6 +131,15 @@
 - 优先检查全图合批不能有效裁剪的无效提交、SSAO在无贡献远景中的采样和静态数据重复计算。保留现有材质、几何、阴影边缘与完整采样合同；按实验证据确定最终优化，不先承诺FPS幅度。
 - 定向单用例、完整typecheck／build／原budget、Builder及独立Reviewer自己的production桌面／触屏验收完成后，再正常同分支提交。新HEAD的完整CI、原三轮性能、独立报告Review、Codex及公开预览均须完成；禁止Plan-only提交，合并由用户操作。
 
+
+### Round 15 Scope
+
+- 用户反馈 vivo Y52s 在苍岬岛「极高」启动时显示 `Unable to create uniform buffer`，并提供浏览器顶部「无敌防线」而页面 Logo「最后防线」的截图。继续原分支／PR #9，基线 `9dd1c72`；前轮 CI／Review 通过不能代表真实手机故障已经覆盖。
+- 已重读当前 Plan、引擎／场景／单机联机启动、错误页／移动样式、相关回归与 Babylon UBO／缓存／销毁实现，分析超过 10 秒。生产 MCP 在活跃 WebGL2 上下文注入第一次 UBO 的原生 `createBuffer` 返回 null，复现相同错误页，并确认失败场景仍留在引擎。第十次失败会被异步预编译捕获，不能作为同一启动失败的证据。实际手机最初分配失败的原因仍待浏览器／链接核实，禁止将其臆断为芯片、内存或某驱动。
+- 场景构建失败必须释放本次自有场景。仅引擎尚未进入过异步准备、同步基础灯初始化阶段的精确 UBO 分配错误、引擎支持 UBO 且未销毁、清理后无其他存活场景、原生 WebGL2 上下文未丢失时，允许清除旧 Effect 缓存并通过 Babylon 的公开兼容模式重建一次；复用同一地图、seed、权威状态和设置。第二次失败也释放并抛出，不循环、不按机型禁用或降低画质。材质／后处理／异步编译开始后的失败只清理并抛出，不切换引擎能力，以免旧异步 Effect 回调复活污染新缓存；已核实 Babylon AssetContainer 构造即登记场景释放，复用其早期所有权、删除旧尾部重复释放，迟到结果立即释放。
+- 错误页提供中文说明与可用的返回设置／重新加载入口，并释放输入／全屏。统一页面声明的应用名称与启动时标题；当前代码和公开 `document.title` 已是「最后防线」，截图中浏览器栏别名来源尚未核实，禁止宣称已复现该浏览器内部行为。
+- 原光影、分辨率、植被、三地图档位、协议、权威规则和资源／性能合同不变。只运行逐个明确单用例；完整 CI、原三轮性能报告、独立 Review／生产桌面触摸截图、Codex 与新公开预览完成后交付，合并仍由用户操作。
+
 ## Build
 
 
@@ -281,6 +290,27 @@
 
 - 独立 Review 发现 medium：可更新索引的 GPU-only 分支不调用 Babylon `onGeometryUpdated`，且普通 attributes dirty 不足以刷新冻结材质。新增单个 GPU-only／共享冻结材质／同步抛错回归，先在登记仍有效处失败，再修复后通过；原恒色回归重跑通过。包装 public `updateIndices`，变更前永久撤销同一几何的登记，保留 this／原参数／抛错；GPU-only 的陈旧 CPU 索引不允许重新登记。第一次撤销去重 owner 的实际 submesh 材质，调用原生 `markDirty(true)` 刷新全部变体，后续动态更新不重复集合扫描；既有几何回调转发不变。当前四静态模板不变更，此额外成本不进入稳态；重新完成完整typecheck／build／原预算，最终JS4083033B、dist4908907B。
 
+
+### Round 15 Build Evidence
+
+- 基线 production MCP 的第一次原生 UBO 分配失败复现用户同文错误，旧引擎残留1个失败场景；修复后在相同 island／seed7／ultra 的活跃 WebGL2 上下文只触发1次失败并成功进入HUD，兼容路径仅1个最终场景。已选设置不变，真实树冠 Effect 编译／ready，普通阴影 uniform 有效、实际 uniform block数0，极高 gamma define保留；材料101、几何3090、mesh5232与正常触屏路径相同，未降低画质或重建权威状态。
+- 本机每次仅运行1个明确用例，最终全部通过：真实GLB容器失败清理（旧代码dispose0，修复后恰好2、scene0）、真实基础灯 UBO 失败重建Ultra并保持权威JSON、晚期／无关错误／上下文丢失／无canvas／其他场景／已禁UBO／引擎已关闭／清理失败保护、精确动态UBO第二次失败后停止并清理、异步加载取消后不返回已销毁场景。完整套件仅交新HEAD CI。
+- 完整typecheck、最终production build和原budget通过：入口858306B、最大非入口599287B、JavaScript4084623B／273chunk、CSS46822B、dist4910613B；Worker634585B、standalone644635B复用未修改的构建。所有原上限／采样／三轮／阈值不变。
+- Builder使用官方Chrome DevTools MCP及本机Chromium、音量0：412×915@2竖屏菜单／错误及返回设置，915×412@2触屏兼容近树／远景、1440×900桌面正常近树／远景均已截图并亲自view_image，整体菜单、标题、相邻控件／HUD无本轮新增退化。初次把portrait HUD冻结后才改变视口，旧方向提示仍显示；验收驱动已改为开局前横屏并重新拍摄，未用遮挡图作为最终验收。正常与兼容shader都实际GPU编译／ready，完成的正常／兼容上下文console无error／warn；冻结HUD FPS不作为性能证据。
+- 最终触屏正常UBO与兼容无UBO同相机近树／远景两张1830×824截图逐像素差0；两路径材料101、几何3090、mesh5232、liveTexture42完全相同。只代表这两个固定视点，不能外推所有地图／帧或vivo真机。
+- 桌面／触屏晚期第3次UBO失败不切换能力，场景清理为0，错误页提供返回设置／重载且质量仍ultra；桌面失败后liveTexture1为引擎缓存，移除注入后手动开局成功。上下文丢失失败也仅1次、scene0／liveTexture0，native恢复后点击返回设置再开始成功进入HUD、scene1、原UBO能力及设置保持。错误console保留原始Error用于诊断，不算正常路径错误；上游异步编译行为没有被宣称为全部修复。
+- 当前源码、公开9dd1c72页面、实际document.title和Logo均为「最后防线」；新增应用／分享标题meta并在启动时显式统一document.title。用户浏览器栏「无敌防线」截图属实，浏览器名称与实际URL未获，不能把新meta视为已修复浏览器缓存或内部站点别名。故障注入不是vivo Y52s真机测试，原始分配失败的硬件／驱动／资源原因仍未证实。
+- 外部日志／JSON／PNG保存在checkout外cloud-setup；每个MCP轮次立即关闭自有页面、preview／MCP／浏览器进程组并TCP确认4173／9345关闭，只剩恢复的about:blank。正常路径仅有界异步创建／错误保护，无新逐帧工作；兼容uniform路径可能增加CPU更新成本，不作FPS承诺。新HEAD完整CI／原main-head三轮性能及独立Review／Codex／公开预览还须完成，提交后事实仅写PR及交付报告。
+
+
+### Round 15 Final Build Evidence
+
+- F1／F2 修复后的完整typecheck、production build、原budget全部通过：入口901953B（默认BRDF工具从异步依赖移到入口）、最大非入口599329B、JavaScript4086913B／273chunk、CSS46822B、dist4913081B；Worker634585B／standalone644635B未修改。全JS仅有界增加约2.3KB，未复制LUT或放宽任何上限。
+- 最终Builder官方MCP静音验收：桌面／portrait真实第3次UBO失败scene0、能力不变、fullscreen=false，返回保留ultra，移除故障后手动再开始HUDscene1。控制台仅1条预期加载失败，无迟到RGBD／编译错误；两个错误／返回组件全图已逐张view_image，字体、字号、按钮、间距、相邻菜单／背景无新增问题。
+- 最终首次UBO故障touch恢复只有1次失败，scene1、selected island／ultra、真实Gamma／普通阴影uniform与无UBO program编译ready；近树／远景全图已亲自view_image，资源持平、console0。正常桌面近树／远景同样ready并亲自看图，world纹理从49→48仅因为BRDF移到virtual owner，GPU liveTexture59保持；不以场景列表减少一张外推显存减少。
+- 最终真实native lose／restore：恢复前LUT ready且isRGBD=false，恢复后场景／LUT ready、isRGBD=false、owner活跃、owner纹理1／mesh0、正式scene1；引擎beginFrame observer回到原0，owner无待处理beforeRender，console仅SDK预期lost／restored两条warn，没有编译error。未修改权威update或用冻结HUD FPS作证据。每轮页面／preview／MCP／Chrome均已结束，4173／9345关闭。
+- 初审两项Finding事实与修复过程保留，上述为最终版证据。新HEAD完整CI／原三轮性能及最终独立Report Review、Codex、公开预览仍待提交后完成，禁止用前HEAD或前次artifact替代。
+
 ## Review
 
 - 当前 Round 12 已完成实现与最终静态复审，所有已发现 blocker／high／medium 已处理；Builder 三地图／触屏／WebGL1 与独立 Reviewer production 图像验收均完成，最终 Review 明确通过并批准正常提交。新 HEAD 完整 CI／性能／Codex／分支预览须持续完成。
@@ -418,3 +448,20 @@
 - 性能Review：SSAO启动增加有界源码处理与独立Effect（典型约+1），最后pass释放共享处理器，无scene强引用／每帧JS；远景少随机、法线及8遮蔽采样，近景多depth判断，原规格／淡出不变。Gamma启动一次O(indices)检查，弱登记、准备O(1)，原计算移到顶点，无新纹理／buffer／varying／实例。第一次几何失效才收集owner实际材质并原生markDirty(true)，其全scene扫描覆盖冻结全部变体；后续更新只常数转发，永久revoked不允许以过期CPU数据重登记。当前静态模板不失效，此扫描不进入稳态。
 - 未识别需额外本机完整采样才能提交的>15%明确风险；约2.7KB代码和有限shader缓存成本已在原预算内。接受全部有效同步GPU局部诊断及反向结果为INFO：town约-6.47%、mixed桌面首次+5.95%／重复-1.26%、WebGL1重复反向，不能宣称三地图或真实设备稳定FPS提升。尚可优化alpha卡片重叠／有效覆盖、后处理和初始编译缓存；本轮不改画面规格，不纳入显著增draw的空间分块。
 - 此记录与实现同提交，原三轮新HEAD CI全部142项／28门禁仍须独立Review；完整CI、Codex、公开预览事实在提交后仅写PR／交付报告，禁止Plan-only。继续PR #9，合并由用户操作。
+
+### Round 15 Initial Review
+
+- 独立 Reviewer 完整静态审查并自行官方 MCP 验证，基础灯首次兼容恢复、精确一次／原状态／原画质和容器所有权认可，但暂不批准提交：medium F1，移动错误页仍 `fullscreenElement=true`，原 deactivate 只解方向锁；medium F2，晚期第3次UBO失败释放场景后，SDK RGBD 解码迟到编译访问 `texture.getScene().postProcessManager`，实际 console 出现 null 错误。已重读当前Plan与完整SDK核实两项成立，不吞console／补丁SDK／虚报零残留。
+- F1 Disposition：新增仅失败使用的安全退出方法，处理 API 缺失、同步拒绝、Promise拒绝及迟到请求；普通 deactivate 保留语义，旧请求不会退出新激活对局或别的全屏元素。单个真实异步边界用例包括返回菜单后迟到、方向锁迟到与重新激活，最终通过。
+- F2 架构／资源 Review：Reviewer 认可公共虚拟 owner 持有默认 LUT，确认战场 dispose 不释放该引用、引擎原生 dispose 释放 owner。额外要求上下文恢复期间转发 SDK beforeRender 准备且完成后移除，已有异步准备的引擎禁止释放全局 Effect 切能力。已实现，成本为1个有界虚拟 Scene／逻辑UBO，LUT仍1张，复用跨失败／重试；无渲染循环、权威状态、额外精度降低或正常稳态逐帧工作。
+- 新单用例通过：原生默认 BRDF 与两个真实 PBR 引用一致，战场释放后 owner／纹理保持活跃，虚拟场景不进入正式列表／LastCreatedScene，正常无新增frame observer，模拟恢复回调移除，最终引擎销毁释放恰好1次。原失败容器单例与真实基础灯Ultra重建单例重新通过；guard增加‘已准备过但场景已清空’拒绝切能力，单例通过。
+- Reviewer 自有桌面／portrait菜单、错误／返回图排版通过；其停loop后世界图因截屏时序全黑，未作为可见验收或代码回归，要求在最终修复dist调整驱动后重拍。其验证结束实际Chrome进程0、4174／9345关闭。外层此前视图正常，仍须最终生产重验／独立Re-review后才能提交。
+
+### Round 15 Re-review
+
+- 独立 `code_reviewer_round9` 最终明确通过并批准正常提交，F1／F2闭环，未解决blocker／high／medium为0。全部diff／用户原始授权／当前合同／SDK与7个单用例证据已核对，未重复Builder测试、typecheck、build或budget。
+- Reviewer自己的官方MCP静音最终13张PNG均亲自view_image：桌面与portrait错误／返回、桌面正常近远、touch无UBO兼容近远与真实native恢复世界。失败scene0／fullscreenfalse／输入释放，返回ultra保持；desktop去故障重试ready／compiled且console仅原error1。首次touch兼容只有1次故障、最终scene1／program0blocks／shadowuniform有效／console0，材质101／mesh5232，整体植被、地表、建筑、天空与HUD无本轮新增可见退化。
+- 独立native恢复后场景与LUTready／非RGBD，owner活跃且纹理1／mesh0、不入正式场景，frame observer回0／owner pending0，只有SDK预期lost／restored warn。其世界图采用仅scene渲染loop，无权威更新，冻结FPS不作证据。自己的24个临时文件和专用profile已删除，actualChrome0、4174／9345 TCP关闭，Builder证据不动，源码／Git只读。
+- 性能Review：正常创建仅常数保护、弱登记和1个有界virtual Scene／逻辑UBO；同一SDK LUT跨战场复用，不新增第二张／mesh／draw／正常逐帧observer，game纹理列表少1不是GPU减少1。恢复期间准备forward临时且完成移除，owner释放清cache／两个observer。入口依赖布局移动使初稿入口+43647B、全JS仅+2290B，仍在原预算；新的启动下载／解析时序须新HEAD同runner三轮INFO复核，无已识别必须追加本机完整采样的>15%正常路径风险。
+- 故障路径基础灯最多两次且第一次先释放，prepared过的engine不能切全局Effect；非UBO native uniform可能增加CPU成本，兼容可用不承诺FPS持平。非阻塞余地为据真机资料定位分配原因／CPU开销、启动依赖布局及LUT准备；不扩大为全部SDK最终引擎销毁任务取消，不宣称浏览器栏别名或vivo根因已证实修复。
+- 提交前精确status／log10／ls-remote确认仍9dd1c72，stash含未跟踪文件保留变更后pull --rebase已最新，pop成功且无冲突，diff检查通过。继续原分支／PR #9；本Review与实现同提交。新HEAD完整CI／142项原三轮报告的独立Review／Codex／公开预览必须继续，提交后事实仅写PR／交付报告，不做Plan-only，合并仍由用户操作。

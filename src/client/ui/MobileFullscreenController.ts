@@ -16,6 +16,7 @@ export class MobileFullscreenController {
   private pending = false;
   private failed = false;
   private orientationLocked = false;
+  private exitWhenInactive = false;
   private operation = 0;
 
   public constructor(options: MobileFullscreenControllerOptions = {}) {
@@ -27,11 +28,13 @@ export class MobileFullscreenController {
 
   public activateFromUserGesture(): void {
     this.active = true;
+    this.exitWhenInactive = false;
     this.requestFromUserGesture();
   }
 
   public activateWithoutUserGesture(): void {
     this.active = true;
+    this.exitWhenInactive = false;
   }
 
   public requestFromUserGesture(): void {
@@ -79,6 +82,23 @@ export class MobileFullscreenController {
     this.deactivate();
   }
 
+  public exitAfterFailure(): void {
+    this.deactivate();
+    this.exitWhenInactive = true;
+    this.exitOwnFullscreen();
+  }
+
+  private exitOwnFullscreen(): void {
+    if (this.active || !this.exitWhenInactive || this.documentTarget.fullscreenElement !== this.target) return;
+    try {
+      if (typeof this.documentTarget.exitFullscreen === "function") {
+        void Promise.resolve(this.documentTarget.exitFullscreen()).catch(() => undefined);
+      }
+    } catch {
+      // 旧浏览器同步拒绝退出时，错误页仍可操作。
+    }
+  }
+
   private isSupported(): boolean {
     return this.touchInput &&
       this.documentTarget.fullscreenEnabled !== false &&
@@ -86,7 +106,10 @@ export class MobileFullscreenController {
   }
 
   private async lockLandscape(operation: number): Promise<void> {
-    if (!this.isCurrent(operation)) return;
+    if (!this.isCurrent(operation)) {
+      this.exitOwnFullscreen();
+      return;
+    }
     const orientation = this.screenTarget?.orientation;
     if (!orientation || typeof orientation.lock !== "function") return;
     await orientation.lock("landscape");
@@ -99,6 +122,7 @@ export class MobileFullscreenController {
     } catch {
       // A stale lock may already have been released by the browser.
     }
+    this.exitOwnFullscreen();
   }
 
   private finish(operation: number, failed: boolean): void {

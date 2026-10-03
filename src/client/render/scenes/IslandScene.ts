@@ -69,6 +69,8 @@ import {
 import { syncLootMarkerViews, type LootMarkerViewAdapter } from "../LootMarkerViewAdapter";
 import { clearDynamicChunkRecoveryAttempts } from "../../dynamicChunkRecovery";
 import { loadCatalogModel } from "../loadCatalogModel";
+import { createSceneWithUniformFallback } from "../SceneCreation";
+import { bindSceneEnvironmentBrdf } from "../SceneResources";
 import { getPoiVisualType } from "../../poiVisuals";
 import { getBrandSignPlacements } from "../../brandSigns";
 
@@ -213,106 +215,109 @@ export async function createIslandScene(
   }
   const layout = createMapLayout(mapId, mapSeed);
 
-  const highPresentation = quality === "high" || quality === "ultra";
-  const scene = new Scene(engine);
-  scene.collisionsEnabled = true;
-  scene.skipPointerMovePicking = true;
-  configureScenePresentation(scene);
+  return createSceneWithUniformFallback(engine, (scene) => {
+    scene.collisionsEnabled = true;
+    scene.skipPointerMovePicking = true;
+    configureScenePresentation(scene);
 
-  const ambient = new HemisphericLight("island-ambient", new Vector3(0.2, 1, 0.12), scene);
-  ambient.intensity = 0.74;
-  ambient.diffuse = new Color3(0.78, 0.82, 0.72);
-  ambient.groundColor = new Color3(0.16, 0.2, 0.18);
+    const ambient = new HemisphericLight("island-ambient", new Vector3(0.2, 1, 0.12), scene);
+    ambient.intensity = 0.74;
+    ambient.diffuse = new Color3(0.78, 0.82, 0.72);
+    ambient.groundColor = new Color3(0.16, 0.2, 0.18);
 
-  const sun = new DirectionalLight("island-sun", new Vector3(-0.55, -1, 0.35), scene);
-  sun.position = new Vector3(180, 260, -140);
-  sun.intensity = 0.98;
-  sun.diffuse = new Color3(0.94, 0.88, 0.73);
-  sun.specular = new Color3(0.42, 0.46, 0.43);
+    const sun = new DirectionalLight("island-sun", new Vector3(-0.55, -1, 0.35), scene);
+    sun.position = new Vector3(180, 260, -140);
+    sun.intensity = 0.98;
+    sun.diffuse = new Color3(0.94, 0.88, 0.73);
+    sun.specular = new Color3(0.42, 0.46, 0.43);
+    return { ambient, sun };
+  }, async (scene, { ambient, sun }) => {
+    if (quality !== "low") bindSceneEnvironmentBrdf(scene);
+    const highPresentation = quality === "high" || quality === "ultra";
+    const materials = createMaterials(scene, assets, highPresentation, layout);
+    createSkyDome(scene, assets, mapSeed);
+    const qualityProfile = QUALITY_PROFILES[quality];
+    createIslandEnvironment(scene, assets, materials, layout, qualityProfile, quality);
+    createPois(scene, materials, layout);
+    createBrandSigns(scene, assets, layout);
 
-  const materials = createMaterials(scene, assets, highPresentation, layout);
-  createSkyDome(scene, assets, mapSeed);
-  const qualityProfile = QUALITY_PROFILES[quality];
-  createIslandEnvironment(scene, assets, materials, layout, qualityProfile, quality);
-  createPois(scene, materials, layout);
-  createBrandSigns(scene, assets, layout);
+    const { actorRoots, actorVisualRoots } = createActors(scene, actors, materials, player.id, highPresentation);
+    const camera = createCamera(scene, player);
+    const aircraftInteriorRoot = createAircraftInterior(scene, camera, materials);
+    aircraftInteriorRoot.setEnabled(player.deployment === "aircraft");
+    const aircraftVisualRoot = createAircraftVisual(scene, materials);
+    aircraftVisualRoot.setEnabled(false);
+    const syncAircraftVisual = (flight: FlightState, visible: boolean): void => {
+      const progress = Math.max(0, Math.min(1, flight.progress));
+      const x = lerp(flight.start.x, flight.end.x, progress);
+      const y = lerp(flight.start.y, flight.end.y, progress);
+      const z = lerp(flight.start.z, flight.end.z, progress);
+      if (!aircraftVisualRoot.position.equalsToFloats(x, y, z)) aircraftVisualRoot.position.set(x, y, z);
+      const yaw = Math.atan2(flight.end.x - flight.start.x, flight.end.z - flight.start.z);
+      if (aircraftVisualRoot.rotation.y !== yaw) aircraftVisualRoot.rotation.y = yaw;
+      const enabled = visible && progress < 1;
+      if (aircraftVisualRoot.isEnabled() !== enabled) aircraftVisualRoot.setEnabled(enabled);
+    };
+    const viewWeaponRoot = createViewWeapon(scene, camera, materials);
+    setActorWeaponVisual(viewWeaponRoot, getActiveWeapon(player)?.weaponId ?? null);
+    viewWeaponRoot.setEnabled(Boolean(getActiveWeapon(player)));
+    const ultraPresentation = quality === "ultra"
+      ? await import("../UltraPresentation")
+      : undefined;
+    if (quality !== "low") {
+      await replaceCatalogModels(
+        scene,
+        camera,
+        assets,
+        actors,
+        actorRoots,
+        actorVisualRoots,
+        materials,
+        player.id,
+        qualityProfile.modelLodDistance,
+        ultraPresentation?.enhanceCharacterContainer,
+      );
+    }
 
-  const { actorRoots, actorVisualRoots } = createActors(scene, actors, materials, player.id, highPresentation);
-  const camera = createCamera(scene, player);
-  const aircraftInteriorRoot = createAircraftInterior(scene, camera, materials);
-  aircraftInteriorRoot.setEnabled(player.deployment === "aircraft");
-  const aircraftVisualRoot = createAircraftVisual(scene, materials);
-  aircraftVisualRoot.setEnabled(false);
-  const syncAircraftVisual = (flight: FlightState, visible: boolean): void => {
-    const progress = Math.max(0, Math.min(1, flight.progress));
-    const x = lerp(flight.start.x, flight.end.x, progress);
-    const y = lerp(flight.start.y, flight.end.y, progress);
-    const z = lerp(flight.start.z, flight.end.z, progress);
-    if (!aircraftVisualRoot.position.equalsToFloats(x, y, z)) aircraftVisualRoot.position.set(x, y, z);
-    const yaw = Math.atan2(flight.end.x - flight.start.x, flight.end.z - flight.start.z);
-    if (aircraftVisualRoot.rotation.y !== yaw) aircraftVisualRoot.rotation.y = yaw;
-    const enabled = visible && progress < 1;
-    if (aircraftVisualRoot.isEnabled() !== enabled) aircraftVisualRoot.setEnabled(enabled);
-  };
-  const viewWeaponRoot = createViewWeapon(scene, camera, materials);
-  setActorWeaponVisual(viewWeaponRoot, getActiveWeapon(player)?.weaponId ?? null);
-  viewWeaponRoot.setEnabled(Boolean(getActiveWeapon(player)));
-  const ultraPresentation = quality === "ultra"
-    ? await import("../UltraPresentation")
-    : undefined;
-  if (quality !== "low") {
-    await replaceCatalogModels(
+    const ultraMaterials = ultraPresentation?.createUltraMaterialAdapter(scene);
+    const { lootMeshes, syncLootMeshes } = createLootMeshes(
+      scene,
+      groundLoot,
+      materials.loot,
+      materials.deathLoot,
+      showGroundLootModels,
+      ultraPresentation?.colorEquipmentPart,
+      ultraMaterials?.adapt,
+    );
+    const { mesh: safeZoneRing, sync: syncSafeZoneRing } = createSafeZoneRing(scene, materials.safeZone, layout);
+
+    if (ultraPresentation && ultraMaterials) {
+      await ultraPresentation.enhanceScenePresentation(
+        scene,
+        assets,
+        sun,
+        ambient,
+        layout,
+        { actorVisualRoots, localActorId: player.id },
+        ultraMaterials,
+      );
+    }
+
+    return {
       scene,
       camera,
-      assets,
-      actors,
       actorRoots,
       actorVisualRoots,
-      materials,
-      player.id,
-      qualityProfile.modelLodDistance,
-      ultraPresentation?.enhanceCharacterContainer,
-    );
-  }
-
-  const ultraMaterials = ultraPresentation?.createUltraMaterialAdapter(scene);
-  const { lootMeshes, syncLootMeshes } = createLootMeshes(
-    scene,
-    groundLoot,
-    materials.loot,
-    materials.deathLoot,
-    showGroundLootModels,
-    ultraPresentation?.colorEquipmentPart,
-    ultraMaterials?.adapt,
-  );
-  const { mesh: safeZoneRing, sync: syncSafeZoneRing } = createSafeZoneRing(scene, materials.safeZone, layout);
-
-  if (ultraPresentation && ultraMaterials) {
-    await ultraPresentation.enhanceScenePresentation(
-      scene,
-      assets,
-      sun,
-      ambient,
-      layout,
-      { actorVisualRoots, localActorId: player.id },
-      ultraMaterials,
-    );
-  }
-
-  return {
-    scene,
-    camera,
-    actorRoots,
-    actorVisualRoots,
-    lootMeshes,
-    syncLootMeshes,
-    viewWeaponRoot,
-    aircraftInteriorRoot,
-    aircraftVisualRoot,
-    syncAircraftVisual,
-    safeZoneRing,
-    syncSafeZoneRing,
-  };
+      lootMeshes,
+      syncLootMeshes,
+      viewWeaponRoot,
+      aircraftInteriorRoot,
+      aircraftVisualRoot,
+      syncAircraftVisual,
+      safeZoneRing,
+      syncSafeZoneRing,
+    };
+  });
 }
 
 export function bindTextureWhenReady(
@@ -372,13 +377,21 @@ async function replaceCatalogModels(
   const requiredCharacterIds = characterIds.filter((kind) => Object.values(actors).some((actor) =>
     actor.id !== localActorId && (actor.kind === "player" ? "player" : "enemy") === kind
   ));
-  const loadIfDeclared = (assetId: string) => assets.has(assetId)
-    ? loadCatalogModel(scene, assets, assetId)
-    : Promise.resolve(null);
+  const loadIfDeclared = async (assetId: string): Promise<LoadedCatalogModel | null> => {
+    if (!assets.has(assetId)) return null;
+    const loaded = await loadCatalogModel(scene, assets, assetId);
+    if (loaded && scene.isDisposed) {
+      loaded.container.dispose();
+      return null;
+    }
+    // AssetContainer 构造时已登记场景释放，涵盖下面的调色和实例化失败。
+    return loaded;
+  };
   const loadedCharacters = await Promise.all(requiredCharacterIds.flatMap((kind) => [
     loadIfDeclared(`model.character.${kind}`),
     loadIfDeclared(`model.character.${kind}.lod1`),
   ]));
+  if (scene.isDisposed) throw new Error("战场加载已取消");
   if (loadedCharacters.length > 0 && loadedCharacters.every((loaded) => loaded !== null)) {
     clearDynamicChunkRecoveryAttempts(() =>
       typeof sessionStorage === "undefined" ? null : sessionStorage
@@ -404,8 +417,6 @@ async function replaceCatalogModels(
       }
     }
   }
-  const loadedContainers = loadedCharacters
-    .flatMap((loaded) => loaded ? [loaded.container] : []);
 
   const actorLods: Array<{
     actorRoot: TransformNode;
@@ -473,7 +484,6 @@ async function replaceCatalogModels(
   scene.onDisposeObservable.addOnce(() => {
     if (lodObserver) scene.onBeforeRenderObservable.remove(lodObserver);
     actorLods.length = 0;
-    for (const container of loadedContainers) container.dispose();
   });
 }
 

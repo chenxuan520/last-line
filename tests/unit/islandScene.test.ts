@@ -1,4 +1,5 @@
 import { NullEngine } from "@babylonjs/core/Engines/nullEngine";
+import { AssetContainer } from "@babylonjs/core/assetContainer";
 import { Scene } from "@babylonjs/core/scene";
 import type { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
 import { BackgroundMaterial } from "@babylonjs/core/Materials/Background/backgroundMaterial";
@@ -46,6 +47,7 @@ import {
 import { mixedFootprintClearsRoads } from "../../src/config/mixedMap";
 import { createMixedMapBlueprint, MIXED_REGION_COUNT } from "../../src/config/mixedMap";
 import { QUALITY_PROFILES } from "../../src/config/settings";
+import { BATTLE_ROYALE_CONFIG } from "../../src/config/battleRoyale";
 import {
   TOWN_POINT_HALF_DEPTH,
   TOWN_POINT_HALF_WIDTH,
@@ -111,6 +113,57 @@ describe("IslandScene lifecycle", () => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
+
+  it("releases detached character containers when scene preparation fails", async () => {
+    const engine = new NullEngine();
+    const assets = createProductionGlbAssets();
+    const resolveAsset = assets.resolve.bind(assets);
+    const failure = new Error("character palette failed");
+    vi.spyOn(assets, "resolve").mockImplementation((id, type) => {
+      const entry = resolveAsset(id, type);
+      if (id !== "model.character.enemy") return entry;
+      const metadata = { ...entry.metadata };
+      Object.defineProperty(metadata, "uniformDarkColor", { get: () => { throw failure; } });
+      return { ...entry, metadata };
+    });
+    const dispose = vi.spyOn(AssetContainer.prototype, "dispose");
+    const state = createBattleRoyaleState("player", { ...BATTLE_ROYALE_CONFIG, participantCount: 2 }, () => 0);
+    try {
+      await expect(createIslandScene(engine, assets, state.actors, state.groundLoot, 0, true, "player", "high"))
+        .rejects.toBe(failure);
+      expect(dispose).toHaveBeenCalledTimes(2);
+      expect(engine.scenes).toHaveLength(0);
+    } finally {
+      engine.dispose();
+    }
+  }, 30_000);
+
+  it("rebuilds the selected Ultra scene after a native light uniform allocation failure", async () => {
+    const engine = new NullEngine();
+    vi.spyOn(engine, "supportsUniformBuffers", "get").mockImplementation(() => !engine.disableUniformBuffers);
+    vi.spyOn(engine, "getRenderingCanvas").mockReturnValue({
+      getContext: () => ({ isContextLost: () => false }),
+    } as unknown as HTMLCanvasElement);
+    const allocation = vi.spyOn(engine, "createUniformBuffer").mockImplementationOnce(() => {
+      throw new Error("Unable to create uniform buffer");
+    });
+    const state = createBattleRoyaleState("player", { ...BATTLE_ROYALE_CONFIG, participantCount: 2 }, () => 0);
+    const before = JSON.stringify(state);
+    try {
+      const bundle = await createIslandScene(engine, createAssets(), state.actors, state.groundLoot, 0, true, "player", "ultra");
+      expect(allocation).toHaveBeenCalledOnce();
+      expect(engine.disableUniformBuffers).toBe(true);
+      expect(engine.scenes).toEqual([bundle.scene]);
+      expect(bundle.scene.getLightByName("island-ambient")).not.toBeNull();
+      expect(bundle.scene.getMeshByName("tree-foliage-template")?.material).toBeInstanceOf(PBRMaterial);
+      expect(bundle.scene.textures.some((texture) => texture.name === "ultra-town-static-shadows")).toBe(true);
+      expect(JSON.stringify(state)).toBe(before);
+      bundle.scene.dispose();
+      expect(engine.scenes).toHaveLength(0);
+    } finally {
+      engine.dispose();
+    }
+  }, 60_000);
 
   it("keeps complete outer town pavement on the rendered terrain slope", async () => {
     const engine = new NullEngine();

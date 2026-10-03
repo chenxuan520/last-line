@@ -60,6 +60,8 @@
 
 GLB 加载还要求至少存在一个可渲染网格。存在 `requiredNodes` 时，每个逗号分隔节点都必须存在。网络、解码、网格或节点失败时记录资源 ID，并保留程序化回退。
 
+GLB 的 `AssetContainer` 在 Babylon 构造时已登记场景释放，模型调色／增强／实例化出错时由整个失败场景的清理释放 detached 容器，不在函数末尾重复登记和释放。场景已销毁后才返回的加载结果立即释放；兼容重建复用既有缓存 payload，不增加按实例加载或生成资源。SDK BRDF 查找纹理由引擎自有虚拟场景持有，PBR／GLB 引用同一纹理，战场失败不会打断其异步解码；引擎销毁负责最终释放。
+
 角色 GLB 使用 `root,weapon_socket,backpack_socket`。角色条目还必须声明精确的逗号分隔 `armorMeshes` 和 `helmetMeshes` 名称，避免装备可见性依赖任意网格命名。加载时会校验这些命名网格可渲染。角色基础 ID 必须存在匹配的 `.lod1` ID，例如 `model.character.enemy.lod1`。可选 metadata `uniformDarkColor`、`uniformColor`、`uniformLightColor`、`armorColor`、`strapColor` 和 `helmetColor` 只重着色匹配的作者 PBR 材质，不改变皮肤。客户端按相机距离选择角色基础/LOD1 组；该行为只影响表现，绝不进入权威比赛状态。
 
 远端人类角色使用 `model.character.player`，Bot 使用 `model.character.enemy`，本地第一人称角色不渲染第三人称身体。第一/第三人称手持武器都使用稳定程序化 `model.weapon.*` 条目。基础角色缺失或无效时，所有距离都保留程序化身体回退；角色 LOD1 缺失时，只让有效基础模型在远处继续显示。

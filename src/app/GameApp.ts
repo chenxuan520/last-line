@@ -2,6 +2,7 @@ import { Engine } from "@babylonjs/core/Engines/engine";
 import { AssetCatalog } from "../assets/AssetCatalog";
 import { AudioFeedback } from "../client/audio/AudioFeedback";
 import { MobileFullscreenController } from "../client/ui/MobileFullscreenController";
+import { isUniformBufferAllocationError } from "../client/render/SceneCreation";
 import { BATTLE_ROYALE_CONFIG } from "../config/battleRoyale";
 import { MAP_DISPLAY_NAMES, normalizeMapId } from "../config/maps";
 import {
@@ -59,6 +60,7 @@ export class GameApp {
   }
 
   public async initialize(): Promise<void> {
+    document.title = "最后防线";
     this.renderLoading(0);
     try {
       if (__SINGLE_PLAYER_DEBUG__) await import("../styles/debug.css");
@@ -110,7 +112,10 @@ export class GameApp {
       );
       this.session.start();
     } catch (error) {
-      this.mobileFullscreen.deactivate();
+      releasePointerLockSafely(document, this.canvas);
+      this.session?.dispose();
+      this.session = null;
+      this.mobileFullscreen.exitAfterFailure();
       this.renderError(error);
     } finally {
       this.starting = false;
@@ -769,8 +774,11 @@ export class GameApp {
       session.start();
     } catch (error) {
       releasePointerLockSafely(document, this.canvas);
+      this.session?.dispose();
+      this.session = null;
+      this.multiplayerConnection = null;
       connection.close();
-      this.mobileFullscreen.deactivate();
+      this.mobileFullscreen.exitAfterFailure();
       this.renderError(error);
     } finally {
       this.starting = false;
@@ -838,8 +846,17 @@ export class GameApp {
   }
 
   private renderError(error: unknown): void {
-    const message = error instanceof Error ? error.message : "未知错误";
-    this.uiRoot.innerHTML = `<section class="menu-panel"><p class="eyebrow">LOAD FAILED</p><h1>无法加载游戏</h1><p class="menu-description">${message}</p></section>`;
+    console.error("游戏加载失败", error);
+    const message = isUniformBufferAllocationError(error)
+      ? "浏览器暂时无法创建图形缓冲，请返回设置重试，或重新加载页面。"
+      : error instanceof Error ? error.message : "未知错误";
+    this.uiRoot.className = "";
+    this.uiRoot.innerHTML = `<section class="menu-panel"><p class="eyebrow">LOAD FAILED</p><h1>无法加载游戏</h1><p class="menu-description"></p><div class="menu-actions"></div></section>`;
+    const description = this.uiRoot.querySelector<HTMLElement>(".menu-description");
+    if (description) description.textContent = message;
+    const actions = this.uiRoot.querySelector<HTMLElement>(".menu-actions");
+    if (this.assets) actions?.append(this.actionButton("返回设置", "BACK", () => this.returnToMenu(), true));
+    actions?.append(this.actionButton("重新加载", "RELOAD", () => window.location.reload()));
   }
 }
 
