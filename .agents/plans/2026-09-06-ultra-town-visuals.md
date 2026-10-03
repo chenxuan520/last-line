@@ -140,6 +140,13 @@
 - 错误页提供中文说明与可用的返回设置／重新加载入口，并释放输入／全屏。统一页面声明的应用名称与启动时标题；当前代码和公开 `document.title` 已是「最后防线」，截图中浏览器栏别名来源尚未核实，禁止宣称已复现该浏览器内部行为。
 - 原光影、分辨率、植被、三地图档位、协议、权威规则和资源／性能合同不变。只运行逐个明确单用例；完整 CI、原三轮性能报告、独立 Review／生产桌面触摸截图、Codex 与新公开预览完成后交付，合并仍由用户操作。
 
+### Round 16 Scope
+
+- Round 15 的 `7d4b6a8` 推送后，PR／push 完整 unit CI 均在 `islandScene` 文件连续执行期间耗尽原 6144MiB heap，624／655 个用例完成。继续同分支修复，不能把公开故障兼容预览通过替代全套验证。
+- 已完整重读当前 Plan、新旧场景回归、Vitest spy 注册表和 Babylon NullEngine／Scene／BRDF 销毁实现，分析超过 10 秒。独立 Reviewer 确认新增 instance spy 被强注册表持有，恢复属性不清历史／实现闭包；NullEngine 的 releaseEffects 为空，会进一步保留测试引擎缓存。单重开用例通过；单 UBO／town 的强制 GC 诊断没有证明全部 6GiB 来自这条链，禁止将其声称为真机或生产泄漏根因。
+- 新增真实 GLB 失败清理和早期 UBO 兼容两项重场景回归移到独立文件，共享原样测试资源 fixture；去掉大引擎 instance spy，使用局部公开 getter／方法包装、手工计数并在 finally 还原 descriptor，容器 prototype spy 及时清理历史。保留所有用例、全部断言、原内存上限、CI／性能配置／三轮／预算和生产渲染实现。
+- 定向单用例、完整 typecheck／build／budget 和独立只读 Review 完成后正常提交；新 HEAD 全套 CI 及原三轮性能报告／独立报告审查、Codex 和公开版本必须继续通过。如 OOM 仍存在，继续诊断，禁止放宽上限或删除用例。
+
 ## Build
 
 
@@ -311,6 +318,13 @@
 - 最终真实native lose／restore：恢复前LUT ready且isRGBD=false，恢复后场景／LUT ready、isRGBD=false、owner活跃、owner纹理1／mesh0、正式scene1；引擎beginFrame observer回到原0，owner无待处理beforeRender，console仅SDK预期lost／restored两条warn，没有编译error。未修改权威update或用冻结HUD FPS作证据。每轮页面／preview／MCP／Chrome均已结束，4173／9345关闭。
 - 初审两项Finding事实与修复过程保留，上述为最终版证据。新HEAD完整CI／原三轮性能及最终独立Report Review、Codex、公开预览仍待提交后完成，禁止用前HEAD或前次artifact替代。
 
+### Round 16 Build Evidence
+
+- 新故障文件的 UBO 兼容和真实 GLB 容器清理，各用 `-t` 单独运行 1 个用例通过；原 `islandScene` 四次重开用例同样单例通过（11.13s）。原文件保留 38 个、独立文件 2 个用例，未删除任何断言；两个共享 fixture 与 `7d4b6a8` 原函数体逐字比较一致，只增加 export 与共享导入。
+- 初次 typecheck 指出原文件搬迁后多余的配置 import，删除后完整 app／Worker／standalone typecheck 全通过；最终 production build 和原 budget 通过：入口901953B、最大非入口599329B、JavaScript4086913B／273chunk、CSS46822B、dist4913081B、Worker634585B／standalone644635B。生产实现未改，产物成本与 Round15 最终版相同。
+- 最小内存诊断仅运行明确单用例：原 UBO 测试 GC 后 heap64.6MB、清 mock 历史后61.0MB；原 town 双场景用例 RSS约2.33GB、GC后heap71.5MB、清历史后70.5MB。它们支持减少注册表引用，不证明全部 CI OOM 的唯一原因；未运行本机全文件／完整 suite／性能采样或放宽6144MiB。
+- Round15 新公开 `7d4b6a8` 部署在本轮修正前已确认版本／标题，官方 MCP 静音第一次原生 UBO 故障后实际 compiled无UBO树冠／普通阴影uniform、ultra／island／scene1、console0；菜单／近树／远景全图已亲自 view_image，9345关闭。Round16仅改测试／文档，不以此前预览替代新HEAD CI、Codex、三轮性能或最终公开版本确认。
+
 ## Review
 
 - 当前 Round 12 已完成实现与最终静态复审，所有已发现 blocker／high／medium 已处理；Builder 三地图／触屏／WebGL1 与独立 Reviewer production 图像验收均完成，最终 Review 明确通过并批准正常提交。新 HEAD 完整 CI／性能／Codex／分支预览须持续完成。
@@ -465,3 +479,16 @@
 - 性能Review：正常创建仅常数保护、弱登记和1个有界virtual Scene／逻辑UBO；同一SDK LUT跨战场复用，不新增第二张／mesh／draw／正常逐帧observer，game纹理列表少1不是GPU减少1。恢复期间准备forward临时且完成移除，owner释放清cache／两个observer。入口依赖布局移动使初稿入口+43647B、全JS仅+2290B，仍在原预算；新的启动下载／解析时序须新HEAD同runner三轮INFO复核，无已识别必须追加本机完整采样的>15%正常路径风险。
 - 故障路径基础灯最多两次且第一次先释放，prepared过的engine不能切全局Effect；非UBO native uniform可能增加CPU成本，兼容可用不承诺FPS持平。非阻塞余地为据真机资料定位分配原因／CPU开销、启动依赖布局及LUT准备；不扩大为全部SDK最终引擎销毁任务取消，不宣称浏览器栏别名或vivo根因已证实修复。
 - 提交前精确status／log10／ls-remote确认仍9dd1c72，stash含未跟踪文件保留变更后pull --rebase已最新，pop成功且无冲突，diff检查通过。继续原分支／PR #9；本Review与实现同提交。新HEAD完整CI／142项原三轮报告的独立Review／Codex／公开预览必须继续，提交后事实仅写PR／交付报告，不做Plan-only，合并仍由用户操作。
+
+### Round 16 Initial Review
+
+- 独立 Reviewer 从两次 CI OOM 核实 medium F1：Vitest `REGISTERED_MOCKS` 为强 Set，`restoreAllMocks` 只还原属性；新增 instance spy 的实现闭包／contexts／restore 闭包持有大引擎，NullEngine `releaseEffects` 为空，不按真实引擎清 Effect 缓存。已确认这条测试引用链成立，未把它定为全部6GiB OOM或用户真机故障根因。
+- Disposition：新增两项整图故障用例搬到独立文件；大引擎三个 instance spy 改局部公开 getter／完整参数转发包装和计数，finally还原原 own descriptor 或删除临时 own 属性。容器 prototype spy 在finally mockRestore清历史。共享 fixture 函数体原样，所有case／断言／CI／内存及性能配置保留；已知生产 BRDF owner 在引擎销毁时正常释放，没有被本轮改动掩盖或改写。最终独立复审与新HEAD全套仍须完成。
+
+### Round 16 Re-review
+
+- 独立 Reviewer 最终只读复审通过，明确允许正常 follow-up 提交，未解决 blocker／high／medium 为0。自行逐字提取比较两 fixture、核对原两个case及8项UBO断言全部保留，mock次数1与手工计数1等价；临时getter／公开两方法无spy注册，参数／this转发及finally原descriptor还原正确，容器prototype mockRestore清history并还原，F1闭环。
+- `src/`／`config/`／`scripts/`／`.github/` 无diff；unit原include覆盖新文件，6144MiB保留；原38＋新2回归未减少。三单例、typecheck／build／原budget日志与Build一致。生产UI与Round15其独立桌面／触摸验收相同，因此没有重复浏览器或外层已完成命令。
+- 性能Review：生产启动／稳态／缓存／GC／GPU／释放成本与Round15相同；测试减少大引擎强引用，仅增加1个文件初始化并分隔累计heap，完整场景与断言工作仍执行。不是6GiB唯一根因证明，更不代表新全套已通过；新HEAD CI失败仍须继续定位。非阻塞余地为旧RTT instance spies和轻量asset mocks的注册成本，按实际新CI证据再决定，禁止预先删除用例／调heap／降门禁。
+- 新HEAD完整CI、原三轮性能的独立报告Review、Codex和最终公开版本必须持续完成；提交后结果仅写PR／交付报告，不做Plan-only，合并仍由用户操作。
+- 提交前 status／log10／精确ls-remote确认远端仍7d4b6a8，stash保留所有已审查修改及两个新文件，pull --rebase已最新，pop成功，无冲突且diff检查通过；仅正常提交并推送原分支。

@@ -165,6 +165,8 @@ Standalone 把访客、房间 metadata、入场、重连凭据、账号/管理�
 
 ## 覆盖率基线
 
+整图启动故障回归使用独立的 NullEngine 测试文件和共享资源 fixture，原场景与断言保持完整。临时公开能力／方法用局部包装注入并在 `finally` 还原 descriptor；不把大引擎注册为长期 instance spy。全局 prototype spy 及时清理历史，避免测试注册表持有已销毁场景或 NullEngine Effect 缓存。这是测试生命周期隔离，不代表已证明真机分配失败来自生产泄漏，原内存、CI 和性能门禁不变。
+
 覆盖率按源码归属统计，确保每个生产 TypeScript 文件只计一次：unit 测 `src/`，Cloudflare 集成测 `worker/`，standalone 集成测 `standalone/`。Node 套件使用 V8；Workers Vitest pool 使用 Istanbul，因为 `workerd` 不暴露原生 V8 inspector coverage。只有声明文件从源码模式排除。
 
 `npm run test:coverage` 运行三套测试，把临时 JSON summary 写入 `node_modules/.cache/coverage/`，执行已签入 statements/branches/functions/lines 阈值，并打印按计数加权的总结果。初始测量为：
