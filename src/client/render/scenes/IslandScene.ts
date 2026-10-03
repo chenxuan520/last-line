@@ -73,6 +73,7 @@ import { createSceneWithUniformFallback } from "../SceneCreation";
 import { bindSceneEnvironmentBrdf } from "../SceneResources";
 import { getPoiVisualType } from "../../poiVisuals";
 import { getBrandSignPlacements } from "../../brandSigns";
+import { FirstPersonPresentation } from "../FirstPersonPresentation";
 
 const INITIAL_SAFE_ZONE_RADIUS = MAP_SIZE * 0.36;
 const HOSPITAL_SURFACE_COLOR = "#ffffff";
@@ -190,6 +191,7 @@ export interface IslandSceneBundle {
   lootMeshes: Map<EntityId, Mesh>;
   syncLootMeshes: (groundLoot: Readonly<Record<EntityId, GroundLootState>>) => void;
   viewWeaponRoot: TransformNode;
+  firstPerson: FirstPersonPresentation;
   aircraftInteriorRoot: TransformNode;
   aircraftVisualRoot: TransformNode;
   syncAircraftVisual: (flight: FlightState, visible: boolean) => void;
@@ -311,6 +313,7 @@ export async function createIslandScene(
       lootMeshes,
       syncLootMeshes,
       viewWeaponRoot,
+      firstPerson: new FirstPersonPresentation(camera, viewWeaponRoot),
       aircraftInteriorRoot,
       aircraftVisualRoot,
       syncAircraftVisual,
