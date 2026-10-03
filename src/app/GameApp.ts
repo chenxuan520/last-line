@@ -2,6 +2,7 @@ import { Engine } from "@babylonjs/core/Engines/engine";
 import { AssetCatalog } from "../assets/AssetCatalog";
 import { AudioFeedback } from "../client/audio/AudioFeedback";
 import { MobileFullscreenController } from "../client/ui/MobileFullscreenController";
+import { isUniformBufferAllocationError } from "../client/render/SceneCreation";
 import { BATTLE_ROYALE_CONFIG } from "../config/battleRoyale";
 import { MAP_DISPLAY_NAMES, normalizeMapId } from "../config/maps";
 import {
@@ -59,6 +60,7 @@ export class GameApp {
   }
 
   public async initialize(): Promise<void> {
+    document.title = "最后防线";
     this.renderLoading(0);
     try {
       if (__SINGLE_PLAYER_DEBUG__) await import("../styles/debug.css");
@@ -110,7 +112,10 @@ export class GameApp {
       );
       this.session.start();
     } catch (error) {
-      this.mobileFullscreen.deactivate();
+      releasePointerLockSafely(document, this.canvas);
+      this.session?.dispose();
+      this.session = null;
+      this.mobileFullscreen.exitAfterFailure();
       this.renderError(error);
     } finally {
       this.starting = false;
@@ -159,7 +164,7 @@ export class GameApp {
         <p class="menu-description">穿越随机航线空降${MAP_DISPLAY_NAMES[this.settings.mapId]}，搜集武器和补给，在不断收缩的安全区内成为最后一名幸存者。</p>
         <div class="settings-grid" aria-label="游戏设置">
           <label>地图选择<select name="map-id" data-setting="map-id"><option value="island">${MAP_DISPLAY_NAMES.island}</option><option value="town">${MAP_DISPLAY_NAMES.town}</option><option value="mixed">${MAP_DISPLAY_NAMES.mixed}</option></select></label>
-          <label>画面质量<select name="quality" data-setting="quality"><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></label>
+          <label>画面质量<select name="quality" data-setting="quality"><option value="low">低</option><option value="medium">中</option><option value="high">高</option><option value="ultra">极高</option></select></label>
           <label class="volume-setting"><span>主音量 <output data-volume-output></output></span><input aria-label="主音量" data-setting="volume" type="range" min="0" max="1" step="0.1" value="${this.settings.volume}" /></label>
           <label class="sensitivity-setting"><span>视角灵敏度 <output data-sensitivity-output></output></span><input data-setting="sensitivity" type="range" min="0.4" max="2" step="0.1" value="${this.settings.sensitivity}" /></label>
           <label class="starter-setting"><span>初始补给</span><span class="starter-option"><input data-setting="start-with-bandage" type="checkbox" ${this.settings.startWithBandage ? "checked" : ""} /><i></i><b>携带 1 条绷带</b></span></label>
@@ -769,8 +774,11 @@ export class GameApp {
       session.start();
     } catch (error) {
       releasePointerLockSafely(document, this.canvas);
+      this.session?.dispose();
+      this.session = null;
+      this.multiplayerConnection = null;
       connection.close();
-      this.mobileFullscreen.deactivate();
+      this.mobileFullscreen.exitAfterFailure();
       this.renderError(error);
     } finally {
       this.starting = false;
@@ -838,8 +846,30 @@ export class GameApp {
   }
 
   private renderError(error: unknown): void {
-    const message = error instanceof Error ? error.message : "未知错误";
-    this.uiRoot.innerHTML = `<section class="menu-panel"><p class="eyebrow">LOAD FAILED</p><h1>无法加载游戏</h1><p class="menu-description">${message}</p></section>`;
+    console.error("游戏加载失败", error);
+    const message = isUniformBufferAllocationError(error)
+      ? "浏览器暂时无法创建图形缓冲，请返回设置重试，或重新加载页面。"
+      : error instanceof Error ? error.message : "未知错误";
+    this.uiRoot.className = "";
+    this.uiRoot.innerHTML = `<section class="menu-panel"><p class="eyebrow">LOAD FAILED</p><h1>无法加载游戏</h1><p class="menu-description"></p><div class="menu-actions"></div></section>`;
+    const description = this.uiRoot.querySelector<HTMLElement>(".menu-description");
+    if (description) description.textContent = message;
+    const actions = this.uiRoot.querySelector<HTMLElement>(".menu-actions");
+    if (this.assets) {
+      const back = this.actionButton("正在退出全屏…", "BACK", () => {
+        if (!back.disabled && back.isConnected) this.returnToMenu();
+      }, true);
+      back.disabled = true;
+      back.setAttribute("aria-busy", "true");
+      actions?.append(back);
+      void this.mobileFullscreen.waitForFailureExit().then(() => {
+        if (!back.isConnected) return;
+        back.disabled = false;
+        back.removeAttribute("aria-busy");
+        back.querySelector("span")!.textContent = "返回设置";
+      });
+    }
+    actions?.append(this.actionButton("重新加载", "RELOAD", () => window.location.reload()));
   }
 }
 
@@ -875,7 +905,7 @@ function loadSettings(): GameSettings {
 }
 
 function isQuality(value: unknown): value is QualityLevel {
-  return value === "low" || value === "medium" || value === "high";
+  return value === "low" || value === "medium" || value === "high" || value === "ultra";
 }
 
 function normalizeVolume(value: number): number {

@@ -16,7 +16,10 @@ export class MobileFullscreenController {
   private pending = false;
   private failed = false;
   private orientationLocked = false;
+  private exitWhenInactive = false;
   private operation = 0;
+  private readonly pendingOperations = new Set<Promise<void>>();
+  private exitPromise: Promise<void> | null = null;
 
   public constructor(options: MobileFullscreenControllerOptions = {}) {
     this.documentTarget = options.document ?? document;
@@ -27,11 +30,13 @@ export class MobileFullscreenController {
 
   public activateFromUserGesture(): void {
     this.active = true;
+    this.exitWhenInactive = false;
     this.requestFromUserGesture();
   }
 
   public activateWithoutUserGesture(): void {
     this.active = true;
+    this.exitWhenInactive = false;
   }
 
   public requestFromUserGesture(): void {
@@ -48,10 +53,10 @@ export class MobileFullscreenController {
       this.finish(operation, true);
       return;
     }
-    void fullscreen
+    this.trackOperation(fullscreen
       .then(() => this.lockLandscape(operation))
       .then(() => this.finish(operation, false))
-      .catch(() => this.finish(operation, true));
+      .catch(() => this.finish(operation, true)));
   }
 
   public needsAction(orientationBlocked: boolean): boolean {
@@ -79,6 +84,36 @@ export class MobileFullscreenController {
     this.deactivate();
   }
 
+  public exitAfterFailure(): void {
+    this.deactivate();
+    this.exitWhenInactive = true;
+    this.exitOwnFullscreen();
+  }
+
+  // 迟到的进入／方向锁完成还可能创建退出任务，必须排空整条操作链后才能重开。
+  public async waitForFailureExit(): Promise<void> {
+    while (this.pendingOperations.size > 0) await Promise.all(this.pendingOperations);
+  }
+
+  private trackOperation(promise: Promise<void>): Promise<void> {
+    const tracked = promise.finally(() => { this.pendingOperations.delete(tracked); });
+    this.pendingOperations.add(tracked);
+    return tracked;
+  }
+
+  private exitOwnFullscreen(): void {
+    if (this.active || !this.exitWhenInactive || this.exitPromise || this.documentTarget.fullscreenElement !== this.target) return;
+    try {
+      if (typeof this.documentTarget.exitFullscreen === "function") {
+        this.exitPromise = this.trackOperation(Promise.resolve(this.documentTarget.exitFullscreen())
+          .catch(() => undefined)
+          .finally(() => { this.exitPromise = null; }));
+      }
+    } catch {
+      // 旧浏览器同步拒绝退出时，错误页仍可操作。
+    }
+  }
+
   private isSupported(): boolean {
     return this.touchInput &&
       this.documentTarget.fullscreenEnabled !== false &&
@@ -86,7 +121,10 @@ export class MobileFullscreenController {
   }
 
   private async lockLandscape(operation: number): Promise<void> {
-    if (!this.isCurrent(operation)) return;
+    if (!this.isCurrent(operation)) {
+      this.exitOwnFullscreen();
+      return;
+    }
     const orientation = this.screenTarget?.orientation;
     if (!orientation || typeof orientation.lock !== "function") return;
     await orientation.lock("landscape");
@@ -99,6 +137,7 @@ export class MobileFullscreenController {
     } catch {
       // A stale lock may already have been released by the browser.
     }
+    this.exitOwnFullscreen();
   }
 
   private finish(operation: number, failed: boolean): void {

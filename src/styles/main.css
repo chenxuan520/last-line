@@ -2905,7 +2905,7 @@ h1 {
 
   .is-touch-input .weapon-status {
     position: fixed;
-    right: max(178px, calc(env(safe-area-inset-right) + 160px));
+    right: max(226px, calc(env(safe-area-inset-right) + 208px));
     bottom: max(78px, calc(env(safe-area-inset-bottom) + 60px));
     min-width: 134px;
     height: 50px;
@@ -2934,6 +2934,45 @@ h1 {
 
   .is-touch-input .pause-actions button {
     min-height: 44px;
+  }
+}
+
+@media (orientation: landscape) and (max-width: 740px) and (max-height: 700px) {
+  .is-touch-input .interaction-prompt {
+    min-width: 0;
+    max-width: calc(100vw - 460px);
+  }
+
+  .is-touch-input .hud-footer {
+    top: max(58px, calc(env(safe-area-inset-top) + 50px));
+    bottom: auto;
+    left: max(8px, env(safe-area-inset-left));
+  }
+
+  .is-touch-input .weapon-status {
+    top: max(112px, calc(env(safe-area-inset-top) + 104px));
+    right: auto;
+    bottom: auto;
+    left: max(8px, env(safe-area-inset-left));
+  }
+
+  .is-touch-input .minimap-card {
+    width: 88px;
+  }
+
+  .is-touch-input .touch-pause {
+    top: max(62px, calc(env(safe-area-inset-top) + 50px));
+  }
+
+  .is-touch-input .touch-reload {
+    right: max(166px, calc(env(safe-area-inset-right) + 148px));
+    bottom: max(142px, calc(env(safe-area-inset-bottom) + 120px));
+  }
+}
+
+@media (orientation: landscape) and (max-width: 740px) and (max-height: 340px) {
+  .is-touch-input .touch-fire-right {
+    bottom: max(58px, calc(env(safe-area-inset-bottom) + 44px));
   }
 }
 

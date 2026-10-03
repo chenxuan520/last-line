@@ -16,6 +16,23 @@ export default defineConfig(({ command }) => {
     server: {
       host: "127.0.0.1",
     },
+    build: {
+      rolldownOptions: {
+        output: {
+          codeSplitting: {
+            groups: [{
+              name: "ultra-shadow-shaders",
+              test: /[\\/]Shaders(?:WGSL)?[\\/](?:ShadersInclude[\\/])?(?:shadowMap|depthBoxBlur|kernelBlur|packingFunctions|sceneVertexDeclaration|instancesDeclaration)/,
+              includeDependenciesRecursively: false,
+            }, {
+              name: "ultra-post-shaders",
+              test: /[\\/]Shaders(?:WGSL)?[\\/](?:ssao2|ssaoCombine|bloomMerge|extractHighlights|imageProcessing|pass|passCube)\.fragment\.js$/,
+              includeDependenciesRecursively: false,
+            }],
+          },
+        },
+      },
+    },
   };
 });
 

@@ -5,12 +5,14 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import WebSocket from "ws";
+import { assertUltraPresentation } from "./performance-presentation.js";
 
 interface Arguments {
   repository: string;
+  textureMetrics: boolean;
   mapId: "island" | "town" | "mixed";
   seed: number;
-  quality: "low" | "medium" | "high";
+  quality: "low" | "medium" | "high" | "ultra";
 }
 
 function parseArguments(): Arguments {
@@ -28,13 +30,13 @@ function parseArguments(): Arguments {
   if (!repository || !mapId || !["island", "town", "mixed"].includes(mapId)) {
     throw new Error("Expected --repository and --map island|town|mixed");
   }
-  if (!quality || !["low", "medium", "high"].includes(quality)) {
-    throw new Error("Expected --quality low|medium|high");
+  if (!quality || !["low", "medium", "high", "ultra"].includes(quality)) {
+    throw new Error("Expected --quality low|medium|high|ultra");
   }
   if (!Number.isInteger(seed) || seed < 0 || seed > 0xffff_ffff) {
     throw new Error("Expected --seed uint32");
   }
-  return { repository, mapId, seed, quality };
+  return { repository, mapId, seed, quality, textureMetrics: values.get("texture-metrics") === "true" };
 }
 
 function mimeType(filePath: string): string {
@@ -175,13 +177,15 @@ async function connectPage(browserPort: number, url: string): Promise<{ socket: 
 async function evaluate<T>(client: CdpClient, expression: string): Promise<T> {
   const response = await client.send<{
     result?: { value?: T };
-    exceptionDetails?: { text?: string };
+    exceptionDetails?: { text?: string; exception?: { description?: string } };
   }>("Runtime.evaluate", {
     expression,
     awaitPromise: true,
     returnByValue: true,
   });
-  if (response.exceptionDetails) throw new Error(response.exceptionDetails.text ?? "Browser evaluation failed");
+  if (response.exceptionDetails) {
+    throw new Error(response.exceptionDetails.exception?.description ?? response.exceptionDetails.text ?? "Browser evaluation failed");
+  }
   return response.result?.value as T;
 }
 
@@ -207,7 +211,7 @@ function percentile(values: readonly number[], fraction: number): number {
 }
 
 async function main(): Promise<void> {
-  const { repository, mapId, seed, quality } = parseArguments();
+  const { repository, mapId, seed, quality, textureMetrics } = parseArguments();
   const { server, url } = await startServer(repository);
   const profileDirectory = await mkdtemp(path.join(tmpdir(), "last-line-performance-chrome-"));
   let chrome: ChildProcess | null = null;
@@ -235,8 +239,13 @@ async function main(): Promise<void> {
     const page = await connectPage(browserPort, url);
     socket = page.socket;
     const client = page.client;
-    await waitFor(client, "document.readyState", (value) => value === "complete", 30_000);
-    await evaluate(client, `(() => {
+    await waitFor(
+      client,
+      `location.href === ${JSON.stringify(url)} && document.readyState === "complete"`,
+      Boolean,
+      30_000,
+    );
+    const settingsScript = `(() => {
       localStorage.setItem("last-line.settings.v1", JSON.stringify({
         mapId: ${JSON.stringify(mapId)},
         quality: ${JSON.stringify(quality)},
@@ -246,7 +255,10 @@ async function main(): Promise<void> {
         disableAiSnipers: true,
         showGroundLootModels: true
       }));
-    })()`);
+    })()`;
+    // 旧菜单异步完成时可能回写旧设置；新文档必须在 GameApp 构造前重新注入。
+    await client.send("Page.addScriptToEvaluateOnNewDocument", { source: settingsScript });
+    await evaluate(client, settingsScript);
     const performanceUrl = `${url}?performance-sample=${Date.now()}`;
     await client.send("Page.navigate", { url: performanceUrl });
     await waitFor(
@@ -258,6 +270,30 @@ async function main(): Promise<void> {
       30_000,
     );
     await evaluate(client, `(() => {
+      if (document.querySelector('[data-setting="map-id"]')?.value !== ${JSON.stringify(mapId)}) {
+        throw new Error("Requested map was not selected");
+      }
+      if (document.querySelector('[data-setting="quality"]')?.value !== ${JSON.stringify(quality)}) {
+        throw new Error("Requested quality was not selected");
+      }
+      if (${textureMetrics}) {
+        const probe = window.__texturePerformance = { created: 0, deleted: 0 };
+        const live = new WeakSet();
+        for (const Context of [window.WebGLRenderingContext, window.WebGL2RenderingContext]) {
+          if (!Context) continue;
+          const create = Context.prototype.createTexture;
+          const remove = Context.prototype.deleteTexture;
+          Context.prototype.createTexture = function() {
+            const texture = create.call(this);
+            if (texture && !live.has(texture)) { live.add(texture); probe.created += 1; }
+            return texture;
+          };
+          Context.prototype.deleteTexture = function(texture) {
+            remove.call(this, texture);
+            if (texture && live.delete(texture)) probe.deleted += 1;
+          };
+        }
+      }
       let first = true;
       let value = (${seed} ^ 0x9e3779b9) >>> 0;
       Math.random = () => {
@@ -280,7 +316,7 @@ async function main(): Promise<void> {
       requestAnimationFrame(frame);
       document.querySelector('[data-action="start"]').click();
     })()`);
-    const hudAt = await waitFor<number | null>(
+    const hudAt = await waitFor<number>(
       client,
       `(() => {
         if (document.querySelector('[data-hud="performance"]')) {
@@ -297,12 +333,41 @@ async function main(): Promise<void> {
       hudAt: number;
       frames: number[];
       fpsText: string;
+      textures?: { created: number; deleted: number };
     }>(client, `({
       clickStarted: window.__runtimePerformance.clickStarted,
       hudAt: window.__runtimePerformance.hudAt,
       frames: window.__runtimePerformance.frames,
+      textures: window.__texturePerformance,
       fpsText: document.querySelector('[data-hud="performance"]')?.textContent ?? ""
     })`);
+    // 帧数组已按值取回；此后的只读场景扫描不进入既有 FPS／长帧窗口。
+    const sceneMetrics = textureMetrics || quality === "ultra" ? await evaluate<Record<string, number>>(client, `(async () => {
+      const urls = [...new Set(performance.getEntriesByType("resource").map(entry => entry.name)
+        .filter(url => /\\/engineStore-[^/]+\\.js(?:\\?.*)?$/.test(url)))];
+      if (urls.length !== 1) throw new Error("Expected one loaded production EngineStore module");
+      const module = await import(urls[0]);
+      const stores = Object.values(module).filter(value => typeof value === "function" && "LastCreatedScene" in value);
+      if (stores.length !== 1) throw new Error("Production EngineStore export missing");
+      const scene = stores[0].LastCreatedScene;
+      if (!scene || scene.isDisposed || !scene.activeCamera) throw new Error("Active production scene missing");
+      (${assertUltraPresentation.toString()})(${JSON.stringify(mapId)}, ${JSON.stringify(quality)},
+        scene.textures.map(texture => texture.name));
+      const actorRoots = scene.transformNodes.filter(node => node.metadata?.actorId && node.metadata?.actorKind);
+      const models = scene.transformNodes.filter(node => node.metadata?.modelLod === "base" &&
+        String(node.metadata?.visualModel).startsWith("model.character."));
+      if (actorRoots.length < 2 || models.length !== actorRoots.length - 1 ||
+        models.some(node => !node.getChildMeshes(false).some(mesh => mesh.getTotalVertices() > 0))) {
+        throw new Error("Production character GLB coverage incomplete");
+      }
+      return {
+        sceneMeshes: scene.meshes.length,
+        sceneMaterials: scene.materials.length,
+        sceneGeometries: scene.geometries.length,
+        sceneVertices: scene.meshes.reduce((total, mesh) => total + mesh.getTotalVertices(), 0),
+        sceneIndices: scene.meshes.reduce((total, mesh) => total + mesh.getTotalIndices(), 0)
+      };
+    })()`) : {};
     await client.send("HeapProfiler.collectGarbage");
     const metrics = await client.send<{
       metrics: Array<{ name: string; value: number }>;
@@ -343,6 +408,12 @@ async function main(): Promise<void> {
       stableLongFrames100: stableFrameDeltas.filter((delta) => delta > 100).length,
       jsHeapUsedBytes: metric("JSHeapUsedSize"),
       nodes: metric("Nodes"),
+      ...(textureMetrics ? {
+        ...sceneMetrics,
+        gpuTexturesCreated: browser.textures?.created,
+        gpuTexturesDeleted: browser.textures?.deleted,
+        gpuTexturesLive: browser.textures ? browser.textures.created - browser.textures.deleted : undefined,
+      } : {}),
     }));
   } finally {
     socket?.close();

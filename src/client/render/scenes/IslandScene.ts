@@ -4,6 +4,7 @@ import type { Engine } from "@babylonjs/core/Engines/engine";
 import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { BackgroundMaterial } from "@babylonjs/core/Materials/Background/backgroundMaterial";
+import type { Material } from "@babylonjs/core/Materials/material";
 import type { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { MultiMaterial } from "@babylonjs/core/Materials/multiMaterial";
@@ -47,6 +48,7 @@ import { getActiveWeapon, type ActorState, type EntityId, type FlightState, type
 import { ACTOR_EYE_HEIGHT, ACTOR_HEIGHT, ACTOR_RADIUS } from "../../../game/rules/actorGeometry";
 import { GROUND_LOOT_POSITION_HEIGHT } from "../../../game/rules/loot";
 import { QUALITY_PROFILES, type QualityLevel, type QualityProfile } from "../../../config/settings";
+import { ULTRA_TERRAIN_TINTS } from "../../../config/ultraPresentation";
 import type { MapId } from "../../../config/maps";
 import {
   createMixedRegionSpecs,
@@ -67,8 +69,11 @@ import {
 import { syncLootMarkerViews, type LootMarkerViewAdapter } from "../LootMarkerViewAdapter";
 import { clearDynamicChunkRecoveryAttempts } from "../../dynamicChunkRecovery";
 import { loadCatalogModel } from "../loadCatalogModel";
+import { createSceneWithUniformFallback } from "../SceneCreation";
+import { bindSceneEnvironmentBrdf } from "../SceneResources";
 import { getPoiVisualType } from "../../poiVisuals";
 import { getBrandSignPlacements } from "../../brandSigns";
+import { FirstPersonPresentation } from "../FirstPersonPresentation";
 
 const INITIAL_SAFE_ZONE_RADIUS = MAP_SIZE * 0.36;
 const HOSPITAL_SURFACE_COLOR = "#ffffff";
@@ -186,6 +191,7 @@ export interface IslandSceneBundle {
   lootMeshes: Map<EntityId, Mesh>;
   syncLootMeshes: (groundLoot: Readonly<Record<EntityId, GroundLootState>>) => void;
   viewWeaponRoot: TransformNode;
+  firstPerson: FirstPersonPresentation;
   aircraftInteriorRoot: TransformNode;
   aircraftVisualRoot: TransformNode;
   syncAircraftVisual: (flight: FlightState, visible: boolean) => void;
@@ -211,87 +217,110 @@ export async function createIslandScene(
   }
   const layout = createMapLayout(mapId, mapSeed);
 
-  const highPresentation = quality === "high";
-  const scene = new Scene(engine);
-  scene.collisionsEnabled = true;
-  scene.skipPointerMovePicking = true;
-  configureScenePresentation(scene);
+  return createSceneWithUniformFallback(engine, (scene) => {
+    scene.collisionsEnabled = true;
+    scene.skipPointerMovePicking = true;
+    configureScenePresentation(scene);
 
-  const ambient = new HemisphericLight("island-ambient", new Vector3(0.2, 1, 0.12), scene);
-  ambient.intensity = 0.74;
-  ambient.diffuse = new Color3(0.78, 0.82, 0.72);
-  ambient.groundColor = new Color3(0.16, 0.2, 0.18);
+    const ambient = new HemisphericLight("island-ambient", new Vector3(0.2, 1, 0.12), scene);
+    ambient.intensity = 0.74;
+    ambient.diffuse = new Color3(0.78, 0.82, 0.72);
+    ambient.groundColor = new Color3(0.16, 0.2, 0.18);
 
-  const sun = new DirectionalLight("island-sun", new Vector3(-0.55, -1, 0.35), scene);
-  sun.position = new Vector3(180, 260, -140);
-  sun.intensity = 0.98;
-  sun.diffuse = new Color3(0.94, 0.88, 0.73);
-  sun.specular = new Color3(0.42, 0.46, 0.43);
+    const sun = new DirectionalLight("island-sun", new Vector3(-0.55, -1, 0.35), scene);
+    sun.position = new Vector3(180, 260, -140);
+    sun.intensity = 0.98;
+    sun.diffuse = new Color3(0.94, 0.88, 0.73);
+    sun.specular = new Color3(0.42, 0.46, 0.43);
+    return { ambient, sun };
+  }, async (scene, { ambient, sun }) => {
+    if (quality !== "low") bindSceneEnvironmentBrdf(scene);
+    const highPresentation = quality === "high" || quality === "ultra";
+    const materials = createMaterials(scene, assets, highPresentation, layout);
+    createSkyDome(scene, assets, mapSeed);
+    const qualityProfile = QUALITY_PROFILES[quality];
+    createIslandEnvironment(scene, assets, materials, layout, qualityProfile, quality);
+    createPois(scene, materials, layout);
+    createBrandSigns(scene, assets, layout);
 
-  const materials = createMaterials(scene, assets, highPresentation, layout);
-  createSkyDome(scene, assets, mapSeed);
-  const qualityProfile = QUALITY_PROFILES[quality];
-  createIslandEnvironment(scene, assets, materials, layout, qualityProfile, quality);
-  createPois(scene, materials, layout);
-  createBrandSigns(scene, assets, layout);
+    const { actorRoots, actorVisualRoots } = createActors(scene, actors, materials, player.id, highPresentation);
+    const camera = createCamera(scene, player);
+    const aircraftInteriorRoot = createAircraftInterior(scene, camera, materials);
+    aircraftInteriorRoot.setEnabled(player.deployment === "aircraft");
+    const aircraftVisualRoot = createAircraftVisual(scene, materials);
+    aircraftVisualRoot.setEnabled(false);
+    const syncAircraftVisual = (flight: FlightState, visible: boolean): void => {
+      const progress = Math.max(0, Math.min(1, flight.progress));
+      const x = lerp(flight.start.x, flight.end.x, progress);
+      const y = lerp(flight.start.y, flight.end.y, progress);
+      const z = lerp(flight.start.z, flight.end.z, progress);
+      if (!aircraftVisualRoot.position.equalsToFloats(x, y, z)) aircraftVisualRoot.position.set(x, y, z);
+      const yaw = Math.atan2(flight.end.x - flight.start.x, flight.end.z - flight.start.z);
+      if (aircraftVisualRoot.rotation.y !== yaw) aircraftVisualRoot.rotation.y = yaw;
+      const enabled = visible && progress < 1;
+      if (aircraftVisualRoot.isEnabled() !== enabled) aircraftVisualRoot.setEnabled(enabled);
+    };
+    const viewWeaponRoot = createViewWeapon(scene, camera, materials);
+    setActorWeaponVisual(viewWeaponRoot, getActiveWeapon(player)?.weaponId ?? null);
+    viewWeaponRoot.setEnabled(Boolean(getActiveWeapon(player)));
+    const ultraPresentation = quality === "ultra"
+      ? await import("../UltraPresentation")
+      : undefined;
+    if (quality !== "low") {
+      await replaceCatalogModels(
+        scene,
+        camera,
+        assets,
+        actors,
+        actorRoots,
+        actorVisualRoots,
+        materials,
+        player.id,
+        qualityProfile.modelLodDistance,
+        ultraPresentation?.enhanceCharacterContainer,
+      );
+    }
 
-  const { actorRoots, actorVisualRoots } = createActors(scene, actors, materials, player.id, highPresentation);
-  const camera = createCamera(scene, player);
-  const aircraftInteriorRoot = createAircraftInterior(scene, camera, materials);
-  aircraftInteriorRoot.setEnabled(player.deployment === "aircraft");
-  const aircraftVisualRoot = createAircraftVisual(scene, materials);
-  aircraftVisualRoot.setEnabled(false);
-  const syncAircraftVisual = (flight: FlightState, visible: boolean): void => {
-    const progress = Math.max(0, Math.min(1, flight.progress));
-    const x = lerp(flight.start.x, flight.end.x, progress);
-    const y = lerp(flight.start.y, flight.end.y, progress);
-    const z = lerp(flight.start.z, flight.end.z, progress);
-    if (!aircraftVisualRoot.position.equalsToFloats(x, y, z)) aircraftVisualRoot.position.set(x, y, z);
-    const yaw = Math.atan2(flight.end.x - flight.start.x, flight.end.z - flight.start.z);
-    if (aircraftVisualRoot.rotation.y !== yaw) aircraftVisualRoot.rotation.y = yaw;
-    const enabled = visible && progress < 1;
-    if (aircraftVisualRoot.isEnabled() !== enabled) aircraftVisualRoot.setEnabled(enabled);
-  };
-  const viewWeaponRoot = createViewWeapon(scene, camera, materials);
-  setActorWeaponVisual(viewWeaponRoot, getActiveWeapon(player)?.weaponId ?? null);
-  viewWeaponRoot.setEnabled(Boolean(getActiveWeapon(player)));
-  if (quality !== "low") {
-    await replaceCatalogModels(
+    const ultraMaterials = ultraPresentation?.createUltraMaterialAdapter(scene);
+    const { lootMeshes, syncLootMeshes } = createLootMeshes(
+      scene,
+      groundLoot,
+      materials.loot,
+      materials.deathLoot,
+      showGroundLootModels,
+      ultraPresentation?.colorEquipmentPart,
+      ultraMaterials?.adapt,
+    );
+    const { mesh: safeZoneRing, sync: syncSafeZoneRing } = createSafeZoneRing(scene, materials.safeZone, layout);
+
+    if (ultraPresentation && ultraMaterials) {
+      await ultraPresentation.enhanceScenePresentation(
+        scene,
+        assets,
+        sun,
+        ambient,
+        layout,
+        { actorVisualRoots, localActorId: player.id },
+        ultraMaterials,
+      );
+    }
+
+    return {
       scene,
       camera,
-      assets,
-      actors,
       actorRoots,
       actorVisualRoots,
-      materials,
-      player.id,
-      qualityProfile.modelLodDistance,
-    );
-  }
-
-  const { lootMeshes, syncLootMeshes } = createLootMeshes(
-    scene,
-    groundLoot,
-    materials.loot,
-    materials.deathLoot,
-    showGroundLootModels,
-  );
-  const { mesh: safeZoneRing, sync: syncSafeZoneRing } = createSafeZoneRing(scene, materials.safeZone, layout);
-
-  return {
-    scene,
-    camera,
-    actorRoots,
-    actorVisualRoots,
-    lootMeshes,
-    syncLootMeshes,
-    viewWeaponRoot,
-    aircraftInteriorRoot,
-    aircraftVisualRoot,
-    syncAircraftVisual,
-    safeZoneRing,
-    syncSafeZoneRing,
-  };
+      lootMeshes,
+      syncLootMeshes,
+      viewWeaponRoot,
+      firstPerson: new FirstPersonPresentation(camera, viewWeaponRoot),
+      aircraftInteriorRoot,
+      aircraftVisualRoot,
+      syncAircraftVisual,
+      safeZoneRing,
+      syncSafeZoneRing,
+    };
+  });
 }
 
 export function bindTextureWhenReady(
@@ -344,19 +373,28 @@ async function replaceCatalogModels(
   materials: IslandMaterials,
   localActorId: EntityId,
   modelLodDistance: number,
+  enhanceCharacter?: (container: LoadedCatalogModel["container"]) => void,
 ): Promise<void> {
   const weaponIds = ["rifle", "smg", "shotgun", "sniper"] as const;
   const characterIds = ["player", "enemy"] as const;
   const requiredCharacterIds = characterIds.filter((kind) => Object.values(actors).some((actor) =>
     actor.id !== localActorId && (actor.kind === "player" ? "player" : "enemy") === kind
   ));
-  const loadIfDeclared = (assetId: string) => assets.has(assetId)
-    ? loadCatalogModel(scene, assets, assetId)
-    : Promise.resolve(null);
+  const loadIfDeclared = async (assetId: string): Promise<LoadedCatalogModel | null> => {
+    if (!assets.has(assetId)) return null;
+    const loaded = await loadCatalogModel(scene, assets, assetId);
+    if (loaded && scene.isDisposed) {
+      loaded.container.dispose();
+      return null;
+    }
+    // AssetContainer 构造时已登记场景释放，涵盖下面的调色和实例化失败。
+    return loaded;
+  };
   const loadedCharacters = await Promise.all(requiredCharacterIds.flatMap((kind) => [
     loadIfDeclared(`model.character.${kind}`),
     loadIfDeclared(`model.character.${kind}.lod1`),
   ]));
+  if (scene.isDisposed) throw new Error("战场加载已取消");
   if (loadedCharacters.length > 0 && loadedCharacters.every((loaded) => loaded !== null)) {
     clearDynamicChunkRecoveryAttempts(() =>
       typeof sessionStorage === "undefined" ? null : sessionStorage
@@ -369,9 +407,19 @@ async function replaceCatalogModels(
   for (const models of characterModels.values()) {
     if (models.base) applyCharacterPalette(models.base);
     if (models.lod1) applyCharacterPalette(models.lod1);
+    if (models.base) enhanceCharacter?.(models.base.container);
+    if (models.base?.container.meshes.some((mesh) => mesh.metadata?.ultraCharacter) && models.lod1) {
+      for (const material of models.lod1.container.materials) {
+        const source = models.base.container.materials.find((candidate) => candidate.name === material.name);
+        if (material.getClassName() === "PBRMaterial" && source?.getClassName() === "PBRMaterial") {
+          const targetPbr = material as PBRMaterial, sourcePbr = source as PBRMaterial;
+          targetPbr.albedoColor.copyFrom(sourcePbr.albedoColor);
+          targetPbr.metallic = sourcePbr.metallic;
+          targetPbr.roughness = sourcePbr.roughness;
+        }
+      }
+    }
   }
-  const loadedContainers = loadedCharacters
-    .flatMap((loaded) => loaded ? [loaded.container] : []);
 
   const actorLods: Array<{
     actorRoot: TransformNode;
@@ -392,6 +440,11 @@ async function replaceCatalogModels(
       ? instantiateCharacterModel(scene, character.lod1, actor, visualRoot, "lod1")
       : null;
     suppressProceduralCharacter(actorRoot);
+    if (character.base.container.meshes.some((mesh) => mesh.metadata?.ultraCharacter)) {
+      for (const mesh of actorRoot.getChildMeshes(false)) {
+        if (mesh.metadata?.actorVisual === "high-detail-gear") mesh.setEnabled(false);
+      }
+    }
     const visuals = [base, lod1].filter((visual): visual is ImportedCharacterVisual => visual !== null);
     suppressProceduralEquipment(actorRoot, visuals);
     for (const weaponId of weaponIds) suppressProceduralWeapon(actorRoot, weaponId);
@@ -405,6 +458,7 @@ async function replaceCatalogModels(
           materials,
           false,
           true,
+          character.base.container.meshes.some((mesh) => mesh.metadata?.ultraCharacter),
         );
       }
     }
@@ -433,7 +487,6 @@ async function replaceCatalogModels(
   scene.onDisposeObservable.addOnce(() => {
     if (lodObserver) scene.onBeforeRenderObservable.remove(lodObserver);
     actorLods.length = 0;
-    for (const container of loadedContainers) container.dispose();
   });
 }
 
@@ -863,6 +916,7 @@ function createIslandEnvironment(
     materials.ground,
     materials.terrainMaterialIndexes,
     materials.terrainTextures,
+    qualityLevel === "ultra",
   );
   ground.material = materials.ground;
   markEnvironment(ground, "island-ground");
@@ -967,7 +1021,7 @@ function createIslandEnvironment(
 
   createBuildingDetails(scene, materials, layout, buildingTextureAssignments);
   createRooftopRailings(scene, materials, layout);
-  if (qualityLevel === "high") {
+  if (qualityLevel === "high" || qualityLevel === "ultra") {
     createIslandHighQualityDetails(scene, materials, layout);
     createTownRoadDetails(scene, materials, layout);
     createTownFacadeDetail(scene, materials, layout);
@@ -1245,12 +1299,14 @@ function applyTerrainSurface(
   groundMaterial: MultiMaterial,
   terrainMaterialIndexes: ReadonlyMap<TerrainTextureAssetId, number>,
   terrainTextures: ReadonlyMap<TerrainTextureAssetId, Texture | null>,
+  continuousRoads = false,
 ): void {
   const positions = ground.getVerticesData(VertexBuffer.PositionKind);
   if (!positions) return;
   const colors: number[] = [];
   const surfaceKinds: TerrainSurface[] = [];
-  const roadSegments = layout.roadSegments;
+  // 极高在片元上绘制道路，不再把12m地形三角形整片涂成沥青。
+  const roadSegments = continuousRoads ? [] : layout.roadSegments;
   const mixedRegions = layout.mapId === "mixed" ? createMixedRegionSpecs(layout.seed) : [];
   for (let index = 0; index < positions.length; index += 3) {
     const x = positions[index] ?? 0;
@@ -1262,10 +1318,12 @@ function applyTerrainSurface(
       height,
       layout.mapId,
       layout.seed,
-      layout.mapPoints,
+      continuousRoads ? [] : layout.mapPoints,
       roadSegments,
       mixedRegions,
     );
+    const tint = continuousRoads ? ULTRA_TERRAIN_TINTS[surface.assetId] : undefined;
+    if (tint) surface.textureTint.copyFromFloats(...tint).scaleInPlace(terrainSurfaceShade(x, z, height, layout.seed));
     positions[index + 1] = height;
     const materialIndex = terrainMaterialIndexes.get(surface.assetId);
     if (materialIndex === undefined) throw new Error(`Terrain material missing for ${surface.assetId}`);
@@ -3221,6 +3279,7 @@ function createWeaponModel(
   materials: IslandMaterials,
   viewModel: boolean,
   socketModel = false,
+  connectedParts = false,
 ): void {
   const scale = viewModel ? 1 : socketModel ? 0.48 : 0.62;
   const offset = viewModel
@@ -3229,7 +3288,14 @@ function createWeaponModel(
       ? { x: 0, y: 0, z: 0 }
       : { x: 0.28, y: -0.43, z: 0.32 };
   const pieces = weaponPieces(weaponId, viewModel);
+  const receiver = connectedParts ? pieces.find(([name]) => name === "receiver") : undefined;
   pieces.forEach(([name, kind, x, y, z, width, height, depth, rotationX = 0]) => {
+    if (receiver) {
+      if (kind === "barrel") {
+        const gap = z - depth / 2 - (receiver[4] + receiver[7] / 2);
+        if (gap > 0) { depth += gap; z -= gap / 2; }
+      } else if (name === "scope") y = Math.min(y, receiver[3] + receiver[6] / 2 + height / 2);
+    }
     const mesh = kind === "barrel"
       ? CreateCylinder(`${prefix}-${weaponId}-${name}`, { diameter: width * scale, height: depth * scale, tessellation: 8 }, scene)
       : CreateBox(`${prefix}-${weaponId}-${name}`, { width: width * scale, height: height * scale, depth: depth * scale }, scene);
@@ -3333,26 +3399,28 @@ const GROUND_LOOT_WEAPON_MODEL_SCALE = 2;
 const GROUND_LOOT_MODEL_CLEARANCE = 0.04;
 const GROUND_LOOT_SPAWN_COLOR = "#e2c66d";
 
-function groundLootModelScale(modelId: string): number {
+function groundLootModelScale(modelId: string, natural = false): number {
+  if (natural) return ITEMS[modelId]?.kind === "weapon" ? 1.15 : 0.85;
   return ITEMS[modelId]?.kind === "weapon" ? GROUND_LOOT_WEAPON_MODEL_SCALE : GROUND_LOOT_MODEL_SCALE;
 }
 
-function createLootModelMaterial(scene: Scene, itemId: string, death = false): StandardMaterial {
-  const color = Color3.FromHexString(death ? "#c85e50" : GROUND_LOOT_SPAWN_COLOR);
+function createLootModelMaterial(scene: Scene, itemId: string, death = false, natural = false): StandardMaterial {
+  const color = Color3.FromHexString(natural ? (death ? "#edc3b9" : "#ffffff") : death ? "#c85e50" : GROUND_LOOT_SPAWN_COLOR);
   const material = new StandardMaterial(
     `${death ? "loot-model-death-material" : "loot-model-material"}-${itemId.replaceAll(".", "-")}`,
     scene,
   );
   material.diffuseColor = color;
-  material.emissiveColor = color.scale(death ? 0.22 : 0.12);
-  material.specularColor = Color3.Black();
+  material.emissiveColor = natural ? new Color3(0.025, 0.025, 0.025) : color.scale(death ? 0.22 : 0.12);
+  material.specularColor = natural ? new Color3(.15, .15, .15) : Color3.Black();
+  if (natural) material.specularPower = 80;
   return material;
 }
 
-function createLootModelTemplates(scene: Scene, fallbackMaterial: StandardMaterial): Map<string, Mesh> {
+function createLootModelTemplates(scene: Scene, fallbackMaterial: StandardMaterial, colorPart?: (mesh: Mesh, itemId: string) => void): Map<string, Mesh> {
   const templates = new Map<string, Mesh>();
   for (const itemId of Object.keys(ITEMS)) {
-    templates.set(itemId, createLootModelTemplate(scene, itemId, createLootModelMaterial(scene, itemId)));
+    templates.set(itemId, createLootModelTemplate(scene, itemId, createLootModelMaterial(scene, itemId, false, Boolean(colorPart)), colorPart));
   }
   const fallback = CreateBox("loot-model-template-fallback", { size: CLASSIC_LOOT_MARKER_SIZE }, scene);
   fallback.rotation.set(0, Math.PI / 4, Math.PI / 4);
@@ -3363,7 +3431,7 @@ function createLootModelTemplates(scene: Scene, fallbackMaterial: StandardMateri
   return templates;
 }
 
-function createLootModelTemplate(scene: Scene, itemId: string, modelMaterial: StandardMaterial): Mesh {
+function createLootModelTemplate(scene: Scene, itemId: string, modelMaterial: StandardMaterial, colorPart?: (mesh: Mesh, itemId: string) => void): Mesh {
   const parts: Mesh[] = [];
   const addBox = (
     name: string,
@@ -3392,7 +3460,7 @@ function createLootModelTemplate(scene: Scene, itemId: string, modelMaterial: St
   ): Mesh => {
     const mesh = CreateCylinder(
       `${itemId}-${name}`,
-      { height, diameterTop, diameterBottom, tessellation },
+      { height, diameterTop, diameterBottom, tessellation: colorPart ? Math.max(16, tessellation) : tessellation },
       scene,
     );
     mesh.position.set(x, y, z);
@@ -3405,7 +3473,7 @@ function createLootModelTemplate(scene: Scene, itemId: string, modelMaterial: St
   if (item?.kind === "weapon" && item.weaponId) {
     const weaponId = item.weaponId as WeaponVisualId;
     const scale = 0.95;
-    const pieces = weaponPieces(weaponId, false);
+    const pieces = weaponPieces(weaponId, Boolean(colorPart));
     for (const [name, kind, x, y, z, width, height, depth, rotationX = 0] of pieces) {
       const mesh = kind === "barrel"
         ? addCylinder(name, depth * scale, width * scale, width * scale)
@@ -3495,12 +3563,46 @@ function createLootModelTemplate(scene: Scene, itemId: string, modelMaterial: St
     addBox("fallback", CLASSIC_LOOT_MARKER_SIZE, CLASSIC_LOOT_MARKER_SIZE, CLASSIC_LOOT_MARKER_SIZE);
   }
 
+  if (colorPart) {
+    if (item?.kind === "weapon") {
+      addBox("ejection-recess", .18, .058, .012, .07, .155, -.115);
+      addBox("charging-latch", .045, .035, .08, -.05, .135, -.14);
+      addBox("trigger-guard", .18, .025, .065, -.06, -.045, 0);
+      if (item.weaponId === "rifle" || item.weaponId === "smg") {
+        for (let i = 0; i < 7; i += 1) addBox(`rail-${i}`, .02, .025, .13, -.15 + i * .055, .28, 0);
+      }
+    } else if (item?.kind === "ammo") {
+      for (const x of [-.25, .25]) addBox("latch", .06, .13, .025, x, .06, -.32);
+      addBox("label", .27, .10, .015, 0, -.065, -.30);
+    } else if (item?.kind === "armor") {
+      for (const x of [-.22, 0, .22]) {
+        addBox("front-pouch", .18, .22, .12, x, -.12, -.23);
+        addBox("buckle", .07, .035, .02, x, -.04, -.298);
+      }
+      for (const y of [.12, .21]) addBox("seam", .50, .016, .02, 0, y, -.22);
+    } else if (itemId === "medkit") {
+      for (const x of [-.27, .27]) {
+        addBox("latch", .075, .045, .05, x, .25, -.20);
+        addBox("case-foot", .12, .06, .28, x, -.31, 0);
+      }
+      addBox("case-seam", .77, .017, .017, 0, .18, -.185);
+    } else if (itemId === "bandage") {
+      for (const x of [-.37, .37]) addCylinder("roll-recess", .012, .08, .08, x, 0, x < 0 ? .08 : -.08).rotation.z = Math.PI / 2;
+    } else if (item?.kind === "helmet") {
+      for (const x of [-.4, .4]) addBox("side-rail", .06, .06, .30, x, 0, 0);
+      addBox("mount", .12, .12, .045, 0, .05, -.41);
+    }
+    for (const part of parts) colorPart(part, itemId);
+  }
   const merged = Mesh.MergeMeshes(parts, true, true);
   if (!merged) throw new Error(`Unable to create loot model ${itemId}`);
   merged.name = `loot-model-template-${itemId.replaceAll(".", "-")}`;
   merged.material = modelMaterial;
   merged.isVisible = false;
   merged.isPickable = false;
+  if (colorPart && (item?.kind === "weapon" || item?.kind === "armor" || itemId === "medkit")) {
+    merged.rotation.x = Math.PI / 2;
+  }
   return merged;
 }
 
@@ -3510,6 +3612,8 @@ function createLootMeshes(
   lootMaterial: StandardMaterial,
   deathLootMaterial: StandardMaterial,
   showGroundLootModels: boolean,
+  colorPart?: (mesh: Mesh, itemId: string) => void,
+  adaptMaterial: (material: Material) => Material = (material) => material,
 ): {
   lootMeshes: Map<EntityId, Mesh>;
   syncLootMeshes: (groundLoot: Readonly<Record<EntityId, GroundLootState>>) => void;
@@ -3519,14 +3623,14 @@ function createLootMeshes(
   boxTemplate.material = lootMaterial;
   boxTemplate.isVisible = false;
   boxTemplate.isPickable = false;
-  const modelTemplates = showGroundLootModels ? createLootModelTemplates(scene, lootMaterial) : new Map<string, Mesh>();
+  const modelTemplates = showGroundLootModels ? createLootModelTemplates(scene, lootMaterial, colorPart) : new Map<string, Mesh>();
   const modelGroundOffsets = new Map<string, number>();
   for (const [modelId, template] of modelTemplates) {
     template.computeWorldMatrix(true);
     const minimumY = template.getBoundingInfo().boundingBox.minimumWorld.y;
     modelGroundOffsets.set(
       modelId,
-      -minimumY * groundLootModelScale(modelId) + GROUND_LOOT_MODEL_CLEARANCE,
+      -minimumY * groundLootModelScale(modelId, Boolean(colorPart)) + (colorPart ? 0.008 : GROUND_LOOT_MODEL_CLEARANCE),
     );
   }
   const deathMaterials = new Map<string, StandardMaterial>();
@@ -3536,7 +3640,7 @@ function createLootMeshes(
     if (modelId === "fallback") return deathLootMaterial;
     let modelDeathMaterial = deathMaterials.get(modelId);
     if (!modelDeathMaterial) {
-      modelDeathMaterial = createLootModelMaterial(scene, modelId, true);
+      modelDeathMaterial = createLootModelMaterial(scene, modelId, true, Boolean(colorPart));
       deathMaterials.set(modelId, modelDeathMaterial);
     }
     return modelDeathMaterial;
@@ -3573,10 +3677,10 @@ function createLootMeshes(
             marker.rotationQuaternion = modelTemplate.rotationQuaternion?.clone() ?? null;
           }
         }
-        marker.material = showGroundLootModels
+        marker.material = adaptMaterial(showGroundLootModels
           ? getModelMaterial(modelId, loot.source === "death")
-          : (loot.source === "death" ? deathLootMaterial : lootMaterial);
-        const modelScale = showGroundLootModels ? groundLootModelScale(modelId) : 1;
+          : (loot.source === "death" ? deathLootMaterial : lootMaterial));
+        const modelScale = showGroundLootModels ? groundLootModelScale(modelId, Boolean(colorPart)) : 1;
         if (!marker.scaling.equalsToFloats(modelScale, modelScale, modelScale)) marker.scaling.setAll(modelScale);
         const y = loot.position.y + (showGroundLootModels
           ? (modelGroundOffsets.get(modelId) ?? 0) - GROUND_LOOT_POSITION_HEIGHT

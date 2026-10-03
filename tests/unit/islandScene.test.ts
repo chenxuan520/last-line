@@ -1,6 +1,9 @@
 import { NullEngine } from "@babylonjs/core/Engines/nullEngine";
 import { Scene } from "@babylonjs/core/scene";
+import type { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
 import { BackgroundMaterial } from "@babylonjs/core/Materials/Background/backgroundMaterial";
+import { ImageProcessingConfiguration } from "@babylonjs/core/Materials/imageProcessingConfiguration";
+import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { MultiMaterial } from "@babylonjs/core/Materials/multiMaterial";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
@@ -10,11 +13,9 @@ import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { Ray } from "@babylonjs/core/Culling/ray";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AssetCatalog } from "../../src/assets/AssetCatalog";
-import type { AssetEntry } from "../../src/assets/types";
+import { createAssets, createProductionGlbAssets } from "../fixtures/islandSceneAssets";
 import {
   applyActorVisualPose,
   bindTerrainTextureWhenReady,
@@ -55,7 +56,6 @@ import { ACTOR_EYE_HEIGHT, ACTOR_HEIGHT, ACTOR_RADIUS } from "../../src/game/rul
 import { createWeaponState } from "../../src/game/state/types";
 import { InventorySystem } from "../../src/game/systems/InventorySystem";
 import { getSupportHeight } from "../../src/game/systems/MovementSystem";
-import productionManifest from "../../public/assets/asset-manifest.json";
 
 const BRAND_SIGN_ASSET_IDS = new Set([
   "decal.brand.drop-zone",
@@ -108,6 +108,252 @@ describe("IslandScene lifecycle", () => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
+
+  it("keeps complete outer town pavement on the rendered terrain slope", async () => {
+    const engine = new NullEngine();
+    const state = createBattleRoyaleState("player", undefined, () => 7 / 0x100000000, { mapId: "town" });
+    expect(state.mapSeed).toBe(7);
+    const before = JSON.stringify(state);
+    const bundle = await createIslandScene(engine, createAssets(), state.actors, state.groundLoot, 7, true, "player", "ultra", "town");
+    const layout = createMapLayout("town", 7);
+    const [ax, az, bx, bz] = layout.roadSegments[78]!;
+    const length = Math.hypot(bx - ax, bz - az), dx = (bx - ax) / length, dz = (bz - az) / length;
+    const pavement = bundle.scene.getMeshByName("ultra-town-pavement")!;
+    const ground = bundle.scene.getMeshByName("island-ground")!;
+    const heights: number[] = [];
+    for (const side of [-1, 1]) {
+      for (const along of [0.7, length / 4, length / 2, length * 3 / 4, length - 0.7]) {
+        for (const across of [-0.8, 0, 0.8]) {
+          const x = ax + dx * along + dz * (side * 4.85 + across);
+          const z = az + dz * along - dx * (side * 4.85 + across);
+          const ray = new Ray(new Vector3(x, 100, z), new Vector3(0, -1, 0), 200);
+          const groundHit = ground.intersects(ray, false), pavementHit = pavement.intersects(ray, false);
+          expect(groundHit.hit).toBe(true); expect(pavementHit.hit).toBe(true);
+          expect(groundHit.distance - pavementHit.distance).toBeCloseTo(0.0425, 4);
+          heights.push(groundHit.pickedPoint!.y);
+        }
+      }
+    }
+    expect(Math.max(...heights) - Math.min(...heights)).toBeGreaterThan(0.5);
+    expect(pavement.metadata.sourceCount).toBe(layout.roadSegments.length * 2);
+    expect(pavement.isPickable).toBe(false); expect(pavement.checkCollisions).toBe(false);
+    expect(JSON.stringify(state)).toBe(before);
+    bundle.scene.dispose(); engine.dispose();
+  }, 60_000);
+
+  it.each(["town", "island", "mixed"] as const)("isolates ultra %s surfaces and cached shadows without changing authoritative geometry", async (mapId) => {
+    const engine = new NullEngine();
+    const assets = createAssets();
+    const state = createBattleRoyaleState("player", undefined, () => 0, { mapId });
+    const before = JSON.stringify(state);
+    const baseline = await createIslandScene(engine, assets, state.actors, state.groundLoot, state.mapSeed, true, "player", "high", mapId);
+    const walls = baseline.scene.meshes.filter((mesh) => mesh.name.startsWith("building-walls-"))
+      .map((mesh) => ({ name: mesh.name, positions: mesh.getVerticesData("position"), indices: mesh.getIndices() }));
+    const groundPositions = baseline.scene.getMeshByName("island-ground")!.getVerticesData("position")!;
+    const meshCount = baseline.scene.meshes.length - baseline.viewWeaponRoot.getChildMeshes(false).length;
+    const trunks = baseline.scene.meshes.filter((mesh) => mesh instanceof InstancedMesh && mesh.sourceMesh.name === "tree-trunk-template")
+      .map((mesh) => ({ name: mesh.name, position: mesh.position.asArray(), scaling: mesh.scaling.asArray() }));
+    expect(baseline.scene.textures.some((texture) => texture.name === "ultra-town-static-shadows")).toBe(false);
+    baseline.scene.dispose();
+    const ultra = await createIslandScene(engine, assets, state.actors, state.groundLoot, state.mapSeed, true, "player", "ultra", mapId);
+    for (const wall of walls) {
+      const mesh = ultra.scene.getMeshByName(wall.name)!;
+      expect(mesh.getVerticesData("position")).toEqual(wall.positions);
+      expect(mesh.getIndices()).toEqual(wall.indices);
+      expect(mesh.receiveShadows).toBe(true);
+    }
+    expect(ultra.scene.meshes.length - ultra.viewWeaponRoot.getChildMeshes(false).length).toBeGreaterThan(meshCount);
+    for (const trunk of trunks) {
+      const mesh = ultra.scene.getMeshByName(trunk.name)!;
+      expect(mesh.position.asArray()).toEqual(trunk.position);
+      expect(mesh.scaling.asArray()).toEqual(trunk.scaling);
+    }
+    const crown = ultra.scene.getMeshByName("tree-foliage-template")!;
+    expect(crown.getTotalVertices()).toBeGreaterThan(800);
+    expect(crown.material).toBeInstanceOf(PBRMaterial);
+    expect((crown.material as PBRMaterial).albedoTexture?.name).toBe("ultra-tree-needles");
+    expect(crown.material!.needAlphaTesting()).toBe(true);
+    expect(crown.material!.needAlphaBlending()).toBe(false);
+    const litStandard = ultra.scene.meshes.filter((mesh) =>
+      !(mesh instanceof InstancedMesh) &&
+      mesh.material instanceof StandardMaterial &&
+      !mesh.material.disableLighting &&
+      mesh.material.alpha >= 0.01 &&
+      !["loot-marker-material", "death-loot-marker-material"].includes(mesh.material.name));
+    expect(litStandard.map((mesh) => mesh.name)).toEqual([]);
+    const ultraGround = ultra.scene.getMeshByName("island-ground")!;
+    expect(Buffer.from(new Float32Array(ultraGround.getVerticesData("position")!).buffer)
+      .equals(Buffer.from(new Float32Array(groundPositions).buffer))).toBe(true);
+    const ground = ultraGround.material as MultiMaterial;
+    expect(ground.subMaterials.every((material) => material instanceof PBRMaterial)).toBe(true);
+    expect(ultra.scene.materials.some((material) => material instanceof StandardMaterial && material.name === "building-floor-material")).toBe(false);
+    expect(ultra.scene.fogMode).toBe(Scene.FOGMODE_LINEAR);
+    expect(ultra.scene.fogStart).toBeGreaterThanOrEqual(1_200);
+    expect(ultra.scene.fogEnd).toBeGreaterThan(MAP_SIZE);
+    expect(ground.subMaterials.every((material) => material?.pluginManager?.getPlugin("UltraRoadSurface"))).toBe(true);
+    const distantCrown = ultra.scene.getMeshByName("ultra-tree-foliage-lod")!;
+    expect(distantCrown.getTotalVertices()).toBeLessThan(crown.getTotalVertices() / 3);
+    expect((crown as Mesh).getLODLevelAtDistance(100)).toBe(distantCrown);
+    expect(ultra.scene.imageProcessingConfiguration).toMatchObject({
+      isEnabled: true,
+      toneMappingEnabled: true,
+      toneMappingType: ImageProcessingConfiguration.TONEMAPPING_ACES,
+      vignetteEnabled: false,
+      applyByPostProcess: true,
+    });
+    expect(ultra.camera._postProcesses.map((postProcess) => postProcess?.name)).toEqual(expect.arrayContaining(["bloomMerge", "ultra-image-processing"]));
+    expect(ultra.scene.getLightByName("island-ambient")!.isEnabled()).toBe(true);
+    const skyLight = ultra.scene.getLightByName("ultra-sky-occlusion") as DirectionalLight;
+    expect(skyLight.intensity).toBe(0);
+    const skyMap = skyLight.getShadowGenerator()!.getShadowMap()!;
+    expect(skyMap.renderList!.length).toBeGreaterThan(0);
+    expect(skyMap.renderList!.every((mesh) =>
+      ["floor-slabs", "roof-slabs", "hospital-surfaces", "ammunition-depot-surfaces"].includes(mesh.metadata?.detailType) ||
+      mesh.metadata?.decoration === "roof-ramp")).toBe(true);
+    expect(ultra.scene.materials.filter((material) => material instanceof PBRMaterial)
+      .every((material) => material.pluginManager?.getPlugin("UltraSkyOcclusion"))).toBe(true);
+    const skyReset = vi.spyOn(skyMap, "resetRefreshCounter");
+    expect(ultra.scene.textures.filter((texture) => texture.name === "ultra-tree-needles")).toHaveLength(1);
+    expect(ultra.scene.textures.filter((texture) => texture.name === "ultra-tree-bark")).toHaveLength(1);
+    const viewParts = ultra.viewWeaponRoot.getChildMeshes(false);
+    expect(viewParts.length).toBeLessThan(20);
+    for (const weaponId of ["rifle", "smg", "shotgun", "sniper", "grenade.frag"]) {
+      const parts = viewParts.filter((mesh) => mesh.metadata?.weaponId === weaponId);
+      expect(parts.length).toBeGreaterThan(0);
+      expect(parts.every((mesh) => !mesh.isPickable && !mesh.isEnabled(false))).toBe(true);
+      expect(parts.every((mesh) => mesh.getVerticesData("position")?.every(Number.isFinite))).toBe(true);
+    }
+    for (const weaponId of ["rifle", "smg", "shotgun", "sniper", "grenade.frag", null]) {
+      setActorWeaponVisual(ultra.viewWeaponRoot, weaponId);
+      expect(viewParts.every((mesh) => mesh.isEnabled(false) === (mesh.metadata?.weaponId === weaponId))).toBe(true);
+    }
+    const steelReceiver = ultra.scene.getMeshByName("ultra-view-rifle-ultra-equipment-steel")!;
+    expect(steelReceiver.getVerticesData("normal")![2]).toBe(-1);
+    const rifle = Object.values(state.groundLoot).find((loot) => loot.itemId === "weapon.rifle")!;
+    const marker = ultra.lootMeshes.get(rifle.id)!;
+    expect(marker.getVerticesData("color")?.length).toBe(marker.getTotalVertices() * 4);
+    const originalGeometry = marker.geometry;
+    const originalSource = rifle.source;
+    rifle.itemId = "medkit";
+    rifle.source = "death";
+    ultra.syncLootMeshes(state.groundLoot);
+    expect(ultra.lootMeshes.get(rifle.id)).toBe(marker);
+    expect(marker.geometry).not.toBe(originalGeometry);
+    expect(marker.geometry).toBe(ultra.scene.getMeshByName("loot-model-template-medkit")?.geometry);
+    expect(marker.getVerticesData("color")?.length).toBe(marker.getTotalVertices() * 4);
+    const deathMaterial = marker.material;
+    expect(deathMaterial).toBeInstanceOf(PBRMaterial);
+    expect(ultra.scene.materials.some((material) => material instanceof StandardMaterial && material.name === deathMaterial?.name)).toBe(false);
+    ultra.syncLootMeshes(state.groundLoot);
+    expect(marker.material).toBe(deathMaterial);
+    rifle.itemId = "weapon.rifle";
+    if (originalSource === undefined) delete rifle.source;
+    else rifle.source = originalSource;
+    ultra.syncLootMeshes(state.groundLoot);
+    expect(marker.geometry).toBe(originalGeometry);
+    expect(ultra.scene.getMeshByName("island-ground")?.receiveShadows).toBe(true);
+    const details = ultra.scene.meshes.filter((mesh) => mesh.metadata?.decoration === "ultra-town-detail");
+    expect(details.length).toBeGreaterThan(mapId === "town" ? 4 : 2);
+    expect(details.length).toBeLessThan((Math.ceil(MAP_SIZE / 128) + 1) ** 2 * (mapId === "town" ? 3 : 2) + 2);
+    expect(ultra.scene.meshes.length - ultra.viewWeaponRoot.getChildMeshes(false).length).toBe(meshCount + details.length + 2);
+    expect(ultra.scene.getMeshByName("ultra-town-pavement") !== null).toBe(mapId === "town");
+    expect(details.every((mesh) => !mesh.isPickable && !mesh.checkCollisions)).toBe(true);
+    const layout = createMapLayout(mapId, state.mapSeed);
+    const decoratedBuildings = new Set(layout.obstacles.filter((building) =>
+      (building.footprint ?? "rectangle") === "rectangle" &&
+      building.id !== layout.hospital.buildingId && building.id !== layout.ammunitionDepot.buildingId).map((building) => building.id));
+    expect(details.filter((mesh) => mesh.metadata?.detailBatch === "ultra-town-facade-trim")
+      .reduce((total, mesh) => total + mesh.metadata.sourceCount, 0)).toBe(
+      layout.wallSegments.filter((wall) => decoratedBuildings.has(wall.obstacleId) && wall.role === "facade" && wall.height >= 1).length * 2);
+    for (const name of ["ultra-town-facade-trim", "ultra-town-facade-joints", ...(mapId === "town" ? ["ultra-town-paving-joints"] : [])]) {
+      const batch = details.filter((mesh) => mesh.metadata?.detailBatch === name) as Mesh[];
+      expect(new Set(batch.map((mesh) => mesh.geometry)).size).toBe(batch.length);
+      expect(new Set(batch.map((mesh) => mesh.material)).size).toBe(1);
+      expect(new Set(batch.map((mesh) => mesh.getVertexBuffer("world0")?.getBuffer())).size).toBe(batch.length);
+      expect(batch.every((mesh) => mesh.getLODLevels().some((level) => level.distanceOrScreenCoverage === 320 && level.mesh === null))).toBe(true);
+    }
+    if (mapId === "town") {
+      expect(ultra.scene.getMeshByName("ultra-town-pavement")!.metadata.sourceCount).toBe(layout.roadSegments.length * 2);
+      expect(ultra.scene.getMaterialByName("ultra-town-pavement-material")?.pluginManager?.getPlugin("UltraPavementRoadCutout")).toBeTruthy();
+    }
+    expect(ultra.scene.getMaterialByName("hospital-surface-material")).toMatchObject({ albedoColor: Color3.White(), albedoTexture: null });
+    const sun = ultra.scene.getLightByName("island-sun") as DirectionalLight;
+    const shadowMap = sun.getShadowGenerator()!.getShadowMap()!;
+    expect(shadowMap.getSize()).toEqual({ width: 2048, height: 2048 });
+    expect(sun.shadowFrustumSize).toBe(256);
+    expect(shadowMap.refreshRate).toBe(0);
+    expect(shadowMap.renderList?.some((mesh) => mesh.name === "building-walls-texture-building-brick-masonry")).toBe(true);
+    expect(shadowMap.renderList?.every((mesh) => !mesh.metadata?.actorId && mesh.metadata?.decoration !== "ultra-town-detail")).toBe(true);
+    const reset = vi.spyOn(shadowMap, "resetRefreshCounter");
+    ultra.camera.getViewMatrix(true);
+    ultra.scene.onBeforeRenderObservable.notifyObservers(ultra.scene);
+    ultra.scene.onBeforeRenderObservable.notifyObservers(ultra.scene);
+    expect(reset).toHaveBeenCalledTimes(1);
+    const sunPosition = sun.position.clone();
+    ultra.camera.position.x += 16;
+    ultra.camera.getViewMatrix(true);
+    ultra.scene.onBeforeRenderObservable.notifyObservers(ultra.scene);
+    expect(reset).toHaveBeenCalledTimes(2);
+    expect(skyReset).toHaveBeenCalledTimes(2);
+    expect(sun.position.x - sunPosition.x).toBe(16);
+    expect(JSON.stringify(state)).toBe(before);
+    ultra.scene.dispose();
+    expect(engine.scenes).toHaveLength(0);
+    expect(ultra.scene.textures).toHaveLength(0);
+    expect(shadowMap.getInternalTexture()).toBeNull();
+    expect(ultra.scene.onBeforeRenderObservable.hasObservers()).toBe(false);
+    engine.dispose();
+  }, 60_000);
+
+  it.each([false, true])("limits ultra actor shadows to nearby desktop actors (touch %s)", async (touch) => {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: touch && query === "(pointer: coarse)" }));
+    const engine = new NullEngine();
+    const state = createBattleRoyaleState("player", {
+      participantCount: 3,
+      flightSeconds: 1,
+      safeZoneStages: [{ waitSeconds: 1, shrinkSeconds: 1, radius: 100, damagePerSecond: 1 }],
+    }, () => 0.5, { mapId: "town" });
+    for (const actor of Object.values(state.actors)) actor.deployment = "grounded";
+    const before = JSON.stringify(state);
+    const bundle = await createIslandScene(engine, createAssets(), state.actors, state.groundLoot, state.mapSeed, true, "player", "ultra", "town");
+    const shadowMap = (bundle.scene.getLightByName("island-sun") as DirectionalLight).getShadowGenerator()!.getShadowMap()!;
+    expect(shadowMap.getSize()).toEqual({ width: 2048, height: 2048 });
+    const actorMap = bundle.scene.getLightByName("ultra-actor-shadows")?.getShadowGenerator()?.getShadowMap();
+    expect(Boolean(actorMap)).toBe(!touch);
+    const actorReset = actorMap ? vi.spyOn(actorMap, "resetRefreshCounter") : null;
+    if (actorMap) expect(actorMap.getSize()).toEqual({ width: 1024, height: 1024 });
+    const postProcesses = bundle.camera._postProcesses.map((postProcess) => postProcess?.name);
+    expect(postProcesses.includes("bloomMerge")).toBe(!touch);
+    expect(postProcesses).toContain("ultra-image-processing");
+    const near = bundle.actorRoots.get("bot-1")!;
+    bundle.actorRoots.get("bot-2")!.position.x += 1_000;
+    near.position.copyFrom(bundle.camera.position).addInPlaceFromFloats(6, 0, 0);
+    const actorMeshes = bundle.actorVisualRoots.get("bot-1")!.getChildMeshes(false);
+    expect(actorMeshes.length).toBeGreaterThan(0);
+    expect(actorMeshes.every((mesh) => (mesh instanceof InstancedMesh ? mesh.sourceMesh : mesh).receiveShadows)).toBe(true);
+    const staticCasters = [...shadowMap.renderList!];
+    const reset = vi.spyOn(shadowMap, "resetRefreshCounter");
+    const frame = (): void => {
+      bundle.scene.onBeforeRenderObservable.notifyObservers(bundle.scene);
+    };
+    frame();
+    frame();
+    expect(shadowMap.renderList!.some((mesh) => actorMeshes.includes(mesh))).toBe(false);
+    expect(actorMap?.renderList?.some((mesh) => actorMeshes.includes(mesh)) ?? false).toBe(!touch);
+    expect(reset).toHaveBeenCalledTimes(1);
+    if (actorReset) expect(actorReset).toHaveBeenCalledTimes(2);
+    near.position.x += 200;
+    frame();
+    frame();
+    expect([...shadowMap.renderList!]).toEqual(staticCasters);
+    expect(reset).toHaveBeenCalledTimes(1);
+    if (actorMap) expect(actorMap.renderList).toHaveLength(0);
+    if (actorReset) expect(actorReset).toHaveBeenCalledTimes(3);
+    expect(JSON.stringify(state)).toBe(before);
+    bundle.scene.dispose();
+    expect(bundle.scene.textures).toHaveLength(0);
+    engine.dispose();
+  }, 60_000);
 
   it("releases scenes and loot marker references across restarts", async () => {
     const engine = new NullEngine();
@@ -931,6 +1177,50 @@ describe("IslandScene lifecycle", () => {
     bundle.scene.dispose();
     engine.dispose();
   }, 30_000);
+
+  it.each(["town", "island", "mixed"] as const)("shares detailed ultra %s character geometry while preserving equipment, LOD and authoritative state", async (mapId) => {
+    const assets = createProductionGlbAssets();
+    const state = createBattleRoyaleState("player", {
+      participantCount: 4,
+      flightSeconds: 1,
+      safeZoneStages: [{ waitSeconds: 1, shrinkSeconds: 1, radius: 100, damagePerSecond: 1 }],
+    }, () => .5, { mapId });
+    state.actors["bot-3"]!.kind = "player";
+    for (const actor of Object.values(state.actors)) actor.deployment = "grounded";
+    const before = JSON.stringify(state);
+    const engine = new NullEngine();
+    const bundle = await createIslandScene(engine, assets, state.actors, state.groundLoot, state.mapSeed, true, "player", "ultra", mapId);
+    const first = bundle.actorRoots.get("bot-1")!;
+    const body = bundle.scene.getMeshByName("bot-1-base-character-merged-uniform")!;
+    const sibling = bundle.scene.getMeshByName("bot-2-base-character-merged-uniform")!;
+    expect((body as Mesh | InstancedMesh).geometry).toBe((sibling as Mesh | InstancedMesh).geometry);
+    expect(body.getTotalVertices()).toBeGreaterThan(400);
+    expect(bundle.scene.getMeshByName("bot-3-base-character-merged-uniform")!.getTotalVertices()).toBe(body.getTotalVertices());
+    const detailed = first.getChildMeshes(false).filter((mesh) => mesh.name.includes("base-character-merged"));
+    expect(detailed).toHaveLength(8);
+    expect(detailed.every((mesh) => !mesh.isPickable && !mesh.checkCollisions)).toBe(true);
+    expect(detailed.every((mesh) => mesh.getVerticesData("position")!.every(Number.isFinite))).toBe(true);
+    expect(first.getChildMeshes(false).filter((mesh) => mesh.metadata?.actorVisual === "high-detail-gear").every((mesh) => !mesh.isEnabled(false))).toBe(true);
+    for (const level of [0, 1, 2, 0] as const) {
+      setActorEquipmentVisual(first, level, level);
+      expect(detailed.filter((mesh) => mesh.metadata?.actorVisual === "vest" || mesh.metadata?.actorVisual === "helmet")
+        .every((mesh) => mesh.isEnabled(false) === (level > 0))).toBe(true);
+      expect(body.isEnabled(false)).toBe(true);
+    }
+    bundle.camera.position.copyFrom(first.position);
+    bundle.scene.render();
+    expect(bundle.scene.getTransformNodeByName("bot-1-character-base")!.isEnabled(false)).toBe(true);
+    bundle.camera.position.x += QUALITY_PROFILES.ultra.modelLodDistance + 20;
+    bundle.scene.render();
+    expect(bundle.scene.getTransformNodeByName("bot-1-character-base")!.isEnabled(false)).toBe(false);
+    expect(bundle.scene.getTransformNodeByName("bot-1-character-lod1")!.isEnabled(false)).toBe(true);
+    expect(bundle.scene.textures.filter((texture) => texture.name === "ultra-character-fabric")).toHaveLength(1);
+    expect(JSON.stringify(state)).toBe(before);
+    bundle.scene.dispose();
+    expect(bundle.scene.textures).toHaveLength(0);
+    expect(bundle.scene.onBeforeRenderObservable.hasObservers()).toBe(false);
+    engine.dispose();
+  }, 60_000);
 
   it("keeps a medium production 50-actor scene within resource budgets", async () => {
     const assets = createProductionGlbAssets();
@@ -1908,77 +2198,6 @@ function roadIntersectsFootprint(
   return true;
 }
 
-function createAssets(): AssetCatalog {
-  const iconAssetIds = [
-    "ui.weapon.rifle",
-    "ui.weapon.smg",
-    "ui.weapon.shotgun",
-    "ui.weapon.sniper",
-    "ui.item.ammo.rifle",
-    "ui.item.ammo.light",
-    "ui.item.ammo.shell",
-    "ui.item.ammo.sniper",
-    "ui.item.armor.1",
-    "ui.item.armor.2",
-    "ui.item.helmet.1",
-    "ui.item.helmet.2",
-    "ui.item.bandage",
-    "ui.item.medkit",
-  ];
-  const textureAssetIds = [
-    "ui.item.ammo-depot",
-    "decal.poi.ammo-depot",
-    "texture.terrain.grass",
-    "texture.terrain.mud",
-    "texture.road",
-    "texture.building.roof",
-    "texture.building.wall",
-    "texture.industrial.metal",
-    "texture.terrain.concrete-urban",
-    "texture.terrain.dry-soil",
-    "texture.terrain.forest-humus",
-    "texture.terrain.forest-moss-wet",
-    "texture.terrain.gravel",
-    "texture.terrain.mud-sparse-grass",
-    "texture.road.asphalt-damaged",
-    "texture.building.brick-masonry",
-    "texture.building.concrete-wall-aged",
-    "texture.building.flat-roof-membrane",
-    "texture.building.roof-tile-gray",
-    "texture.building.roof-tile-red-brown",
-    "texture.building.wall-plaster-aged",
-    "texture.industrial.metal-roof-rusted",
-    "texture.sky.clearing",
-    "texture.sky.overcast",
-    "texture.sky.storm",
-    "decal.brand.drop-zone",
-    "decal.brand.island-operations",
-    "decal.brand.property-ll01",
-    "decal.brand.restricted-area",
-    "decal.brand.supply",
-  ];
-  const catalog = new AssetCatalog({
-    version: 1,
-    assets: [
-      { id: "fallback.ui", type: "svg", url: "/fallback.svg" },
-      { id: "fallback.model", type: "procedural-model", metadata: { color: "#cf4b3f" } },
-      { id: "ui.crosshair", type: "svg", url: "/crosshair.svg", fallback: "fallback.ui" },
-      ...iconAssetIds.map((id) => ({ id, type: "svg" as const, url: `/${id}.svg`, fallback: "fallback.ui" })),
-      ...textureAssetIds.map((id) => ({ id, type: "image" as const, url: `/${id}.webp`, fallback: "fallback.ui" })),
-      { id: "model.character.player", type: "procedural-model", fallback: "fallback.model", metadata: { color: "#809d5e" } },
-      { id: "model.character.enemy", type: "procedural-model", fallback: "fallback.model", metadata: { color: "#bd6357" } },
-      { id: "model.weapon.rifle", type: "procedural-model", fallback: "fallback.model", metadata: { color: "#283126" } },
-      { id: "model.weapon.smg", type: "procedural-model", fallback: "fallback.model", metadata: { color: "#263838" } },
-      { id: "model.weapon.shotgun", type: "procedural-model", fallback: "fallback.model", metadata: { color: "#3b3028" } },
-      { id: "model.weapon.sniper", type: "procedural-model", fallback: "fallback.model", metadata: { color: "#354238" } },
-    ],
-  });
-  const imagePayload = new Uint8Array([0x52, 0x49, 0x46, 0x46]).buffer;
-  vi.spyOn(catalog, "getPayload").mockImplementation((id) =>
-    textureAssetIds.includes(id) ? imagePayload : undefined
-  );
-  return catalog;
-}
 
 async function createGlbAssets(failedModelUrls: ReadonlySet<string> = new Set()): Promise<AssetCatalog> {
   const glb = createMinimalGlb();
@@ -2064,52 +2283,6 @@ async function createGlbAssets(failedModelUrls: ReadonlySet<string> = new Set())
   return AssetCatalog.load("/manifest.json");
 }
 
-function createProductionGlbAssets(): AssetCatalog {
-  const modelEntries = productionManifest.assets.filter((entry) => entry.type === "model") as AssetEntry[];
-  const proceduralWeaponEntries = productionManifest.assets.filter((entry) =>
-    entry.type === "procedural-model" && entry.id.startsWith("model.weapon.")
-  ) as AssetEntry[];
-  vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
-    const url = input.toString();
-    const entry = modelEntries.find((candidate) => candidate.url === url);
-    if (!entry?.url) return new Response(null, { status: 404 });
-    const payload = await readFile(resolve(process.cwd(), "public", entry.url.replace(/^\.\//, "")));
-    return new Response(new Uint8Array(payload), { headers: { "content-type": "model/gltf-binary" } });
-  }));
-  return new AssetCatalog({
-    version: 1,
-    assets: [
-      { id: "fallback.ui", type: "svg", url: "/fallback.svg" },
-      { id: "fallback.model", type: "procedural-model", metadata: { color: "#cf4b3f" } },
-      { id: "ui.crosshair", type: "svg", url: "/crosshair.svg", fallback: "fallback.ui" },
-      { id: "ui.weapon.rifle", type: "svg", url: "/rifle.svg", fallback: "fallback.ui" },
-      { id: "ui.item.ammo-depot", type: "image", url: "/ammo-depot.webp", fallback: "fallback.ui" },
-      {
-        id: "texture.industrial.metal",
-        type: "image",
-        url: "/industrial-metal.webp",
-        fallback: "fallback.ui",
-      },
-      ...[
-        "texture.terrain.grass",
-        "texture.terrain.mud",
-        "texture.road",
-        "texture.building.roof",
-        "texture.building.wall",
-        "texture.sky.clearing",
-        "texture.sky.overcast",
-        "texture.sky.storm",
-        "decal.brand.drop-zone",
-        "decal.brand.island-operations",
-        "decal.brand.property-ll01",
-        "decal.brand.restricted-area",
-        "decal.brand.supply",
-      ].map((id) => ({ id, type: "svg" as const, url: `/${id}.svg`, fallback: "fallback.ui" })),
-      ...modelEntries,
-      ...proceduralWeaponEntries,
-    ],
-  });
-}
 
 function createMinimalGlb(): Uint8Array<ArrayBuffer> {
   const document = {
