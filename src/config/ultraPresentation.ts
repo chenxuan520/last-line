@@ -10,6 +10,7 @@ export const ULTRA_PRESENTATION = {
   roadMaskSize: 2_048,
   roadTextureMeters: 6,
   foliageLodDistance: 100,
+  understoryLodDistance: 40,
   detailBatchSpan: 128,
   detailLodDistance: 320,
   lootFillIntensity: 0.22,

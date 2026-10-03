@@ -258,7 +258,7 @@ describe("IslandScene lifecycle", () => {
     const details = ultra.scene.meshes.filter((mesh) => mesh.metadata?.decoration === "ultra-town-detail");
     expect(details.length).toBeGreaterThan(mapId === "town" ? 4 : 2);
     expect(details.length).toBeLessThan((Math.ceil(MAP_SIZE / 128) + 1) ** 2 * (mapId === "town" ? 3 : 2) + 2);
-    expect(ultra.scene.meshes.length - ultra.viewWeaponRoot.getChildMeshes(false).length).toBe(meshCount + details.length + 1);
+    expect(ultra.scene.meshes.length - ultra.viewWeaponRoot.getChildMeshes(false).length).toBe(meshCount + details.length + 2);
     expect(ultra.scene.getMeshByName("ultra-town-pavement") !== null).toBe(mapId === "town");
     expect(details.every((mesh) => !mesh.isPickable && !mesh.checkCollisions)).toBe(true);
     const layout = createMapLayout(mapId, state.mapSeed);
