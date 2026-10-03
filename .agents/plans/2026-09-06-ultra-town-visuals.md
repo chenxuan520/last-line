@@ -492,3 +492,13 @@
 - 性能Review：生产启动／稳态／缓存／GC／GPU／释放成本与Round15相同；测试减少大引擎强引用，仅增加1个文件初始化并分隔累计heap，完整场景与断言工作仍执行。不是6GiB唯一根因证明，更不代表新全套已通过；新HEAD CI失败仍须继续定位。非阻塞余地为旧RTT instance spies和轻量asset mocks的注册成本，按实际新CI证据再决定，禁止预先删除用例／调heap／降门禁。
 - 新HEAD完整CI、原三轮性能的独立报告Review、Codex和最终公开版本必须持续完成；提交后结果仅写PR／交付报告，不做Plan-only，合并仍由用户操作。
 - 提交前 status／log10／精确ls-remote确认远端仍7d4b6a8，stash保留所有已审查修改及两个新文件，pull --rebase已最新，pop成功，无冲突且diff检查通过；仅正常提交并推送原分支。
+
+### Round 17 Scope and Build Evidence
+
+- `92068b8` 提交后检查发现新共享 fixture 末尾多余空行；暂存 diff 检查的非零退出未阻止原命令后续提交。已重新核实该提交确含两份测试代码及完整 Review，非 Plan-only；本轮只移除末尾空行，使用正常 follow-up 修复，不 amend／重写原提交。
+- fixture 语句、两个用例、生产代码和预算无变化，沿用 Round16 三单例／typecheck／build／budget证据，不为纯空白变化重复测试。外层将分别检查暂存路径和 diff 退出结果后再执行提交，新HEAD CI／性能／Codex仍须完成。
+
+### Round 17 Review
+
+- 独立 Reviewer 最小只读复审通过，核实92068b8确有末尾空行报错、当前只删该空行且fixture语句逐字不变、diff检查通过；是实际检查错误修复，不是绕过Plan-only规则，明确允许正常清理提交／推送。无新增Finding，生产行为和性能不变，Round16 Review仍有效，新HEAD CI必须继续。
+- 提交前status／log10／精确ls-remote确认本地92068b8、远端7d4b6a8；stash保留两文件后pull --rebase已最新，pop成功，无冲突，diff检查退出0。清理提交后再推送两个正常commit，未改写历史。
