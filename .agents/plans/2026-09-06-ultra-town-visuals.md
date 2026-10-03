@@ -147,6 +147,14 @@
 - 新增真实 GLB 失败清理和早期 UBO 兼容两项重场景回归移到独立文件，共享原样测试资源 fixture；去掉大引擎 instance spy，使用局部公开 getter／方法包装、手工计数并在 finally 还原 descriptor，容器 prototype spy 及时清理历史。保留所有用例、全部断言、原内存上限、CI／性能配置／三轮／预算和生产渲染实现。
 - 定向单用例、完整 typecheck／build／budget 和独立只读 Review 完成后正常提交；新 HEAD 全套 CI 及原三轮性能报告／独立报告审查、Codex 和公开版本必须继续通过。如 OOM 仍存在，继续诊断，禁止放宽上限或删除用例。
 
+### Round 18 Scope
+
+- Codex 在已推送实现提出两项 P2，已重读当前 Plan、完整全屏控制器／错误页／单机和联机入口、阴影插件与工厂／回归／样式，分析超过 10 秒并经独立 Reviewer 只读预审：已经发出的 `exitFullscreen` 不能由下一局激活取消；角色阴影的 define 和 bind 仍按名字识别，会误认同名外部灯。
+- 继续用户全部修复和同分支的授权。跟踪完整进入／方向锁／迟到退出操作链；错误页的返回设置入口等待旧操作全部结束后恢复，重新加载始终可用。下一次开始仍从新的真实点击同步请求全屏，正常入口不新增异步等待，不假造浏览器取消或超时完成。
+- 两种遮挡灯在模块工厂按显式角色登记弱身份；define 与 bind 使用同一实际灯槽和登记，重命名仍有效，同名外部灯不进入特例。保留每场景至多一个角色灯和一个天空遮挡灯、原阴影算法、画质、权威与性能门禁。
+- 用户再次明确要求修复「无敌防线」名称。继续统一页面及应用／分享声明为「最后防线」，核对最终公开版本实际 title 和源声明；手机浏览器名称与截图实际 URL 尚未收到，不能声称已查明或改变浏览器自身别名／缓存。
+- 前一 HEAD `5d0a41d` 的 push／PR 完整核心 CI 均已通过，原三轮性能尚未完成；这些不作为本轮新 HEAD 验收。补单用例红／绿、必要 typecheck／build／原 budget，以及静音 production 桌面／触屏错误等待、返回和重开检查；独立最终 Review 后正常 follow-up，继续新 HEAD 完整 CI、三轮报告 Review、Codex 与公开预览。
+
 ## Build
 
 
@@ -325,6 +333,17 @@
 - 最小内存诊断仅运行明确单用例：原 UBO 测试 GC 后 heap64.6MB、清 mock 历史后61.0MB；原 town 双场景用例 RSS约2.33GB、GC后heap71.5MB、清历史后70.5MB。它们支持减少注册表引用，不证明全部 CI OOM 的唯一原因；未运行本机全文件／完整 suite／性能采样或放宽6144MiB。
 - Round15 新公开 `7d4b6a8` 部署在本轮修正前已确认版本／标题，官方 MCP 静音第一次原生 UBO 故障后实际 compiled无UBO树冠／普通阴影uniform、ultra／island／scene1、console0；菜单／近树／远景全图已亲自 view_image，9345关闭。Round16仅改测试／文档，不以此前预览替代新HEAD CI、Codex、三轮性能或最终公开版本确认。
 
+### Round 18 Build Evidence
+
+- 新全屏单用例先因缺少恢复屏障报错，加入完整 Promise 跟踪后通过；真实异步进入、方向锁、已进入三种边界均等待原生退出结束，随后新点击进入不会再被旧退出影响。原所有权回归补充等待屏障，8类拒绝／同步异常／缺 API／外部元素／重新激活路径通过；每次仅执行1个明确用例。
+- 新阴影单用例先因角色槽误识别失败，修复后通过：工厂灯使用独立新名，与两盏同名外部零强度灯并存；真实Effect／define及bind索引2／3正确，外部有caster而角色为空时active0，角色有caster时active1且Effect不变，关闭自有灯后全部特例清除。旧空／近／空Effect及换序回归仍通过。
+- 完整typecheck、production build、原budget通过。入口902597B，非入口599329B，全JS4087650B／273chunk，CSS46822B，dist4913878B；未改Worker／standalone，复用634585B／644635B既有产物。没有放宽预算、heap、采样、画质或权威合同。
+- 官方Chrome DevTools MCP用已安装Chromium、静音0，最终production实际延迟进入＋退出：错误scene0、fullscreen仍在、返回disabled／aria-busy、reload可用，disabled原生click无副作用；先释放exit后旧enter未完成仍disabled，再释放enter才启用；返回保持island／ultra，去故障后真实点击重开scene1／HUD／fullscreentrue。桌面晚期失败也scene0、可返回并重开，UBO能力不切换；两个故障round仅原始注入error1，无额外异常。
+- 桌面1440×900与触屏915×412@2正常极高近树／远景production实际ready、shaderReady／compiled=true，资源保持材质101／mesh5232／geometry3090，liveTexture59／42，console0。所有错误等待／恢复／菜单及最终世界PNG均亲自view_image；字体、大小、色彩、间距、对齐、按钮与相邻背景／地形／天空／完整HUD无本轮新增退化。重开瞬间停loop的HUD图世界尚未就绪，不作为画面验收，以上正常最终ready图才作证据；冻结FPS不作性能结论。
+- 页面实际title、Logo、application-name／og:title／新增og:site_name全部为「最后防线」，源码无「无敌防线」。原生TLS校验的CLI首次Python默认UA访问3域403，改常规浏览器UA后正式自有域／默认Pages／GitHub Pages／5d分支预览均200，HTML标题均为「最后防线」且无旧名；5d有前两项meta，新增站点名待本轮部署。最终公开MCP仍须核验，手机浏览器内部别名来源仍未证实，不能据此声称截图来自某个域或缓存。
+- 各browser round自己的页面已关，最终只剩必要about:blank；实际专用Chrome进程0，preview4173／MCP9345端口关闭。Builder证据在checkout外，独立最终Review与其自有UI审查尚须完成；此记录与本轮实现同提交，不做Plan-only。
+- 本轮提交前，前一 `5d0a41d` 的PR run `37117382609` 原三轮报告也已生成并成功：142项／28确定性门禁／阈值0.15，main无极高时继续以high作INFO参考。该报告不覆盖当前未提交修改，新HEAD仍须完整CI与同runner原报告独立Review，不能跨run声称帧时间或FPS改善。
+
 ## Review
 
 - 当前 Round 12 已完成实现与最终静态复审，所有已发现 blocker／high／medium 已处理；Builder 三地图／触屏／WebGL1 与独立 Reviewer production 图像验收均完成，最终 Review 明确通过并批准正常提交。新 HEAD 完整 CI／性能／Codex／分支预览须持续完成。
@@ -502,3 +521,12 @@
 
 - 独立 Reviewer 最小只读复审通过，核实92068b8确有末尾空行报错、当前只删该空行且fixture语句逐字不变、diff检查通过；是实际检查错误修复，不是绕过Plan-only规则，明确允许正常清理提交／推送。无新增Finding，生产行为和性能不变，Round16 Review仍有效，新HEAD CI必须继续。
 - 提交前status／log10／精确ls-remote确认本地92068b8、远端7d4b6a8；stash保留两文件后pull --rebase已最新，pop成功，无冲突，diff检查退出0。清理提交后再推送两个正常commit，未改写历史。
+
+### Round 18 Review
+
+- 独立 `code_reviewer_round9` 完整只读复审通过，Codex 两项 P2 均已闭环，未解决 blocker／high／medium 为0，明确批准正常 follow-up 提交。完整 operation 链与循环屏障覆盖迟到新退出；错误页 connected／disabled 守卫保留，下一次真实点击同步激活。工厂弱角色登记与 define／bind 同源，生产每场景至多一个角色灯和一个天空遮挡灯，实际有效四槽一致。
+- Reviewer 自行官方 MCP、独立 profile／context、静音0，桌面1365×900与触屏390×844@2／844×390@2，共12张自己的菜单／错误等待／恢复／返回／近远世界全视口截图全部亲自view_image。独立只延迟exit：touch scene0、fullscreen仍在、back disabled且aria-busy、reload可用、exit1；释放原生exit后恢复返回，真实重开scene1／ready／fullscreentrue，桌面亦可恢复且UBO不变。
+- 其真实GPU program编译与Effect ready通过，desktop角色槽1／5blocks、touch无角色槽／4blocks，材质101；完整HUD、树、地面、天空和阴影无本轮新增退化。重开随机序列产生的mesh5230／5206不是与Builder首次seed7的5232作同状态资源对比。两模式console仅注入故障原始error1，无额外异常。自己的页面关闭仅blank，actualChrome0、preview4174／MCP9345关闭，18个自己的临时文件及profile清理，未动外层证据或Git。
+- 性能Review：controller仅入场／失败分配Promise及Set条目，settled即删除，失败屏障按任务排空，无timer／逐帧poll／正常入口await；错误DOM只在失败更新。工厂至多两次O(1)弱登记，prepare／bind至多四槽查找，bind由全部灯源收窄为有效四槽，不新增图形资源、shader源码或必要Effect数量。metadata仅静态字节，新测试小场景；无识别出的须追加本机定量采样才能提交的>15%风险。
+- 非阻塞余地为取得真实vivo浏览器／URL诊断旧名与原生分配，依据新CI和真机CPU证据再优化；禁止用冻结SwiftShader FPS声称流畅，标题声明不证明手机浏览器别名来源。新HEAD完整CI、原三轮142项报告独立Review、Codex及公开版本仍须继续；提交后事实只写PR和交付报告，不做Plan-only，合并保持用户手动操作。
+- 提交前status／log10／精确ls-remote确认远端仍5d0a41d；stash保留全部10文件后pull --rebase已最新，pop成功且无冲突。本Review与实现同提交，分别核实暂存路径及diff检查退出后再正常commit／push。

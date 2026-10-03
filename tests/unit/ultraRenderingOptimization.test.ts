@@ -80,8 +80,8 @@ describe("ultra rendering work reuse", () => {
     const material = new PBRMaterial("receiver", scene);
     mesh.material = material; mesh.receiveShadows = true;
     const sun = new DirectionalLight("sun", new Vector3(1, -1, 1), scene);
-    const actor = createShadowOnlyLight(ULTRA_ACTOR_SHADOW_NAME, sun.direction.clone(), scene);
-    const sky = createShadowOnlyLight(ULTRA_SKY_OCCLUSION_NAME, new Vector3(0.01, -1, 0), scene);
+    const actor = createShadowOnlyLight(ULTRA_ACTOR_SHADOW_NAME, sun.direction.clone(), scene, "actor");
+    const sky = createShadowOnlyLight(ULTRA_SKY_OCCLUSION_NAME, new Vector3(0.01, -1, 0), scene, "sky");
     for (const light of [sun, actor, sky]) {
       const generator = new ShadowGenerator(32, light);
       generator.usePercentageCloserFiltering = true;
@@ -138,6 +138,66 @@ describe("ultra rendering work reuse", () => {
     expect(alternate.subMeshes![0]!.effect!.defines).not.toContain("#define ULTRA_SHADOW_ONLY_LIGHT0");
     expect(alternate.subMeshes![0]!.effect!.defines).toContain("#define ULTRA_SHADOW_ONLY_LIGHT2");
     buffer.dispose(); scene.dispose(); engine.dispose();
+  });
+
+  it("identifies shadow roles by factory identity despite renaming and colliding external light names", async () => {
+    const engine = new NullEngine();
+    engine._features.supportShadowSamplers = true;
+    const scene = new Scene(engine);
+    const camera = new FreeCamera("camera", new Vector3(0, 1, -5), scene);
+    camera.setTarget(Vector3.Zero());
+    const mesh = CreateBox("receiver", {}, scene);
+    const material = new PBRMaterial("receiver", scene);
+    mesh.material = material;
+    mesh.receiveShadows = true;
+    const direction = new Vector3(1, -1, 1);
+    const externalActor = new DirectionalLight(ULTRA_ACTOR_SHADOW_NAME, direction.clone(), scene);
+    const externalSky = new DirectionalLight(ULTRA_SKY_OCCLUSION_NAME, direction.clone(), scene);
+    externalActor.intensity = externalSky.intensity = 0;
+    const actor = createShadowOnlyLight("renamed-actor", direction.clone(), scene, "actor");
+    const sky = createShadowOnlyLight("renamed-sky", direction.clone(), scene, "sky");
+    const buffer = new UniformBuffer(engine);
+    try {
+      for (const light of [externalActor, externalSky, actor, sky]) {
+        const generator = new ShadowGenerator(32, light);
+        generator.usePercentageCloserFiltering = true;
+        generator.getShadowMap()!.renderList = light === actor ? [] : [mesh];
+      }
+      addSkyOcclusion(material);
+      await material.forceCompilationAsync(mesh);
+      scene.render();
+      const effect = mesh.subMeshes![0]!.effect!;
+      expect(effect.defines).toContain("#define ULTRA_ACTOR_SHADOW_LIGHT2");
+      expect(effect.defines).toContain("#define ULTRA_SHADOW_ONLY_LIGHT2");
+      expect(effect.defines).toContain("#define ULTRA_SHADOW_ONLY_LIGHT3");
+      expect(effect.defines).not.toContain("#define ULTRA_ACTOR_SHADOW_LIGHT0");
+      expect(effect.defines).not.toContain("#define ULTRA_SHADOW_ONLY_LIGHT0");
+      expect(effect.defines).not.toContain("#define ULTRA_SHADOW_ONLY_LIGHT1");
+      const plugin = material.pluginManager!.getPlugin("UltraSkyOcclusion")!;
+      const indices = vi.spyOn(buffer, "updateFloat2");
+      const active = vi.spyOn(buffer, "updateFloat");
+      buffer.bindToEffect(effect, "Material");
+      plugin.bindForSubMesh(buffer, scene, engine, mesh.subMeshes![0]!);
+      expect(indices).toHaveBeenLastCalledWith("ultraShadowIndices", 2, 3);
+      expect(active).toHaveBeenLastCalledWith("ultraActorShadowActive", 0);
+      actor.getShadowGenerator()!.getShadowMap()!.renderList = [mesh];
+      scene.render();
+      plugin.bindForSubMesh(buffer, scene, engine, mesh.subMeshes![0]!);
+      expect(active).toHaveBeenLastCalledWith("ultraActorShadowActive", 1);
+      expect(mesh.subMeshes![0]!.effect).toBe(effect);
+      actor.setEnabled(false);
+      sky.setEnabled(false);
+      await material.forceCompilationAsync(mesh);
+      scene.render();
+      const externalEffect = mesh.subMeshes![0]!.effect!;
+      expect(externalEffect.defines).not.toContain("#define ULTRA_ACTOR_SHADOW_LIGHT");
+      expect(externalEffect.defines).not.toContain("#define ULTRA_SHADOW_ONLY_LIGHT");
+      plugin.bindForSubMesh(buffer, scene, engine, mesh.subMeshes![0]!);
+      expect(indices).toHaveBeenLastCalledWith("ultraShadowIndices", -1, -1);
+      expect(active).toHaveBeenLastCalledWith("ultraActorShadowActive", 0);
+    } finally {
+      buffer.dispose(); scene.dispose(); engine.dispose();
+    }
   });
 
   it("culls only outside the light volume and restores distant casters after moving the cached shadow tile", () => {

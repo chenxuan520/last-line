@@ -855,7 +855,20 @@ export class GameApp {
     const description = this.uiRoot.querySelector<HTMLElement>(".menu-description");
     if (description) description.textContent = message;
     const actions = this.uiRoot.querySelector<HTMLElement>(".menu-actions");
-    if (this.assets) actions?.append(this.actionButton("返回设置", "BACK", () => this.returnToMenu(), true));
+    if (this.assets) {
+      const back = this.actionButton("正在退出全屏…", "BACK", () => {
+        if (!back.disabled && back.isConnected) this.returnToMenu();
+      }, true);
+      back.disabled = true;
+      back.setAttribute("aria-busy", "true");
+      actions?.append(back);
+      void this.mobileFullscreen.waitForFailureExit().then(() => {
+        if (!back.isConnected) return;
+        back.disabled = false;
+        back.removeAttribute("aria-busy");
+        back.querySelector("span")!.textContent = "返回设置";
+      });
+    }
     actions?.append(this.actionButton("重新加载", "RELOAD", () => window.location.reload()));
   }
 }

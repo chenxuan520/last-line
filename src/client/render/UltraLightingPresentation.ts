@@ -46,15 +46,16 @@ export const ULTRA_SKY_OCCLUSION_NAME = "ultra-sky-occlusion";
 const ULTRA_INDOOR_SKY_LIGHT = 0.45;
 const SKY_OCCLUSION_DETAIL_TYPES = new Set(["floor-slabs", "roof-slabs", "hospital-surfaces", "ammunition-depot-surfaces"]);
 const SHADOW_TILE_SIZE = 8;
-const SHADOW_ONLY_LIGHTS = new WeakSet<DirectionalLight>();
+type ShadowRole = "actor" | "sky";
+const SHADOW_ONLY_LIGHTS = new WeakMap<DirectionalLight, ShadowRole>();
 const ACTOR_SLOT_DEFINES = ["ULTRA_ACTOR_SHADOW_LIGHT0", "ULTRA_ACTOR_SHADOW_LIGHT1", "ULTRA_ACTOR_SHADOW_LIGHT2", "ULTRA_ACTOR_SHADOW_LIGHT3"] as const;
 const SHADOW_ONLY_SLOT_DEFINES = ["ULTRA_SHADOW_ONLY_LIGHT0", "ULTRA_SHADOW_ONLY_LIGHT1", "ULTRA_SHADOW_ONLY_LIGHT2", "ULTRA_SHADOW_ONLY_LIGHT3"] as const;
 
 // 此模块自有的遮挡灯始终为零强度；仅凭名称不允许跳过其他灯的光照。
-export function createShadowOnlyLight(name: string, direction: Vector3, scene: Scene): DirectionalLight {
+export function createShadowOnlyLight(name: string, direction: Vector3, scene: Scene, role: ShadowRole): DirectionalLight {
   const light = new DirectionalLight(name, direction, scene);
   light.intensity = 0;
-  SHADOW_ONLY_LIGHTS.add(light);
+  SHADOW_ONLY_LIGHTS.set(light, role);
   return light;
 }
 const SKY_FOG_COLORS: Readonly<Record<string, readonly [number, number, number]>> = {
@@ -257,7 +258,7 @@ class SkyOcclusionPlugin extends MaterialPluginBase {
   public override prepareDefines(defines: MaterialDefines, _scene: Scene, mesh: AbstractMesh): void {
     for (let index = 0; index < 4; index += 1) {
       const light = index < (this._material as PBRMaterial).maxSimultaneousLights ? mesh.lightSources[index] : undefined;
-      defines[ACTOR_SLOT_DEFINES[index]!] = light?.name === ULTRA_ACTOR_SHADOW_NAME;
+      defines[ACTOR_SLOT_DEFINES[index]!] = light instanceof DirectionalLight && SHADOW_ONLY_LIGHTS.get(light) === "actor";
       defines[SHADOW_ONLY_SLOT_DEFINES[index]!] = light instanceof DirectionalLight && SHADOW_ONLY_LIGHTS.has(light);
     }
   }
@@ -272,9 +273,12 @@ class SkyOcclusionPlugin extends MaterialPluginBase {
   public override bindForSubMesh(buffer: UniformBuffer, _scene: Scene, _engine: AbstractEngine, subMesh: SubMesh): void {
     const lights = subMesh.getMesh().lightSources;
     let actorIndex = -1, skyIndex = -1;
-    for (let index = 0; index < lights.length; index += 1) {
-      if (lights[index]!.name === ULTRA_ACTOR_SHADOW_NAME) actorIndex = index;
-      if (lights[index]!.name === ULTRA_SKY_OCCLUSION_NAME) skyIndex = index;
+    const count = Math.min(lights.length, (this._material as PBRMaterial).maxSimultaneousLights, 4);
+    for (let index = 0; index < count; index += 1) {
+      const light = lights[index]!;
+      const role = light instanceof DirectionalLight ? SHADOW_ONLY_LIGHTS.get(light) : undefined;
+      if (role === "actor") actorIndex = index;
+      if (role === "sky") skyIndex = index;
     }
     buffer.updateFloat2("ultraShadowIndices", actorIndex, skyIndex);
     const actorMap = lights[actorIndex]?.getShadowGenerator()?.getShadowMap();
@@ -575,7 +579,7 @@ function createShadows(scene: Scene, options: UltraLightingOptions, touch: boole
   filterStaticShadowCasters(shadows);
 
   // 只写楼板与屋顶的俯视遮挡图，光强为 0，不照亮任何表面，只给环境光提供室内判断。
-  const sky = createShadowOnlyLight(ULTRA_SKY_OCCLUSION_NAME, new Vector3(0.0001, -1, 0.0001), scene);
+  const sky = createShadowOnlyLight(ULTRA_SKY_OCCLUSION_NAME, new Vector3(0.0001, -1, 0.0001), scene, "sky");
   sky.diffuse.set(0, 0, 0);
   sky.specular.set(0, 0, 0);
   sky.renderPriority = -1;
@@ -606,7 +610,7 @@ function createShadows(scene: Scene, options: UltraLightingOptions, touch: boole
   const actorEntries = touch
     ? []
     : [...actorVisualRoots].filter(([actorId]) => actorId !== localActorId);
-  const actorLight = touch ? null : createShadowOnlyLight(ULTRA_ACTOR_SHADOW_NAME, sun.direction.clone(), scene);
+  const actorLight = touch ? null : createShadowOnlyLight(ULTRA_ACTOR_SHADOW_NAME, sun.direction.clone(), scene, "actor");
   const actorShadows = actorLight ? new ShadowGenerator(ULTRA_PRESENTATION.actorShadowSize, actorLight) : null;
   const actorMap = actorShadows?.getShadowMap() ?? null;
   if (actorLight && actorShadows && actorMap) {
