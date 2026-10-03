@@ -124,6 +124,13 @@
 - 使用共享程序化枝叶／低矮植物图集和几何，近景增加自然分枝、叶簇、草叶与少量花穗层次，远景保留低复杂度实例 LOD。沿用现有树木／灌木数量和水平位置，不扩大生成范围或引入玩法碰撞，不改变权威布局、低／中／高画质、协议或资源预算。
 - 上线前检查近景轮廓、接地、远景 LOD、alpha-test、资源复用与释放；只运行明确单用例，完整测试与原三轮性能采样交 CI。Builder 和独立 Reviewer 分别在生产构建桌面／触屏截图并亲自查看，全部 Finding 闭环后正常提交，等待新 HEAD CI、Codex 和分支预览。
 
+### Round 14 Scope
+
+- 用户要求继续自行实验并尽可能优化性能，延续此前保持当前渲染的授权。继续原分支／PR #9，基线为 `e781214`；不改变光影规格、模型、植被数量、分辨率、后处理参数、权威规则或低／中／高路径。
+- 完整读取当前Plan、极高光照／材质／地形／植被与场景合批调用、回归及Babylon实现，分析超过10秒；先用现有production与Chrome DevTools MCP进行固定场景的最小归因实验，音量0。局部关闭模块只用于诊断并恢复，不作为降画质方案；旧CI时间不跨run比较，完整性能套件仍只由CI运行。
+- 优先检查全图合批不能有效裁剪的无效提交、SSAO在无贡献远景中的采样和静态数据重复计算。保留现有材质、几何、阴影边缘与完整采样合同；按实验证据确定最终优化，不先承诺FPS幅度。
+- 定向单用例、完整typecheck／build／原budget、Builder及独立Reviewer自己的production桌面／触屏验收完成后，再正常同分支提交。新HEAD的完整CI、原三轮性能、独立报告Review、Codex及公开预览均须完成；禁止Plan-only提交，合并由用户操作。
+
 ## Build
 
 
@@ -258,6 +265,22 @@
 - 每轮own页面全部关闭仅余不可避免blank，实际浏览器／MCP／preview进程组停止，4173／4175／9345端口关闭。没有安装／下载浏览器、运行完整本地suite或修改采样条件。
 - Builder第一轮production实际图暴露平面叶片、规则岩面纹路和岩底接触问题，已据图修改短针簇、周期噪声和底部；触屏图进一步暴露树干分面／平铺缝，已修正，不以测试通过代替图像验收。最终三地图／触屏／兼容图与独立Review完成后补充本轮提交前事实。
 
+
+### Round 14 Build Evidence
+
+- 固定 production 诊断保持 seed、视角、画质与 volume0，冻结游戏更新且关闭飞机可视根节点只为查看地景，完成后关闭自己的页面／context／服务。初始 SSAO 消融使用了错误的 effect 标识，未纳入结论；随后改为同场景原／优化 shader 独立切换。早期 `render + gl.finish` 的 5–20ms 只是提交侧诊断，不能当整帧或 FPS；实际同步 `readPixels` 后渲染耗时为数百至数千 ms，符合此 SwiftShader 软件环境的成本。
+- 尝试 256m 空间 submesh 分块，仅在隔离浏览器内重排同一索引，原几何全部恢复；岛屿空中绘制282→553、提交索引1205184→1108830，落地152→267、981624→706665。索引下降同时显著增加绘制调用，未证明稳定收益，因此没有把分块代码加入 production。
+- 保留两项有界 shader 优化：桌面 SSAO 在原 `maxZ=90` 淡出完全归零后提前返回同一终值，随机纹理读取移至判断后，近景／样本／规格不变；静态自有几何逐三角形 RGB 严格相同时，把同一 gamma 纠正移到最终顶点颜色混合之后。真实三地图当前仅四个植物近远模板通过条件，岩石、树干渐变及其他不符合条件的表面保持原计算。
+- 专属 SSAO pass 只从此次新建相机 passes 中选择，以独立 define 隔离 Effect，处理器引用计数覆盖重编译／重叠生命周期并释放；未知源码原样返回，WebGPU 不改 GLSL。静态颜色检查是一次 O(indices) 扫描，弱引用登记，几何更新永久撤销并转发旧回调；贴花／细节／物资补光／动态几何明确保留片元路径。不新增 varying、texture、buffer、实例或逐帧集合扫描，不改权威、LOD、低／中／高。
+- SSAO 缓存／重编译／重叠释放单用例、恒色／渐变／可更新／贴花／物资／实例／LOD／共享几何／更新撤销单用例及既有物资补光缓存单用例分别通过；完整 `npm run typecheck`、`npm run build` 与原预算通过。JS4083033／4110000B、273／277chunks、dist4908907／5000000B、entry856716B、max599287B、CSS46822B；未变的已构建 Worker634585／636000B、server644635／646000B。完整套件与原性能采样仍只由新HEAD CI运行。
+- Builder 经官方 Chrome DevTools MCP 检查并亲自 view_image：岛屿桌面近树／灌木／远景与旧 production 对照、城镇桌面近树／灌木／远景、混合触屏灌木、岛屿强制 WebGL1 近树，全部实际 ultra、volume0、ready=true；完成轮次 console error／warn0，HUD／控制布局和相邻地面、道路、建筑、天空未新增退化。WebGL1 按原能力关闭 SSAO，四个植物模板 shader 正常编译。冻结 HUD 的 FPS 不作为测试结果。
+- 同场景逐项／合并 shader 像素对照：岛屿三视点及混合触屏差0；城镇1296000像素最多4个差1个 RGB 级，无差值>1，SSAO 单独差0；WebGL1 差0。没有修改共享颜色／索引，scene资源数量不变，岛屿三固定视点旧／新 draw和indices完全一致；启动增加有界 shader 变体与约2.7KB代码。
+- 有效同步 GPU 诊断每阶段3帧、固定相机且无权威更新，仅用于局部选择，不修改CI合同：城镇远景原中位2936.4ms，SSAO单独2725.9ms、Gamma单独2802.8ms、合并2746.5ms（约-6.47%）；混合触屏原906.3ms、合并832.6ms，但相邻无SSAO对照也有波动；WebGL1首次417.8→360.6ms、重复370.9→393.8ms。保留全部分布，不将短窗口或单次改善宣称为真实设备 FPS 提升，也不能推断瓶颈全已解决。原始报告／截图在仓库外 cloud-setup，原 main/head 三轮 CI 与独立性能审查仍为交付门禁。
+
+- 最终混合地图桌面远景补验：实际 SSAO fragment 包含 cutoff 且 ready，独立 SSAO／Gamma／合并像素差0，resource不变，console0；Builder亲自查看整屏。同步诊断首次1914.5→2028.4ms（约+5.95%），重复1879.0→1855.3ms（约-1.26%），不构成稳定整体收益。保留此反向／波动证据，未把城镇约6.5%外推到三地图或真实机器。所有本轮自己的页面已关闭仅blank，4173／4175／9345实测关闭。
+
+- 独立 Review 发现 medium：可更新索引的 GPU-only 分支不调用 Babylon `onGeometryUpdated`，且普通 attributes dirty 不足以刷新冻结材质。新增单个 GPU-only／共享冻结材质／同步抛错回归，先在登记仍有效处失败，再修复后通过；原恒色回归重跑通过。包装 public `updateIndices`，变更前永久撤销同一几何的登记，保留 this／原参数／抛错；GPU-only 的陈旧 CPU 索引不允许重新登记。第一次撤销去重 owner 的实际 submesh 材质，调用原生 `markDirty(true)` 刷新全部变体，后续动态更新不重复集合扫描；既有几何回调转发不变。当前四静态模板不变更，此额外成本不进入稳态；重新完成完整typecheck／build／原预算，最终JS4083033B、dist4908907B。
+
 ## Review
 
 - 当前 Round 12 已完成实现与最终静态复审，所有已发现 blocker／high／medium 已处理；Builder 三地图／触屏／WebGL1 与独立 Reviewer production 图像验收均完成，最终 Review 明确通过并批准正常提交。新 HEAD 完整 CI／性能／Codex／分支预览须持续完成。
@@ -387,3 +410,11 @@
 - 性能Review：共享树干38→74顶点，实例不增但可见树干顶点工作增加；树冠872及100m LOD不变，岩石索引／顶点数不增，灌木近景153→128、40m远32。新增1个共享LOD、4张RGBA纹理含mip约0.58MiB，材质数不增、无fetch、逐帧几何／接地矩阵生成。双面alpha-test重叠与额外法线采样属于实际成本，固定视点vertices／indices下降不能外推GPU或FPS；没有已识别应阻止提交的全局>15%风险，新HEAD完整原三轮main/head报告仍须独立Review，不跨旧run比较时间。
 - 非阻塞余地为近景枝叶alpha覆盖／卡片布局、图集形态变化与空间实例组织；不追加逐实例材质、细碎draw或风动几何。Reviewer没有重复Builder测试／typecheck／build／budget／性能命令，也未改源码或Git；自己的页面全关仅blank，Vite／MCP／独立Chrome进程停止，4174／9345实测关闭，临时图／脚本／日志／profile清理。外层随后再次核验端口与Git状态。
 - 此记录与本轮实现同提交；提交后完整CI／性能／Codex／预览事实只在PR和交付报告记录，禁止Plan-only提交。继续当前分支／PR #9，合并由用户操作。
+
+### Round 14 Review
+
+- 独立 `code_reviewer_round9` 回看本轮用户自行实验／尽可能优化及保持渲染的授权，完整只读检查当前Plan、diff、SDK、调用和资源合同；medium（GPU-only索引不触发几何回调、冻结材质仍用旧Effect）经新增红／绿回归与永久撤销、public方法转发、共享材质强制重编译关闭。最终明确 Review 通过，无未解决 blocker／high／medium，允许当前分支正常提交。
+- Reviewer自行用官方Chrome DevTools MCP打开最终修正版dist，在独立岛屿桌面1440×900×1和混合触屏844×390×2，各检查近树／灌木／远景，六张全视口截图均亲自view_image。actual ultra、volume0、ready=true、console error／warn0；真实desktop attached fragment含cutoff并ready、touch无SSAO符合旧合同、四模板define存在。颜色、轮廓、曝光、相邻地面／墙面与完整HUD无本轮新增退化，冻结HUD FPS不作证据。自己的页面全部关闭仅blank，Vite／MCP及实际Chrome独立profile进程清理，4174／9345实测关闭；仅清理自己的临时文件／profile，Builder证据未动，未重复外层验证或修改Git。
+- 性能Review：SSAO启动增加有界源码处理与独立Effect（典型约+1），最后pass释放共享处理器，无scene强引用／每帧JS；远景少随机、法线及8遮蔽采样，近景多depth判断，原规格／淡出不变。Gamma启动一次O(indices)检查，弱登记、准备O(1)，原计算移到顶点，无新纹理／buffer／varying／实例。第一次几何失效才收集owner实际材质并原生markDirty(true)，其全scene扫描覆盖冻结全部变体；后续更新只常数转发，永久revoked不允许以过期CPU数据重登记。当前静态模板不失效，此扫描不进入稳态。
+- 未识别需额外本机完整采样才能提交的>15%明确风险；约2.7KB代码和有限shader缓存成本已在原预算内。接受全部有效同步GPU局部诊断及反向结果为INFO：town约-6.47%、mixed桌面首次+5.95%／重复-1.26%、WebGL1重复反向，不能宣称三地图或真实设备稳定FPS提升。尚可优化alpha卡片重叠／有效覆盖、后处理和初始编译缓存；本轮不改画面规格，不纳入显著增draw的空间分块。
+- 此记录与实现同提交，原三轮新HEAD CI全部142项／28门禁仍须独立Review；完整CI、Codex、公开预览事实在提交后仅写PR／交付报告，禁止Plan-only。继续PR #9，合并由用户操作。

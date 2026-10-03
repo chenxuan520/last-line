@@ -16,6 +16,7 @@ import { Matrix, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Frustum } from "@babylonjs/core/Maths/math.frustum";
 import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
 import { InstancedMesh } from "@babylonjs/core/Meshes/instancedMesh";
+import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { SubMesh } from "@babylonjs/core/Meshes/subMesh";
 import type { AbstractEngine } from "@babylonjs/core/Engines/abstractEngine";
@@ -32,6 +33,8 @@ import type { Nullable } from "@babylonjs/core/types";
 import { usesMobileDevicePixels } from "../../config/settings";
 import type { EntityId } from "../../game/state/types";
 import { ULTRA_PRESENTATION } from "../../config/ultraPresentation";
+import { addSsaoDistanceOptimization } from "./UltraSsaoOptimization";
+import { registerStaticUniformVertexColors, usesUniformVertexColors } from "./UltraVertexColorOptimization";
 
 export const ULTRA_SHADOW_MAP_NAME = "ultra-town-static-shadows";
 export const ULTRA_ENVIRONMENT_NAME = "ultra-sky-environment";
@@ -143,6 +146,7 @@ export function createUltraMaterialAdapter(scene: Scene): UltraMaterialAdapter {
     convertScene(): void {
       for (const mesh of scene.meshes) {
         if (mesh instanceof InstancedMesh || !mesh.material) continue;
+        if (mesh instanceof Mesh) registerStaticUniformVertexColors(mesh);
         if (mesh.material instanceof MultiMaterial) {
           const multi = mesh.material;
           multi.subMaterials = multi.subMaterials.map((material) => material ? adapt(material) : material);
@@ -334,25 +338,33 @@ export function addSkyOcclusion(material: PBRMaterial): void {
   if (!material.pluginManager?.getPlugin("UltraSkyOcclusion")) new SkyOcclusionPlugin(material);
 }
 
-// Standard 材质把顶点色当作 gamma 空间乘数；PBR 在线性空间相乘，因此逐像素换算以保持原配色。
+// Standard 顶点色使用 gamma 空间；静态且每个三角形 RGB 恒定时提前纠正，否则保留逐像素换算。
 class GammaVertexColorPlugin extends MaterialPluginBase {
   public constructor(material: PBRMaterial, private readonly groundLoot = false) {
-    super(material, "UltraGammaVertexColor", 200, { ULTRA_LOOT_FILL: false }, true, true);
+    super(material, "UltraGammaVertexColor", 200, { ULTRA_LOOT_FILL: false, ULTRA_VERTEX_GAMMA: false }, true, true);
   }
 
   public override getClassName(): string {
     return "UltraGammaVertexColorPlugin";
   }
 
-  public override prepareDefines(defines: MaterialDefines): void {
+  public override prepareDefines(defines: MaterialDefines, _scene: Scene, mesh: AbstractMesh): void {
     defines.ULTRA_LOOT_FILL = this.groundLoot;
+    defines.ULTRA_VERTEX_GAMMA = !this.groundLoot && !defines.DECAL && !defines.DETAIL && usesUniformVertexColors(mesh);
   }
 
   public override getCustomCode(shaderType: string): Nullable<Record<string, string>> {
+    if (shaderType === "vertex") return {
+      CUSTOM_VERTEX_MAIN_END: `
+#if defined(VERTEXCOLOR) && defined(ULTRA_VERTEX_GAMMA)
+vColor.rgb *= toLinearSpace(max(vColor.rgb, vec3(0.0001))) / max(vColor.rgb, vec3(0.0001));
+#endif
+`,
+    };
     if (shaderType !== "fragment") return null;
     return {
       CUSTOM_FRAGMENT_UPDATE_ALBEDO: `
-#if defined(VERTEXCOLOR)
+#if defined(VERTEXCOLOR) && !defined(ULTRA_VERTEX_GAMMA)
 surfaceAlbedo *= toLinearSpace(max(vColor.rgb, vec3(0.0001))) / max(vColor.rgb, vec3(0.0001));
 #endif
 `,
@@ -388,6 +400,7 @@ function createPostProcessing(scene: Scene, touch: boolean, SSAO2: SSAO2Pipeline
   processing.contrast = 1.1;
   processing.ditheringEnabled = true;
   processing.vignetteEnabled = false;
+  const previousPasses = new Set(camera._postProcesses);
   const ssao = !touch && SSAO2?.IsSupported
     ? new SSAO2(ULTRA_SSAO_NAME, scene, { ssaoRatio: 0.5, blurRatio: 0.5 }, [camera], false, Constants.TEXTURETYPE_HALF_FLOAT)
     : null;
@@ -400,6 +413,8 @@ function createPostProcessing(scene: Scene, touch: boolean, SSAO2: SSAO2Pipeline
     ssao.expensiveBlur = false;
     // 启用 SSAO 后场景先渲染到预渲染目标，多重采样由它承担。
     ssao.textureSamples = 4;
+    const pass = camera._postProcesses.find((process) => process?.name === "ssao" && !previousPasses.has(process));
+    if (pass) addSsaoDistanceOptimization(pass);
   }
   const textureType = !touch && engine.getCaps().textureHalfFloatRender
     ? Constants.TEXTURETYPE_HALF_FLOAT
