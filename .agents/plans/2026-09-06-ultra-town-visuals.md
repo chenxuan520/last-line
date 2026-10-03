@@ -109,6 +109,14 @@
 - 先用真实 production MCP 延迟manifest验证旧菜单晚写竞态和新文档前注入机制，再修复采样准备：保留原两次导航、预热、地图／seed／质量、3轮、click开始时间、HUD及8s观察窗、全部指标／15%门禁。在第二次导航前登记相同设置的document-start注入，新GameApp构造前恢复所需值；保留原手动写入，第一次等待明确目标URL，异常保留CDP真实description。只改CI采样准备，不改production。
 - 独立Reviewer已明确架构／资源预审通过：新增操作仅在点击采样前O(1)存储写入和CDP注册，main／HEAD使用同采样器，无已识别>15%生产回归风险；所有原条件必须保持。完整typecheck、独立脚本类型检查、diff检查和MCP定向竞态验证；不在本机运行性能套件。独立Reviewer最终复审后正常follow-up，同HEAD完整CI／性能／Codex和Pages仍须通过。
 
+### Round 12 Scope
+
+- 用户明确要求「保持这个渲染的情况下把优化跟上」，授权自行尝试优化。继续当前分支／PR #9，基线为 `0ac515e`；保留光照、阴影规格、后处理、模型、植被密度、道路和物资辨识度，优化可避免的计算、重复派生与不影响结果的提交，不通过降低画质实现。
+- 已检查当前 Plan、完整极高模块及场景调用、相关用例、Babylon 插件／阴影／纹理实现并分析超过 10 秒。候选为无近角色时通过 uniform 跳过空角色图的 PCF、非道路像素跳过无贡献沥青采样、法线图片解码／派生结果在场景内复用，以及按光源实际视锥保守筛选静态投影提交。复杂 shader 替换必须检查实际 production 编译源码与近角色切换，不增加切灯重编译。
+- 所有现有预算、CI main/head 三轮地图／seed／画质／预热／窗口／指标／15%门禁保持；本机不运行性能套件或 CLI，使用 Chrome DevTools MCP 静音做固定渲染状态的最小诊断与旧版／最终版对照，并标为诊断证据。基线 production 产物保存在 checkout 外，画面陈列仅操作可视节点，不改权威状态。
+- 单次单用例覆盖材质 shader 缓存、空／非空角色投影切换、实际光源视锥边缘与相机外投影物、法线复用与失败／释放；完整 typecheck／build／budget，Builder 与独立 Reviewer 的 production 桌面／触屏截图亲自看图。架构／性能预审与最终 Review 后正常提交，持续修复 CI／Codex，发布分支预览，保留人工合并边界。
+- 追加已通过预审的候选：仅模块自有、强度固定为零的 DirectionalLight 按身份跳过直接光 BRDF，完整初始化所有条件 lightingInfo 字段，保留阴影与累加并保护 CUSTOMUSERLIGHTING；必须核实实际 GL shader、扩展宏组合编译及同视点像素对照。
+
 ## Build
 
 
@@ -217,9 +225,21 @@
 - 第二次导航前登记document-start设置脚本，保留旧手动写入；首次就绪要求真实目标href，CDP异常保留exception.description。原两次导航、预热、3轮、场景／seed／质量、click采样时点、HUD及8s窗口、全部指标／门禁和预算未改变。production零diff，现有Round9最终画面／build仍适用，没有本机性能采样。
 - 完整 `npm run typecheck`、采样器独立TypeScript检查和diff检查通过。TypeScript7对命令行文件要求显式 `--ignoreConfig`，首次检查因TS5112未执行，添加该编译器要求后通过；未修改项目配置。工程指南、README及架构说明同步记录初始化与严格选择核验。
 
+### Round 12 Build Evidence
+
+- 三个极高模块落实五项计算／提交复用：场景内法线 payload 解码与同配置纹理缓存；WebGL2 非道路零覆盖跳过沥青读取且使用分支外显式梯度，WebGL1 保留旧路径；空人物图以一致 uniform 跳过 PCF；静态／天空图按实际光体积保守裁剪；仅模块工厂登记且终生零强度的两盏遮挡灯跳过直接光 BRDF。光照／后处理／分辨率／模型／植被／道路／物资补光与权威状态保持。
+- 按要求每次仅一个具名用例，法线并发／UV／晚绑定／失败／释放、实际 Effect 空近空与灯序／同名非自有灯隔离、真实阴影边界／离屏物／分区恢复均通过；原场景权威几何合同与物资生命周期用例通过。最后 caster 用例增加三个新 renderId 的完整阴影 observer 链，数值不变时 caster.computeWorldMatrix 零调用，排除 updateFlag 重写引起的重复筛选。
+- 最终完整 typecheck、production build、budget 与 diff 检查通过：入口 856,683B、最大非入口 599,287B、JavaScript 4,075,592B／273 chunk、CSS 46,822B、dist 4,901,466B、Worker 634,585B、standalone 644,635B；所有原上限不变。最后矩阵缓存修正不改 shader／绘制结果，只增加两份有界矩阵存储和 16 个元素的常数比较。
+- Chrome DevTools MCP 使用本机 Chromium，静音0、相同地图／seed／档位、checkout 外保留旧版 production。灰炉城桌面实际 GL program 附着的 fragment shader 编译成功：directional／specular BRDF 调用各 3→1，源码 67,016→66,224 字符，等效状态 Effect 数均为54；WebGL2 显式 textureGrad 已存在。SHEEN／CLEARCOAT／SS_TRANSLUCENCY 联合组合实际 GPU 编译通过，全部条件 info 字段初始化，太阳仍执行原计算；组合额外 Effect 后人物 caster 0→68→0，Effect 始终同一对象且数量55不增长。
+- 灰炉城街道／暗处物资旧版与最终 shader 版 production PNG 均亲自查看，未发现物资颜色／轮廓、相邻曝光／道路／HUD 可见退化。第一轮中心世界区域 476,150 像素比较中，超过99%的像素最大通道差不超过6／255；候选独立 context 重拍后，最终街道／暗处同一区域旧新像素完全相同。冻结前异步时序与其他地图物资姿态并非完全一致，不能外推所有帧／所有地图逐像素一致。固定暗处视点跨8m移动的实际 WebGL 提交为219→191、211→183，稳态177不变；提交 indices 同帧分别约减少2.1%，太阳候选276→13、天空5→3。候选列表减少比例不代表整体 GPU 或 FPS 改善，时间保留原始记录且仅作 INFO。
+- 早期两个同时打开的重量级 SwiftShader context 导致 MCP 超时，浏览器结束后均关闭页面／进程组并确认端口关闭；改为串行 context 完成有界诊断。首次 GL 查询遇到 Babylon 在编译后清空 fragmentShader 引用，改从 program.getAttachedShaders 读取实际 GPU shader；不以未预处理文本代替编译证据。原 CI 采样器、三轮交替条件、完整指标／15%门禁均未修改，定向截图陈列只改可视节点、不改权威状态。
+
+- 最后矩阵内容缓存版本的三地图／触屏／GL1 production 均完成静音 Chrome MCP：苍岬岛固定移动帧 draw246→220／236→210、indices约减少13%，烬岚郡217→191／207→182、indices约减少19%；对应稳态198／175保持，普通状态 Effect49／50及法线10／15不变。触屏街道／暗处截图均亲自看图且世界区域旧新像素完全相同，移动 draw236→207／223→195、稳态192不变，真实 GPU BRDF2→1、Effect42不变，法线8不变。其他地图物资初始姿态有差异，不当作画质改动；世界曝光、贴图、道路与轮廓保持。
+- 强制 WebGL2 context 不可用的兼容验收，确认最终版实际 WebGL1、GPU编译成功、shader没有 textureGrad，保留原道路隐式采样；街道／暗处两张 production 图已亲自查看。全部上下文 console0、volume0，每轮自己的页面全关只剩 blank，实际浏览器／MCP／preview 进程组已停止，4173／4175／9345均关闭。完整记录在 checkout 外 `round12-final-*`，浏览器显示的冻结HUD FPS不能当性能证据；原始定向帧时间可见波动且无三轮完整游戏计时结论。
+
 ## Review
 
-- 当前 Round 11 采样初始化修复、定向竞态验证与独立 Re-review 已完成，无未解决 blocker／high／medium；Round9最终production画面继续有效，新HEAD完整CI／性能／Codex仍待完成。
+- 当前 Round 12 已完成实现与最终静态复审，所有已发现 blocker／high／medium 已处理；Builder 三地图／触屏／WebGL1 与独立 Reviewer production 图像验收均完成，最终 Review 明确通过并批准正常提交。新 HEAD 完整 CI／性能／Codex／分支预览须持续完成。
 
 ### Round 1
 
@@ -325,3 +345,15 @@
 - 独立 Reviewer 最终只读 Review 通过，无未解决 blocker／high／medium，允许正常follow-up提交。核对完整diff、MCP延迟manifest脚本／日志与采样调用链，确认新文档注入在第二次导航前、manualwrite和严格地图／quality核验保留；main／HEAD消费同采样器，所有原预热、交替顺序、窗口、指标、阈值、预算保持。真实竞态已复现，仍不宣称旧Uncaught的唯一根因。
 - 性能 Review：固定CDP注册和localStorage写入只在click采样前，没有production差异、逐帧JS或图形资源新增，无必须提交前另采样的>15%风险。非阻塞文档准确性建议已处理：README性能说明改为确定性运行时／资源指标硬门禁，wall-clock／FPS／长帧／heap作为INFO，与既有合同一致，不改变实际门禁。
 - Reviewer未重复Builder命令／浏览器，未改Git或源码。`976f64f` 的push完整build已经成功，Test阶段全部通过并完成原产物预算与Docker smoke；PR build进入Docker阶段，这些属于前一HEAD证据，新采样修复仍需新HEAD完整CI／性能／Codex。页面／服务已清理，MCP9345以及preview4173／4174实际确认关闭。
+
+
+### Round 12 Review
+
+- 独立 `code_reviewer_round9` 按用户保持现有渲染且自行优化的授权进行架构／资源预审、最终静态审查及多次 Re-review；明确要求不改采样／预算，缓存按实际灯序隔离，不能用 shader 文本或绘制数外推 FPS。
+- Finding：道路分支内隐式导数在混合覆盖片元可选择错误 mip。Disposition：WebGL2 先在分支外计算 UV 梯度再 textureGrad，WebGL1 原路径保留；真实 GPU 源码及兼容编译核实，关闭。
+- Finding：反复清空并填充被 RTT hook 的 renderList 会把全场景灯源标为 dirty。Disposition：原全量列表保留不动，独立复用的 visible 只由 getCustomRenderList 提供，定向断言无 light dirty，关闭。
+- Finding：未计入法线／深度 bias 与 texel 的精确边缘裁剪可能丢失影子。Disposition：保守扩展光视锥，跨界批次与不可靠边界保留，tiny-biased-edge、相机外物体及分区恢复断言通过，关闭。
+- Finding（medium）：Babylon 可在新 renderId 重写相同矩阵，单用 updateFlag 不能复用内容。Disposition：新增独立 Matrix 内容缓存与 equals 快路径；三个真实 renderId observer 链不重筛，位移／高度变化仍重筛。Reviewer 再读当前 Plan 和源码，明确 Re-review 关闭。
+- BRDF 分支经过严格预审：仅工厂登记的固定零强度 DirectionalLight，完整覆盖所有 lightingInfo 条件字段，保护 CUSTOMUSERLIGHTING，保留阴影／末尾累加，太阳仍计算。实际 GPU 与扩展组合编译通过，空近空同 Effect，灯序与同名外部灯身份隔离通过。静态及最终视觉 Review 无未解决 blocker／high／medium。
+- 独立 Reviewer 自己经官方 Chrome DevTools MCP 打开最终 production，own context 桌面1440×900暗处、触屏844×390@2室外，actual ultra／volume0／ready=true，两张 PNG 亲自 view_image：15类物资颜色与部件可辨，相邻砖墙、道路、开口、天空、完整HUD／触控布局无新增退化／裁剪，console error/warn0。own页面全部关闭，preview／MCP／Chromium实际进程清理，4174／9345关闭，临时图／脚本／profile清理；未改源码／Git、未重复 Builder 验证。最终 Review 明确通过，允许正常提交。
+- 性能 Review：真实光体积改变才 O(N) 选 caster，未变仅 16 元素常数比较；法线／shader slot 工作有界且释放安全。代表场景法线数量并未减少，缓存只消除相同输入的重复，不宣称本轮降低实际GPU纹理数。真实GPU BRDF与移动提交减少成立，稳态 draw／Effect／法线持平；无已识别需额外本机采样才能提交的>15%回退风险，不等于完整帧时间／FPS改善。新HEAD同runner三轮报告仍需 Review；非阻塞余地为大AABB合并批次、植被alpha-test和后处理，不扩大本轮规格／预算。

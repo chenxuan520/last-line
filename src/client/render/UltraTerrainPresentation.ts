@@ -4,6 +4,7 @@ import type { Material } from "@babylonjs/core/Materials/material";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
 import { MaterialPluginBase } from "@babylonjs/core/Materials/materialPluginBase";
+import type { MaterialDefines } from "@babylonjs/core/Materials/materialDefines";
 import { MultiMaterial } from "@babylonjs/core/Materials/multiMaterial";
 import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
 import { RawTexture } from "@babylonjs/core/Materials/Textures/rawTexture";
@@ -167,7 +168,12 @@ export function createRoadSurfacePixels(layout: MapLayout, size = ULTRA_PRESENTA
 
 class RoadSurfacePlugin extends MaterialPluginBase {
   public constructor(material: PBRMaterial, private readonly mask: Texture, private readonly asphalt: Texture | null) {
-    super(material, "UltraRoadSurface", 220, undefined, true, true);
+    super(material, "UltraRoadSurface", 220, { ULTRA_ROAD_GRADIENTS: false }, true, true);
+  }
+
+  public override prepareDefines(defines: MaterialDefines, scene: Scene): void {
+    const engine = scene.getEngine();
+    defines.ULTRA_ROAD_GRADIENTS = "webGLVersion" in engine && engine.webGLVersion === 2;
   }
 
   public override getSamplers(samplers: string[]): void {
@@ -191,9 +197,18 @@ class RoadSurfacePlugin extends MaterialPluginBase {
       CUSTOM_FRAGMENT_UPDATE_ALBEDO: `
 vec2 ultraRoadCoverage = texture2D(ultraRoadMaskSampler, vPositionW.xz / ${MAP_SIZE.toFixed(1)} + vec2(0.5)).rg;
 vec3 ultraRoadAlbedo = vec3(0.13, 0.14, 0.15);
-if (ultraAsphaltReady > 0.5) {
-  ultraRoadAlbedo = toLinearSpace(texture2D(ultraAsphaltSampler, vPositionW.xz / ${ULTRA_PRESENTATION.roadTextureMeters.toFixed(1)}).rgb) * 0.58;
+vec2 ultraAsphaltUv = vPositionW.xz / ${ULTRA_PRESENTATION.roadTextureMeters.toFixed(1)};
+#ifdef ULTRA_ROAD_GRADIENTS
+// 在分支外算导数，路边混合覆盖的片元仍采用原有 mip 与各向异性过滤。
+vec2 ultraAsphaltDx = dFdx(ultraAsphaltUv), ultraAsphaltDy = dFdy(ultraAsphaltUv);
+if (ultraAsphaltReady > 0.5 && ultraRoadCoverage.r > 0.0) {
+  ultraRoadAlbedo = toLinearSpace(textureGrad(ultraAsphaltSampler, ultraAsphaltUv, ultraAsphaltDx, ultraAsphaltDy).rgb) * 0.58;
 }
+#else
+if (ultraAsphaltReady > 0.5) {
+  ultraRoadAlbedo = toLinearSpace(texture2D(ultraAsphaltSampler, ultraAsphaltUv).rgb) * 0.58;
+}
+#endif
 surfaceAlbedo = mix(surfaceAlbedo, vec3(0.24, 0.23, 0.20), ultraRoadCoverage.g * 0.65);
 surfaceAlbedo = mix(surfaceAlbedo, ultraRoadAlbedo, ultraRoadCoverage.r);
 `,

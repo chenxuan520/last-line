@@ -93,6 +93,7 @@ export async function enhanceScenePresentation(
   }
 
   // 只从已校验的 payload 派生凹凸，不重新请求图片，也不阻塞场景。
+  const bindNormal = createSurfaceNormalCache(scene);
   for (const texture of [...scene.textures]) {
     if (!(texture instanceof Texture) || !WORLD_TEXTURE_IDS.has(texture.name)) continue;
     if (texture.name.startsWith("texture.building.") || texture.name.startsWith("texture.industrial.")) {
@@ -102,7 +103,7 @@ export async function enhanceScenePresentation(
       texture.vScale *= 3;
     }
     const payload = assets.getPayload(texture.name);
-    if (payload) void addSurfaceNormal(scene, texture, payload);
+    if (payload) void bindNormal(texture, payload);
   }
   await enhanceLighting(scene, { sun, ambient, ...actors, materials });
   enhanceTerrainPresentation(scene, layout);
@@ -126,39 +127,56 @@ function applyWorldSurfaceUvs(mesh: Mesh): void {
   mesh.setVerticesData(VertexBuffer.UVKind, uvs);
 }
 
-async function addSurfaceNormal(scene: Scene, source: Texture, payload: ArrayBuffer): Promise<void> {
-  if (typeof createImageBitmap !== "function" || typeof OffscreenCanvas === "undefined") return;
-  try {
-    const bitmap = await createImageBitmap(new Blob([payload]));
-    if (scene.isDisposed) {
-      bitmap.close();
-      return;
+// 解码和派生按 payload 复用；不同 UV／翻转仍保留独立纹理，同配置材质共享一张。
+export function createSurfaceNormalCache(scene: Scene): (source: Texture, payload: ArrayBuffer) => Promise<void> {
+  const decoded = new Map<ArrayBuffer, Promise<Uint8Array | null>>();
+  const textures = new Map<ArrayBuffer, Map<string, Promise<RawTexture | null>>>();
+  scene.onDisposeObservable.addOnce(() => { decoded.clear(); textures.clear(); });
+  const size = 256;
+  const decode = async (payload: ArrayBuffer): Promise<Uint8Array | null> => {
+    let bitmap: ImageBitmap | undefined;
+    try {
+      bitmap = await createImageBitmap(new Blob([payload]));
+      if (scene.isDisposed) return null;
+      const context = new OffscreenCanvas(size, size).getContext("2d");
+      if (!context) return null;
+      context.drawImage(bitmap, 0, 0, size, size);
+      return surfaceNormalPixels(context.getImageData(0, 0, size, size).data, size);
+    } catch {
+      return null;
+    } finally {
+      bitmap?.close();
     }
-    const size = 256;
-    const canvas = new OffscreenCanvas(size, size);
-    const context = canvas.getContext("2d");
-    if (!context) {
-      bitmap.close();
-      return;
+  };
+  return async (source, payload) => {
+    if (scene.isDisposed || typeof createImageBitmap !== "function" || typeof OffscreenCanvas === "undefined") return;
+    let pixels = decoded.get(payload);
+    if (!pixels) { pixels = decode(payload); decoded.set(payload, pixels); }
+    let variants = textures.get(payload);
+    if (!variants) { variants = new Map(); textures.set(payload, variants); }
+    const key = JSON.stringify([source.name, source.invertY, source.uScale, source.vScale]);
+    let pending = variants.get(key);
+    if (!pending) {
+      const { name, invertY, uScale, vScale } = source;
+      pending = pixels.then((data) => {
+        if (!data || scene.isDisposed) return null;
+        const normal = RawTexture.CreateRGBATexture(data, size, size, scene, true, invertY, Texture.TRILINEAR_SAMPLINGMODE);
+        normal.name = `${name}.normal`;
+        normal.gammaSpace = false;
+        normal.wrapU = normal.wrapV = Texture.WRAP_ADDRESSMODE;
+        normal.uScale = uScale; normal.vScale = vScale;
+        normal.anisotropicFilteringLevel = 8;
+        normal.level = 0.65;
+        return normal;
+      }).catch(() => null);
+      variants.set(key, pending);
     }
-    context.drawImage(bitmap, 0, 0, size, size);
-    bitmap.close();
-    const pixels = context.getImageData(0, 0, size, size).data;
-    const data = surfaceNormalPixels(pixels, size);
-    const normal = RawTexture.CreateRGBATexture(data, size, size, scene, true, source.invertY, Texture.TRILINEAR_SAMPLINGMODE);
-    normal.name = `${source.name}.normal`;
-    normal.gammaSpace = false;
-    normal.wrapU = normal.wrapV = Texture.WRAP_ADDRESSMODE;
-    normal.uScale = source.uScale;
-    normal.vScale = source.vScale;
-    normal.anisotropicFilteringLevel = 8;
-    normal.level = 0.65;
+    const normal = await pending;
+    if (!normal || scene.isDisposed) return;
     const bind = (): void => bindGeneratedSurfaceNormal(scene, source, normal);
     if (source.isReady()) bind();
     else source.onLoadObservable.addOnce(bind);
-  } catch {
-    // 图片解码或凹凸增强不可用时保留原材质，权威几何始终可见。
-  }
+  };
 }
 
 // 法线在 PBR 转换前后都可能就绪。转换前必须写到仍在场的 Standard 材质，转换才会把 bumpTexture 拷过去。

@@ -12,7 +12,8 @@ import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import type { BaseTexture } from "@babylonjs/core/Materials/Textures/baseTexture";
 import type { UniformBuffer } from "@babylonjs/core/Materials/uniformBuffer";
 import { RenderTargetTexture } from "@babylonjs/core/Materials/Textures/renderTargetTexture";
-import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Matrix, Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Frustum } from "@babylonjs/core/Maths/math.frustum";
 import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
 import { InstancedMesh } from "@babylonjs/core/Meshes/instancedMesh";
 import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
@@ -42,6 +43,17 @@ export const ULTRA_SKY_OCCLUSION_NAME = "ultra-sky-occlusion";
 const ULTRA_INDOOR_SKY_LIGHT = 0.45;
 const SKY_OCCLUSION_DETAIL_TYPES = new Set(["floor-slabs", "roof-slabs", "hospital-surfaces", "ammunition-depot-surfaces"]);
 const SHADOW_TILE_SIZE = 8;
+const SHADOW_ONLY_LIGHTS = new WeakSet<DirectionalLight>();
+const ACTOR_SLOT_DEFINES = ["ULTRA_ACTOR_SHADOW_LIGHT0", "ULTRA_ACTOR_SHADOW_LIGHT1", "ULTRA_ACTOR_SHADOW_LIGHT2", "ULTRA_ACTOR_SHADOW_LIGHT3"] as const;
+const SHADOW_ONLY_SLOT_DEFINES = ["ULTRA_SHADOW_ONLY_LIGHT0", "ULTRA_SHADOW_ONLY_LIGHT1", "ULTRA_SHADOW_ONLY_LIGHT2", "ULTRA_SHADOW_ONLY_LIGHT3"] as const;
+
+// 此模块自有的遮挡灯始终为零强度；仅凭名称不允许跳过其他灯的光照。
+export function createShadowOnlyLight(name: string, direction: Vector3, scene: Scene): DirectionalLight {
+  const light = new DirectionalLight(name, direction, scene);
+  light.intensity = 0;
+  SHADOW_ONLY_LIGHTS.add(light);
+  return light;
+}
 const SKY_FOG_COLORS: Readonly<Record<string, readonly [number, number, number]>> = {
   "texture.sky.clearing": [0.64, 0.68, 0.71],
   "texture.sky.overcast": [0.56, 0.59, 0.60],
@@ -226,15 +238,31 @@ function convertStandardMaterial(scene: Scene, source: StandardMaterial): PBRMat
 // 按网格实际灯源索引读取两种遮挡，避免依赖灯光在循环中的最后一个位置。
 class SkyOcclusionPlugin extends MaterialPluginBase {
   public constructor(material: PBRMaterial) {
-    super(material, "UltraSkyOcclusion", 210, undefined, true, true);
+    super(material, "UltraSkyOcclusion", 210, {
+      ULTRA_ACTOR_SHADOW_LIGHT0: false, ULTRA_ACTOR_SHADOW_LIGHT1: false,
+      ULTRA_ACTOR_SHADOW_LIGHT2: false, ULTRA_ACTOR_SHADOW_LIGHT3: false,
+      ULTRA_SHADOW_ONLY_LIGHT0: false, ULTRA_SHADOW_ONLY_LIGHT1: false,
+      ULTRA_SHADOW_ONLY_LIGHT2: false, ULTRA_SHADOW_ONLY_LIGHT3: false,
+    }, true, true);
   }
 
   public override getClassName(): string {
     return "UltraSkyOcclusionPlugin";
   }
 
+  public override prepareDefines(defines: MaterialDefines, _scene: Scene, mesh: AbstractMesh): void {
+    for (let index = 0; index < 4; index += 1) {
+      const light = index < (this._material as PBRMaterial).maxSimultaneousLights ? mesh.lightSources[index] : undefined;
+      defines[ACTOR_SLOT_DEFINES[index]!] = light?.name === ULTRA_ACTOR_SHADOW_NAME;
+      defines[SHADOW_ONLY_SLOT_DEFINES[index]!] = light instanceof DirectionalLight && SHADOW_ONLY_LIGHTS.has(light);
+    }
+  }
+
   public override getUniforms(): ReturnType<MaterialPluginBase["getUniforms"]> {
-    return { ubo: [{ name: "ultraShadowIndices", size: 2, type: "vec2" }], fragment: "uniform vec2 ultraShadowIndices;" };
+    return {
+      ubo: [{ name: "ultraShadowIndices", size: 2, type: "vec2" }, { name: "ultraActorShadowActive", size: 1, type: "float" }],
+      fragment: "uniform vec2 ultraShadowIndices; uniform float ultraActorShadowActive;",
+    };
   }
 
   public override bindForSubMesh(buffer: UniformBuffer, _scene: Scene, _engine: AbstractEngine, subMesh: SubMesh): void {
@@ -245,12 +273,40 @@ class SkyOcclusionPlugin extends MaterialPluginBase {
       if (lights[index]!.name === ULTRA_SKY_OCCLUSION_NAME) skyIndex = index;
     }
     buffer.updateFloat2("ultraShadowIndices", actorIndex, skyIndex);
+    const actorMap = lights[actorIndex]?.getShadowGenerator()?.getShadowMap();
+    buffer.updateFloat("ultraActorShadowActive", actorMap?.renderList?.length ? 1 : 0);
   }
 
   public override getCustomCode(shaderType: string): Nullable<Record<string, string>> {
     if (shaderType !== "fragment") return null;
     const code: Record<string, string> = {
       CUSTOM_FRAGMENT_BEFORE_LIGHTS: "float ultraActorVisibility = 1.0; float ultraSkyOcclusion = 1.0; float ultraLightIndex = -1.0;",
+      // 阴影仍执行；完整初始化每个条件字段，防止复用上一盏灯的 lightingInfo。
+      "!#elif defined\\(PBR\\)\\n(?=#ifdef SPOTLIGHT([0-3]))": `
+#elif defined(PBR) && defined(ULTRA_SHADOW_ONLY_LIGHT$1) && !defined(CUSTOMUSERLIGHTING)
+info.diffuse = vec3(0.0);
+#ifdef SS_TRANSLUCENCY
+info.diffuseTransmission = vec3(0.0);
+#endif
+#ifdef SPECULARTERM
+info.specular = vec3(0.0);
+#endif
+#ifdef SHEEN
+info.sheen = vec3(0.0);
+#endif
+#ifdef CLEARCOAT
+info.clearCoat = vec4(0.0, 0.0, 0.0, 1.0);
+#endif
+$0`,
+      // 保留灯源与 defines，只跳过空角色图；进入投影范围时不用重新编译全场景。
+      "!shadow=computeShadowWithPCF[135]\\(vPositionFromLight([0-3]),[^;]+\\);": `
+#ifdef ULTRA_ACTOR_SHADOW_LIGHT$1
+if (ultraActorShadowActive > 0.5) { $0 }
+else { shadow = 1.0; }
+#else
+$0
+#endif
+`,
       "!aggShadow\\+=shadow;numLights\\+=1\\.0;": `$0
 if (abs(ultraLightIndex - ultraShadowIndices.x) < 0.5) ultraActorVisibility = shadow;
 if (abs(ultraLightIndex - ultraShadowIndices.y) < 0.5) ultraSkyOcclusion = shadow;
@@ -443,6 +499,47 @@ function isStaticShadowCaster(mesh: AbstractMesh): boolean {
     (mesh.metadata?.decoration === "natural-detail" && mesh.metadata?.detailType === "rock");
 }
 
+// 以光源视锥而非相机视锥裁剪，保留离屏但能投影入图的物体与跨界大批次。
+export function filterStaticShadowCasters(generator: ShadowGenerator): void {
+  const light = generator.getLight();
+  if (!(light instanceof DirectionalLight) || light.shadowFrustumSize <= 0) return;
+  const map = generator.getShadowMap()!;
+  const casters = [...map.renderList!];
+  const planes = Frustum.GetPlanes(Matrix.Identity());
+  const lastTransform = Matrix.Zero();
+  const visible = [...casters];
+  let matrixVersion = -1;
+  let lastMargin = Number.NaN;
+  // renderList 保留全量且不改 RTT hook 过的数组，避免跨分区把全场景灯光标为 dirty。
+  map.getCustomRenderList = () => visible;
+  // 此 observer 排在生成器矩阵更新之后；重复 readiness 检查复用相同光矩阵的列表。
+  map.onBeforeRenderObservable.add(() => {
+    const transform = generator.getTransformMatrix();
+    const camera = light.getScene().activeCamera;
+    const depthSpan = Math.abs((light.shadowMaxZ ?? camera?.maxZ ?? 0) - (light.shadowMinZ ?? camera?.minZ ?? 0));
+    // 投影顶点带法线／深度偏移，另留两个 texel，不能用未偏移的几何边缘精确裁切。
+    const margin = Math.abs(generator.normalBias) + Math.abs(generator.bias) * depthSpan +
+      2 * light.shadowFrustumSize / map.getSize().width;
+    // Babylon 可能在新 renderId 重写数值相同的矩阵，updateFlag 本身不是内容版本。
+    if (margin === lastMargin && (transform.updateFlag === matrixVersion || transform.equals(lastTransform))) {
+      matrixVersion = transform.updateFlag;
+      return;
+    }
+    matrixVersion = transform.updateFlag; lastMargin = margin;
+    lastTransform.copyFrom(transform);
+    Frustum.GetPlanesToRef(transform, planes);
+    for (const plane of planes) plane.d += margin;
+    visible.length = 0;
+    for (const mesh of casters) {
+      mesh.computeWorldMatrix();
+      const box = mesh.getBoundingInfo().boundingBox;
+      const min = box.minimumWorld, max = box.maximumWorld;
+      const reliable = Number.isFinite(min.x + min.y + min.z + max.x + max.y + max.z);
+      if (!reliable || box.isInFrustum(planes)) visible.push(mesh);
+    }
+  });
+}
+
 // 静态图仅跨分区刷新；桌面角色使用独立小图，逐帧只绘制附近角色。
 function createShadows(scene: Scene, options: UltraLightingOptions, touch: boolean): void {
   const { sun, actorVisualRoots, localActorId } = options;
@@ -460,10 +557,10 @@ function createShadows(scene: Scene, options: UltraLightingOptions, touch: boole
   shadowMap.refreshRate = RenderTargetTexture.REFRESHRATE_RENDER_ONCE;
   const staticCasters = scene.meshes.filter(isStaticShadowCaster);
   shadowMap.renderList = [...staticCasters];
+  filterStaticShadowCasters(shadows);
 
   // 只写楼板与屋顶的俯视遮挡图，光强为 0，不照亮任何表面，只给环境光提供室内判断。
-  const sky = new DirectionalLight(ULTRA_SKY_OCCLUSION_NAME, new Vector3(0.0001, -1, 0.0001), scene);
-  sky.intensity = 0;
+  const sky = createShadowOnlyLight(ULTRA_SKY_OCCLUSION_NAME, new Vector3(0.0001, -1, 0.0001), scene);
   sky.diffuse.set(0, 0, 0);
   sky.specular.set(0, 0, 0);
   sky.renderPriority = -1;
@@ -480,6 +577,7 @@ function createShadows(scene: Scene, options: UltraLightingOptions, touch: boole
   skyMap.refreshRate = RenderTargetTexture.REFRESHRATE_RENDER_ONCE;
   skyMap.renderList = scene.meshes.filter((mesh) =>
     SKY_OCCLUSION_DETAIL_TYPES.has(mesh.metadata?.detailType) || mesh.metadata?.decoration === "roof-ramp");
+  filterStaticShadowCasters(skyShadows);
 
   const receivers = [
     ...[...actorVisualRoots.values()].flatMap((root) => root.getChildMeshes(false)),
@@ -493,11 +591,10 @@ function createShadows(scene: Scene, options: UltraLightingOptions, touch: boole
   const actorEntries = touch
     ? []
     : [...actorVisualRoots].filter(([actorId]) => actorId !== localActorId);
-  const actorLight = touch ? null : new DirectionalLight(ULTRA_ACTOR_SHADOW_NAME, sun.direction.clone(), scene);
+  const actorLight = touch ? null : createShadowOnlyLight(ULTRA_ACTOR_SHADOW_NAME, sun.direction.clone(), scene);
   const actorShadows = actorLight ? new ShadowGenerator(ULTRA_PRESENTATION.actorShadowSize, actorLight) : null;
   const actorMap = actorShadows?.getShadowMap() ?? null;
   if (actorLight && actorShadows && actorMap) {
-    actorLight.intensity = 0;
     actorLight.renderPriority = 0;
     actorLight.shadowFrustumSize = ULTRA_PRESENTATION.actorShadowSpan;
     actorLight.shadowMinZ = 1;
