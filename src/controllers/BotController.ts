@@ -14,6 +14,7 @@ import {
   BUILDING_ROOF_CAP_HEIGHT,
   getTerrainHeight,
   LANDING_ZONE_COUNT,
+  MAP_HALF_SIZE,
   type MapLayout,
 } from "../config/map";
 import { WEAPONS } from "../config/weapons";
@@ -738,15 +739,18 @@ export class BotController {
       patrolRadius * (endgameSearch ? 0.9 : 0.68) - 1,
       endgameSearch ? 420 : lateGame ? 260 : 180,
     ));
+    const patrolOrigin = lateGame ? patrolCenter : actor.position;
     for (let attempt = 0; attempt < 12; attempt += 1) {
       const angle = this.controlledActorNumericId * 2.399963 + (this.patrolSequence + attempt) * 1.618034;
       const radiusScale = endgameSearch
         ? [0.82, 0.5, 0.68][(this.controlledActorNumericId + this.patrolSequence + attempt) % 3] ?? 0.68
         : 0.35 + ((this.controlledActorNumericId + this.patrolSequence + attempt * 3) % 6) * 0.1;
       const radius = usableRadius * radiusScale;
-      const x = patrolCenter.x + Math.cos(angle) * radius;
-      const z = patrolCenter.z + Math.sin(angle) * radius;
+      const x = patrolOrigin.x + Math.cos(angle) * radius;
+      const z = patrolOrigin.z + Math.sin(angle) * radius;
+      if (Math.abs(x) > MAP_HALF_SIZE - ACTOR_RADIUS || Math.abs(z) > MAP_HALF_SIZE - ACTOR_RADIUS) continue;
       const candidate = { x, y: getTerrainHeight(x, z, layout) + ACTOR_EYE_HEIGHT, z };
+      if (horizontalDistance(candidate, patrolCenter) > patrolRadius) continue;
       if (pointInsideGroundBlocker(candidate, layout)) continue;
       const path = this.navigator.findPath(actor.position, candidate);
       if (path.length === 0 || horizontalDistance(actor.position, candidate) < 2) continue;
@@ -974,7 +978,7 @@ export class BotController {
         );
       }
       return hasWeapon
-        ? (item.kind === "ammo" && (!needsAmmo || item.id === weaponConfig?.ammoItemId) && replacementItemId === null) ||
+        ? (item.kind === "ammo" && isCompatibleAmmo(item.id) && (!needsAmmo || item.id === weaponConfig?.ammoItemId) && replacementItemId === null) ||
           (item.kind === "medical" && actor.health < 90 && replacementItemId === null) ||
           (item.kind === "throwable" && replacementItemId === null) ||
           (item.kind === "armor" && (

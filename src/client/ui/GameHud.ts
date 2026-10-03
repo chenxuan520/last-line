@@ -12,6 +12,7 @@ import {
 } from "../../config/throwables";
 import { getItemIconAssetId } from "../itemIcon";
 import type { DamageTotals } from "../../game/DamageTotals";
+import { LOOT_INTERACTION_DISTANCE_SQUARED } from "../../game/rules/loot";
 import {
   getActiveWeapon,
   getItemLabel,
@@ -19,6 +20,7 @@ import {
   type ActorState,
   type EntityId,
   type GameEvent,
+  type GroundLootState,
   type MatchResult,
   type MatchState,
 } from "../../game/state/types";
@@ -35,10 +37,15 @@ export class GameHud {
   private resultVisible = false;
   private inventorySignature = "";
   private weaponIconId = "";
-  private grenadeStatusSignature = "";
+  private grenadeStatus: {
+    actorId: string;
+    count: number;
+    selected: boolean;
+    preparing: boolean;
+    throwMode: GrenadeThrowMode;
+  } | null = null;
   private minimapSignature = "";
   private healingSignature = "";
-  private promptSignature = "";
   private leaderboardSignature = "";
   private readonly playerVictimIds = new Set<EntityId>();
   private playerKillerId: EntityId | null = null;
@@ -146,14 +153,14 @@ export class GameHud {
           <div class="touch-controls" data-hud="touch-controls" aria-label="触控操作">
             <div class="touch-look-area" data-touch-role="look" aria-label="滑动视角"></div>
             <div class="touch-joystick" data-touch-role="move" aria-label="移动摇杆"><i></i><b data-touch-knob></b></div>
-            <button class="touch-action touch-fire touch-fire-left" type="button" data-touch-action="fire" data-touch-role="fire" aria-label="左侧开火">开火</button>
-            <button class="touch-action touch-fire touch-fire-right" type="button" data-touch-action="fire" data-touch-role="fire-look" aria-label="右侧开火并拖动瞄准">开火</button>
-            <button class="touch-action touch-scope" type="button" data-touch-action="scope">瞄准</button>
+            <button class="touch-action touch-fire touch-fire-left" type="button" data-hud="touch-fire-left" data-touch-action="fire" data-touch-role="fire" aria-label="左侧开火">开火</button>
+            <button class="touch-action touch-fire touch-fire-right" type="button" data-hud="touch-fire-right" data-touch-action="fire" data-touch-role="fire-look" aria-label="右侧开火并拖动瞄准">开火</button>
+            <button class="touch-action touch-scope" type="button" data-hud="touch-scope" data-touch-action="scope">瞄准</button>
             <button class="touch-action touch-jump" type="button" data-touch-action="jump">跳跃</button>
             <button class="touch-action touch-pickup" type="button" data-touch-action="interact">拾取</button>
             <button class="touch-action touch-reload" type="button" data-touch-action="reload">换弹</button>
             <button class="touch-action touch-switch" type="button" data-touch-action="switch-weapon">切枪</button>
-            <button class="touch-action touch-grenade" type="button" data-touch-action="grenade" aria-label="选择破片手雷">
+            <button class="touch-action touch-grenade" type="button" data-hud="touch-grenade" data-touch-action="grenade" aria-label="选择破片手雷">
               <img src="${this.resolveIconUrl("ui.item.grenade")}" alt="" /><b data-hud="grenade-count">0</b>
             </button>
             <button class="touch-action touch-bandage" type="button" data-touch-action="bandage">绷带</button>
@@ -278,28 +285,36 @@ export class GameHud {
     if (orientationFullscreenAction) orientationFullscreenAction.hidden = !showFullscreenAction || !orientationBlocked;
     const fullscreenAction = this.elements.get("fullscreen-action") as HTMLButtonElement | undefined;
     if (fullscreenAction) fullscreenAction.hidden = !showFullscreenAction || orientationBlocked;
-    this.root.querySelector<HTMLElement>("[data-touch-action='scope']")?.classList.toggle("is-active", scoped);
+    this.elements.get("touch-scope")?.classList.toggle("is-active", scoped);
     const grenadeCount = getBackpackItemQuantity(viewedActor, FRAG_GRENADE_ITEM_ID);
-    const grenadeStatusSignature = [
-      viewedActor.id,
-      grenadeCount,
-      grenadeSelected,
-      grenadePreparing,
-      grenadeThrowMode,
-    ].join(":");
-    if (grenadeStatusSignature !== this.grenadeStatusSignature) {
-      const grenadeAction = this.root.querySelector<HTMLButtonElement>("[data-touch-action='grenade']");
+    const previousGrenade = this.grenadeStatus;
+    if (
+      !previousGrenade ||
+      previousGrenade.actorId !== viewedActor.id ||
+      previousGrenade.count !== grenadeCount ||
+      previousGrenade.selected !== grenadeSelected ||
+      previousGrenade.preparing !== grenadePreparing ||
+      previousGrenade.throwMode !== grenadeThrowMode
+    ) {
+      const grenadeAction = this.elements.get("touch-grenade") as HTMLButtonElement | undefined;
       grenadeAction?.classList.toggle("is-active", grenadeSelected);
       if (grenadeAction) grenadeAction.disabled = grenadeCount <= 0;
       this.elements.get("grenade-count")?.replaceChildren(grenadeCount.toString());
-      for (const fireButton of this.root.querySelectorAll<HTMLButtonElement>("[data-touch-action='fire']")) {
-        fireButton.textContent = grenadeSelected ? "投掷" : "开火";
+      for (const name of ["touch-fire-left", "touch-fire-right"]) {
+        const fireButton = this.elements.get(name);
+        if (fireButton) fireButton.textContent = grenadeSelected ? "投掷" : "开火";
       }
       this.setText(
         "weapon-name",
         grenadeSelected ? `破片手雷 · ${grenadeThrowMode === "high" ? "高抛" : "低抛"}` : config?.label ?? "未装备",
       );
-      this.grenadeStatusSignature = grenadeStatusSignature;
+      this.grenadeStatus = {
+        actorId: viewedActor.id,
+        count: grenadeCount,
+        selected: grenadeSelected,
+        preparing: grenadePreparing,
+        throwMode: grenadeThrowMode,
+      };
     }
     const leaderboardBecameVisible = leaderboardVisible && !this.leaderboardVisible;
     const leaderboard = this.requireElement("leaderboard");
@@ -369,11 +384,7 @@ export class GameHud {
       this.renderBackpack(viewedActor, canManageBackpack, canDropBackpack);
       this.inventorySignature = inventorySignature;
     }
-    const promptSignature = pickupPromptSignature(player, state.groundLoot);
-    if (promptSignature !== this.promptSignature) {
-      this.setText("prompt", pickupPromptText(player, state.groundLoot, this.options.touchInput === true));
-      this.promptSignature = promptSignature;
-    }
+    this.setText("prompt", pickupPromptText(player, state.groundLoot, this.options.touchInput === true));
   }
 
   public scrollLeaderboard(deltaY: number, deltaMode: number): void {
@@ -886,8 +897,18 @@ export function pickupPromptText(
   groundLoot: MatchState["groundLoot"],
   touchInput = false,
 ): string {
-  const pickup = findPickupCandidate(player, groundLoot);
-  const nearby = pickup ?? findNearbyLootCandidate(player, groundLoot);
+  if (!player.alive || player.deployment !== "grounded") return "";
+  const nearbyLoot: Record<EntityId, GroundLootState> = Object.create(null);
+  for (const id in groundLoot) {
+    const loot = groundLoot[id];
+    if (!loot?.available || loot.quantity <= 0) continue;
+    const distanceSquared = (loot.position.x - player.position.x) ** 2 +
+      (loot.position.y - player.position.y) ** 2 +
+      (loot.position.z - player.position.z) ** 2;
+    if (distanceSquared <= LOOT_INTERACTION_DISTANCE_SQUARED) nearbyLoot[id] = loot;
+  }
+  const pickup = findPickupCandidate(player, nearbyLoot);
+  const nearby = pickup ?? findNearbyLootCandidate(player, nearbyLoot);
   return pickup
     ? `${touchInput ? "拾取" : "F 拾取"} ${getItemLabel(pickup.itemId)}`
     : nearby
