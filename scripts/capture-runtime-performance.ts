@@ -1,11 +1,13 @@
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
+import { assertUltraPresentation } from "./performance-presentation.js";
 
 interface Arguments {
   repository: string;
+  probeQuality: boolean;
   mapId: "island" | "town" | "mixed";
   seed: number;
-  quality: "low" | "medium" | "high";
+  quality: "low" | "medium" | "high" | "ultra";
 }
 
 function parseArguments(): Arguments {
@@ -23,13 +25,13 @@ function parseArguments(): Arguments {
   if (!repository || !mapId || !["island", "town", "mixed"].includes(mapId)) {
     throw new Error("Expected --repository and --map island|town|mixed");
   }
-  if (!quality || !["low", "medium", "high"].includes(quality)) {
-    throw new Error("Expected --quality low|medium|high");
+  if (!quality || !["low", "medium", "high", "ultra"].includes(quality)) {
+    throw new Error("Expected --quality low|medium|high|ultra");
   }
   if (!Number.isInteger(seed) || seed < 0 || seed > 0xffff_ffff) {
     throw new Error("Expected --seed uint32");
   }
-  return { repository, mapId, seed, quality };
+  return { repository, mapId, seed, quality, probeQuality: values.get("probe-quality") === "true" };
 }
 
 function deterministicRandom(seed: number): () => number {
@@ -46,9 +48,16 @@ function deterministicRandom(seed: number): () => number {
 }
 
 async function main(): Promise<void> {
-  const { repository, mapId, seed, quality } = parseArguments();
+  const { repository, mapId, seed, quality, probeQuality } = parseArguments();
   const moduleUrl = (relativePath: string): string =>
     pathToFileURL(`${repository}/${relativePath}`).href;
+  const { QUALITY_PROFILES } = await import(moduleUrl("src/config/settings.ts"));
+  const supported = Object.hasOwn(QUALITY_PROFILES, quality);
+  if (probeQuality) {
+    console.log(JSON.stringify({ supported }));
+    return;
+  }
+  if (!supported) throw new Error(`Unsupported quality: ${quality}`);
   const [
     { NullEngine },
     { Scene },
@@ -116,6 +125,7 @@ async function main(): Promise<void> {
       mapId,
     );
     const sceneMilliseconds = performance.now() - sceneStarted;
+    assertUltraPresentation(mapId, quality, bundle.scene.textures.map((texture: { name: string }) => texture.name));
     global.gc?.();
     const heapUsedBytes = process.memoryUsage().heapUsed;
     const meshes = bundle.scene.meshes;

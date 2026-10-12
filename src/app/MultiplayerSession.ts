@@ -86,6 +86,7 @@ export class MultiplayerSession implements GameSession {
   private readonly lootMeshes;
   private readonly syncLootMeshes;
   private readonly viewWeaponRoot;
+  private readonly firstPerson;
   private readonly aircraftInteriorRoot;
   private readonly syncAircraftVisual;
   private readonly syncSafeZoneRing;
@@ -146,6 +147,7 @@ export class MultiplayerSession implements GameSession {
     this.lootMeshes = bundle.lootMeshes;
     this.syncLootMeshes = bundle.syncLootMeshes;
     this.viewWeaponRoot = bundle.viewWeaponRoot;
+    this.firstPerson = bundle.firstPerson;
     this.aircraftInteriorRoot = bundle.aircraftInteriorRoot;
     this.syncAircraftVisual = bundle.syncAircraftVisual;
     this.syncSafeZoneRing = bundle.syncSafeZoneRing;
@@ -628,20 +630,18 @@ export class MultiplayerSession implements GameSession {
     }, this.state.phase === "flight" && player.deployment !== "aircraft");
     const cameraPose = this.getJumpVisualPose(cameraActor);
     const cameraPosition = this.visualPosition(cameraActor.id, cameraActor.position);
-    const cameraY = cameraPosition.y + cameraPose.cameraY;
-    if (!this.camera.position.equalsToFloats(cameraPosition.x, cameraY, cameraPosition.z)) {
-      this.camera.position.set(cameraPosition.x, cameraY, cameraPosition.z);
-    }
     const cameraPitch = cameraActor.pitch
       + (cameraActor.id === this.localActorId ? this.localRecoil.pitchOffset : 0);
     if (!this.camera.rotation.equalsToFloats(cameraPitch, cameraActor.yaw, 0)) {
       this.camera.rotation.set(cameraPitch, cameraActor.yaw, 0);
     }
+    this.firstPerson.updateCamera(this.grenadePreviewWorld, cameraActor.position, cameraPosition, cameraPose.cameraY);
     this.syncViewWeaponVisual(
       activeViewWeapon,
       cameraPose.weaponY,
       cameraPose.weaponRotationX,
       grenadeSelected,
+      frameSeconds,
     );
     for (const [actorId, root] of this.actorRoots) {
       const actor = this.getActor(actorId);
@@ -779,15 +779,13 @@ export class MultiplayerSession implements GameSession {
     jumpY: number,
     jumpRotationX: number,
     grenadeSelected = false,
+    seconds = SIMULATION_STEP_SECONDS,
   ): void {
     const reload = getReloadVisualTransform(weapon);
     const y = (reload?.y ?? 0) + jumpY + (grenadeSelected ? 0.03 : 0);
     const rotationX = (reload?.rotationX ?? 0) + jumpRotationX + (grenadeSelected ? -0.08 : 0);
     const rotationZ = reload?.rotationZ ?? 0;
-    if (!this.viewWeaponRoot.position.equalsToFloats(0, y, 0)) this.viewWeaponRoot.position.set(0, y, 0);
-    if (!this.viewWeaponRoot.rotation.equalsToFloats(rotationX, 0, rotationZ)) {
-      this.viewWeaponRoot.rotation.set(rotationX, 0, rotationZ);
-    }
+    this.firstPerson.updateWeapon(this.grenadePreviewWorld, this.lastViewWeaponId, y, rotationX, rotationZ, seconds);
   }
 
   private getJumpVisualPose(actor: ActorState) {

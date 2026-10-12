@@ -1,11 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
   normalizeSensitivity,
+  DEFAULT_SETTINGS,
+  QUALITY_PROFILES,
   renderHardwareScalingLevel,
   usesMobileDevicePixels,
 } from "../../src/config/settings";
 
 describe("game settings", () => {
+  it("keeps ultra opt-in without increasing resolution or vegetation over high", () => {
+    expect(DEFAULT_SETTINGS.quality).toBe("medium");
+    expect(QUALITY_PROFILES.ultra).toEqual(QUALITY_PROFILES.high);
+    expect(renderHardwareScalingLevel("ultra", 1, false)).toBe(1);
+    expect(renderHardwareScalingLevel("ultra", 3, true)).toBe(0.5);
+  });
   it("normalizes stored sensitivity to the supported range", () => {
     expect(normalizeSensitivity(undefined)).toBe(1);
     expect(normalizeSensitivity(Number.NaN)).toBe(1);

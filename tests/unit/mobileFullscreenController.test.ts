@@ -102,6 +102,83 @@ describe("MobileFullscreenController", () => {
     expect(environment.unlock).toHaveBeenCalledOnce();
     expect(controller.needsAction(false)).toBe(false);
   });
+
+  it("holds failure recovery until late entry, orientation and fullscreen exit have all settled", async () => {
+    for (const stage of ["entered", "entry", "orientation"] as const) {
+      const environment = createEnvironment();
+      let releaseEntry = (): void => undefined;
+      let releaseExit = (): void => undefined;
+      if (stage === "entry") environment.requestFullscreen.mockImplementationOnce(() => new Promise<void>((resolve) => {
+        releaseEntry = () => { environment.setFullscreenElement(environment.options.target); resolve(); };
+      }));
+      if (stage === "orientation") environment.lock.mockImplementationOnce(() => new Promise<void>((resolve) => { releaseEntry = resolve; }));
+      const exit = vi.fn(() => new Promise<void>((resolve) => {
+        releaseExit = () => { environment.setFullscreenElement(null); resolve(); };
+      }));
+      Object.assign(environment.options.document, { exitFullscreen: exit });
+      const controller = new MobileFullscreenController(environment.options);
+      controller.activateFromUserGesture();
+      await settle();
+      controller.exitAfterFailure();
+      let canReturnToSettings = false;
+      const recovery = controller.waitForFailureExit().then(() => { canReturnToSettings = true; });
+      await settle();
+      expect(canReturnToSettings).toBe(false);
+      releaseEntry();
+      await settle();
+      await settle();
+      expect(exit).toHaveBeenCalledOnce();
+      expect(canReturnToSettings).toBe(false);
+      releaseExit();
+      await recovery;
+      expect(canReturnToSettings).toBe(true);
+      expect(environment.options.document.fullscreenElement).toBeNull();
+      controller.deactivate();
+      controller.activateFromUserGesture();
+      expect(environment.requestFullscreen).toHaveBeenCalledTimes(2);
+      await settle();
+      await controller.waitForFailureExit();
+      expect(environment.options.document.fullscreenElement).toBe(environment.options.target);
+      expect(controller.needsAction(false)).toBe(false);
+      expect(exit).toHaveBeenCalledOnce();
+      controller.dispose();
+    }
+  });
+
+  it("exits only owned fullscreen after a failed entry including late completion", async () => {
+    for (const kind of ["entered", "pending", "reactivated", "pending-lock", "other", "denied", "throws", "unsupported"] as const) {
+      const environment = createEnvironment();
+      let resolvePending = (): void => undefined;
+      const exit = vi.fn(async () => {
+        if (kind === "denied") throw new Error("exit denied");
+        environment.setFullscreenElement(null);
+      });
+      if (kind === "throws") exit.mockImplementation(() => { throw new Error("legacy exit denied"); });
+      Object.assign(environment.options.document, { exitFullscreen: kind === "unsupported" ? undefined : exit });
+      if (kind === "pending" || kind === "reactivated") environment.requestFullscreen.mockImplementationOnce(() => new Promise<void>((resolve) => {
+        resolvePending = () => { environment.setFullscreenElement(environment.options.target); resolve(); };
+      }));
+      if (kind === "pending-lock") environment.lock.mockImplementationOnce(() => new Promise<void>((resolve) => { resolvePending = resolve; }));
+      const controller = new MobileFullscreenController(environment.options);
+      controller.activateFromUserGesture();
+      await settle();
+      if (kind === "other") environment.setFullscreenElement({} as Element);
+      expect(() => controller.exitAfterFailure()).not.toThrow();
+      if (kind === "pending") expect(exit).not.toHaveBeenCalled();
+      // 返回菜单也必须继续取消本轮迟到的全屏请求。
+      controller.deactivate();
+      if (kind === "reactivated") controller.activateWithoutUserGesture();
+      resolvePending();
+      await settle();
+      await settle();
+      await controller.waitForFailureExit();
+      expect(exit).toHaveBeenCalledTimes(kind === "other" || kind === "unsupported" || kind === "reactivated" ? 0 : 1);
+      if (kind === "pending") expect(environment.lock).not.toHaveBeenCalled();
+      if (kind === "pending-lock") expect(environment.unlock).toHaveBeenCalledOnce();
+      expect(controller.needsAction(false)).toBe(false);
+      if (["entered", "pending", "pending-lock"].includes(kind)) expect(environment.options.document.fullscreenElement).toBeNull();
+    }
+  });
 });
 
 function createEnvironment(overrides: { touchInput?: boolean; requestFullscreen?: boolean } = {}) {

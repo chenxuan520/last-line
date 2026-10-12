@@ -105,6 +105,7 @@ export class BattleRoyaleSession {
   private readonly lootMeshes;
   private readonly syncLootMeshes;
   private readonly viewWeaponRoot;
+  private readonly firstPerson;
   private readonly aircraftInteriorRoot;
   private readonly syncAircraftVisual;
   private readonly syncSafeZoneRing;
@@ -156,6 +157,7 @@ export class BattleRoyaleSession {
     this.lootMeshes = bundle.lootMeshes;
     this.syncLootMeshes = bundle.syncLootMeshes;
     this.viewWeaponRoot = bundle.viewWeaponRoot;
+    this.firstPerson = bundle.firstPerson;
     this.aircraftInteriorRoot = bundle.aircraftInteriorRoot;
     this.syncAircraftVisual = bundle.syncAircraftVisual;
     this.syncSafeZoneRing = bundle.syncSafeZoneRing;
@@ -429,14 +431,11 @@ export class BattleRoyaleSession {
         jumpPoses.set(actor.id, this.getJumpVisualPose(actor));
       }
       const cameraJumpPose = jumpPoses.get(cameraActor.id) ?? neutralJumpVisualPose();
-      const cameraY = cameraActor.position.y + cameraJumpPose.cameraY;
-      if (!this.camera.position.equalsToFloats(cameraActor.position.x, cameraY, cameraActor.position.z)) {
-        this.camera.position.set(cameraActor.position.x, cameraY, cameraActor.position.z);
-      }
       if (!this.camera.rotation.equalsToFloats(cameraActor.pitch, cameraActor.yaw, 0)) {
         this.camera.rotation.set(cameraActor.pitch, cameraActor.yaw, 0);
       }
-      this.syncViewWeaponVisual(activeViewWeapon, cameraJumpPose, grenadeSelected);
+      this.firstPerson.updateCamera(this.combatWorld, cameraActor.position, cameraActor.position, cameraJumpPose.cameraY);
+      this.syncViewWeaponVisual(activeViewWeapon, cameraJumpPose, grenadeSelected, visualDeltaSeconds);
       for (const [actorId, root] of this.actorRoots) {
         const actor = this.getActor(actorId);
         if (!root.position.equalsToFloats(actor.position.x, actor.position.y, actor.position.z)) {
@@ -484,15 +483,13 @@ export class BattleRoyaleSession {
     weapon: ReturnType<typeof getActiveWeapon>,
     jumpPose: JumpVisualPose,
     grenadeSelected = false,
+    seconds = SIMULATION_STEP_SECONDS,
   ): void {
     const reload = getReloadVisualTransform(weapon);
     const y = (reload?.y ?? 0) + jumpPose.weaponY + (grenadeSelected ? 0.03 : 0);
     const rotationX = (reload?.rotationX ?? 0) + jumpPose.weaponRotationX + (grenadeSelected ? -0.08 : 0);
     const rotationZ = reload?.rotationZ ?? 0;
-    if (!this.viewWeaponRoot.position.equalsToFloats(0, y, 0)) this.viewWeaponRoot.position.set(0, y, 0);
-    if (!this.viewWeaponRoot.rotation.equalsToFloats(rotationX, 0, rotationZ)) {
-      this.viewWeaponRoot.rotation.set(rotationX, 0, rotationZ);
-    }
+    this.firstPerson.updateWeapon(this.combatWorld, this.lastViewWeaponId, y, rotationX, rotationZ, seconds);
   }
 
   private getJumpVisualPose(actor: ActorState): JumpVisualPose {
