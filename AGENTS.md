@@ -60,6 +60,7 @@ npm run preview
 - 灰炉城街道必须保持为由种子决定的单一连通图，包含受限抖动的主干骨架、局部 T 字路口、弯道和合并后的视觉街区；禁止退化为贯穿全图的正交网格线。建筑、POI、掩体、权威树木、地形道路、小地图道路和视觉细节必须共同使用或避让 `MapLayout.roadSegments` 的同一道路肩范围。
 - 所有地图类型都必须在确定性、符合地图语义的锚点上渲染完整的 5 张品牌标牌。岛屿锚点保持稳定；城镇和混合地图使用各自的住宅/城镇、工业/森林、仓库/农村 POI。品牌标牌只能影响表现，必须不可拾取、不可碰撞且地形安全；缺少锚点或安全位置时必须显式失败，禁止静默减少标牌。
 - `GameMode` 必须保持通用。大逃杀行为属于 `BattleRoyaleMode`，不要臆测未来 5v5 规则。
+- 单机开局 Google H5 广告必须由构建期开关 `VITE_SINGLE_PLAYER_ADS_ENABLED=true` 和合法 `VITE_GOOGLE_ADS_CLIENT` 同时启用，默认关闭且不加载 Google 脚本。仅在点击单机开始后的战场准备阶段使用 `start` placement；初始化／未展示请求合计最多等 2 秒，无网、无填充、失败或超时直接跳过并保留一键开局。广告与场景异步准备重叠，实际展示结束且场景就绪后必须真实点击“进入战场”获取输入／全屏权限，此前不启动比赛模拟、HUD 或角色输入。成功展示后的频控至少 5 分钟，只写当前标签页 `sessionStorage`，刷新保留；不得进入游戏设置、账号或 checkpoint。联机、死亡观战和玩法奖励不接广告，失效回调不得干扰新对局。
 - 单机调试模式只能通过 `npm run dev -- --debug=true` 显式启用。无敌、属性编辑、物品发放和 UI 面板必须只存在于 `BattleRoyaleSession`；禁止通过联机协议、Worker/standalone 服务、持久化 checkpoint 或正常生产构建暴露调试状态。
 - Cloudflare 与 standalone 联机必须共享协议、网关、大厅、房间、账号、管理员和比赛领域逻辑。平台专属代码只能处理存储、alarm、socket、HTTP 和进程生命周期适配；禁止分叉玩法或复制第二套服务实现。
 - 浏览器只能根据 URL 选择后端（完整 standalone 使用 `same-origin`），不得根据 Cloudflare 或 standalone 分支玩法语义。

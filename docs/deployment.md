@@ -2,6 +2,21 @@
 
 生产前端产物是 `npm run build` 生成的静态 `dist/`。Vite 使用相对资源 URL，因此同一产物既能部署在 GitHub 仓库子路径，也能部署在 Cloudflare Pages 根域。菜单页脚版本优先从构建时的 `APP_VERSION` 注入，否则使用 `git describe --tags --always`。CI 会检出完整历史：tag 构建使用精确 Git ref 名，分支和 PR/MR 构建使用 `git describe`。
 
+## 可选单机开局广告
+
+广告接口默认关闭。浏览器构建仅在下面两个变量同时有效时请求 Google H5 Games Ad Placement：
+
+```dotenv
+VITE_SINGLE_PLAYER_ADS_ENABLED=false
+VITE_GOOGLE_ADS_CLIENT=
+```
+
+准备投放时，将开关设为 `true`，并填写 Google 后台提供的 `ca-pub-` 加 16 位数字 publisher ID，再重新执行 `npm run build`。Vite 变量是浏览器构建期配置，不是 Node 服务运行期开关；不能靠重启现有 Docker 镜像或设置服务环境变量启用已经编译的前端。本仓库生产配置继续保持 `false` 和空 ID。
+
+仅单机点击开始后的战场准备页提供 `start` placement，和已有场景异步准备重叠；初始化／未展示请求合计最多等待 2 秒，无网、无填充、失败或超时直接跳过。实际广告开始后不启动比赛，广告结束且战场就绪时通过真实“进入战场”点击获取全屏与输入权限；关闭或跳过保持一键开局。成功展示后至少 5 分钟才再尝试，频控只保存在当前标签页 `sessionStorage`，刷新保留，存储不可用时仍有页面内频控。联机、奖励和复活不接广告，也没有新增离线安装／PWA 能力。
+
+真实投放前须获得已审核 AdSense 账号和 Google H5 Games Ads 资格，核对投放地区、内容、隐私、未成年人及用户同意要求。`ads.txt` 必须使用 Google 后台提供的准确记录；此预接入不生成猜测的 publisher 信息。开发与浏览器验收使用受控假 SDK，禁止请求真实广告或产生计费曝光。Google SDK 没有公开的取消／卸载接口，已开始展示由 SDK 关闭；不操作内部广告 iframe。远程 SDK 和视频不属于本地 bundle 预算，正式启用后还须实测下载、主线程及释放成本。
+
 ## GitHub Actions 与 GitHub Pages
 
 `.github/workflows/ci.yml` 在所有分支 push、所有指向 `main` 的 PR/MR、匹配 `v*` 的版本 tag 和手动触发时运行构建任务：

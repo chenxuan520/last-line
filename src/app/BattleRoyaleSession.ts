@@ -111,7 +111,7 @@ export class BattleRoyaleSession {
   private readonly syncSafeZoneRing;
   private readonly simulation: GameSimulation;
   private readonly clock = new FixedStepClock();
-  private readonly humanController: HumanController;
+  private humanController!: HumanController;
   private readonly botControllers = new Map<EntityId, BotController>();
   private readonly botActorIds: ReadonlySet<EntityId>;
   private readonly combatWorld: SimulationCombatWorld;
@@ -161,10 +161,6 @@ export class BattleRoyaleSession {
     this.aircraftInteriorRoot = bundle.aircraftInteriorRoot;
     this.syncAircraftVisual = bundle.syncAircraftVisual;
     this.syncSafeZoneRing = bundle.syncSafeZoneRing;
-    this.humanController = new HumanController(canvas, settings.sensitivity, {
-      touchRoot: uiRoot,
-      onLeaderboardScroll: (deltaY, deltaMode) => this.hud?.scrollLeaderboard(deltaY, deltaMode),
-    });
     this.audio = audio;
     this.effects = new CombatEffects(this.scene);
     this.grenadePresentation = new GrenadePresentation(this.scene);
@@ -221,6 +217,10 @@ export class BattleRoyaleSession {
 
   public start(): void {
     if (this.active) return;
+    this.humanController = new HumanController(this.canvas, this.settings.sensitivity, {
+      touchRoot: this.uiRoot,
+      onLeaderboardScroll: (deltaY, deltaMode) => this.hud?.scrollLeaderboard(deltaY, deltaMode),
+    });
     this.active = true;
     this.hud = new GameHud(
       this.uiRoot,
@@ -294,7 +294,7 @@ export class BattleRoyaleSession {
 
   public dispose(): void {
     this.active = false;
-    this.humanController.dispose();
+    this.humanController?.dispose();
     this.hud?.dispose();
     this.hud = null;
     this.debugPanel?.dispose();
