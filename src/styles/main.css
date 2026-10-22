@@ -890,6 +890,17 @@ h1 {
   transition: width 120ms linear;
 }
 
+.loading-panel.is-ready p span {
+  border-color: var(--signal);
+  border-radius: 0;
+  background: var(--signal);
+  animation: none;
+}
+
+.loading-panel.is-ready .primary-button {
+  margin-top: 20px;
+}
+
 @keyframes loading-spin {
   to {
     transform: rotate(360deg);

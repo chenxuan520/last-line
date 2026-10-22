@@ -5,6 +5,8 @@ interface ImportMetaEnv {
   readonly VITE_MULTIPLAYER_ENABLED?: "true" | "false";
   readonly VITE_MULTIPLAYER_URL?: string;
   readonly VITE_SINGLE_PLAYER_DEBUG?: "true" | "false";
+  readonly VITE_SINGLE_PLAYER_ADS_ENABLED?: "true" | "false";
+  readonly VITE_GOOGLE_ADS_CLIENT?: string;
 }
 
 interface ImportMeta {

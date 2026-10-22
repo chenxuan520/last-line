@@ -1,6 +1,7 @@
 import { Engine } from "@babylonjs/core/Engines/engine";
 import { AssetCatalog } from "../assets/AssetCatalog";
 import { AudioFeedback } from "../client/audio/AudioFeedback";
+import { SinglePlayerStartAds } from "../client/SinglePlayerStartAds";
 import { MobileFullscreenController } from "../client/ui/MobileFullscreenController";
 import { isUniformBufferAllocationError } from "../client/render/SceneCreation";
 import { BATTLE_ROYALE_CONFIG } from "../config/battleRoyale";
@@ -49,6 +50,8 @@ export class GameApp {
   private readonly menuAudio = new AudioFeedback(0);
   private readonly mobileFullscreen = new MobileFullscreenController();
   private readonly multiplayerAdmissionGate = new MultiplayerAdmissionGate();
+  private readonly startAds = new SinglePlayerStartAds();
+  private singlePlayerStart: AbortController | null = null;
   private starting = false;
 
   public constructor(
@@ -78,6 +81,9 @@ export class GameApp {
   }
 
   public dispose(): void {
+    this.singlePlayerStart?.abort();
+    this.singlePlayerStart = null;
+    this.startAds.dispose();
     window.removeEventListener("resize", this.handleResize);
     window.visualViewport?.removeEventListener("resize", this.handleResize);
     this.engine.stopRenderLoop();
@@ -97,9 +103,20 @@ export class GameApp {
     this.session = null;
     this.applyQuality();
     this.renderLoading(0.92, "正在准备战场");
+    const attempt = new AbortController();
+    this.singlePlayerStart = attempt;
+    let prepared: BattleRoyaleSession | null = null;
+    const releaseAdPointerLock = (): void => releasePointerLockSafely(document, this.canvas);
+    const ad = this.startAds.request(attempt.signal, () => {
+      this.menuAudio.setVolume(0);
+      document.addEventListener("pointerlockchange", releaseAdPointerLock, { signal: attempt.signal });
+      releaseAdPointerLock();
+      this.mobileFullscreen.deactivate();
+    }, this.settings.volume > 0);
     await waitForPaint();
     try {
-      this.session = await BattleRoyaleSession.create(
+      if (attempt.signal.aborted) return;
+      prepared = await BattleRoyaleSession.create(
         this.engine,
         this.canvas,
         this.uiRoot,
@@ -110,17 +127,70 @@ export class GameApp {
         this.startSinglePlayerFromUserGesture,
         () => this.returnToMenu(),
       );
+      if (attempt.signal.aborted) return;
+      if (ad) this.renderLoading(1, "战场已就绪", "正在等待广告确认或结束，比赛尚未开始");
+      const shown = ad ? await ad : false;
+      if (attempt.signal.aborted) return;
+      if (shown) {
+        const enter = await this.waitForSinglePlayerEntry(attempt.signal, releaseAdPointerLock);
+        if (!enter || attempt.signal.aborted) return;
+      }
+      this.menuAudio.setVolume(this.settings.volume);
+      this.session = prepared;
+      prepared = null;
       this.session.start();
     } catch (error) {
+      if (attempt.signal.aborted) return;
+      attempt.abort();
       releasePointerLockSafely(document, this.canvas);
       this.session?.dispose();
       this.session = null;
       this.mobileFullscreen.exitAfterFailure();
       this.renderError(error);
     } finally {
-      this.starting = false;
+      document.removeEventListener("pointerlockchange", releaseAdPointerLock);
+      prepared?.dispose();
+      if (this.singlePlayerStart === attempt) {
+        this.singlePlayerStart = null;
+        this.starting = false;
+      }
     }
   };
+
+  private waitForSinglePlayerEntry(signal: AbortSignal, releaseAdPointerLock: () => void): Promise<boolean> {
+    if (signal.aborted) return Promise.resolve(false);
+    this.uiRoot.className = "";
+    this.uiRoot.innerHTML = `<section class="loading-panel is-ready" aria-live="polite"><p><span></span>战场已就绪</p><strong>100%</strong><small>广告已结束，点击进入战场后开始部署</small></section>`;
+    const panel = this.uiRoot.querySelector<HTMLElement>(".loading-panel");
+    return new Promise((resolve) => {
+      const finish = (enter: boolean): void => {
+        signal.removeEventListener("abort", cancel);
+        resolve(enter);
+      };
+      const cancel = (): void => finish(false);
+      signal.addEventListener("abort", cancel, { once: true });
+      const button = this.actionButton("进入战场", "DEPLOY", () => {
+        if (signal.aborted || button.disabled) return;
+        button.disabled = true;
+        document.removeEventListener("pointerlockchange", releaseAdPointerLock);
+        this.requestDesktopGameplayInputFromUserGesture();
+        this.mobileFullscreen.activateFromUserGesture();
+        this.menuAudio.setVolume(this.settings.volume);
+        this.menuAudio.start();
+        finish(true);
+      });
+      button.dataset.action = "enter-battlefield";
+      button.disabled = true;
+      button.setAttribute("aria-busy", "true");
+      panel?.append(button);
+      void this.mobileFullscreen.waitForFailureExit().then(() => {
+        if (signal.aborted || !button.isConnected) return;
+        button.disabled = false;
+        button.removeAttribute("aria-busy");
+        button.focus();
+      });
+    });
+  }
 
   private readonly handleResize = (): void => this.engine.resize();
 
@@ -139,9 +209,9 @@ export class GameApp {
     );
   }
 
-  private renderLoading(progress: number, message = "正在加载资源"): void {
+  private renderLoading(progress: number, message = "正在加载资源", detail?: string): void {
     this.uiRoot.className = "";
-    this.uiRoot.innerHTML = `<section class="loading-panel" aria-live="polite"><p><span></span>${message}</p><strong>${Math.round(progress * 100)}%</strong><small>${message === "正在准备战场" ? "正在生成地图、建筑、物资与角色，请稍候" : "正在校验并载入战区资源"}</small><div><i style="width:${progress * 100}%"></i></div></section>`;
+    this.uiRoot.innerHTML = `<section class="loading-panel" aria-live="polite"><p><span></span>${message}</p><strong>${Math.round(progress * 100)}%</strong><small>${detail ?? (message === "正在准备战场" ? "正在生成地图、建筑、物资与角色，请稍候" : "正在校验并载入战区资源")}</small><div><i style="width:${progress * 100}%"></i></div></section>`;
   }
 
   private renderMenu(): void {
@@ -786,6 +856,9 @@ export class GameApp {
   }
 
   private returnToMenu(terminalMessage?: string, multiplayerMenu = false): void {
+    this.singlePlayerStart?.abort();
+    this.singlePlayerStart = null;
+    this.starting = false;
     releasePointerLockSafely(document, this.canvas);
     this.mobileFullscreen.deactivate();
     this.session?.dispose();
